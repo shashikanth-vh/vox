@@ -1,0 +1,19 @@
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.env
+tests/
+*.md
+# ...but README.md is required by pyproject (readme = "README.md") during pip install.
+!README.md
+.git/
+.gitignore
+# Never bake real data into the image — operators load it at runtime.
+# (data/atlas_data.json, the synthetic prototype mock, is intentionally kept.)
+data/*.xlsx
+data/*.xlsm
+data/*.csv

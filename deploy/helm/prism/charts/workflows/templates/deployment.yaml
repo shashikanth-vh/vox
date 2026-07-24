@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflows.fullname" . }}
+  labels:
+    {{- include "workflows.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "workflows.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "workflows.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "workflows.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: workflows
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # The image CMD runs `python -m app.worker` (connects out to Temporal).
+          env:
+            - name: WORKFLOWS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: WORKFLOWS_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: WORKFLOWS_TEMPORAL_ADDRESS
+              value: {{ .Values.temporal.address | quote }}
+            - name: WORKFLOWS_TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: WORKFLOWS_TASK_QUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+            - name: WORKFLOWS_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: WORKFLOWS_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: WORKFLOWS_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.register.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: api-key
+                  {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

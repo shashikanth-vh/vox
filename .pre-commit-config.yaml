@@ -1,0 +1,23 @@
+# Fast local guardrails — run before every commit so style/hygiene issues never reach CI.
+#   pip install pre-commit && pre-commit install
+# CI runs the heavier gates (mypy + tests); pre-commit keeps commits clean.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff            # lint (with --fix)
+        args: [--fix]
+      - id: ruff-format     # format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]

@@ -1,0 +1,31 @@
+# Client-facing service — the stable name every PRISM module connects to.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "postgresql.fullname" . }}
+  labels:
+    {{- include "postgresql.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: postgresql
+      port: {{ .Values.service.port }}
+      targetPort: postgresql
+  selector:
+    {{- include "postgresql.selectorLabels" . | nindent 4 }}
+---
+# Headless service gives the StatefulSet a stable network identity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "postgresql.fullname" . }}-headless
+  labels:
+    {{- include "postgresql.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: postgresql
+      port: {{ .Values.service.port }}
+      targetPort: postgresql
+  selector:
+    {{- include "postgresql.selectorLabels" . | nindent 4 }}

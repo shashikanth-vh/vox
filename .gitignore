@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local config / secrets
+.env
+*.local
+
+# Real data must never be committed — operators load it at runtime (see README).
+# The synthetic prototype mock (services/register/data/atlas_data.json) is intentionally kept.
+services/register/data/*.xlsx
+services/register/data/*.xlsm
+services/register/data/*.csv
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

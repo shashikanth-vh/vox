@@ -1,0 +1,56 @@
+# LOCAL overrides for the whole platform — one command brings up the shared PostgreSQL,
+# the Register (migrated + seeded with the ATLAS mock), on a local cluster.
+# Subcharts are vendored under charts/, so no `helm dependency build` is needed.
+#
+#   helm upgrade --install prism deploy/helm/prism \
+#     -f deploy/helm/prism/values-local.yaml --namespace prism --create-namespace
+
+postgresql:
+  enabled: true
+  auth:
+    username: prism
+    password: prism
+    database: register
+  persistence:
+    enabled: true
+    size: 8Gi
+
+register:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  database:
+    host: prism-postgresql
+    user: prism
+    name: register
+    existingSecret: prism-postgresql-secret
+    existingSecretPasswordKey: postgres-password
+  migrations:
+    asHook: false
+    seed: true          # load the ATLAS mock dataset
+  waitForDb: true
+  apiKeys:
+    value: "dev-local-key"
+  config:
+    environment: dev
+    logJson: false
+
+# Workflows ring — Temporal on the shared Postgres + the worker (build & load the image:
+#   docker build -f services/workflows/Dockerfile -t prism-workflows:0.1.0 .
+#   kind load docker-image prism-workflows:0.1.0)
+temporal:
+  enabled: true
+  ui:
+    enabled: true
+workflows:
+  enabled: true
+  image:
+    repository: prism-workflows
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  register:
+    baseUrl: http://prism-register
+    apiKey: dev-local-key

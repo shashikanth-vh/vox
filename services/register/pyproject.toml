@@ -1,0 +1,85 @@
+[project]
+name = "prism-register"
+version = "0.1.0"
+description = "PRISM Register — the entity-centric source of truth for Evam Finance's climate finance platform."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Evam Finance" }]
+
+dependencies = [
+    "evam-backend-core",         # shared PRISM backend platform (logging/errors/db/crud/retry)
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "gunicorn==23.0.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",            # async driver used by the app
+    "psycopg[binary]==3.2.3",     # sync driver used by Alembic migrations (runs in-container)
+    "alembic==1.14.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-json-logger==3.2.1",
+    "orjson==3.10.12",
+    "openpyxl==3.1.5",           # Excel export/import (backup + MIS load)
+    "python-multipart==0.0.20",  # file uploads (xlsx import endpoint)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "httpx==0.28.1",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
+# S101 asserts (tests); B008 FastAPI Depends() defaults; UP046 PEP695 generics (3.12+ only,
+# kept back-compatible with 3.11); S105 flags the *dev-default* DB password, not a real secret.
+ignore = ["S101", "B008", "UP046", "S105"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests invoke the `alembic` CLI to build the real schema — partial path is fine.
+"tests/*" = ["S603", "S607"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_defs = false
+
+# Third-party libs without type stubs.
+[[tool.mypy.overrides]]
+module = ["openpyxl.*"]
+ignore_missing_imports = true
+
+# The generic CRUD router builds routes with per-resource schema classes supplied as
+# *runtime* annotations (payload: spec.create_schema) — a deliberate FastAPI pattern that
+# static analysis can't resolve. Relax just those error codes here.
+[[tool.mypy.overrides]]
+module = ["app.api.crud_router"]
+disable_error_code = ["name-defined", "valid-type"]
+
+# Seed / import batch utilities reuse loop variables across model types and lean on
+# runtime coercion — pragmatic for one-shot loaders, not worth strict typing.
+[[tool.mypy.overrides]]
+module = ["app.seed.*"]
+disable_error_code = ["assignment", "var-annotated", "arg-type"]

@@ -1,0 +1,20 @@
+{{- if .Values.extraDatabases }}
+# Runs once on first init (docker-entrypoint-initdb.d) to create a database per module.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "postgresql.fullname" . }}-initdb
+  labels:
+    {{- include "postgresql.labels" . | nindent 4 }}
+data:
+  10-extra-databases.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    for db in {{ join " " .Values.extraDatabases }}; do
+      echo "creating database $db (if absent)"
+      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-SQL
+        SELECT 'CREATE DATABASE "'||'$db'||'"'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$db')\gexec
+    SQL
+    done
+{{- end }}

@@ -1,0 +1,27 @@
+apiVersion: v2
+name: prism
+description: >-
+  PRISM platform umbrella. Deploys the shared PostgreSQL and the platform modules
+  together. Today that is the Register; CIPHER, PULSE, VOX and ATLAS get added here as
+  further dependencies as they are built — all sharing the one database.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance
+
+# Subcharts are vendored directly under ./charts (no external registry, no
+# `helm dependency build` needed). These entries only add enable/disable conditions.
+dependencies:
+  - name: postgresql
+    version: "0.1.0"
+    condition: postgresql.enabled
+  - name: register
+    version: "0.1.0"
+    condition: register.enabled
+  - name: temporal
+    version: "0.1.0"
+    condition: temporal.enabled
+  - name: workflows
+    version: "0.1.0"
+    condition: workflows.enabled

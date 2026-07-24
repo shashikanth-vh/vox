@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "temporal.fullname" . }}
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "temporal.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "temporal.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: temporal
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: DB
+              value: postgres12
+            - name: DB_PORT
+              value: {{ .Values.datastore.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.datastore.user | quote }}
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.datastore.existingSecret }}
+                  name: {{ .Values.datastore.existingSecret }}
+                  key: {{ .Values.datastore.existingSecretPasswordKey }}
+                  {{- else }}
+                  name: {{ include "temporal.secretName" . }}
+                  key: datastore-password
+                  {{- end }}
+            - name: POSTGRES_SEEDS
+              value: {{ .Values.datastore.host | quote }}
+            - name: DBNAME
+              value: {{ .Values.datastore.database | quote }}
+            - name: VISIBILITY_DBNAME
+              value: {{ .Values.datastore.visibilityDatabase | quote }}
+            - name: ENABLE_ES
+              value: "false"
+          ports:
+            - name: grpc
+              containerPort: 7233
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

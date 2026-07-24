@@ -1,0 +1,40 @@
+# LOCAL overrides for deploying the Register ALONE against the shared PRISM PostgreSQL.
+#
+# Deploy the shared database first:
+#   helm upgrade --install prism-postgresql deploy/helm/prism/charts/postgresql -n prism --create-namespace
+# then the Register:
+#   helm upgrade --install register deploy/helm/prism/charts/register \
+#     -f deploy/helm/prism/charts/register/values-local.yaml -n prism
+#
+# (Or deploy everything at once with the umbrella chart: deploy/helm/prism — see its
+#  values-local.yaml.)
+
+replicaCount: 1
+autoscaling:
+  enabled: false
+podDisruptionBudget:
+  enabled: false
+
+# Point at the shared PostgreSQL service and its password secret.
+database:
+  host: prism-postgresql
+  port: 5432
+  name: register
+  user: prism
+  existingSecret: prism-postgresql-secret
+  existingSecretPasswordKey: postgres-password
+
+# DB comes up alongside the app locally: don't use a pre-install hook; wait for it.
+migrations:
+  enabled: true
+  asHook: false
+  seed: true
+
+waitForDb: true
+
+apiKeys:
+  value: "dev-local-key"
+
+config:
+  environment: dev
+  logJson: false

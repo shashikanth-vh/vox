@@ -1,0 +1,21 @@
+# Build context is the repo root (services/register/Dockerfile installs packages/ + register/).
+.git/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/.env
+**/*.local
+services/register/tests/
+services/workflows/tests/
+# Never bake real data into the image (the synthetic mock is kept).
+services/register/data/*.xlsx
+services/register/data/*.xlsm
+services/register/data/*.csv
+# Docs / deploy assets aren't needed inside the image.
+docs/
+postman/
+deploy/

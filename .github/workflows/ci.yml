@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: lint · type-check · test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: register
+          POSTGRES_PASSWORD: register
+          POSTGRES_DB: register_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U register -d register_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      REGISTER_DB_HOST: 127.0.0.1
+      REGISTER_DB_PORT: "5432"
+      REGISTER_DB_USER: register
+      REGISTER_DB_PASSWORD: register
+      REGISTER_DB_NAME: register_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install (shared packages first, then the services)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/evam-backend-core
+          pip install -e "packages/evam-register-client[dev]"
+          pip install -e "services/register[dev]"
+          pip install -e "services/workflows[dev]"
+
+      - name: Lint (ruff)
+        run: |
+          python -m ruff check services/register/app services/register/scripts services/register/tests
+          python -m ruff check services/workflows/app services/workflows/tests
+          python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
+          python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
+
+      - name: Type-check (mypy)
+        run: |
+          (cd services/register && python -m mypy app)
+          (cd services/workflows && python -m mypy app)
+          (cd packages/evam-backend-core && python -m mypy evam_backend_core)
+          (cd packages/evam-register-client && python -m mypy evam_register_client)
+
+      - name: Test — Register (real Postgres + Alembic migration)
+        run: cd services/register && python -m pytest -q
+
+      - name: Test — register client
+        run: cd packages/evam-register-client && python -m pytest -q
+
+      - name: Test — workflows (Temporal test server + mock Register)
+        run: cd services/workflows && python -m pytest -q

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: register
+description: PRISM Register — the entity-centric source of truth for Evam Finance's climate finance platform.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance
+keywords:
+  - prism
+  - register
+  - postgres
+  - fastapi
+
+# The Register does NOT own a database. It connects to the SHARED PRISM PostgreSQL —
+# the sibling `deploy/helm/postgresql` chart (service `prism-postgresql`) that every
+# module uses — or to a managed India-resident Postgres. Configure via `database.*`.
+# Deploy them together with the umbrella `deploy/helm/prism` chart, or separately.

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: workflows
+description: >-
+  PRISM workflows worker — runs Temporal workflows/activities; activities write the
+  Register through the shared client SDK. Connects out to Temporal and the Register; no
+  inbound service.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - prism
+  - workflows
+  - temporal
+  - worker
+maintainers:
+  - name: Evam Finance

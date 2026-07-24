@@ -1,0 +1,60 @@
+# Shared PRISM PostgreSQL.
+# A stable, well-known service name so every module points at the same database server.
+
+# Fixed name modules connect to (host = prism-postgresql). Keep this stable.
+fullnameOverride: prism-postgresql
+nameOverride: ""
+
+image:
+  repository: postgres          # Docker Official Image — free, PostgreSQL License
+  tag: "16-alpine"
+  pullPolicy: IfNotPresent
+
+auth:
+  username: prism
+  # Password: supply via existingSecret in real deployments; inline only for local.
+  password: prism
+  # Primary database created on first init.
+  database: register
+  existingSecret: ""
+  existingSecretPasswordKey: postgres-password
+
+# Additional databases created on first init — one per module as the platform grows
+# (e.g. [cipher, pulse, scribe]). The Register lives in `auth.database` above.
+extraDatabases: []
+
+service:
+  type: ClusterIP
+  port: 5432
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""              # "" = cluster default
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# Must exceed (pool_size + max_overflow) * total module replicas across the platform.
+maxConnections: 200
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  fsGroup: 999
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  runAsUser: 999
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

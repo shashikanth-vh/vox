@@ -1,0 +1,149 @@
+# Default values for the Register chart.
+# Production must override: image.repository/tag, database.*, and the API key secret.
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/evam/prism-register
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+# Container security context — non-root, read-only root FS, no privilege escalation.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: register.internal.evamfinance.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget keeps at least this many pods during voluntary disruptions.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Run `alembic upgrade head` as a Job.
+migrations:
+  enabled: true
+  # As a pre-install/pre-upgrade Helm hook (correct when the shared DB already exists).
+  # When deploying the DB together with the Register (umbrella / local), set this false
+  # so the Job runs in the main phase and waits for the DB via the wait-for-db init.
+  asHook: true
+  # Also seed the ATLAS mock (dev/demo only — leave false in production).
+  seed: false
+  # Provision the default tenant + reference dropdowns (NO business data) so the API is
+  # usable on a fresh DB — without this, tenant-scoped requests 403 with "unknown tenant".
+  # Safe and recommended in production. Ignored when `seed: true` (seed covers it).
+  bootstrap: true
+  backoffLimit: 3
+
+# App configuration → rendered into a ConfigMap (non-secret) + Secret (secret).
+config:
+  environment: prod
+  logLevel: INFO
+  logJson: true
+  webConcurrency: 4
+  workerTimeout: 60
+  defaultTenantCode: EVAM
+  requireApiKey: true
+  enforceRls: false
+  pool:
+    size: 20
+    maxOverflow: 10
+    statementTimeoutMs: 30000
+    lockTimeoutMs: 10000
+    idleInTxnTimeoutMs: 60000
+  page:
+    default: 50
+    max: 200
+
+# Database connection.
+# The Register does NOT own a database — it connects to the SHARED PRISM PostgreSQL
+# (the `postgresql` chart, service name `prism-postgresql`) that every module uses.
+# For a managed setup, point these at your India-resident Postgres (RDS Mumbai, etc.).
+database:
+  host: prism-postgresql        # shared platform DB service; or a managed host
+  port: 5432
+  name: register
+  user: prism
+  # Provide the password via an existing secret (preferred) OR inline `password`.
+  existingSecret: ""
+  existingSecretPasswordKey: password
+  password: ""
+
+# Block app + migration pods on an initContainer until PostgreSQL is reachable — makes
+# the Register robust to the shared DB starting up alongside it. Uses a small psql image.
+waitForDb: true
+waitForDbImage: "postgres:16-alpine"
+
+# API keys accepted by the service. Provide via an existing secret in production.
+apiKeys:
+  existingSecret: ""
+  existingSecretKey: api-keys
+  # Comma-separated. Overridden by existingSecret when set.
+  value: "change-me-in-prod"
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 15
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Spread replicas across nodes for availability.
+topologySpreadConstraints: []

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: temporal
+description: >-
+  Temporal for the PRISM Workflows ring — a dev/staging-grade single-Deployment server
+  (temporalio/auto-setup) plus optional Web UI, backed by the shared PRISM PostgreSQL in
+  its OWN databases. For production, point `datastore.*` at a dedicated Temporal datastore
+  (or swap in the official Temporal Helm chart) — Temporal is write-heavy.
+type: application
+version: 0.1.0
+appVersion: "1.25"
+keywords:
+  - prism
+  - temporal
+  - workflows
+maintainers:
+  - name: Evam Finance

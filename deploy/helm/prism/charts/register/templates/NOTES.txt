@@ -1,0 +1,33 @@
+PRISM Register {{ .Chart.AppVersion }} deployed as "{{ .Release.Name }}".
+
+0. Database: the Register connects to the SHARED PRISM PostgreSQL at
+   {{ include "register.dbHost" . }}:{{ include "register.dbPort" . }} (db {{ include "register.dbName" . }}, user {{ include "register.dbUser" . }}).
+   Deploy that via the `postgresql` chart (or the umbrella `prism` chart), or point
+   database.* at a managed India-resident Postgres.
+
+1. Migrations ran via the Job
+   ({{ include "register.fullname" . }}-migrate-{{ .Release.Revision }})
+   {{- if .Values.migrations.asHook }} as a pre-install/upgrade hook.{{ else }} in the main phase (waits for the DB).{{ end }}
+   {{- if .Values.migrations.seed }} The ATLAS mock dataset was seeded.{{ end }}
+
+2. Reach the service inside the cluster at:
+     http://{{ include "register.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+{{- if .Values.ingress.enabled }}
+   Externally via ingress:
+{{- range .Values.ingress.hosts }}
+     http://{{ .host }}
+{{- end }}
+{{- else }}
+   Port-forward for a quick check:
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "register.fullname" . }} 8000:{{ .Values.service.port }}
+     curl -H "X-API-Key: <key>" http://localhost:8000/v1/entities
+{{- end }}
+
+3. Health: GET /healthz (liveness), GET /readyz (readiness). API docs at /docs.
+
+{{- if not .Values.apiKeys.existingSecret }}
+
+WARNING: API keys are set from values (apiKeys.value). For production, set
+apiKeys.existingSecret to a Secret you manage, and likewise database.existingSecret.
+{{- end }}

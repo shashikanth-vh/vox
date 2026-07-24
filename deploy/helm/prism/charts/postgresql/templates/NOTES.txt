@@ -1,0 +1,25 @@
+Shared PRISM PostgreSQL {{ .Chart.AppVersion }} deployed as "{{ .Release.Name }}".
+
+Every PRISM module connects to this one database server at:
+
+  host: {{ include "postgresql.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  port: {{ .Values.service.port }}
+  user: {{ .Values.auth.username }}
+  primary database: {{ .Values.auth.database }}
+{{- if .Values.extraDatabases }}
+  extra databases: {{ join ", " .Values.extraDatabases }}
+{{- end }}
+
+Password lives in secret "{{ include "postgresql.secretName" . }}"
+(key: {{ include "postgresql.secretPasswordKey" . }}).
+
+Point a module at it, e.g. the Register:
+  --set database.host={{ include "postgresql.fullname" . }} \
+  --set database.user={{ .Values.auth.username }} \
+  --set database.name={{ .Values.auth.database }}
+
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is DISABLED — data is lost if the pod is rescheduled. For anything
+beyond throwaway testing, enable persistence.
+{{- end }}

@@ -1,0 +1,56 @@
+# PRISM workflows worker.
+fullnameOverride: ""       # umbrella sets prism-workflows
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/evam/prism-workflows
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+temporal:
+  address: prism-temporal:7233
+  namespace: default
+  taskQueue: prism-workflows
+
+register:
+  baseUrl: http://prism-register        # the Register Service (umbrella release)
+  tenant: EVAM
+  # The worker authenticates to the Register with an API key that must be in the
+  # Register's REGISTER_API_KEYS. Override, or reference a shared Secret.
+  apiKey: dev-local-key
+  existingSecret: ""
+  existingSecretKey: api-key
+
+config:
+  logLevel: INFO
+  logJson: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

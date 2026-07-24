@@ -1,0 +1,15 @@
+apiVersion: v2
+name: postgresql
+description: >-
+  Shared PostgreSQL for the PRISM platform. The single database server every PRISM
+  module (Register, CIPHER, PULSE, VOX, ATLAS) connects to. Built on the free official
+  `postgres` Docker image — no Bitnami, no external dependency.
+type: application
+version: 0.1.0
+appVersion: "16"
+keywords:
+  - prism
+  - postgresql
+  - shared
+maintainers:
+  - name: Evam Finance

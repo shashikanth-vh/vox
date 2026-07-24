@@ -1,0 +1,29 @@
+PRISM platform "{{ .Release.Name }}" deployed in namespace {{ .Release.Namespace }}.
+
+Components:
+{{- if .Values.postgresql.enabled }}
+  • Shared PostgreSQL   → service prism-postgresql:5432 (every module connects here)
+{{- end }}
+{{- if .Values.register.enabled }}
+  • Register (module)   → the source of truth; API + migrations (+ seed if enabled)
+{{- end }}
+{{- if .Values.temporal.enabled }}
+  • Temporal (engine)   → service prism-temporal:7233 (the Workflows ring)
+  {{- if .Values.temporal.ui.enabled }}
+  • Temporal Web UI     → service prism-temporal-ui:8080
+  {{- end }}
+{{- end }}
+{{- if .Values.workflows.enabled }}
+  • Workflows (worker)  → runs Temporal workflows; activities write the Register via the SDK
+{{- end }}
+
+Quick check (port-forward the Register service, then hit it):
+  kubectl -n {{ .Release.Namespace }} get pods
+  kubectl -n {{ .Release.Namespace }} port-forward svc/prism-register 8000:80
+  curl -H "X-API-Key: <key>" http://localhost:8000/v1/entities?with_total=true
+{{- if .Values.temporal.enabled }}{{ if .Values.temporal.ui.enabled }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/prism-temporal-ui 8088:8080   # Temporal UI
+{{- end }}{{ end }}
+
+As new modules (CIPHER, PULSE, VOX, ATLAS) are built, add them as dependencies in
+Chart.yaml — they share this same prism-postgresql database and this workflow plane.

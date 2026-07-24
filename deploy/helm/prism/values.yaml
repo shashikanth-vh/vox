@@ -1,0 +1,70 @@
+# PRISM umbrella values. Subchart values are nested under the subchart name.
+# The shared PostgreSQL is deployed once; every module points at `prism-postgresql`.
+
+# ---- shared platform database -------------------------------------------------
+postgresql:
+  enabled: true
+  fullnameOverride: prism-postgresql   # stable name all modules connect to
+  auth:
+    username: prism
+    password: prism                    # OVERRIDE in real deployments (or use existingSecret)
+    database: register
+  # As more modules arrive, give each its own database here:
+  # extraDatabases: [cipher, pulse]
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# ---- Register module ----------------------------------------------------------
+register:
+  enabled: true
+  fullnameOverride: prism-register     # stable name Temporal workers/other modules use
+  database:
+    host: prism-postgresql
+    port: 5432
+    name: register
+    user: prism
+    # Reuse the password Secret the postgresql subchart creates.
+    existingSecret: prism-postgresql-secret
+    existingSecretPasswordKey: postgres-password
+  # DB and app come up together — run migrations in the main phase and wait for the DB.
+  migrations:
+    asHook: false
+    seed: false
+  waitForDb: true
+
+# ---- Workflows ring: Temporal engine + the PRISM worker -----------------------
+# Temporal (dev/staging server on the shared PostgreSQL, in its own databases). For
+# production, point temporal.datastore.* at a DEDICATED instance.
+temporal:
+  enabled: true
+  fullnameOverride: prism-temporal     # stable name workers dial (prism-temporal:7233)
+  datastore:
+    host: prism-postgresql
+    port: 5432
+    user: prism
+    existingSecret: prism-postgresql-secret
+    existingSecretPasswordKey: postgres-password
+    database: temporal
+    visibilityDatabase: temporal_visibility
+  ui:
+    enabled: true
+
+# The PRISM worker — runs workflows/activities; activities write the Register via the SDK.
+workflows:
+  enabled: true
+  fullnameOverride: prism-workflows
+  image:
+    repository: ghcr.io/evam/prism-workflows
+    tag: "0.1.0"
+  temporal:
+    address: prism-temporal:7233
+  register:
+    baseUrl: http://prism-register     # the Register Service (port 80)
+    tenant: EVAM
+    apiKey: dev-local-key              # OVERRIDE; must be in the Register's REGISTER_API_KEYS
+
+# Future modules slot in here as they are built, e.g.:
+# cipher:
+#   enabled: false
+#   database: { host: prism-postgresql, name: register, user: prism, ... }

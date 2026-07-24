@@ -1,0 +1,4855 @@
+{
+  "info": {
+    "name": "PRISM Register API",
+    "description": "CRUD for every Register table + custom endpoints. Set the environment first (baseUrl, apiKey, tenant).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Asset Monetisation",
+      "item": [
+        {
+          "name": "POST /v1/asset-monetisation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample state\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample nature\",\n  \"deal_type\": \"sample deal_type\",\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/asset-monetisation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/asset-monetisation/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/asset-monetisation/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample state\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample nature\",\n  \"deal_type\": \"sample deal_type\",\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/asset-monetisation/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/asset-monetisation/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "GET /v1/audit",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/audit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "resource_type",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "resource_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contracts & Assets",
+      "item": [
+        {
+          "name": "POST /v1/contracts-assets",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"asset_type\": \"sample asset_type\",\n  \"title\": \"sample title\",\n  \"counterparty_id\": \"{{id}}\",\n  \"counterparty_name\": \"sample counterparty_name\",\n  \"capacity_mw\": 1.0,\n  \"tariff\": 1.0,\n  \"location\": \"sample location\",\n  \"state\": \"sample state\",\n  \"start_date\": \"2026-03-31\",\n  \"end_date\": \"2026-03-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/contracts-assets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/contracts-assets/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/contracts-assets/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"asset_type\": \"sample asset_type\",\n  \"title\": \"sample title\",\n  \"counterparty_id\": \"{{id}}\",\n  \"counterparty_name\": \"sample counterparty_name\",\n  \"capacity_mw\": 1.0,\n  \"tariff\": 1.0,\n  \"location\": \"sample location\",\n  \"state\": \"sample state\",\n  \"start_date\": \"2026-03-31\",\n  \"end_date\": \"2026-03-31\",\n  \"tenor_years\": 1.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/contracts-assets/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/contracts-assets/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/contracts-assets/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "contracts-assets",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Counterparties",
+      "item": [
+        {
+          "name": "POST /v1/counterparties",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"sample name\",\n  \"short_name\": \"sample short_name\",\n  \"counterparty_type\": \"sample counterparty_type\",\n  \"is_active\": false,\n  \"sectors\": \"sample sectors\",\n  \"ticket_min_cr\": 1.0,\n  \"ticket_max_cr\": 1.0,\n  \"notes\": \"sample notes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/counterparties",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/counterparties/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/counterparties/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"sample name\",\n  \"short_name\": \"sample short_name\",\n  \"counterparty_type\": \"sample counterparty_type\",\n  \"is_active\": false,\n  \"sectors\": \"sample sectors\",\n  \"ticket_min_cr\": 1.0,\n  \"ticket_max_cr\": 1.0,\n  \"notes\": \"sample notes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/counterparties/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/counterparties/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Deals",
+      "item": [
+        {
+          "name": "POST /v1/deals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_no\": \"sample deal_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"code\": \"sample code\",\n  \"product_type\": \"sample product_type\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"stage\": \"sample stage\",\n  \"temperature\": \"sample temperature\",\n  \"source\": \"sample source\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/deals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/deals/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/deals/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_no\": \"sample deal_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"code\": \"sample code\",\n  \"product_type\": \"sample product_type\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"stage\": \"sample stage\",\n  \"temperature\": \"sample temperature\",\n  \"source\": \"sample source\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/deals/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/deals/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Entities",
+      "item": [
+        {
+          "name": "GET /v1/entities/{{entityId}}/dossier",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{entityId}}/dossier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{entityId}}",
+                "dossier"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/entities/{{entityId}}/lender-matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{entityId}}/lender-matrix",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{entityId}}",
+                "lender-matrix"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/entities",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"sample code\",\n  \"legal_name\": \"sample legal_name\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"cin\": \"sample cin\",\n  \"pan\": \"sample pan\",\n  \"gstin\": \"sample gstin\",\n  \"sector\": \"sample sector\",\n  \"sub_sector\": \"sample sub_sector\",\n  \"lens\": \"sample lens\",\n  \"state\": \"sample state\",\n  \"location\": \"sample location\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/entities",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/entities/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/entities/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"sample code\",\n  \"legal_name\": \"sample legal_name\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"cin\": \"sample cin\",\n  \"pan\": \"sample pan\",\n  \"gstin\": \"sample gstin\",\n  \"sector\": \"sample sector\",\n  \"sub_sector\": \"sample sub_sector\",\n  \"lens\": \"sample lens\",\n  \"state\": \"sample state\",\n  \"location\": \"sample location\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/entities/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/entities/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Export",
+      "item": [
+        {
+          "name": "GET /v1/export/excel",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/export/excel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "excel"
+              ],
+              "query": [
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "tables",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/export/json",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/export/json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "json"
+              ],
+              "query": [
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "tables",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/export/counts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/export/counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "counts"
+              ],
+              "query": [
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "External Intelligence",
+      "item": [
+        {
+          "name": "POST /v1/external-intelligence/{intel_id}/acknowledge",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{intel_id}/acknowledge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{intel_id}",
+                "acknowledge"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/external-intelligence/{intel_id}/dismiss",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{intel_id}/dismiss",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{intel_id}",
+                "dismiss"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/external-intelligence",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"intel_type\": \"sample intel_type\",\n  \"source\": \"sample source\",\n  \"signal\": \"sample signal\",\n  \"title\": \"sample title\",\n  \"summary\": \"sample summary\",\n  \"url\": \"sample url\",\n  \"observed_at\": \"2026-03-31T10:00:00Z\",\n  \"pulled_at\": \"2026-03-31T10:00:00Z\",\n  \"payload\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/external-intelligence",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/external-intelligence/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/external-intelligence/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"intel_type\": \"sample intel_type\",\n  \"source\": \"sample source\",\n  \"signal\": \"sample signal\",\n  \"title\": \"sample title\",\n  \"summary\": \"sample summary\",\n  \"url\": \"sample url\",\n  \"observed_at\": \"2026-03-31T10:00:00Z\",\n  \"pulled_at\": \"2026-03-31T10:00:00Z\",\n  \"payload\": {},\n  \"acknowledged_by\": \"sample acknowledged_by\",\n  \"acknowledged_at\": \"2026-03-31T10:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/external-intelligence/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/external-intelligence/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/external-intelligence/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "external-intelligence",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Financials",
+      "item": [
+        {
+          "name": "POST /v1/financials",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"statement_type\": \"sample statement_type\",\n  \"period_type\": \"sample period_type\",\n  \"period_start\": \"2026-03-31\",\n  \"period_end\": \"2026-03-31\",\n  \"fiscal_year\": \"sample fiscal_year\",\n  \"as_of_date\": \"2026-03-31\",\n  \"provenance\": \"sample provenance\",\n  \"source_document_ref\": \"sample source_document_ref\",\n  \"currency\": \"sample currency\",\n  \"is_consolidated\": false,\n  \"is_audited\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/financials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/financials/history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "entity_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "statement_type",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "period_end",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/financials/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/financials/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"period_type\": \"sample period_type\",\n  \"period_start\": \"2026-03-31\",\n  \"fiscal_year\": \"sample fiscal_year\",\n  \"as_of_date\": \"2026-03-31\",\n  \"provenance\": \"sample provenance\",\n  \"source_document_ref\": \"sample source_document_ref\",\n  \"currency\": \"sample currency\",\n  \"is_consolidated\": false,\n  \"is_audited\": false,\n  \"scale\": \"sample scale\",\n  \"revenue\": 1.0,\n  \"ebitda\": 1.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/financials/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/financials/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /healthz",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /readyz",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/readyz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "readyz"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Import",
+      "item": [
+        {
+          "name": "POST /v1/import/atlas-xlsx",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/import/atlas-xlsx",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "import",
+                "atlas-xlsx"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Interactions",
+      "item": [
+        {
+          "name": "POST /v1/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/leads/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/leads/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/deals/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/deals/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/entities/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/entities/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/counterparties/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/counterparties/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/counterparties/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "counterparties",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/lending/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/syndication/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/syndication/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/asset-monetisation/{subject_id}/interactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{subject_id}",
+                "interactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/asset-monetisation/{subject_id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{subject_id}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{subject_id}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"sample subject_type\",\n  \"subject_id\": \"{{id}}\",\n  \"interaction_type\": \"sample interaction_type\",\n  \"direction\": \"sample direction\",\n  \"occurred_at\": \"2026-03-31T10:00:00Z\",\n  \"summary\": \"sample summary\",\n  \"notes\": \"sample notes\",\n  \"outcome\": \"sample outcome\",\n  \"performed_by\": \"sample performed_by\",\n  \"contact_name\": \"sample contact_name\",\n  \"syndication_lender_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/interactions/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/interactions/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "interactions",
+                "{{id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Leads",
+      "item": [
+        {
+          "name": "POST /v1/leads",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lead_no\": \"sample lead_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"company\": \"sample company\",\n  \"sector\": \"sample sector\",\n  \"lens\": \"sample lens\",\n  \"source\": \"sample source\",\n  \"source_name\": \"sample source_name\",\n  \"rm\": \"sample rm\",\n  \"status\": \"sample status\",\n  \"temperature\": \"sample temperature\",\n  \"contact\": \"sample contact\",\n  \"designation\": \"sample designation\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/leads",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/leads/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/leads/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lead_no\": \"sample lead_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"company\": \"sample company\",\n  \"sector\": \"sample sector\",\n  \"lens\": \"sample lens\",\n  \"source\": \"sample source\",\n  \"source_name\": \"sample source_name\",\n  \"rm\": \"sample rm\",\n  \"status\": \"sample status\",\n  \"temperature\": \"sample temperature\",\n  \"contact\": \"sample contact\",\n  \"designation\": \"sample designation\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/leads/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/leads/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lending Tracker",
+      "item": [
+        {
+          "name": "POST /v1/lending",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"amount_cr\": 1.0,\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"stage\": \"sample stage\",\n  \"stage_updated_at\": \"2026-03-31\",\n  \"sanction_date\": \"2026-03-31\",\n  \"disbursed_amount\": 1.0,\n  \"disbursement_date\": \"2026-03-31\",\n  \"pending_with\": \"sample pending_with\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/lending",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/lending/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/lending/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"amount_cr\": 1.0,\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"stage\": \"sample stage\",\n  \"stage_updated_at\": \"2026-03-31\",\n  \"sanction_date\": \"2026-03-31\",\n  \"disbursed_amount\": 1.0,\n  \"disbursement_date\": \"2026-03-31\",\n  \"pending_with\": \"sample pending_with\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/lending/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Monitoring & Reporting",
+      "item": [
+        {
+          "name": "POST /v1/monitoring",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"record_type\": \"sample record_type\",\n  \"covenant_name\": \"sample covenant_name\",\n  \"due_date\": \"2026-03-31\",\n  \"submitted_date\": \"2026-03-31\",\n  \"on_time\": false,\n  \"delay_days\": 1,\n  \"security_created_within_days\": 1,\n  \"extension_count\": 1,\n  \"behavioural_score\": 1.0,\n  \"period\": \"sample period\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/monitoring",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/monitoring/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/monitoring/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"record_type\": \"sample record_type\",\n  \"covenant_name\": \"sample covenant_name\",\n  \"due_date\": \"2026-03-31\",\n  \"submitted_date\": \"2026-03-31\",\n  \"on_time\": false,\n  \"delay_days\": 1,\n  \"security_created_within_days\": 1,\n  \"extension_count\": 1,\n  \"behavioural_score\": 1.0,\n  \"period\": \"sample period\",\n  \"status\": \"sample status\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/monitoring/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/monitoring/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/monitoring/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "monitoring",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "People",
+      "item": [
+        {
+          "name": "POST /v1/people",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"sample name\",\n  \"full_name\": \"sample full_name\",\n  \"role\": \"sample role\",\n  \"email\": \"sample email\",\n  \"phone\": \"sample phone\",\n  \"geography\": \"sample geography\",\n  \"sectors\": \"sample sectors\",\n  \"started_on\": \"2026-03-31\",\n  \"reports_to\": \"sample reports_to\",\n  \"inactive\": false,\n  \"notes\": \"sample notes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/people",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/people/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/people/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"sample name\",\n  \"full_name\": \"sample full_name\",\n  \"role\": \"sample role\",\n  \"email\": \"sample email\",\n  \"phone\": \"sample phone\",\n  \"geography\": \"sample geography\",\n  \"sectors\": \"sample sectors\",\n  \"started_on\": \"2026-03-31\",\n  \"reports_to\": \"sample reports_to\",\n  \"inactive\": false,\n  \"notes\": \"sample notes\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/people/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/people/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reference",
+      "item": [
+        {
+          "name": "GET /v1/ref",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/ref",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "ref"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/ref/Sector",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/ref/Sector",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "ref",
+                "Sector"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "GET /v1/settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT /v1/settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"settings\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Syndication Lenders",
+      "item": [
+        {
+          "name": "GET /v1/syndication/{{synId}}/lenders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{synId}}/lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{synId}}",
+                "lenders"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/syndication/{{synId}}/lenders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{synId}}/lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{synId}}",
+                "lenders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"syndication_id\": \"{{id}}\",\n  \"counterparty_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\",\n  \"is_existing\": false,\n  \"status\": \"sample status\",\n  \"since\": \"2026-03-31\",\n  \"response_date\": \"2026-03-31\",\n  \"chased_date\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"status_history\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/syndication-lenders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"syndication_id\": \"{{id}}\",\n  \"counterparty_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\",\n  \"is_existing\": false,\n  \"status\": \"sample status\",\n  \"since\": \"2026-03-31\",\n  \"response_date\": \"2026-03-31\",\n  \"chased_date\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"status_history\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/syndication-lenders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/syndication-lenders/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/syndication-lenders/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"counterparty_id\": \"{{id}}\",\n  \"lender_name\": \"sample lender_name\",\n  \"is_existing\": false,\n  \"status\": \"sample status\",\n  \"since\": \"2026-03-31\",\n  \"response_date\": \"2026-03-31\",\n  \"chased_date\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"status_history\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/syndication-lenders/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/syndication-lenders/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication-lenders/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication-lenders",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Syndication Tracker",
+      "item": [
+        {
+          "name": "POST /v1/syndication",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"toi\": \"sample toi\",\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"lc\": \"sample lc\",\n  \"priority\": \"sample priority\",\n  \"status\": \"sample status\",\n  \"amount_cr\": 1.0,\n  \"line\": \"sample line\",\n  \"facility\": \"sample facility\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/syndication",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/syndication/{{id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/syndication/{{id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracker_no\": \"sample tracker_no\",\n  \"entity_id\": \"{{entityId}}\",\n  \"deal_id\": \"{{id}}\",\n  \"toi\": \"sample toi\",\n  \"rm\": \"sample rm\",\n  \"analyst\": \"sample analyst\",\n  \"lc\": \"sample lc\",\n  \"priority\": \"sample priority\",\n  \"status\": \"sample status\",\n  \"amount_cr\": 1.0,\n  \"line\": \"sample line\",\n  \"facility\": \"sample facility\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/syndication/{{id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/syndication/{{id}}/restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tenants",
+      "item": [
+        {
+          "name": "POST /v1/tenants",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenants"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"sample code\",\n  \"name\": \"sample name\",\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/tenants",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenants"
+              ],
+              "query": [
+                {
+                  "key": "active_only",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/tenants/{{tenantCode}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants/{{tenantCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "{{tenantCode}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/tenants/{{tenantCode}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants/{{tenantCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "{{tenantCode}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"sample name\",\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/tenants/{{tenantCode}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenants/{{tenantCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenants",
+                "{{tenantCode}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
