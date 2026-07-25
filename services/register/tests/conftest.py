@@ -77,7 +77,8 @@ async def client() -> AsyncIterator[AsyncClient]:
                 "TRUNCATE entities, deals, leads, lending_tracker, syndication_tracker, "
                 "syndication_lenders, asset_monetisation, financials, contracts_assets, "
                 "interactions, external_intelligence, monitoring_reporting, counterparties, "
-                "people, audit_log, idempotency_keys RESTART IDENTITY CASCADE"
+                "people, documents, document_checklist, audit_log, idempotency_keys "
+                "RESTART IDENTITY CASCADE"
             ))
             await session.commit()
         await dispose_engine()

@@ -16,24 +16,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationAppError
 from app.models import (
-    AssetMonetisation,
-    Counterparty,
-    Deal,
-    Entity,
     Interaction,
     Lead,
-    LendingTracker,
     SyndicationLender,
-    SyndicationTracker,
 )
 from app.repositories.crud import CRUDRepository
+from app.repositories.subjects import SUBJECTS as _SUBJECTS
+from app.repositories.subjects import derive_links as _derive_links
+from app.repositories.subjects import load_subject as _load_subject
 
 _repo = CRUDRepository(
     Interaction,
@@ -41,39 +37,6 @@ _repo = CRUDRepository(
     filterable=["subject_type", "subject_id", "interaction_type", "direction", "entity_id",
                 "deal_id", "source"],
 )
-
-# subject_type → (model, how to derive entity_id, deal_id)
-_SUBJECTS: dict[str, type] = {
-    "Lead": Lead,
-    "Deal": Deal,
-    "Entity": Entity,
-    "Counterparty": Counterparty,
-    "Lending": LendingTracker,
-    "Syndication": SyndicationTracker,
-    "AssetMonetisation": AssetMonetisation,
-}
-
-
-async def _load_subject(session: AsyncSession, tenant_id: uuid.UUID, stype: str, sid: uuid.UUID):
-    model: Any = _SUBJECTS[stype]
-    return (
-        await session.execute(
-            select(model).where(model.id == sid, model.tenant_id == tenant_id)
-        )
-    ).scalar_one_or_none()
-
-
-def _derive_links(stype: str, subject) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-    """Return (entity_id, deal_id) denormalised from the subject record."""
-    if stype == "Entity":
-        return subject.id, None
-    if stype == "Deal":
-        return subject.entity_id, subject.id
-    if stype == "Lead":
-        return subject.entity_id, None
-    if stype in ("Lending", "Syndication", "AssetMonetisation"):
-        return subject.entity_id, getattr(subject, "deal_id", None)
-    return None, None  # Counterparty
 
 
 async def create_interaction(

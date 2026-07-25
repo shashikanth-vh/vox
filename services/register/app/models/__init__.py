@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.db.base import AuditLog, Base
 from app.models.deals import Deal, Lead
+from app.models.documents import Document, DocumentChecklistItem
 from app.models.interactions import Interaction
 from app.models.prism import (
     ContractAsset,
@@ -32,6 +33,8 @@ __all__ = [
     "Counterparty",
     "Lead",
     "Deal",
+    "Document",
+    "DocumentChecklistItem",
     "Interaction",
     "LendingTracker",
     "SyndicationTracker",

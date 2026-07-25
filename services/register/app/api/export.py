@@ -31,6 +31,8 @@ from app.models import (
     ContractAsset,
     Counterparty,
     Deal,
+    Document,
+    DocumentChecklistItem,
     Entity,
     ExternalIntelligence,
     Financial,
@@ -62,6 +64,8 @@ _EXPORT_MODELS: list[tuple[str, Any]] = [
     ("interactions", Interaction),
     ("external_intelligence", ExternalIntelligence),
     ("monitoring_reporting", MonitoringReporting),
+    ("documents", Document),
+    ("document_checklist", DocumentChecklistItem),
     ("ref_values", RefValue),
 ]
 _MODELS_BY_NAME = dict(_EXPORT_MODELS)
@@ -90,6 +94,8 @@ def _xl(v: Any) -> Any:
         return v.isoformat()  # tz-aware datetimes aren't allowed as native Excel values
     if isinstance(v, Decimal):
         return float(v)
+    if isinstance(v, bytes | bytearray | memoryview):
+        return f"<{len(bytes(v))} bytes>"  # never dump raw document bytes into a sheet
     return v
 
 
@@ -100,6 +106,8 @@ def _json(v: Any) -> Any:
         return v.isoformat()
     if isinstance(v, Decimal):
         return float(v)
+    if isinstance(v, bytes | bytearray | memoryview):
+        return f"<{len(bytes(v))} bytes>"
     return v
 
 

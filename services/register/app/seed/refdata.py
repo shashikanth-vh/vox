@@ -86,4 +86,10 @@ REF_VALUES: dict[str, list[str]] = {
     "Financial Section": ["P&L", "Balance Sheet", "Cash Flow", "Ratios"],
     "Scale": ["Absolute", "Thousand", "Lakh", "Million", "Crore"],
     "Waiver Status": ["None", "Requested", "Granted", "Rejected"],
+    # Data Register (documents) dropdowns.
+    "Document Section": [
+        "KYC & Constitutional", "Financials", "Banking & Debt",
+        "Compliance & Bureau", "Project & Technical", "Deal Documents",
+    ],
+    "Document Status": ["On File", "Pending", "Waived", "Rejected", "Superseded"],
 }

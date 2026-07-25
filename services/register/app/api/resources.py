@@ -10,6 +10,8 @@ from app.models import (
     ContractAsset,
     Counterparty,
     Deal,
+    Document,
+    DocumentChecklistItem,
     Entity,
     ExternalIntelligence,
     Financial,
@@ -141,6 +143,26 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["record_type", "entity_id", "deal_id", "feeds_irg"]),
         create_schema=s.MonitoringCreate, update_schema=s.MonitoringUpdate, read_schema=s.MonitoringRead,
         filterable=["record_type", "entity_id", "deal_id", "feeds_irg"],
+    ),
+    ResourceSpec(
+        name="document", prefix="/v1/documents", tags=["Documents"],
+        repo=CRUDRepository(Document,
+                            searchable=["title", "doc_type", "original_filename", "notes"],
+                            filterable=["subject_type", "subject_id", "section", "slot_key",
+                                        "status", "entity_id", "deal_id", "is_required"]),
+        create_schema=s.DocumentCreate, update_schema=s.DocumentUpdate, read_schema=s.DocumentRead,
+        filterable=["subject_type", "subject_id", "section", "slot_key", "status",
+                    "entity_id", "deal_id", "is_required"],
+        include_create=False,  # creation goes through the subject-aware register endpoint
+    ),
+    ResourceSpec(
+        name="document checklist item", prefix="/v1/document-checklist", tags=["Documents"],
+        repo=CRUDRepository(DocumentChecklistItem, searchable=["label", "slot_key", "section"],
+                            filterable=["applies_to", "section", "slot_key", "is_required",
+                                        "is_active"]),
+        create_schema=s.DocumentChecklistCreate, update_schema=s.DocumentChecklistUpdate,
+        read_schema=s.DocumentChecklistRead,
+        filterable=["applies_to", "section", "slot_key", "is_required", "is_active"],
     ),
 ]
 

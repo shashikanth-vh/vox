@@ -9,6 +9,7 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine, get_sessionmaker, init_engine
+from app.seed.checklist import seed_document_checklist
 from app.seed.loader import ensure_tenant, load_data_file, seed_all, seed_ref_values
 
 log = get_logger("seed")
@@ -29,6 +30,7 @@ async def run() -> None:
         )
         ref_added = await seed_ref_values(session)
         counts = await seed_all(session, data, tenant_id)
+        counts["document_checklist"] = await seed_document_checklist(session, tenant_id)
         await session.commit()
 
     log.info("seed complete: ref_values=+%d, %s", ref_added, counts)

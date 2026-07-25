@@ -6,6 +6,25 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Documents & the ATLAS "Data Register".** The catalog + checklist behind ATLAS's
+  Data Register modal (17 required documents across 6 sections). Two new tables:
+  - `documents` — one row per document on file: a **reference** (`storage_uri` into
+    object storage) plus metadata (title, size, checksum, owner, time). Large-file **bytes
+    live in object storage**; a bounded `inline_content` (default ≤400 KB, config
+    `REGISTER_DOCUMENTS_INLINE_MAX_BYTES`) is the small-file fallback until MinIO/S3 is
+    wired — mirroring ATLAS ("files up to 400 KB stay viewable, larger are recorded").
+    Attaches to a polymorphic subject (Lead/Entity/Deal/…) and denormalises `entity_id`.
+  - `document_checklist` — the per-tenant checklist **template** (sections + required
+    slots), seeded with Evam's default 24-slot / 17-required list; configurable via
+    `/v1/document-checklist`.
+  - **Endpoints:** subject-aware `POST /v1/documents` + nested
+    `GET/POST /v1/<subject>/{id}/documents`; the rollup
+    `GET /v1/<subject>/{id}/data-register` (sections, per-slot on-file/pending,
+    percent-complete — exactly what the modal renders); `GET /v1/document-checklist/template`;
+    `GET /v1/documents/{id}/content` (streams inline bytes / redirects to an http(s)
+    reference); plus generic CRUD for both tables.
+  - Migration `0002_documents` (reversible); shared polymorphic-subject resolver extracted
+    to `app/repositories/subjects.py` (interactions + documents use one definition).
 - **ATLAS MIS xlsx importer.** Load the authoritative 6-sheet MIS spreadsheet into the
   Register — `POST /v1/import/atlas-xlsx?mode=replace|merge` (upload) and
   `python -m app.seed.xlsx_cli <file>` (CLI). Maps every sheet to its table, dedups

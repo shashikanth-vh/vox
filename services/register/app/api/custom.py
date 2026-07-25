@@ -14,13 +14,22 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, Query, Response
-from sqlalchemy import func, select
+from fastapi.responses import RedirectResponse
+from sqlalchemy import func, or_, select
 
 from app.core.errors import NotFoundError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.db.base import AuditLog
-from app.models import Deal, Entity, ExternalIntelligence, Financial, Interaction
+from app.models import (
+    Deal,
+    Document,
+    DocumentChecklistItem,
+    Entity,
+    ExternalIntelligence,
+    Financial,
+    Interaction,
+)
 from app.models.system import RefValue, TenantSettings
 from app.models.trackers import (
     AssetMonetisation,
@@ -29,6 +38,7 @@ from app.models.trackers import (
     SyndicationTracker,
 )
 from app.repositories.crud import CRUDRepository
+from app.repositories.documents import data_register, register_document
 from app.repositories.financials import create_version
 from app.repositories.interactions import create_interaction, timeline
 from app.schemas import resources as s
@@ -40,6 +50,7 @@ _synlender_repo = CRUDRepository(
     SyndicationLender, filterable=["status", "syndication_id", "counterparty_id"]
 )
 _intel_repo = CRUDRepository(ExternalIntelligence)
+_document_repo = CRUDRepository(Document)
 
 # Built-in defaults for per-tenant settings (ATLAS alert thresholds, in days). A tenant's
 # stored settings are merged over these on read, so a fresh tenant already has sane values.
@@ -460,3 +471,142 @@ async def entity_lender_matrix(
         if exists is None:
             raise NotFoundError(f"entity '{entity_id}' not found.")
     return {"entity_id": str(entity_id), "lenders": list(matrix.values())}
+
+
+# --------------------------------------------------------------------------- #
+# Documents — ATLAS "Data Register" (catalog + checklist)
+# --------------------------------------------------------------------------- #
+@router.post("/v1/documents", response_model=s.DocumentRead, status_code=201,
+             tags=["Documents"], summary="Register a document (subject-aware)")
+async def create_document(
+    payload: s.DocumentCreate,
+    response: Response,
+    ctx: RequestContext = Depends(get_context),
+) -> Any:
+    obj = await register_document(
+        ctx.session, ctx.tenant_id, ctx.actor, payload.model_dump(exclude_unset=False)
+    )
+    response.headers["ETag"] = f'"{obj.version}"'
+    return s.DocumentRead.model_validate(obj)
+
+
+def _document_routes(path_prefix: str, subject_type: str) -> None:
+    """Register GET/POST /v1/<path_prefix>/{id}/documents and the data-register rollup."""
+    label = subject_type.lower()
+
+    @router.get(f"/v1/{path_prefix}/{{subject_id}}/documents",
+                response_model=list[s.DocumentRead], tags=["Documents"],
+                summary=f"Documents on file for a {label}", name=f"documents_{subject_type}")
+    async def _get(subject_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
+                   limit: int = Query(default=200, ge=1, le=1000)) -> Any:
+        rows = (
+            await ctx.session.execute(
+                select(Document)
+                .where(Document.tenant_id == ctx.tenant_id,
+                       Document.subject_type == subject_type,
+                       Document.subject_id == subject_id,
+                       Document.deleted_at.is_(None))
+                .order_by(Document.uploaded_at.desc().nullslast(), Document.created_at.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        return [s.DocumentRead.model_validate(r) for r in rows]
+
+    @router.post(f"/v1/{path_prefix}/{{subject_id}}/documents",
+                 response_model=s.DocumentRead, status_code=201, tags=["Documents"],
+                 summary=f"Register a document against a {label}", name=f"add_document_{subject_type}")
+    async def _post(subject_id: uuid.UUID, payload: s.DocumentCreate,
+                    response: Response, ctx: RequestContext = Depends(get_context)) -> Any:
+        data = payload.model_dump(exclude_unset=False)
+        data["subject_type"] = subject_type  # path wins over body
+        data["subject_id"] = subject_id
+        obj = await register_document(ctx.session, ctx.tenant_id, ctx.actor, data)
+        response.headers["ETag"] = f'"{obj.version}"'
+        return s.DocumentRead.model_validate(obj)
+
+    @router.get(f"/v1/{path_prefix}/{{subject_id}}/data-register", tags=["Documents"],
+                summary=f"Data Register (checklist + progress) for a {label}",
+                name=f"data_register_{subject_type}")
+    async def _rollup(subject_id: uuid.UUID,
+                      ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+        return await data_register(ctx.session, ctx.tenant_id, subject_type, subject_id)
+
+
+# Nested document + data-register routes for every subject type (matches ATLAS refType).
+_document_routes("leads", "Lead")
+_document_routes("deals", "Deal")
+_document_routes("entities", "Entity")
+_document_routes("counterparties", "Counterparty")
+_document_routes("lending", "Lending")
+_document_routes("syndication", "Syndication")
+_document_routes("asset-monetisation", "AssetMonetisation")
+
+
+@router.get("/v1/document-checklist/template", tags=["Documents"],
+            summary="The Data Register checklist template, grouped by section")
+async def document_checklist_template(
+    ctx: RequestContext = Depends(get_context),
+    applies_to: str = Query(default="*", description="Subject type, or '*' for all"),
+) -> dict[str, Any]:
+    """The configurable checklist as the ATLAS modal renders it — sections, each with its
+    slots — before any documents are attached. Includes items scoped to ``applies_to`` and
+    the universal ('*') items."""
+    conds = [
+        DocumentChecklistItem.tenant_id == ctx.tenant_id,
+        DocumentChecklistItem.is_active.is_(True),
+        DocumentChecklistItem.deleted_at.is_(None),
+    ]
+    if applies_to != "*":
+        conds.append(or_(DocumentChecklistItem.applies_to == "*",
+                         DocumentChecklistItem.applies_to == applies_to))
+    rows = (
+        await ctx.session.execute(
+            select(DocumentChecklistItem).where(*conds).order_by(
+                DocumentChecklistItem.section_order, DocumentChecklistItem.section,
+                DocumentChecklistItem.sort_order, DocumentChecklistItem.label,
+            )
+        )
+    ).scalars().all()
+
+    sections: list[dict[str, Any]] = []
+    index: dict[str, dict[str, Any]] = {}
+    required_total = 0
+    for it in rows:
+        sec = index.get(it.section)
+        if sec is None:
+            sec = {"section": it.section, "section_order": it.section_order,
+                   "required_total": 0, "items": []}
+            index[it.section] = sec
+            sections.append(sec)
+        if it.is_required:
+            required_total += 1
+            sec["required_total"] += 1
+        sec["items"].append({
+            "slot_key": it.slot_key, "label": it.label, "is_required": it.is_required,
+            "hint": it.hint,
+        })
+    return {"applies_to": applies_to, "required_total": required_total, "sections": sections}
+
+
+@router.get("/v1/documents/{doc_id}/content", tags=["Documents"],
+            summary="Fetch a document's bytes (inline) or its storage reference")
+async def download_document(
+    doc_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
+) -> Any:
+    """Streams inline-stored bytes; redirects to an http(s) ``storage_uri``; otherwise
+    returns the object-storage reference for the caller to fetch (e.g. via a presigned
+    URL). Metadata-only records (no bytes on record) 404."""
+    doc = await _document_repo.get(ctx.session, ctx.tenant_id, doc_id)
+    if doc.inline_content is not None:
+        filename = doc.original_filename or doc.title
+        return Response(
+            content=doc.inline_content,
+            media_type=doc.content_type or "application/octet-stream",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+    if doc.storage_uri:
+        if doc.storage_uri.startswith(("http://", "https://")):
+            return RedirectResponse(doc.storage_uri)
+        return {"storage_backend": doc.storage_backend, "storage_uri": doc.storage_uri,
+                "note": "Fetch these bytes from object storage (e.g. via a presigned URL)."}
+    raise NotFoundError(f"document '{doc_id}' has no bytes on record (metadata-only).")

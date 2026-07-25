@@ -250,3 +250,22 @@ class MonitoringRecordType(StrEnum):
     BEHAVIOURAL_SCORE = "Behavioural Score"
     MIS_SNAPSHOT = "MIS Snapshot"
     REPORT_REGISTER = "Report Register"
+
+
+class DocumentSection(StrEnum):
+    """The ATLAS Data Register checklist sections."""
+
+    KYC_CONSTITUTIONAL = "KYC & Constitutional"
+    FINANCIALS = "Financials"
+    BANKING_DEBT = "Banking & Debt"
+    COMPLIANCE_BUREAU = "Compliance & Bureau"
+    PROJECT_TECHNICAL = "Project & Technical"
+    DEAL_DOCUMENTS = "Deal Documents"
+
+
+class DocumentStatus(StrEnum):
+    ON_FILE = "On File"
+    PENDING = "Pending"
+    WAIVED = "Waived"
+    REJECTED = "Rejected"
+    SUPERSEDED = "Superseded"

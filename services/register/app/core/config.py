@@ -42,6 +42,12 @@ class Settings(BaseServiceSettings):
     # ---- Behaviour -------------------------------------------------------
     idempotency_ttl_hours: int = 48
 
+    # ---- Documents (Data Register) --------------------------------------
+    # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.
+    # Larger files must be uploaded to object storage and registered by ``storage_uri``.
+    # Mirrors the ATLAS "files up to 400 KB stay viewable" affordance.
+    documents_inline_max_bytes: int = 400 * 1024
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def _split_api_keys(cls, v: object) -> object:

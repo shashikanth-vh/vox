@@ -923,6 +923,119 @@ class MonitoringRead(ReadModel):
 
 
 # --------------------------------------------------------------------------- #
+# Documents (the catalog behind ATLAS's "Data Register")
+# --------------------------------------------------------------------------- #
+class DocumentCreate(CreateModel):
+    # subject_type/subject_id are optional here because the nested endpoints
+    # (/v1/<subject>/{id}/documents) inject them from the path; the generic
+    # POST /v1/documents requires both (validated server-side).
+    subject_type: str | None = Field(default=None, max_length=30)
+    subject_id: uuid.UUID | None = None
+    section: str | None = Field(default=None, max_length=80)
+    slot_key: str | None = Field(default=None, max_length=60)
+    doc_type: str | None = Field(default=None, max_length=120)
+    title: str = Field(max_length=300)
+    is_required: bool = False
+    status: str = Field(default="On File", max_length=40)
+    # Where the bytes live. Supply *one* of:
+    #   storage_uri  — already uploaded to object storage (s3://… / https://…), OR
+    #   content_base64 — small file kept inline (bounded by documents_inline_max_bytes), OR
+    #   neither      — a metadata-only record (name/size recorded, no bytes stored).
+    storage_uri: str | None = None
+    storage_backend: str | None = Field(default=None, max_length=20)
+    content_type: str | None = Field(default=None, max_length=120)
+    size_bytes: int | None = Field(default=None, ge=0)
+    checksum: str | None = Field(default=None, max_length=64)
+    original_filename: str | None = Field(default=None, max_length=300)
+    content_base64: str | None = None  # write-only; decoded + stored inline, never returned
+    uploaded_by: str | None = Field(default=None, max_length=120)
+    uploaded_at: datetime | None = None
+    notes: str | None = None
+    meta: dict[str, Any] | None = None
+
+
+class DocumentUpdate(UpdateModel):
+    section: str | None = Field(default=None, max_length=80)
+    slot_key: str | None = Field(default=None, max_length=60)
+    doc_type: str | None = Field(default=None, max_length=120)
+    title: str | None = Field(default=None, max_length=300)
+    is_required: bool | None = None
+    status: str | None = Field(default=None, max_length=40)
+    storage_uri: str | None = None
+    storage_backend: str | None = Field(default=None, max_length=20)
+    content_type: str | None = Field(default=None, max_length=120)
+    size_bytes: int | None = Field(default=None, ge=0)
+    checksum: str | None = Field(default=None, max_length=64)
+    original_filename: str | None = Field(default=None, max_length=300)
+    notes: str | None = None
+    meta: dict[str, Any] | None = None
+
+
+class DocumentRead(ReadModel):
+    subject_type: str
+    subject_id: uuid.UUID
+    entity_id: uuid.UUID | None
+    deal_id: uuid.UUID | None
+    section: str | None
+    slot_key: str | None
+    doc_type: str | None
+    title: str
+    is_required: bool
+    status: str
+    storage_backend: str | None
+    storage_uri: str | None
+    content_type: str | None
+    size_bytes: int | None
+    checksum: str | None
+    original_filename: str | None
+    uploaded_by: str | None
+    uploaded_at: datetime | None
+    notes: str | None
+    meta: dict[str, Any] | None
+    # inline_content (the raw bytes) is intentionally NOT exposed here — fetch it from
+    # GET /v1/documents/{id}/content.
+
+
+# --------------------------------------------------------------------------- #
+# Document checklist template (the Data Register's configurable slot list)
+# --------------------------------------------------------------------------- #
+class DocumentChecklistCreate(CreateModel):
+    applies_to: str = Field(default="*", max_length=30)
+    section: str = Field(max_length=80)
+    section_order: int = 0
+    slot_key: str = Field(max_length=60)
+    label: str = Field(max_length=200)
+    is_required: bool = False
+    sort_order: int = 0
+    is_active: bool = True
+    hint: str | None = None
+
+
+class DocumentChecklistUpdate(UpdateModel):
+    applies_to: str | None = Field(default=None, max_length=30)
+    section: str | None = Field(default=None, max_length=80)
+    section_order: int | None = None
+    slot_key: str | None = Field(default=None, max_length=60)
+    label: str | None = Field(default=None, max_length=200)
+    is_required: bool | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+    hint: str | None = None
+
+
+class DocumentChecklistRead(ReadModel):
+    applies_to: str
+    section: str
+    section_order: int
+    slot_key: str
+    label: str
+    is_required: bool
+    sort_order: int
+    is_active: bool
+    hint: str | None
+
+
+# --------------------------------------------------------------------------- #
 # Tenant settings (per-tenant business config, e.g. alert thresholds)
 # --------------------------------------------------------------------------- #
 class SettingsUpdate(BaseModel):
