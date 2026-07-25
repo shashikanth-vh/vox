@@ -56,6 +56,7 @@ jobs:
           pip install -e "services/workflows[dev]"
           pip install -e "services/access[dev]"
           pip install -e "services/gateway[dev]"
+          pip install -e "services/vocx[dev]"
 
       - name: Lint (ruff)
         run: |
@@ -63,6 +64,7 @@ jobs:
           python -m ruff check services/workflows/app services/workflows/tests
           python -m ruff check services/access/app services/access/tests
           python -m ruff check services/gateway/app services/gateway/tests
+          python -m ruff check services/vocx/app services/vocx/tests
           python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
           python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
 
@@ -72,6 +74,7 @@ jobs:
           (cd services/workflows && python -m mypy app)
           (cd services/access && python -m mypy app)
           (cd services/gateway && python -m mypy app)
+          (cd services/vocx && python -m mypy app)
           (cd packages/evam-backend-core && python -m mypy evam_backend_core)
           (cd packages/evam-register-client && python -m mypy evam_register_client)
 
@@ -93,3 +96,6 @@ jobs:
 
       - name: Test (gateway e2e — real 3-service stack)
         run: cd services/gateway && python -m pytest -q
+
+      - name: Test (vocx e2e — capture → Register)
+        run: cd services/vocx && python -m pytest -q

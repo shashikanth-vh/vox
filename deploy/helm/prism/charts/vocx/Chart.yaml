@@ -1,0 +1,11 @@
+apiVersion: v2
+name: vocx
+description: >-
+  PRISM VocX — voice-based field touchpoint capture (formerly "VOX"). Writes structured
+  touchpoints to the Register via the platform SDK with capture-id idempotency
+  (exactly-once). Stateless; individually deployable.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

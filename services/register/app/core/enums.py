@@ -192,7 +192,8 @@ class InteractionSubject(StrEnum):
 
 class InteractionSource(StrEnum):
     MANUAL = "Manual"
-    VOX = "VOX"
+    VOCX = "VocX"      # voice touchpoint capture service (formerly "VOX")
+    VOX = "VOX"        # legacy value kept for rows written before the rename
     EMAIL = "Email"
     SYSTEM = "System"
 

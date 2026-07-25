@@ -131,7 +131,7 @@
       <div class="layer-title"><span>Clients</span></div>
       <div class="boxes">
         <div class="box planned"><div class="t">ATLAS UI</div><div class="d">deal-desk front end · consumes /v1 + the Data Register</div></div>
-        <div class="box planned"><div class="t">VOX</div><div class="d">voice touchpoint capture → interactions</div></div>
+        <div class="box"><div class="t">VocX</div><div class="d">voice touchpoint capture → POST /v1/touchpoints (:8003) → interactions, exactly-once</div></div>
         <div class="box"><div class="t">Postman / curl</div><div class="d">full CRUD collection, every table</div></div>
         <div class="box"><div class="t">evam-register-client</div><div class="d">typed SDK — auth, retry, idempotency, pagination</div></div>
       </div>
@@ -398,13 +398,13 @@ counts · percent_complete"]
 
   <div class="flow">
     <div class="flow-head"><span class="flow-id">F8</span><h3>Log an interaction — timeline + roll-ups</h3></div>
-    <p class="about">One append-only record type for manual notes and VOX touchpoints. Writing one also
+    <p class="about">One append-only record type for manual notes and VocX touchpoints. Writing one also
       updates everything ATLAS derives from it — in the same transaction.</p>
     <p class="endpoints"><code>POST /v1/&lt;subject&gt;/{id}/interactions</code> · <code>GET …/interactions</code></p>
     <div class="diagram"><pre class="mermaid">
 sequenceDiagram
   autonumber
-  participant C as Client / VOX
+  participant C as Client / VocX
   participant A as Register API
   participant P as PostgreSQL
   C->>A: interaction (type, direction, notes, transcript…)
@@ -556,7 +556,7 @@ flowchart LR
         <tr><td>Edge — NGINX</td><td><code>deploy/nginx/nginx.conf</code></td><td><span class="pill built">built</span></td><td>in Compose · Ingress plays it in k8s</td></tr>
         <tr><td>Compose — 9 services</td><td><code>deploy/compose/docker-compose.yml</code></td><td><span class="pill built">built</span></td><td>NGINX → gateway → register · one Postgres · one command</td></tr>
         <tr><td>Helm — 7 subcharts</td><td><code>deploy/helm/prism</code></td><td><span class="pill built">built</span></td><td>postgresql · register · access · gateway · minio · temporal · workflows</td></tr>
-        <tr><td>CIPHER · PULSE · VOX backends</td><td><code>services/&lt;name&gt;</code> via <code>make new-service</code></td><td><span class="pill planned">planned</span></td><td>scaffolder verified</td></tr>
+        <tr><td>CIPHER · PULSE · VocX backends</td><td><code>services/&lt;name&gt;</code> via <code>make new-service</code></td><td><span class="pill planned">planned</span></td><td>scaffolder verified</td></tr>
         <tr><td>SCRIBE — document ops</td><td>phase 2 — absorbs OCR / parsing / versioning</td><td><span class="pill planned">planned</span></td><td>catalog + bytes already in place</td></tr>
       </tbody>
     </table>

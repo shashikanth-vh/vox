@@ -18,7 +18,7 @@
 # If a previous run errors with "network ... not found" (stale containers from an older
 # compose layout), reset once:  docker compose -f deploy/compose/docker-compose.yml down --remove-orphans
 #
-# Edge (through NGINX): http://localhost:8080 · Gateway direct: :8001 · Register direct: :8000 · Access: :8002
+# Edge (NGINX): :8080 · Gateway: :8001 · Register: :8000 · Access: :8002 · VocX: :8003
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # Temporal Web UI: http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
@@ -156,6 +156,23 @@ services:
       GATEWAY_LOG_JSON: "true"
     ports:
       - "8001:8000"   # direct gateway access for dev
+    restart: unless-stopped
+
+  # VocX — voice-based field touchpoint capture; writes interactions to the Register via
+  # the SDK (source "VocX", capture-id idempotency = exactly-once). Individually deployable.
+  vocx:
+    build:
+      context: ../..
+      dockerfile: services/vocx/Dockerfile
+    depends_on:
+      - register
+    environment:
+      VOCX_REGISTER_BASE_URL: "http://register:8000"
+      VOCX_REGISTER_API_KEY: "dev-local-key"
+      VOCX_REGISTER_TENANT: "EVAM"
+      VOCX_LOG_JSON: "true"
+    ports:
+      - "8003:8000"   # direct capture endpoint for dev
     restart: unless-stopped
 
   # Edge reverse proxy — TLS (prod), routing, load-balancing, edge rate-limit, correlation id.

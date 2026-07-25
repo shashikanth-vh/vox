@@ -13,7 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import Depends, File, Form, Query, Response, UploadFile
+from fastapi import Depends, File, Form, Header, Query, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, or_, select
 
@@ -169,12 +169,46 @@ async def log_interaction(
     payload: s.InteractionCreate,
     response: Response,
     ctx: RequestContext = Depends(get_context),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Any:
+    # Idempotent like the generic creates: a retried capture (VocX flaky uplink, SDK
+    # retry) with the same key replays the original interaction instead of duplicating.
+    if idempotency_key:
+        from app.models.system import IdempotencyKey
+
+        existing = (
+            await ctx.session.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.tenant_id == ctx.tenant_id,
+                    IdempotencyKey.key == idempotency_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            response.status_code = existing.status_code
+            response.headers["Idempotency-Replay"] = "true"
+            return existing.response_body
+
     obj = await create_interaction(
         ctx.session, ctx.tenant_id, ctx.actor, payload.model_dump(exclude_unset=False)
     )
+    result = s.InteractionRead.model_validate(obj)
+    if idempotency_key:
+        from datetime import timedelta
+
+        from app.core.config import get_settings
+        from app.models.system import IdempotencyKey
+
+        await ctx.session.flush()
+        ctx.session.add(IdempotencyKey(
+            tenant_id=ctx.tenant_id, key=idempotency_key, request_hash="interaction",
+            method="POST", path="/v1/interactions", status_code=201,
+            response_body=result.model_dump(mode="json"),
+            expires_at=datetime.now(UTC) + timedelta(
+                hours=get_settings().idempotency_ttl_hours),
+        ))
     response.headers["ETag"] = f'"{obj.version}"'
-    return s.InteractionRead.model_validate(obj)
+    return result
 
 
 def _timeline_routes(path_prefix: str, subject_type: str) -> None:

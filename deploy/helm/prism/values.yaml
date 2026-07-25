@@ -75,6 +75,16 @@ gateway:
   gatewaySecret:
     value: "prism-gateway-secret" # OVERRIDE; must match register.gatewaySharedSecret
 
+# ---- VocX — voice touchpoint capture (individually deployable) -----------------
+vocx:
+  enabled: true
+  fullnameOverride: prism-vocx
+  register:
+    baseUrl: http://prism-register
+    tenant: EVAM
+    apiKey:
+      value: "dev-local-key"      # must be in the Register's REGISTER_API_KEYS
+
 # ---- Object storage (document bytes) ------------------------------------------
 # S3-compatible store for the Data Register uploads. Dev/staging single node; for
 # production set minio.enabled=false and point register.storage.s3.* at a managed S3.

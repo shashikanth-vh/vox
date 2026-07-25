@@ -1,0 +1,52 @@
+# PRISM VocX (voice touchpoint capture). Stateless.
+fullnameOverride: ""       # umbrella sets prism-vocx
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/evam/prism-vocx
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+register:
+  baseUrl: http://prism-register
+  tenant: EVAM
+  # Must be present in the Register's REGISTER_API_KEYS.
+  apiKey:
+    existingSecret: ""
+    existingSecretKey: api-key
+    value: "change-me-in-prod"
+
+config:
+  logLevel: INFO
+  logJson: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

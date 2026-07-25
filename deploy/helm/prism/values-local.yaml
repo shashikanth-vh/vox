@@ -94,3 +94,11 @@ gateway:
     repository: prism-gateway
     tag: "0.1.0"
     pullPolicy: IfNotPresent
+
+# VocX — build & load: docker build -f services/vocx/Dockerfile -t prism-vocx:0.1.0 .
+vocx:
+  enabled: true
+  image:
+    repository: prism-vocx
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent

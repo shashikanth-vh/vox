@@ -18,7 +18,7 @@ it is live here.**
 | **Register** | The data foundation — 7 master tables, entity-centric, tenant-aware, versioned. Source of truth. | ✅ **in this repo** (`services/register/`) |
 | CIPHER | Underwriting brain — automated CAM + Internal Risk Grade (IRG). | planned |
 | PULSE | Continuous news / adverse-media intelligence; 7 AM portfolio digest. | planned |
-| VOX | Voice-based field touchpoint capture → structured into the Register. | planned |
+| **VocX** | Voice-based field touchpoint capture → structured into the Register (formerly "VOX"). | ✅ **in this repo** (`services/vocx/`) |
 | ATLAS | Live management dashboard across Lending / Syndication / Asset Monetisation. | planned |
 | SCRIBE | Standardised documents & operations engine. | Phase 2 |
 
@@ -56,6 +56,8 @@ services/
                        future home of client-specific logic (stateless)
   access/              user management & access facts — users, roles, and the
                        admin-editable access matrix (guardrails; /v1/resolve)
+  vocx/                VocX — voice touchpoint capture → Register interactions via the
+                       SDK (capture-id idempotency = exactly-once); stateless
   workflows/           Temporal worker — durable orchestration; activities write the
                        Register via the client SDK (the Workflows ring, realized)
 packages/

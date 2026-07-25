@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vocx.fullname" . }}
+  labels:
+    {{- include "vocx.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vocx.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "vocx.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "vocx.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: vocx
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: VOCX_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: VOCX_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: VOCX_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: VOCX_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: VOCX_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.apiKey.existingSecret }}
+                  name: {{ .Values.register.apiKey.existingSecret }}
+                  key: {{ .Values.register.apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "vocx.secretName" . }}
+                  key: register-api-key
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

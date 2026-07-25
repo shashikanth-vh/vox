@@ -31,6 +31,9 @@ dependencies:
   - name: temporal
     version: "0.1.0"
     condition: temporal.enabled
+  - name: vocx
+    version: "0.1.0"
+    condition: vocx.enabled
   - name: workflows
     version: "0.1.0"
     condition: workflows.enabled
