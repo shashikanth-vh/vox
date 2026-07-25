@@ -59,6 +59,12 @@ cd services/pulse && pip install -e ".[dev]" && uvicorn app.main:app --port 8004
 
 # Docker (build context = repo root):
 docker build -f services/pulse/Dockerfile -t prism-pulse:0.1.0 .
+docker run -p 8004:8000 \
+  -e PULSE_REGISTER_BASE_URL=http://host.docker.internal:8000 \
+  -e PULSE_REGISTER_API_KEY=my-key prism-pulse:0.1.0
+
+# Compose subset (shared Postgres + Register + PULSE):
+docker compose -f deploy/compose/docker-compose.yml up --build postgres register pulse
 
 # Kubernetes, standalone (the chart is vendored, no registry needed):
 helm upgrade --install pulse deploy/helm/prism/charts/pulse \

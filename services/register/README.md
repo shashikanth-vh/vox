@@ -234,6 +234,22 @@ dropdowns, no business data), `seed` (adds the ATLAS mock), `import-mis` (load a
 MIS xlsx), and the combos `migrate-serve`, `migrate-bootstrap-serve` (**Compose default**),
 `migrate-seed-serve`, `migrate-import-serve`.
 
+Fully standalone in two commands (its own throwaway Postgres + the API):
+
+```bash
+docker run -d --name register-db -p 5432:5432 \
+  -e POSTGRES_USER=register -e POSTGRES_PASSWORD=register -e POSTGRES_DB=register postgres:16
+docker run -p 8000:8000 -e REGISTER_DB_HOST=host.docker.internal \
+  -e REGISTER_DB_USER=register -e REGISTER_DB_PASSWORD=register -e REGISTER_DB_NAME=register \
+  -e REGISTER_API_KEYS=my-key prism-register:0.1.0 migrate-bootstrap-serve
+```
+
+Or as a subset of the one-file compose (shared Postgres + the Register only):
+
+```bash
+docker compose -f ../../deploy/compose/docker-compose.yml up --build postgres register
+```
+
 ### Helm
 
 The Register **does not own a database** — it's a subchart of the PRISM umbrella

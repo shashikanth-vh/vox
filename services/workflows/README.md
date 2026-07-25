@@ -54,5 +54,37 @@ cd services/workflows && pytest      # activity tests use a mock Register; the w
                                      # test runs on Temporal's in-memory server (skips offline)
 ```
 
-Config is `WORKFLOWS_`-prefixed (`TEMPORAL_ADDRESS`, `TASK_QUEUE`, `REGISTER_BASE_URL`,
-`REGISTER_API_KEY`, `REGISTER_TENANT`). See [`BACKEND_STANDARDS.md`](../../BACKEND_STANDARDS.md).
+## Run it standalone
+
+The worker needs two reachable upstreams: a Temporal server and a Register.
+
+```bash
+# Build & run (build context = repo root):
+docker build -f services/workflows/Dockerfile -t prism-workflows:0.1.0 .
+docker run \
+  -e WORKFLOWS_TEMPORAL_ADDRESS=host.docker.internal:7233 \
+  -e WORKFLOWS_REGISTER_BASE_URL=http://host.docker.internal:8000 \
+  -e WORKFLOWS_REGISTER_API_KEY=my-key -e WORKFLOWS_REGISTER_TENANT=EVAM \
+  prism-workflows:0.1.0
+
+# Kubernetes, standalone (vendored chart):
+helm upgrade --install workflows deploy/helm/prism/charts/workflows \
+  --set temporal.address=<temporal-host>:7233 \
+  --set register.baseUrl=http://prism-register --set register.apiKey=<key>
+```
+
+A managed Temporal (Temporal Cloud) works the same way — point
+`WORKFLOWS_TEMPORAL_ADDRESS` at it and skip the bundled server entirely.
+
+## Configuration (env, prefix `WORKFLOWS_`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `WORKFLOWS_TEMPORAL_ADDRESS` | `temporal:7233` | The Temporal frontend |
+| `WORKFLOWS_TASK_QUEUE` | `prism-workflows` | Queue this worker polls |
+| `WORKFLOWS_REGISTER_BASE_URL` | `http://register:8000` | The Register the activities write |
+| `WORKFLOWS_REGISTER_API_KEY` | `dev-local-key` | Must be in `REGISTER_API_KEYS` |
+| `WORKFLOWS_REGISTER_TENANT` | `EVAM` | Tenant the workflows act on |
+| `WORKFLOWS_LOG_LEVEL` / `WORKFLOWS_LOG_JSON` | `INFO` / `true` | Structured logging |
+
+See [`BACKEND_STANDARDS.md`](../../BACKEND_STANDARDS.md) for the shared conventions.

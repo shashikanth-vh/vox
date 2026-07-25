@@ -6,6 +6,16 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **A full README in every service — each one runnable on its own.** All seven
+  services (`register`, `access`, `gateway`, `vocx`, `pulse`, `atlas`, `workflows`)
+  now carry the same README shape: what it is and why, the API table, the complete
+  env-var configuration table, **"Run it standalone"** (plain `docker run` with a
+  throwaway dependency where needed, the one-file-compose subset command, and the
+  vendored-chart `helm install` for just that service), tests, and an
+  "extending it — start here if you are new" section. A user can pick any single
+  service — e.g. Access as a standalone user-management API, or the Register as a
+  standalone system of record — and run it with nothing else from the platform.
+
 - **PULSE + ATLAS as individually deployable services — every PRISM module now ships
   on its own.** Two NEW stateless services on the platform SDK:
   - **`services/pulse`** — the news / adverse-media radar. Pluggable providers
