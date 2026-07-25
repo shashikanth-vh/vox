@@ -57,6 +57,7 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["status", "temperature", "sector", "rm", "source"]),
         create_schema=s.LeadCreate, update_schema=s.LeadUpdate, read_schema=s.LeadRead,
         filterable=["status", "temperature", "sector", "rm", "source"],
+        subject_type="Lead", view_name="leads",
     ),
     ResourceSpec(
         name="deal", prefix="/v1/deals", tags=["Deals"],
@@ -66,6 +67,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.DealCreate, update_schema=s.DealUpdate, read_schema=s.DealRead,
         filterable=["product_type", "stage", "temperature", "is_lending", "is_syndication",
                     "is_asset_mon", "entity_id", "rm", "code"],
+        subject_type="Deal", view_name="deals",
     ),
     ResourceSpec(
         name="lending record", prefix="/v1/lending", tags=["Lending Tracker"],
@@ -73,6 +75,7 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["stage", "pending_with", "entity_id", "rm"]),
         create_schema=s.LendingCreate, update_schema=s.LendingUpdate, read_schema=s.LendingRead,
         filterable=["stage", "pending_with", "entity_id", "rm"],
+        subject_type="Lending", view_name="lending",
     ),
     ResourceSpec(
         name="syndication record", prefix="/v1/syndication", tags=["Syndication Tracker"],
@@ -81,6 +84,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.SyndicationCreate, update_schema=s.SyndicationUpdate,
         read_schema=s.SyndicationRead,
         filterable=["status", "priority", "entity_id", "rm", "pending_with"],
+        subject_type="Syndication", view_name="syndication",
     ),
     ResourceSpec(
         name="syndication lender", prefix="/v1/syndication-lenders", tags=["Syndication Lenders"],
@@ -96,6 +100,7 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["status", "nature", "entity_id", "state"]),
         create_schema=s.AssetMonCreate, update_schema=s.AssetMonUpdate, read_schema=s.AssetMonRead,
         filterable=["status", "nature", "entity_id", "state"],
+        subject_type="AssetMonetisation", view_name="asset_monetisation",
     ),
     ResourceSpec(
         name="financial", prefix="/v1/financials", tags=["Financials"],

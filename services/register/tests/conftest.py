@@ -77,7 +77,7 @@ async def client() -> AsyncIterator[AsyncClient]:
                 "TRUNCATE entities, deals, leads, lending_tracker, syndication_tracker, "
                 "syndication_lenders, asset_monetisation, financials, contracts_assets, "
                 "interactions, external_intelligence, monitoring_reporting, counterparties, "
-                "people, documents, document_checklist, users, user_roles, line_assignments, "
+                "people, documents, document_checklist, line_assignments, "
                 "change_requests, audit_log, idempotency_keys "
                 "RESTART IDENTITY CASCADE"
             ))

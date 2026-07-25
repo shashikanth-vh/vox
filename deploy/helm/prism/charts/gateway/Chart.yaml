@@ -1,0 +1,10 @@
+apiVersion: v2
+name: gateway
+description: >-
+  PRISM Gateway — the REST-API service: cached binary RBAC gate + routing to the
+  Register; the future home of client-specific logic. Stateless (no database).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

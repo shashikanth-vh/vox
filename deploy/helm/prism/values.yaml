@@ -9,8 +9,8 @@ postgresql:
     username: prism
     password: prism                    # OVERRIDE in real deployments (or use existingSecret)
     database: register
-  # As more modules arrive, give each its own database here:
-  # extraDatabases: [cipher, pulse]
+  # One server, a database per service: the Access service's db is created at first init.
+  extraDatabases: [access]
   persistence:
     enabled: true
     size: 10Gi
@@ -32,6 +32,7 @@ register:
     asHook: false
     seed: false
   waitForDb: true
+  gatewaySharedSecret: "prism-gateway-secret"   # must match gateway.gatewaySecret.value
   # Document bytes → the bundled MinIO (below). Reuse MinIO's chart-managed secret for the
   # secret key. Set storage.backend=inline (or point s3.* at a managed S3) to change this.
   storage:
@@ -45,6 +46,34 @@ register:
       accessKeyId: prism
       existingSecret: prism-minio-secret
       existingSecretKey: root-password
+
+# ---- Identity & authorization (three-service RBAC) -----------------------------
+# The Access service owns users, roles and the admin-editable access matrix; the
+# Gateway is the REST-API service every client enters through (cached binary gate,
+# future client-specific logic). The Register verifies gateway-stamped identity.
+access:
+  enabled: true
+  fullnameOverride: prism-access
+  database:
+    host: prism-postgresql
+    port: 5432
+    name: access
+    user: prism
+    existingSecret: prism-postgresql-secret
+    existingSecretPasswordKey: postgres-password
+  apiKeys:
+    value: "dev-local-key"        # OVERRIDE in real deployments
+
+gateway:
+  enabled: true
+  fullnameOverride: prism-gateway
+  upstreams:
+    registerUrl: http://prism-register
+    accessUrl: http://prism-access
+  accessApiKey:
+    value: "dev-local-key"        # must be in the Access service's ACCESS_API_KEYS
+  gatewaySecret:
+    value: "prism-gateway-secret" # OVERRIDE; must match register.gatewaySharedSecret
 
 # ---- Object storage (document bytes) ------------------------------------------
 # S3-compatible store for the Data Register uploads. Dev/staging single node; for

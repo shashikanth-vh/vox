@@ -19,6 +19,12 @@ dependencies:
   - name: register
     version: "0.1.0"
     condition: register.enabled
+  - name: access
+    version: "0.1.0"
+    condition: access.enabled
+  - name: gateway
+    version: "0.1.0"
+    condition: gateway.enabled
   - name: minio
     version: "0.1.0"
     condition: minio.enabled

@@ -77,3 +77,20 @@ workflows:
   register:
     baseUrl: http://prism-register
     apiKey: dev-local-key
+
+# Identity & authorization — build & load the images:
+#   docker build -f services/access/Dockerfile  -t prism-access:0.1.0  .
+#   docker build -f services/gateway/Dockerfile -t prism-gateway:0.1.0 .
+#   kind load docker-image prism-access:0.1.0 prism-gateway:0.1.0
+access:
+  enabled: true
+  image:
+    repository: prism-access
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+gateway:
+  enabled: true
+  image:
+    repository: prism-gateway
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent

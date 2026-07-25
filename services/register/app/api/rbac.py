@@ -1,21 +1,17 @@
-"""User management & RBAC endpoints — the ATLAS RBAC spec (v3.1) as an API.
+"""RBAC endpoints that live NEXT TO THE DATA — assignments, change requests, authz check.
 
-Flows implemented exactly per the spec:
-* **Employees governance** — `/v1/users` CRUD (+ activate/deactivate), e-mail domain
-  enforced (SSO integrity), `reports_to` mandatory for ICs. Admin/Management only.
-* **Role stacking** — grant/revoke catalogue roles; effective permission = highest role.
+Three-service architecture: identity + roles + the admin-editable access matrix live in
+the **Access service**; the **Gateway** decides binary access from cached facts and
+forwards verified identity headers. This module keeps the flows whose semantics are
+inseparable from the business rows:
+
 * **Assignments** — Credit Head assigns Deal Analysts to Lending/Syn/AM lines; Syn Head
-  assigns Syn RMs; AM Head assigns AM RMs; BD Head reassigns leads. Assignment grants
-  write on that line until unassigned; two assignees can co-exist on a line.
-* **Request → approve/reject** — non-approvers raise a stage/status change request;
-  Admin / Management / the relevant vertical Head decides; approval APPLIES the change
-  (with history + audit via the standard repository).
-* **/v1/me** — the caller's effective views, operations and assignments; ATLAS renders
-  its menus and buttons straight from this.
-* **/v1/authz/check** — evaluate any (operation, subject) for the calling user.
-
-Authority checks always apply when a user context is present; without one, behaviour
-follows REGISTER_ENFORCE_RBAC (compatibility mode for machine-to-machine callers).
+  assigns Syn RMs; AM Head assigns AM RMs. Assignment grants write on that line until
+  unassigned; two assignees can co-exist on a line.
+* **Request → approve/reject** — approval APPLIES the stage/status change atomically
+  with history + audit via the standard repository.
+* **/v1/authz/check** — evaluate an operation (optionally against a line) for the
+  calling user — the scoped half the gateway cannot answer.
 """
 
 from __future__ import annotations
@@ -28,8 +24,7 @@ from fastapi import Depends, Query
 from sqlalchemy import select
 
 from app import authz
-from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE, ROLES
-from app.core.config import get_settings
+from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
 from app.core.errors import (
     ConflictError,
     ForbiddenError,
@@ -38,16 +33,14 @@ from app.core.errors import (
 )
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
-from app.models.users import ChangeRequest, LineAssignment, User, UserRole
+from app.models.users import ChangeRequest, LineAssignment
 from app.repositories.crud import CRUDRepository
 from app.repositories.subjects import SUBJECTS, load_subject
-from app.schemas import users as s
-from app.schemas.users import AssignmentRead, ChangeRequestRead, MeRead, UserRead
+from app.schemas import rbac as s
+from app.schemas.rbac import AssignmentRead, ChangeRequestRead
 
 router = api_router()
 
-_user_repo = CRUDRepository(User, searchable=["email", "full_name", "short_name"],
-                            filterable=["is_active", "email"])
 _assign_repo = CRUDRepository(LineAssignment,
                               filterable=["user_id", "subject_type", "subject_id",
                                           "assignment_role"])
@@ -73,134 +66,6 @@ def _require_user(ctx: RequestContext) -> authz.UserContext:
     return ctx.user
 
 
-def _validate_email(email: str) -> str:
-    email = email.strip().lower()
-    domain = get_settings().user_email_domain
-    if "@" not in email or not email.endswith(f"@{domain}"):
-        raise ValidationAppError(f"User e-mail must be an @{domain} address (SSO integrity).")
-    return email
-
-
-def _validate_role(role: str) -> str:
-    if role not in ROLES:
-        raise ValidationAppError(f"Unknown role '{role}'. One of: {', '.join(ROLES)}.")
-    return role
-
-
-async def _roles_of(ctx: RequestContext, user_id: uuid.UUID) -> list[str]:
-    rows = (
-        await ctx.session.execute(
-            select(UserRole.role).where(
-                UserRole.tenant_id == ctx.tenant_id,
-                UserRole.user_id == user_id,
-                UserRole.deleted_at.is_(None),
-            ).order_by(UserRole.role)
-        )
-    ).scalars().all()
-    return list(rows)
-
-
-async def _user_read(ctx: RequestContext, obj: User) -> UserRead:
-    data = UserRead.model_validate(obj)
-    data.roles = await _roles_of(ctx, obj.id)
-    return data
-
-
-# --------------------------------------------------------------------------- #
-# Users (Employees governance table) — Admin / Management only
-# --------------------------------------------------------------------------- #
-@router.post("/v1/users", response_model=UserRead, status_code=201, tags=["Users & RBAC"],
-             summary="Add a user (employee) — optionally with initial roles")
-async def create_user(payload: s.UserCreate, ctx: RequestContext = Depends(get_context)) -> Any:
-    authz.enforce_operation(ctx.user, "add_employee_assign_role")
-    data = payload.model_dump(exclude_unset=False)
-    roles = data.pop("roles", None) or []
-    data["email"] = _validate_email(data["email"])
-    for r in roles:
-        _validate_role(r)
-    obj = await _user_repo.create(ctx.session, ctx.tenant_id, ctx.actor, data)
-    for r in dict.fromkeys(roles):  # de-dupe, keep order
-        ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=obj.id, role=r,
-                                 granted_by=ctx.actor, created_by=ctx.actor,
-                                 updated_by=ctx.actor))
-    await ctx.session.flush()
-    return await _user_read(ctx, obj)
-
-
-@router.get("/v1/users", response_model=list[UserRead], tags=["Users & RBAC"],
-            summary="List users (team directory is readable by every role)")
-async def list_users(ctx: RequestContext = Depends(get_context),
-                     q: str | None = Query(default=None),
-                     include_inactive: bool = Query(default=False)) -> Any:
-    conds = [User.tenant_id == ctx.tenant_id, User.deleted_at.is_(None)]
-    if not include_inactive:
-        conds.append(User.is_active.is_(True))
-    if q:
-        like = f"%{q}%"
-        from sqlalchemy import or_
-
-        conds.append(or_(User.email.ilike(like), User.full_name.ilike(like)))
-    rows = (
-        await ctx.session.execute(select(User).where(*conds).order_by(User.full_name))
-    ).scalars().all()
-    return [await _user_read(ctx, u) for u in rows]
-
-
-@router.get("/v1/users/{user_id}", response_model=UserRead, tags=["Users & RBAC"],
-            summary="Get one user with their stacked roles")
-async def get_user(user_id: uuid.UUID, ctx: RequestContext = Depends(get_context)) -> Any:
-    obj = await _user_repo.get(ctx.session, ctx.tenant_id, user_id)
-    return await _user_read(ctx, obj)
-
-
-@router.patch("/v1/users/{user_id}", response_model=UserRead, tags=["Users & RBAC"],
-              summary="Edit a user (governance fields) — Admin / Management")
-async def update_user(user_id: uuid.UUID, payload: s.UserUpdate,
-                      ctx: RequestContext = Depends(get_context)) -> Any:
-    authz.enforce_operation(ctx.user, "edit_employee")
-    data = payload.model_dump(exclude_unset=True)
-    expected = data.pop("expected_version", None)
-    obj = await _user_repo.update(ctx.session, ctx.tenant_id, user_id, ctx.actor, data,
-                                  expected_version=expected)
-    return await _user_read(ctx, obj)
-
-
-@router.post("/v1/users/{user_id}/roles", response_model=UserRead, status_code=201,
-             tags=["Users & RBAC"], summary="Grant a role (role stacking)")
-async def grant_role(user_id: uuid.UUID, payload: s.RoleGrant,
-                     ctx: RequestContext = Depends(get_context)) -> Any:
-    authz.enforce_operation(ctx.user, "add_employee_assign_role")
-    role = _validate_role(payload.role)
-    obj = await _user_repo.get(ctx.session, ctx.tenant_id, user_id)
-    if role in await _roles_of(ctx, user_id):
-        raise ConflictError(f"User already holds role '{role}'.")
-    ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user_id, role=role,
-                             granted_by=ctx.actor, created_by=ctx.actor, updated_by=ctx.actor))
-    await ctx.session.flush()
-    return await _user_read(ctx, obj)
-
-
-@router.delete("/v1/users/{user_id}/roles/{role}", response_model=UserRead,
-               tags=["Users & RBAC"], summary="Revoke a role")
-async def revoke_role(user_id: uuid.UUID, role: str,
-                      ctx: RequestContext = Depends(get_context)) -> Any:
-    authz.enforce_operation(ctx.user, "add_employee_assign_role")
-    obj = await _user_repo.get(ctx.session, ctx.tenant_id, user_id)
-    row = (
-        await ctx.session.execute(
-            select(UserRole).where(UserRole.tenant_id == ctx.tenant_id,
-                                   UserRole.user_id == user_id, UserRole.role == role,
-                                   UserRole.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise NotFoundError(f"User does not hold role '{role}'.")
-    row.deleted_at = datetime.now(UTC)
-    row.updated_by = ctx.actor
-    await ctx.session.flush()
-    return await _user_read(ctx, obj)
-
-
 # --------------------------------------------------------------------------- #
 # Assignments — the assignment-driven permission primitive
 # --------------------------------------------------------------------------- #
@@ -224,10 +89,9 @@ async def create_assignment(payload: s.AssignmentCreate,
     elif ctx.user is None:
         authz.enforce_operation(None, "add_employee_assign_role")  # honours enforce_rbac
 
-    # Subject + assignee must exist.
+    # Subject must exist (the assignee is an Access-service user — validated upstream).
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
         raise NotFoundError(f"{stype} '{data['subject_id']}' not found.")
-    await _user_repo.get(ctx.session, ctx.tenant_id, data["user_id"])
 
     data["assigned_by"] = ctx.actor
     obj = await _assign_repo.create(ctx.session, ctx.tenant_id, ctx.actor, data)
@@ -375,22 +239,8 @@ async def reject_request(request_id: uuid.UUID, payload: s.ChangeRequestDecision
 
 
 # --------------------------------------------------------------------------- #
-# /v1/me + /v1/authz/check — what the caller may see and do
+# /v1/authz/check — the scoped half of an access decision
 # --------------------------------------------------------------------------- #
-@router.get("/v1/me", response_model=MeRead, tags=["Users & RBAC"],
-            summary="The calling user's effective permissions (renders the ATLAS menu)")
-async def me(ctx: RequestContext = Depends(get_context)) -> Any:
-    user = _require_user(ctx)
-    assignments = await authz.engine.active_assignments(ctx.session, ctx.tenant_id, user.id)
-    return MeRead(
-        id=user.id, email=user.email, full_name=user.full_name,
-        roles=sorted(user.roles),
-        views=authz.effective_views(user),
-        operations=authz.effective_operations(user),
-        assignments=[AssignmentRead.model_validate(a) for a in assignments],
-    )
-
-
 @router.get("/v1/authz/check", tags=["Users & RBAC"],
             summary="Can the calling user perform an operation (optionally on a line)?")
 async def authz_check(

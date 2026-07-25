@@ -128,6 +128,9 @@ apiKeys:
   # Comma-separated. Overridden by existingSecret when set.
   value: "change-me-in-prod"
 
+# Shared secret proving identity headers came via the gateway. Empty = dev-trust.
+gatewaySharedSecret: ""
+
 # Object storage for document bytes (the Data Register). "inline" keeps small files in
 # Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled
 # MinIO, or a managed S3). The catalog rows are identical either way.

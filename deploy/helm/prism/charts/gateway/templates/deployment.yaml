@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gateway.fullname" . }}
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gateway.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "gateway.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "gateway.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: GATEWAY_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: GATEWAY_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: GATEWAY_CACHE_TTL_S
+              value: {{ .Values.config.cacheTtlS | quote }}
+            - name: GATEWAY_DEFAULT_TENANT_CODE
+              value: {{ .Values.config.defaultTenantCode | quote }}
+            - name: GATEWAY_REGISTER_URL
+              value: {{ .Values.upstreams.registerUrl | quote }}
+            - name: GATEWAY_ACCESS_URL
+              value: {{ .Values.upstreams.accessUrl | quote }}
+            - name: GATEWAY_ACCESS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.accessApiKey.existingSecret }}
+                  name: {{ .Values.accessApiKey.existingSecret }}
+                  key: {{ .Values.accessApiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "gateway.secretName" . }}
+                  key: access-api-key
+                  {{- end }}
+            - name: GATEWAY_GATEWAY_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.gatewaySecret.existingSecret }}
+                  name: {{ .Values.gatewaySecret.existingSecret }}
+                  key: {{ .Values.gatewaySecret.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "gateway.secretName" . }}
+                  key: gateway-secret
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

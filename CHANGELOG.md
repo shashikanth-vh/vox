@@ -6,6 +6,34 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Three-service RBAC architecture — Gateway + Access service + Register (the agreed
+  design, implemented).** Two NEW microservices, one rewire:
+  - **`services/access`** — user management & access-control facts: `users`, `user_roles`
+    and the **access matrix as admin-editable tables** (`access_grants` +
+    `matrix_versions`), seeded from the spec artifact (now shared as
+    `evam_backend_core.rbac`). Admin-only governance APIs with **guardrail cells**
+    (delete/backup-restore/audit surfaces immutable even to Admin); every edit bumps a
+    matrix version. `GET /v1/resolve` returns user → roles + effective matrices +
+    version for the gateway's cache. Own `access` database on the shared Postgres.
+  - **`services/gateway`** — the REST-API service: **cached binary RBAC gate**
+    (route → operation map; NONE → 403 at the gateway, FULL/SCOPED forwarded with an
+    `X-Authz-Decision` header), identity-header forwarding stamped with a shared secret,
+    reverse proxy to the Register, and a composed `GET /v1/me` (Access facts + Register
+    assignments). Stateless; the future home of client-specific logic. Facts are fetched
+    from Access **on cache miss/TTL only — never per request** (last-known-good on
+    outage).
+  - **Register rewired** (migration `0004`, reversible): local `users`/`user_roles`
+    dropped (identity lives in Access); identity arrives via gateway-verified headers
+    (`X-Gateway-Auth` secret — spoofed identity on direct calls is rejected);
+    `line_assignments` + `change_requests` + the **scoped enforcement stay next to the
+    data**: scoped writes on the 5 line resources require an active assignment, scoped
+    list access filters to assigned lines, delete stays Admin-only.
+  - **Verified end-to-end**: 7 gateway e2e tests run the REAL three-service stack
+    (register + access as live uvicorn servers on their own test DBs) covering CF1–CF7 —
+    incl. **admin edits a matrix cell → new rule live with no deploy**, and the bypass
+    wall. Plus 5 access-service tests and the register suite. Compose gains `access` +
+    `gateway` (NGINX now fronts the gateway); Helm gains both subcharts (9 services /
+    7 subcharts total).
 - **User management & RBAC — the ATLAS RBAC spec (v3.1), implemented.** Four new tables
   (migration `0003`, reversible, RLS'd): `users` (the Employees governance table —
   @evamfinance.com e-mail enforced, active flag, `reports_to`), `user_roles` (role

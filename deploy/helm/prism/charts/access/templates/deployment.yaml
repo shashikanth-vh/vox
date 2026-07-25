@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "access.fullname" . }}
+  labels:
+    {{- include "access.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "access.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "access.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "access.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: access
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.migrateSeedOnStart }}
+          args: ["migrate-seed-serve"]
+          {{- end }}
+          env:
+            - name: ACCESS_ENVIRONMENT
+              value: {{ .Values.config.environment | quote }}
+            - name: ACCESS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: ACCESS_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: ACCESS_DEFAULT_TENANT_CODE
+              value: {{ .Values.config.defaultTenantCode | quote }}
+            - name: ACCESS_USER_EMAIL_DOMAIN
+              value: {{ .Values.config.userEmailDomain | quote }}
+            - name: ACCESS_ENFORCE_RBAC
+              value: {{ .Values.config.enforceRbac | quote }}
+            - name: ACCESS_DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: ACCESS_DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: ACCESS_DB_NAME
+              value: {{ .Values.database.name | quote }}
+            - name: ACCESS_DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: ACCESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.database.existingSecret }}
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.existingSecretPasswordKey }}
+                  {{- else }}
+                  name: {{ include "access.secretName" . }}
+                  key: db-password
+                  {{- end }}
+            - name: ACCESS_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.apiKeys.existingSecret }}
+                  name: {{ .Values.apiKeys.existingSecret }}
+                  key: {{ .Values.apiKeys.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "access.secretName" . }}
+                  key: api-keys
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

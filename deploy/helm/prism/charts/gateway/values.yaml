@@ -1,0 +1,65 @@
+# PRISM Gateway (REST-API service). Stateless.
+fullnameOverride: ""       # umbrella sets prism-gateway
+nameOverride: ""
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/evam/prism-gateway
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+upstreams:
+  registerUrl: http://prism-register
+  accessUrl: http://prism-access
+
+# API key the gateway itself uses against the Access service.
+accessApiKey:
+  existingSecret: ""
+  existingSecretKey: api-key
+  value: "change-me-in-prod"
+
+# Shared secret stamped on forwarded identity headers (Register verifies it).
+gatewaySecret:
+  existingSecret: ""
+  existingSecretKey: gateway-secret
+  value: "change-me-in-prod"
+
+config:
+  logLevel: INFO
+  logJson: true
+  cacheTtlS: "60"
+  defaultTenantCode: EVAM
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,24 +1,15 @@
-"""User management & RBAC — the tables behind the ATLAS RBAC spec (v3.1).
+"""RBAC tables that must live NEXT TO THE DATA (three-service architecture).
 
-Four tables realise the spec's model:
+Identity (users, roles, the admin-editable access matrix) lives in the **Access
+service**; the Gateway forwards verified identity per request. The Register keeps the
+two tables whose semantics are inseparable from the business rows:
 
-* ``users``            — login identities (the spec's *Employees* governance table):
-                         @evamfinance.com e-mail, active flag, ``reports_to`` (drives Head
-                         visibility scope).
-* ``user_roles``       — role stacking: a user may hold several of the 10 catalogue roles
-                         simultaneously; when they overlap the HIGHER role's permission
-                         applies (resolved in ``app.authz.engine``).
 * ``line_assignments`` — the assignment-driven permission primitive: assigning a user to a
                          product line (Lending / Syndication / AM) or a lead/deal grants
                          role-appropriate write **on that line only**, until unassigned.
-                         Two assignees can co-exist on a line (Syn RM + Deal Analyst).
+                         ``user_id`` references an Access-service user (no local FK).
 * ``change_requests``  — the request → approve/reject flow for stage/status changes:
-                         non-approvers raise a request; Admin / Management / the relevant
-                         vertical Head decides; approval applies the change.
-
-Deliberately auth-light (per the platform brief): passwords/SSO live upstream at the
-Doors; the Register stores identities, roles and assignments and *enforces* what they
-may do to the source of truth.
+                         approval APPLIES the change atomically with the tracker row.
 """
 
 from __future__ import annotations
@@ -27,63 +18,15 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
-    ForeignKey,
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import RegisterBase
-
-
-class User(RegisterBase):
-    """A platform user (the spec's Employee record). Drives all RBAC."""
-
-    __tablename__ = "users"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "email", name="users_tenant_email"),
-        Index("ix_users_tenant_active", "tenant_id", "is_active"),
-    )
-
-    email: Mapped[str] = mapped_column(String(200), nullable=False)  # must match tenant domain
-    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    # Short handle used across ATLAS grids (matches trackers' rm/analyst columns).
-    short_name: Mapped[str | None] = mapped_column(String(60))
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
-                                            server_default="true")
-    # MANDATORY for ICs, optional for Heads (spec: drives Head visibility scope).
-    reports_to: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
-    )
-    # Optional link to the existing team-directory row.
-    person_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("people.id", ondelete="SET NULL")
-    )
-    phone: Mapped[str | None] = mapped_column(String(30))
-    notes: Mapped[str | None] = mapped_column(Text)
-    meta: Mapped[dict | None] = mapped_column(JSONB)
-
-
-class UserRole(RegisterBase):
-    """One catalogue role held by a user. Multiple rows = role stacking."""
-
-    __tablename__ = "user_roles"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "user_id", "role", name="user_roles_unique"),
-        Index("ix_user_roles_user", "tenant_id", "user_id"),
-    )
-
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    role: Mapped[str] = mapped_column(String(30), nullable=False)  # ref: RBAC Role
-    granted_by: Mapped[str | None] = mapped_column(String(200))
 
 
 class LineAssignment(RegisterBase):
@@ -100,9 +43,8 @@ class LineAssignment(RegisterBase):
         Index("ix_assign_user_active", "tenant_id", "user_id", "ended_at"),
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    # References an Access-service user (identity lives there; no local FK).
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     # Lead / Deal / Lending / Syndication / AssetMonetisation (ATLAS refType).
     subject_type: Mapped[str] = mapped_column(String(30), nullable=False)
     subject_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)

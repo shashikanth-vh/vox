@@ -50,7 +50,12 @@ every service builds on. A new engineer knows exactly where things go.
 
 ```
 services/
-  register/            the Register service (FastAPI, incl. Dockerfile)
+  register/            the Register service (FastAPI) — the source of truth; enforces
+                       SCOPED access next to the data (assignments, approvals)
+  gateway/             the REST-API service — cached binary RBAC gate + routing; the
+                       future home of client-specific logic (stateless)
+  access/              user management & access facts — users, roles, and the
+                       admin-editable access matrix (guardrails; /v1/resolve)
   workflows/           Temporal worker — durable orchestration; activities write the
                        Register via the client SDK (the Workflows ring, realized)
 packages/
@@ -58,9 +63,11 @@ packages/
                        CRUD, retry, app factory) — the Register is its reference impl
   evam-register-client/ typed client: call the Register from any vertical
 deploy/
-  compose/             docker-compose.yml — the whole platform: edge + Register + DB + MinIO + Temporal + worker
+  compose/             docker-compose.yml — the whole platform: edge + gateway + register
+                       + access + DB + MinIO + Temporal + worker (one command)
   nginx/               NGINX edge config (TLS-ready, routing, rate-limit, correlation id)
-  helm/prism/          the PRISM umbrella chart (postgresql + register subcharts)
+  helm/prism/          the PRISM umbrella chart (postgresql · register · access · gateway
+                       · minio · temporal · workflows subcharts)
 docs/                  SCHEMA.md (data model + ERD), openapi.json, adr/ (decision records)
 scripts/               repo tooling (new_service.py — scaffold a vertical)
 postman/               Postman collection + environment (CRUD for every table)

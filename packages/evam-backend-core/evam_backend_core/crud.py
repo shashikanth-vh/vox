@@ -137,10 +137,14 @@ class CRUDRepository(Generic[M]):
         cursor: str | None = None,
         include_deleted: bool = False,
         with_total: bool = False,
+        id_in: list | None = None,
     ) -> tuple[list[M], str | None, int | None]:
         conds = [self.model.tenant_id == tenant_id]
         if not include_deleted:
             conds.append(self.model.deleted_at.is_(None))
+        if id_in is not None:
+            # Row-scope restriction (e.g. RBAC scoped access: only assigned lines).
+            conds.append(self.model.id.in_(id_in))
 
         for key, value in (filters or {}).items():
             if value is None:

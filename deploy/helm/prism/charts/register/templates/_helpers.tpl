@@ -125,6 +125,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ include "register.secretName" . }}
       key: api-keys
       {{- end }}
+- name: REGISTER_GATEWAY_SHARED_SECRET
+  value: {{ .Values.gatewaySharedSecret | quote }}
 # Object storage (document bytes) — only wired when the backend is "s3".
 - name: REGISTER_STORAGE_BACKEND
   value: {{ .Values.storage.backend | quote }}

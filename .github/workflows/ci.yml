@@ -33,6 +33,11 @@ jobs:
       REGISTER_DB_USER: register
       REGISTER_DB_PASSWORD: register
       REGISTER_DB_NAME: register_test
+      ACCESS_DB_HOST: 127.0.0.1
+      ACCESS_DB_PORT: "5432"
+      ACCESS_DB_USER: register
+      ACCESS_DB_PASSWORD: register
+      ACCESS_DB_NAME: access_test
 
     steps:
       - uses: actions/checkout@v4
@@ -49,11 +54,15 @@ jobs:
           pip install -e "packages/evam-register-client[dev]"
           pip install -e "services/register[dev]"
           pip install -e "services/workflows[dev]"
+          pip install -e "services/access[dev]"
+          pip install -e "services/gateway[dev]"
 
       - name: Lint (ruff)
         run: |
           python -m ruff check services/register/app services/register/scripts services/register/tests
           python -m ruff check services/workflows/app services/workflows/tests
+          python -m ruff check services/access/app services/access/tests
+          python -m ruff check services/gateway/app services/gateway/tests
           python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
           python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
 
@@ -61,14 +70,26 @@ jobs:
         run: |
           (cd services/register && python -m mypy app)
           (cd services/workflows && python -m mypy app)
+          (cd services/access && python -m mypy app)
+          (cd services/gateway && python -m mypy app)
           (cd packages/evam-backend-core && python -m mypy evam_backend_core)
           (cd packages/evam-register-client && python -m mypy evam_register_client)
 
       - name: Test — Register (real Postgres + Alembic migration)
-        run: cd services/register && python -m pytest -q
+        run: |
+          # The Access service's test database on the same CI Postgres.
+          PGPASSWORD=register psql -h 127.0.0.1 -U register -d register_test \
+            -c "CREATE DATABASE access_test;" || true
+          cd services/register && python -m pytest -q
 
       - name: Test — register client
         run: cd packages/evam-register-client && python -m pytest -q
 
       - name: Test — workflows (Temporal test server + mock Register)
         run: cd services/workflows && python -m pytest -q
+
+      - name: Test (access)
+        run: cd services/access && python -m pytest -q
+
+      - name: Test (gateway e2e — real 3-service stack)
+        run: cd services/gateway && python -m pytest -q

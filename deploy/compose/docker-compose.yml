@@ -2,8 +2,11 @@
 #
 #   docker compose -f deploy/compose/docker-compose.yml up --build
 #
-# Brings up: NGINX edge + Register API + PostgreSQL + MinIO (object storage)
-#          + Temporal (server + Web UI) + the PRISM worker.
+# Brings up: NGINX edge + Gateway (REST-API service) + Register API + Access service
+#          + PostgreSQL + MinIO (object storage) + Temporal (server + Web UI) + worker.
+#
+# All user traffic flows NGINX → gateway (binary RBAC gate) → register; the gateway
+# resolves identity from the access service (cached). Admin user: admin@evamfinance.com.
 #
 # ONE Postgres container serves everything: the Register in the `register` database and
 # Temporal in its own `temporal` / `temporal_visibility` databases (auto-created on first
@@ -15,7 +18,7 @@
 # If a previous run errors with "network ... not found" (stale containers from an older
 # compose layout), reset once:  docker compose -f deploy/compose/docker-compose.yml down --remove-orphans
 #
-# Edge (through NGINX): http://localhost:8080   ·   Register direct (dev): http://localhost:8000
+# Edge (through NGINX): http://localhost:8080 · Gateway direct: :8001 · Register direct: :8000 · Access: :8002
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # Temporal Web UI: http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
@@ -34,6 +37,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # First-init only: creates the Access service's database on the shared server.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U prism -d register"]
       interval: 5s
@@ -93,6 +98,8 @@ services:
       REGISTER_S3_SECRET_ACCESS_KEY: "prism-secret"
       REGISTER_S3_USE_SSL: "false"
       REGISTER_S3_PATH_STYLE: "true"
+      # Trust identity headers only when stamped by the gateway (three-service RBAC).
+      REGISTER_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
     # Migrate, provision the tenant + reference dropdowns (NO business data), then serve.
     # This is "start fresh, but usable" — the API works immediately, the DB has no leads/
     # deals/entities. Use "migrate-serve" for a truly bare DB (you must then create a tenant
@@ -108,11 +115,54 @@ services:
       - "8000:8000"    # direct access for dev; production traffic goes through NGINX
     restart: unless-stopped
 
+  # User management & access-control facts — users, roles, the admin-editable matrix.
+  access:
+    build:
+      context: ../..
+      dockerfile: services/access/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ACCESS_ENVIRONMENT: dev
+      ACCESS_DB_HOST: postgres
+      ACCESS_DB_PORT: "5432"
+      ACCESS_DB_USER: prism
+      ACCESS_DB_PASSWORD: prism
+      ACCESS_DB_NAME: access
+      ACCESS_API_KEYS: "dev-local-key"
+      ACCESS_LOG_JSON: "true"
+    # Migrate, seed (tenant + spec matrix + admin@evamfinance.com), serve.
+    command: ["migrate-seed-serve"]
+    ports:
+      - "8002:8000"   # direct access for dev/governance UIs
+    restart: unless-stopped
+
+  # The REST-API service — cached binary RBAC gate + routing; the future home of
+  # client-specific logic. All user traffic flows NGINX → gateway → register.
+  gateway:
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    depends_on:
+      - register
+      - access
+    environment:
+      GATEWAY_REGISTER_URL: "http://register:8000"
+      GATEWAY_ACCESS_URL: "http://access:8000"
+      GATEWAY_ACCESS_API_KEY: "dev-local-key"
+      GATEWAY_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
+      GATEWAY_CACHE_TTL_S: "30"
+      GATEWAY_LOG_JSON: "true"
+    ports:
+      - "8001:8000"   # direct gateway access for dev
+    restart: unless-stopped
+
   # Edge reverse proxy — TLS (prod), routing, load-balancing, edge rate-limit, correlation id.
   nginx:
     image: nginx:1.27-alpine
     depends_on:
-      - register
+      - gateway
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:

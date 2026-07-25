@@ -29,7 +29,7 @@ from app.authz.matrix import (
 )
 from app.core.config import get_settings
 from app.core.errors import ForbiddenError
-from app.models.users import LineAssignment, User, UserRole
+from app.models.users import LineAssignment
 
 
 @dataclass
@@ -50,33 +50,22 @@ class UserContext:
         return self.email
 
 
-async def load_user_context(
-    session: AsyncSession, tenant_id: uuid.UUID, email: str
+def user_context_from_headers(
+    email: str, roles_header: str | None, user_id_header: str | None
 ) -> UserContext:
-    """Resolve an active user + stacked roles, or 403 (unknown/inactive users can't act)."""
-    user = (
-        await session.execute(
-            select(User).where(
-                User.tenant_id == tenant_id,
-                User.email == email.strip().lower(),
-                User.is_active.is_(True),
-                User.deleted_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if user is None:
-        raise ForbiddenError(f"Unknown or inactive user '{email}'.")
-    roles = (
-        await session.execute(
-            select(UserRole.role).where(
-                UserRole.tenant_id == tenant_id,
-                UserRole.user_id == user.id,
-                UserRole.deleted_at.is_(None),
-            )
-        )
-    ).scalars().all()
-    return UserContext(id=user.id, email=user.email, full_name=user.full_name,
-                       roles=set(roles))
+    """Build the acting user from gateway-forwarded (or dev-trusted) identity headers.
+
+    Identity FACTS live in the Access service; the Gateway resolves them there (cached)
+    and forwards email + roles + id. A stable UUID is derived from the e-mail when no id
+    header is present (dev/direct calls), so scoped checks still key consistently.
+    """
+    email = email.strip().lower()
+    roles = {r.strip() for r in (roles_header or "").split(",") if r.strip()}
+    if user_id_header:
+        uid = uuid.UUID(user_id_header)
+    else:
+        uid = uuid.uuid5(uuid.NAMESPACE_URL, f"prism-user:{email}")
+    return UserContext(id=uid, email=email, full_name=email.split("@")[0], roles=roles)
 
 
 def _stacked(matrix_row: dict[str, Access], roles: set[str]) -> Access:

@@ -14,7 +14,7 @@ from app.authz.engine import (
     effective_operations,
     effective_views,
     enforce_operation,
-    load_user_context,
+    user_context_from_headers,
 )
 from app.authz.matrix import (
     ASSIGNMENT_AUTHORITY,
@@ -27,6 +27,6 @@ from app.authz.matrix import (
 
 __all__ = [
     "Access", "ROLES", "VIEW_ACCESS", "OPERATIONS", "DEFAULT_LINE_OWNER",
-    "ASSIGNMENT_AUTHORITY", "UserContext", "load_user_context", "effective_views",
+    "ASSIGNMENT_AUTHORITY", "UserContext", "user_context_from_headers", "effective_views",
     "effective_operations", "enforce_operation", "can_write_line", "can_approve",
 ]

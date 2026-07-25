@@ -1,0 +1,12 @@
+apiVersion: v2
+name: access
+description: >-
+  PRISM Access service — user management & access-control facts: users, stacked roles,
+  and the admin-editable access matrix (seeded from the RBAC spec; guardrail cells
+  immutable). Own `access` database on the shared PostgreSQL. The gateway calls
+  /v1/resolve to fill its cache.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

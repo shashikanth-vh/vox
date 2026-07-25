@@ -1,0 +1,55 @@
+[project]
+name = "prism-gateway"
+version = "0.1.0"
+description = "PRISM Gateway — the REST-API service: cached binary RBAC gate, routing, and the future home of client-specific logic"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "evam-backend-core",         # shared platform: logging, errors, middleware, rbac artifact
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "gunicorn==23.0.0",
+    "httpx==0.28.1",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-json-logger==3.2.1",
+    "orjson==3.10.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "ruff==0.8.4",
+    "mypy==1.14.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
+ignore = ["S101", "B008", "UP046", "S105"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S603", "S607", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_defs = false

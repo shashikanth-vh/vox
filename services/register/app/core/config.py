@@ -49,6 +49,10 @@ class Settings(BaseServiceSettings):
     # (X-User-Email). Off (default) keeps machine-to-machine API-key flows working;
     # requests that DO carry a user are always checked either way.
     enforce_rbac: bool = False
+    # Shared secret proving identity headers came from the gateway. Empty (dev/local) =
+    # trust headers as sent; set in any real deployment so identity can't be spoofed by
+    # a caller that reaches the Register directly.
+    gateway_shared_secret: str = ""
 
     # ---- Documents (Data Register) --------------------------------------
     # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.

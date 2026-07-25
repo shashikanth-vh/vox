@@ -50,6 +50,8 @@ class ResourceSpec:
         include_create: bool = True,
         include_update: bool = True,
         include_delete: bool = True,
+        subject_type: str | None = None,
+        view_name: str | None = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -63,6 +65,11 @@ class ResourceSpec:
         # Append-only resources (e.g. the interaction timeline) omit update/delete.
         self.include_update = include_update
         self.include_delete = include_delete
+        # RBAC: line resources (Lead/Deal/Lending/Syndication/AssetMonetisation) enforce
+        # scoped writes (assignment-driven) and scoped list filtering when a user context
+        # is present. None = not a line resource; only the delete gate applies.
+        self.subject_type = subject_type
+        self.view_name = view_name
 
 
 def _hash_body(payload: dict) -> str:
@@ -77,6 +84,33 @@ def _parse_if_match(if_match: str | None) -> int | None:
         return None
     val = if_match.strip().strip('"')
     return int(val) if val.isdigit() else None
+
+
+async def _enforce_line_write(ctx: "RequestContext", spec: "ResourceSpec",
+                              obj_id: uuid.UUID) -> None:
+    """Write scope for line resources when a user context is present.
+
+    Trust ladder: an upstream (gateway) decision header settles the BINARY half —
+    FULL passes, SCOPED requires an active assignment on THIS line. With no decision
+    header (direct/bypass call), fall back to the code-matrix check (defense in depth).
+    """
+    if ctx.user is None or spec.subject_type is None:
+        return
+    from app.authz.engine import can_write_line, is_assigned
+    from app.core.errors import ForbiddenError
+
+    if ctx.authz_decision == "FULL":
+        return
+    if ctx.authz_decision == "SCOPED":
+        if await is_assigned(ctx.session, ctx.tenant_id, ctx.user.id,
+                             spec.subject_type, obj_id):
+            return
+        raise ForbiddenError(
+            f"Scoped access: you are not assigned to this {spec.subject_type} line.")
+    if not await can_write_line(ctx.session, ctx.tenant_id, ctx.user,
+                                spec.subject_type, obj_id):
+        raise ForbiddenError(
+            f"Role(s) {sorted(ctx.user.roles)} may not write this {spec.subject_type} line.")
 
 
 def build_crud_router(spec: ResourceSpec) -> APIRouter:
@@ -142,6 +176,23 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         include_deleted: bool = Query(default=False),
         with_total: bool = Query(default=False, description="Include exact total (slower)"),
     ) -> Any:
+        # RBAC on line-resource lists (user context present): view access NONE → 403;
+        # SCOPED → only rows the user is assigned to; READ/FULL → everything.
+        scoped_ids: list[uuid.UUID] | None = None
+        if ctx.user is not None and spec.view_name is not None:
+            from app.authz.engine import _stacked, active_assignments
+            from app.authz.matrix import VIEW_ACCESS, Access
+            from app.core.errors import ForbiddenError
+
+            granted = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+            if granted is Access.NONE:
+                raise ForbiddenError(
+                    f"Role(s) {sorted(ctx.user.roles)} have no access to {spec.view_name}.")
+            if granted is Access.SCOPED:
+                mine = await active_assignments(ctx.session, ctx.tenant_id, ctx.user.id)
+                scoped_ids = [a.subject_id for a in mine
+                              if a.subject_type == spec.subject_type]
+
         # Whitelisted equality filters pulled straight from the query string.
         filters = {
             k: request.query_params[k] for k in spec.filterable if k in request.query_params
@@ -155,6 +206,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             cursor=cursor,
             include_deleted=include_deleted,
             with_total=with_total,
+            id_in=scoped_ids,
         )
         items = [spec.read_schema.model_validate(r) for r in rows]
         return Page(items=items, count=len(items), next_cursor=next_cursor, total=total)
@@ -180,6 +232,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             ctx: RequestContext = Depends(get_context),
             if_match: str | None = Header(default=None, alias="If-Match"),
         ) -> Any:
+            await _enforce_line_write(ctx, spec, obj_id)
             data = payload.model_dump(exclude_unset=True)
             expected = data.pop("expected_version", None)
             if expected is None:
