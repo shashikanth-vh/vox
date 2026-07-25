@@ -3,7 +3,11 @@
 #   docker compose -f deploy/compose/docker-compose.yml up --build
 #
 # Brings up: NGINX edge + Register API + PostgreSQL + MinIO (object storage)
-#          + Temporal (server + its own datastore + Web UI) + the PRISM worker.
+#          + Temporal (server + Web UI) + the PRISM worker.
+#
+# ONE Postgres container serves everything: the Register in the `register` database and
+# Temporal in its own `temporal` / `temporal_visibility` databases (auto-created on first
+# start) — one server, a database per concern, matching the Helm umbrella.
 #
 # Don't need the workflow plane? Name just the core services:
 #   docker compose -f deploy/compose/docker-compose.yml up --build postgres minio register nginx
@@ -116,37 +120,27 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------------------- #
-  # Workflow plane — Temporal (server + its OWN datastore + UI) and the PRISM worker.
-  # The worker shares this network, so its activities reach the Register at
-  # http://register:8000.
+  # Workflow plane — Temporal (server + UI) and the PRISM worker. The worker shares this
+  # network, so its activities reach the Register at http://register:8000.
+  #
+  # Temporal persists to the SHARED postgres container above, in its OWN databases
+  # (`temporal`, `temporal_visibility`) which auto-setup creates on first start — one
+  # Postgres server, a database per concern (same layout as the Helm umbrella).
+  # For production, point Temporal at a dedicated datastore instead: it is write-heavy.
   # ------------------------------------------------------------------------- #
-
-  # Temporal's persistence — deliberately SEPARATE from the Register's Postgres.
-  temporal-postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
-      POSTGRES_DB: temporal
-    volumes:
-      - temporal-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   temporal:
     image: temporalio/auto-setup:1.25.2
     depends_on:
-      temporal-postgres:
+      postgres:
         condition: service_healthy
     environment:
       DB: postgres12
       DB_PORT: "5432"
-      POSTGRES_USER: temporal
-      POSTGRES_PWD: temporal
-      POSTGRES_SEEDS: temporal-postgres
+      POSTGRES_USER: prism
+      POSTGRES_PWD: prism
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
     ports:
       - "7233:7233"
     restart: unless-stopped
@@ -181,4 +175,3 @@ services:
 volumes:
   pgdata:
   miniodata:
-  temporal-pgdata:

@@ -6,13 +6,16 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
-- **Single Docker Compose file — whole platform, one command.** Merged
+- **Single Docker Compose file — whole platform, one command, ONE Postgres.** Merged
   `docker-compose.workflows.yml` into `docker-compose.yml`; a plain
   `docker compose up --build` now brings up everything: NGINX + Register + Postgres +
-  MinIO + Temporal (server, datastore, UI) + the worker. Name just the core services on
-  the command line if you don't want the workflow plane. No second `-f` file, no
-  `--profile` flag. (If an older run left stale containers, one
-  `docker compose down --remove-orphans` resets the network.)
+  MinIO + Temporal (server + UI) + the worker. The second Postgres container is gone —
+  Temporal now persists to the shared Postgres in its own `temporal` /
+  `temporal_visibility` databases (auto-created on first start), one server with a
+  database per concern, matching the Helm umbrella. Name just the core services on the
+  command line if you don't want the workflow plane. No second `-f` file, no `--profile`
+  flag. (If an older run left stale containers, one `docker compose down
+  --remove-orphans` resets the network.)
 - **Object storage (S3 / MinIO) for document bytes.** The Register now *stores the bytes*,
   not just references. New `app/storage/` backend (boto3; works with AWS S3 and MinIO —
   same API, different endpoint), with blocking calls off the event loop.
