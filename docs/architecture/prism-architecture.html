@@ -106,8 +106,8 @@
   <h1>PRISM — Architecture &amp; Functionality Flows</h1>
   <div class="meta">
     <span>Branch <b>claude/register-service-postgres-4tc9rj</b></span>
-    <span>As of <b>f8bd171</b> · 2026-07-25</span>
-    <span>Tests <b>77 passing (65 register · 5 access · 7 e2e)</b></span>
+    <span>As of <b>b89a0e5</b> · 2026-07-25</span>
+    <span>Tests <b>109 passing (65 register · 16 SDK · 7 gateway e2e · 6 atlas · 5 access · 5 pulse · 3 vocx · 2 workflows)</b></span>
   </div>
   <div class="legend">
     <span><i class="swatch sw-built"></i> Built &amp; tested</span>
@@ -123,7 +123,9 @@
     Every request enters through NGINX, passes the Gateway's cached binary RBAC gate, and lands on
     the Register — the platform's source of truth, which enforces scoped access next to the data.
     Identity &amp; the admin-editable access matrix live in the Access service; document bytes live in
-    MinIO/S3; Temporal drives durable workflows. One PostgreSQL server, a database per service.
+    MinIO/S3; Temporal drives durable workflows. VocX, PULSE and ATLAS are stateless satellites that
+    talk to the Register only through the SDK — each individually deployable. One PostgreSQL server,
+    a database per service.
   </p>
 
   <div class="arch">
@@ -132,6 +134,8 @@
       <div class="boxes">
         <div class="box planned"><div class="t">ATLAS UI</div><div class="d">deal-desk front end · consumes /v1 + the Data Register</div></div>
         <div class="box"><div class="t">VocX</div><div class="d">voice touchpoint capture → POST /v1/touchpoints (:8003) → interactions, exactly-once</div></div>
+        <div class="box"><div class="t">PULSE</div><div class="d">news / adverse-media radar (:8004) — scans sources, matches entities, files RED/AMBER/GREEN intel idempotently</div></div>
+        <div class="box"><div class="t">ATLAS service</div><div class="d">dashboard BFF (:8005) — /v1/dashboard · /v1/today · /v1/pipeline; view-level RBAC via Access</div></div>
         <div class="box"><div class="t">Postman / curl</div><div class="d">full CRUD collection, every table</div></div>
         <div class="box"><div class="t">evam-register-client</div><div class="d">typed SDK — auth, retry, idempotency, pagination</div></div>
       </div>
@@ -162,7 +166,6 @@
         <div class="box"><div class="t">Access (FastAPI)</div><div class="d">users · stacked roles · access matrix as ADMIN-EDITABLE tables (guardrails, versioned) · /v1/resolve · own db</div></div>
         <div class="box"><div class="t">Register (FastAPI)</div><div class="d">PRISM 7 masters + ATLAS ops + documents catalog &amp; Data Register checklist · optimistic locking · idempotency · RLS · audit · keyset pagination · SCOPED enforcement next to the data (assignments · approvals · admin-only delete)</div></div>
         <div class="box planned"><div class="t">CIPHER</div><div class="d">financial spreading</div></div>
-        <div class="box planned"><div class="t">PULSE</div><div class="d">external intelligence</div></div>
         <div class="box planned"><div class="t">SCRIBE</div><div class="d">document ops (OCR, parsing, versioning) — phase 2</div></div>
       </div>
     </div>
@@ -204,7 +207,7 @@
     <code>database.*</code> / <code>storage.s3.*</code> at RDS / S3.</p>
   <div class="cols">
     <div class="layer">
-      <div class="layer-title"><span>Docker Compose — 9 services, one command</span></div>
+      <div class="layer-title"><span>Docker Compose — 12 services, one command</span></div>
       <div class="diagram"><pre class="mermaid">
 flowchart TD
   CMD["docker compose up --build"] --> N["nginx :8080"]
@@ -221,10 +224,14 @@ register · access · temporal ×2")]
   TU["temporal-ui :8088"] --> T
   W["workflows worker"] --> T
   W -->|SDK| R
+  VX["vocx :8003"] -->|SDK| R
+  PU["pulse :8004"] -->|SDK| R
+  AT["atlas :8005"] -->|SDK| R
+  AT -.views.-> AC
       </pre></div>
     </div>
     <div class="layer">
-      <div class="layer-title"><span>Helm — prism umbrella, 7 vendored subcharts</span></div>
+      <div class="layer-title"><span>Helm — prism umbrella, 10 vendored subcharts (each behind enabled:)</span></div>
       <div class="diagram"><pre class="mermaid">
 flowchart TD
   U["helm install prism"] --> P["postgresql → prism-postgresql
@@ -243,6 +250,14 @@ extraDatabases: [access]"]
   TP --> P
   WF --> TP
   WF --> RG
+  U --> VX["vocx → prism-vocx"]
+  U --> PU["pulse → prism-pulse
++ scan CronJob 07:00 IST"]
+  U --> AT["atlas → prism-atlas"]
+  VX --> RG
+  PU --> RG
+  AT --> RG
+  AT -.-> AC
       </pre></div>
     </div>
   </div>
@@ -554,9 +569,12 @@ flowchart LR
         <tr><td>Typed SDK</td><td><code>packages/evam-register-client</code></td><td><span class="pill built">built</span></td><td>16 tests, mock + live</td></tr>
         <tr><td>Workflow worker</td><td><code>services/workflows</code></td><td><span class="pill built">built</span></td><td>activity tests on Temporal test env</td></tr>
         <tr><td>Edge — NGINX</td><td><code>deploy/nginx/nginx.conf</code></td><td><span class="pill built">built</span></td><td>in Compose · Ingress plays it in k8s</td></tr>
-        <tr><td>Compose — 9 services</td><td><code>deploy/compose/docker-compose.yml</code></td><td><span class="pill built">built</span></td><td>NGINX → gateway → register · one Postgres · one command</td></tr>
-        <tr><td>Helm — 7 subcharts</td><td><code>deploy/helm/prism</code></td><td><span class="pill built">built</span></td><td>postgresql · register · access · gateway · minio · temporal · workflows</td></tr>
-        <tr><td>CIPHER · PULSE · VocX backends</td><td><code>services/&lt;name&gt;</code> via <code>make new-service</code></td><td><span class="pill planned">planned</span></td><td>scaffolder verified</td></tr>
+        <tr><td>Compose — 12 services</td><td><code>deploy/compose/docker-compose.yml</code></td><td><span class="pill built">built</span></td><td>NGINX → gateway → register · one Postgres · one command</td></tr>
+        <tr><td>Helm — 10 subcharts</td><td><code>deploy/helm/prism</code></td><td><span class="pill built">built</span></td><td>postgresql · register · access · gateway · vocx · pulse · atlas · minio · temporal · workflows — every module behind an <code>enabled:</code> flag</td></tr>
+        <tr><td>VocX — voice capture</td><td><code>services/vocx</code></td><td><span class="pill built">built</span></td><td>capture-id idempotency · 3 e2e tests</td></tr>
+        <tr><td>PULSE — news radar</td><td><code>services/pulse</code></td><td><span class="pill built">built</span></td><td>scan → match → idempotent intel · 5 tests</td></tr>
+        <tr><td>ATLAS — dashboard service</td><td><code>services/atlas</code></td><td><span class="pill built">built</span></td><td>dashboard/today/pipeline · view RBAC · 6 tests</td></tr>
+        <tr><td>CIPHER backend</td><td><code>services/cipher</code> via <code>make new-service</code></td><td><span class="pill planned">planned</span></td><td>scaffolder verified</td></tr>
         <tr><td>SCRIBE — document ops</td><td>phase 2 — absorbs OCR / parsing / versioning</td><td><span class="pill planned">planned</span></td><td>catalog + bytes already in place</td></tr>
       </tbody>
     </table>
