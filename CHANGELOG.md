@@ -6,10 +6,13 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
-- **Single Docker Compose file (profiles).** Merged `docker-compose.workflows.yml` into
-  `docker-compose.yml`; the Temporal + worker plane now lives behind the `workflows`
-  Compose profile. Core stack (Postgres + Register + NGINX + MinIO) still comes up by
-  default; add `--profile workflows` for the workflow plane — no more second `-f` file.
+- **Single Docker Compose file — whole platform, one command.** Merged
+  `docker-compose.workflows.yml` into `docker-compose.yml`; a plain
+  `docker compose up --build` now brings up everything: NGINX + Register + Postgres +
+  MinIO + Temporal (server, datastore, UI) + the worker. Name just the core services on
+  the command line if you don't want the workflow plane. No second `-f` file, no
+  `--profile` flag. (If an older run left stale containers, one
+  `docker compose down --remove-orphans` resets the network.)
 - **Object storage (S3 / MinIO) for document bytes.** The Register now *stores the bytes*,
   not just references. New `app/storage/` backend (boto3; works with AWS S3 and MinIO —
   same API, different endpoint), with blocking calls off the event loop.
@@ -157,7 +160,7 @@ bundle, or just check that the newest item below is present in your copy).
     workflows whose activities write the Register through `evam-register-client`. Reference
     `IngestInteractionWorkflow` (record interaction → read dossier) shows the pattern, with a
     workflow-derived idempotency key so **Temporal retries × idempotency = exactly-once
-    effect** on the source of truth. Opt-in stack (Compose `--profile workflows`) brings up
+    effect** on the source of truth. The single compose file brings up
     Temporal + its *own* datastore + Web UI + the worker. 3 tests (activities on Temporal's
     ActivityEnvironment vs a mock Register; workflow on the in-memory test server, skipped
     offline). CI + Makefile now cover it; mypy/ruff clean.

@@ -24,9 +24,9 @@ workflow-derived idempotency key.
 ## Run it (local)
 
 ```bash
-# Temporal + its datastore + UI + this worker, alongside the Register — the workflow plane
-# lives behind the `workflows` Compose profile in the single compose file:
-docker compose -f deploy/compose/docker-compose.yml --profile workflows up --build
+# The single compose file brings up the whole platform — Register stack AND the workflow
+# plane (Temporal + its datastore + UI + this worker) — in one command:
+docker compose -f deploy/compose/docker-compose.yml up --build
 # Temporal Web UI → http://localhost:8088
 ```
 
