@@ -1,8 +1,18 @@
-# Local / demo stack: NGINX edge + the Register API + PostgreSQL.
-#   from repo root:   docker compose -f deploy/compose/docker-compose.yml up --build
-#   or:               cd deploy/compose && docker compose up --build
+# PRISM local / demo stack — one file, two tiers via Compose profiles.
+#
+#   Core (default):  NGINX edge + Register API + PostgreSQL + MinIO (object storage)
+#     docker compose -f deploy/compose/docker-compose.yml up --build
+#
+#   + Workflow plane (Temporal server + its own datastore + UI + the PRISM worker):
+#     docker compose -f deploy/compose/docker-compose.yml --profile workflows up --build
+#     (or:  COMPOSE_PROFILES=workflows docker compose -f deploy/compose/docker-compose.yml up --build)
+#
+# The workflow services live behind the `workflows` profile, so the core stack stays light
+# by default and the heavier Temporal plane starts only when you ask for it.
+#
 # Edge (through NGINX): http://localhost:8080   ·   Register direct (dev): http://localhost:8000
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
+# Temporal Web UI (workflows profile): http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
 # Load data on demand afterwards (see the register service's command comment below).
 # The build context is the repo root (../..) so the image can bundle the shared
@@ -104,6 +114,74 @@ services:
       - "8080:80"
     restart: unless-stopped
 
+  # ------------------------------------------------------------------------- #
+  # Workflow plane (opt-in) — enable with `--profile workflows`.
+  # Temporal (server + its OWN datastore + UI) and the PRISM worker. The worker shares this
+  # network, so its activities reach the Register at http://register:8000.
+  # ------------------------------------------------------------------------- #
+
+  # Temporal's persistence — deliberately SEPARATE from the Register's Postgres.
+  temporal-postgres:
+    image: postgres:16-alpine
+    profiles: ["workflows"]
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    profiles: ["workflows"]
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-postgres
+    ports:
+      - "7233:7233"
+    restart: unless-stopped
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    profiles: ["workflows"]
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "8088:8080"
+    restart: unless-stopped
+
+  # PRISM worker — runs workflows/activities; activities write the Register via the SDK.
+  workflows:
+    build:
+      context: ../..
+      dockerfile: services/workflows/Dockerfile
+    profiles: ["workflows"]
+    depends_on:
+      - temporal
+      - register
+    environment:
+      WORKFLOWS_TEMPORAL_ADDRESS: temporal:7233
+      WORKFLOWS_TASK_QUEUE: prism-workflows
+      WORKFLOWS_REGISTER_BASE_URL: http://register:8000
+      WORKFLOWS_REGISTER_API_KEY: dev-local-key
+      WORKFLOWS_REGISTER_TENANT: EVAM
+      WORKFLOWS_LOG_JSON: "true"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
+  temporal-pgdata:

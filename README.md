@@ -58,7 +58,7 @@ packages/
                        CRUD, retry, app factory) — the Register is its reference impl
   evam-register-client/ typed client: call the Register from any vertical
 deploy/
-  compose/             docker-compose.yml (edge + Register + DB) · .workflows.yml (Temporal)
+  compose/             docker-compose.yml (edge + Register + DB + MinIO; `--profile workflows` adds Temporal)
   nginx/               NGINX edge config (TLS-ready, routing, rate-limit, correlation id)
   helm/prism/          the PRISM umbrella chart (postgresql + register subcharts)
 docs/                  SCHEMA.md (data model + ERD), openapi.json, adr/ (decision records)
