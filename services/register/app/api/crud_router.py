@@ -199,6 +199,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             if_match: str | None = Header(default=None, alias="If-Match"),
             expected_version: int | None = Query(default=None),
         ) -> Response:
+            # RBAC: "Delete a row — Admin ONLY" (checked whenever a user context is
+            # present; machine-to-machine behaviour follows REGISTER_ENFORCE_RBAC).
+            from app.authz import enforce_operation
+
+            enforce_operation(ctx.user, "delete_row")
             expected = expected_version if expected_version is not None else _parse_if_match(if_match)
             await repo.soft_delete(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, expected_version=expected

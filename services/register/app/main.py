@@ -15,6 +15,7 @@ from app.api.export import router as export_router
 from app.api.imports import router as import_router
 from app.api.resources import build_resource_router
 from app.api.tenants import router as tenants_router
+from app.api.users import router as users_router
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
         settings=settings,
         routers=[
             tenants_router,
+            users_router,
             export_router,
             import_router,
             custom_router,

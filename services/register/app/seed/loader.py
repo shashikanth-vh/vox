@@ -92,6 +92,35 @@ async def ensure_tenant(session: AsyncSession, code: str, name: str) -> uuid.UUI
     return row.id
 
 
+async def ensure_admin_user(session: AsyncSession, tenant_id: uuid.UUID) -> bool:
+    """Provision the initial Admin (+Management) user so a fresh Register is governable.
+
+    RBAC's chicken-and-egg: user management is Admin-only, so someone must exist to do
+    it. Idempotent; e-mail follows the configured domain. Returns True when created.
+    """
+    from app.core.config import get_settings
+    from app.models.users import User, UserRole
+
+    email = f"admin@{get_settings().user_email_domain}"
+    existing = (
+        await session.execute(
+            select(User).where(User.tenant_id == tenant_id, User.email == email)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    user = User(tenant_id=tenant_id, email=email, full_name="System Administrator",
+                short_name="Admin", created_by="bootstrap", updated_by="bootstrap")
+    session.add(user)
+    await session.flush()
+    for role in ("Admin", "Management"):
+        session.add(UserRole(tenant_id=tenant_id, user_id=user.id, role=role,
+                             granted_by="bootstrap", created_by="bootstrap",
+                             updated_by="bootstrap"))
+    await session.flush()
+    return True
+
+
 async def seed_ref_values(session: AsyncSession) -> int:
     existing = {
         (c, v)

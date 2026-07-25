@@ -13,8 +13,12 @@ import hmac
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fastapi import Header, Request
+
+if TYPE_CHECKING:
+    from app.authz.engine import UserContext
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +38,10 @@ class RequestContext:
     tenant_id: uuid.UUID
     tenant_code: str
     actor: str
+    # The acting user (resolved from X-User-Email), when the caller identifies one.
+    # None = machine-to-machine call carrying only the API key — RBAC checks then follow
+    # settings.enforce_rbac (off: compatibility mode; on: gated operations 403).
+    user: "UserContext | None" = None
 
 
 def _check_api_key(provided: str | None) -> None:
@@ -70,6 +78,7 @@ async def get_context(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
     x_tenant: str | None = Header(default=None, alias="X-Tenant"),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ) -> AsyncIterator[RequestContext]:
     """FastAPI dependency: authenticate, resolve tenant, open a scoped transaction.
 
@@ -92,11 +101,19 @@ async def get_context(
                 text("SELECT set_config('app.current_tenant', :tid, true)"),
                 {"tid": str(tenant_id)},
             )
+            # Resolve the acting user when the caller identifies one (RBAC context).
+            user = None
+            if x_user_email:
+                from app.authz.engine import load_user_context
+
+                user = await load_user_context(session, tenant_id, x_user_email)
+                if actor == "api":
+                    actor = user.email[:120]
             tenant_ctx.set(tenant_code)
             actor_ctx.set(actor)
             request.state.tenant_id = tenant_id
             request.state.actor = actor
-            yield RequestContext(session, tenant_id, tenant_code, actor)
+            yield RequestContext(session, tenant_id, tenant_code, actor, user=user)
             await session.commit()
         except Exception:
             await session.rollback()

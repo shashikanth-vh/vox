@@ -5621,6 +5621,687 @@
      }
     }
    ]
+  },
+  {
+   "name": "Users & RBAC",
+   "item": [
+    {
+     "name": "POST /v1/users (add employee + roles)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"email\": \"bdrm1@evamfinance.com\",\n  \"full_name\": \"BDRM One\",\n  \"short_name\": \"B1\",\n  \"roles\": [\n    \"BDRM\"\n  ]\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "GET /v1/users",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users"
+       ],
+       "query": [
+        {
+         "key": "q",
+         "value": "",
+         "disabled": true
+        },
+        {
+         "key": "include_inactive",
+         "value": "false",
+         "disabled": true
+        }
+       ]
+      }
+     }
+    },
+    {
+     "name": "GET /v1/users/{id}",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users/{{id}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users",
+        "{{id}}"
+       ]
+      }
+     }
+    },
+    {
+     "name": "PATCH /v1/users/{id} (edit / deactivate)",
+     "request": {
+      "method": "PATCH",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users/{{id}}",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users",
+        "{{id}}"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"is_active\": true,\n  \"reports_to\": null\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "POST /v1/users/{id}/roles (grant \u2014 role stacking)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users/{{id}}/roles",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users",
+        "{{id}}",
+        "roles"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"role\": \"Management\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "DELETE /v1/users/{id}/roles/{role} (revoke)",
+     "request": {
+      "method": "DELETE",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/users/{{id}}/roles/Management",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "users",
+        "{{id}}",
+        "roles",
+        "Management"
+       ]
+      }
+     }
+    },
+    {
+     "name": "POST /v1/assignments (assign to a line)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/assignments",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "assignments"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"user_id\": \"{{id}}\",\n  \"subject_type\": \"Syndication\",\n  \"subject_id\": \"{{synId}}\",\n  \"assignment_role\": \"Deal Analyst\",\n  \"note\": \"IM prep\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "GET /v1/assignments",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/assignments",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "assignments"
+       ],
+       "query": [
+        {
+         "key": "user_id",
+         "value": "",
+         "disabled": true
+        },
+        {
+         "key": "subject_type",
+         "value": "",
+         "disabled": true
+        },
+        {
+         "key": "subject_id",
+         "value": "",
+         "disabled": true
+        },
+        {
+         "key": "include_ended",
+         "value": "false",
+         "disabled": true
+        }
+       ]
+      }
+     }
+    },
+    {
+     "name": "POST /v1/assignments/{id}/end (unassign)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/assignments/{{id}}/end",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "assignments",
+        "{{id}}",
+        "end"
+       ]
+      }
+     }
+    },
+    {
+     "name": "POST /v1/requests (request stage change)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/requests",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "requests"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{id}}\",\n  \"field\": \"stage\",\n  \"to_value\": \"Note Circulated\",\n  \"note\": \"diligence complete\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "GET /v1/requests (pending)",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/requests",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "requests"
+       ],
+       "query": [
+        {
+         "key": "status",
+         "value": "Pending"
+        },
+        {
+         "key": "subject_id",
+         "value": "",
+         "disabled": true
+        }
+       ]
+      }
+     }
+    },
+    {
+     "name": "POST /v1/requests/{id}/approve",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/requests/{{id}}/approve",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "requests",
+        "{{id}}",
+        "approve"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"note\": \"ok to move\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "POST /v1/requests/{id}/reject",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/requests/{{id}}/reject",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "requests",
+        "{{id}}",
+        "reject"
+       ]
+      },
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"note\": \"not yet\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "GET /v1/me (effective permissions)",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/me",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "me"
+       ]
+      }
+     }
+    },
+    {
+     "name": "GET /v1/authz/check",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/authz/check",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "authz",
+        "check"
+       ],
+       "query": [
+        {
+         "key": "operation",
+         "value": "edit_syndication_line"
+        },
+        {
+         "key": "subject_type",
+         "value": "Syndication",
+         "disabled": true
+        },
+        {
+         "key": "subject_id",
+         "value": "{{synId}}",
+         "disabled": true
+        }
+       ]
+      }
+     }
+    }
+   ]
   }
  ]
 }

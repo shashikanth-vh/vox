@@ -6,6 +6,28 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **User management & RBAC — the ATLAS RBAC spec (v3.1), implemented.** Four new tables
+  (migration `0003`, reversible, RLS'd): `users` (the Employees governance table —
+  @evamfinance.com e-mail enforced, active flag, `reports_to`), `user_roles` (role
+  stacking across the 10-role catalogue; highest role wins), `line_assignments` (the
+  assignment-driven permission primitive — assigning a user to a Lending/Syn/AM line
+  grants write on THAT line until unassigned; co-assignees supported), and
+  `change_requests` (the request → approve/reject stage-change flow).
+  - **Matrices encoded verbatim** from the spec (`app/authz/matrix.py`): 13-view access
+    matrix, 35-operation matrix, assignment authority (Credit Head owns the analyst
+    pool), approval routing (Admin/Mgmt/relevant vertical Head), ownership defaults
+    (unassigned line → its Head).
+  - **Endpoints:** `/v1/users` (+ grant/revoke roles), `/v1/assignments` (+ end),
+    `/v1/requests` (+ approve — which APPLIES the change with history/audit — + reject),
+    `/v1/me` (effective views/operations/assignments — ATLAS renders its menu from
+    this), `/v1/authz/check` (evaluate any operation, optionally against a line).
+  - **Enforcement:** requests carrying `X-User-Email` are always checked (e.g. "Delete a
+    row — Admin ONLY" now 403s Management); machine-to-machine API-key calls keep
+    working, governed by `REGISTER_ENFORCE_RBAC` (default off). Bootstrap provisions
+    `admin@evamfinance.com` (Admin+Management) so a fresh Register is governable.
+  - 8 new tests (domain validation, stacking, cross-vertical assignment + revoke,
+    authority denial, approval routing incl. wrong-vertical Head, applied stage change
+    with auto-history, admin-only delete, inactive-user lockout). Suite: 68 passing.
 - **Single Docker Compose file — whole platform, one command, ONE Postgres.** Merged
   `docker-compose.workflows.yml` into `docker-compose.yml`; a plain
   `docker compose up --build` now brings up everything: NGINX + Register + Postgres +

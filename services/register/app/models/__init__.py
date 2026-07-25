@@ -20,6 +20,7 @@ from app.models.trackers import (
     SyndicationLender,
     SyndicationTracker,
 )
+from app.models.users import ChangeRequest, LineAssignment, User, UserRole
 
 __all__ = [
     "Base",
@@ -44,4 +45,8 @@ __all__ = [
     "ContractAsset",
     "ExternalIntelligence",
     "MonitoringReporting",
+    "User",
+    "UserRole",
+    "LineAssignment",
+    "ChangeRequest",
 ]

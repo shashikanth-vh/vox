@@ -42,6 +42,14 @@ class Settings(BaseServiceSettings):
     # ---- Behaviour -------------------------------------------------------
     idempotency_ttl_hours: int = 48
 
+    # ---- User management / RBAC (ATLAS RBAC spec) -------------------------
+    # Users' e-mail addresses must belong to this domain (spec: SSO integrity).
+    user_email_domain: str = "evamfinance.com"
+    # When on, operations gated by the RBAC matrix REQUIRE a user context
+    # (X-User-Email). Off (default) keeps machine-to-machine API-key flows working;
+    # requests that DO carry a user are always checked either way.
+    enforce_rbac: bool = False
+
     # ---- Documents (Data Register) --------------------------------------
     # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.
     # Larger files must be uploaded to object storage and registered by ``storage_uri``.

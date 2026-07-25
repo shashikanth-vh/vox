@@ -92,4 +92,11 @@ REF_VALUES: dict[str, list[str]] = {
         "Compliance & Bureau", "Project & Technical", "Deal Documents",
     ],
     "Document Status": ["On File", "Pending", "Waived", "Rejected", "Superseded"],
+    # RBAC (ATLAS RBAC v3.1) — role catalogue + assignment capacities.
+    "RBAC Role": [
+        "Admin", "Management", "BD Head", "Credit Head", "Syn Head", "AM Head",
+        "BDRM", "Deal Analyst", "Syn RM", "AM RM",
+    ],
+    "Assignment Role": ["BDRM", "Deal Analyst", "Syn RM", "AM RM"],
+    "Request Status": ["Pending", "Approved", "Rejected", "Cancelled"],
 }
