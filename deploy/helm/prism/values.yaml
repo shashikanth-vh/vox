@@ -85,6 +85,40 @@ vocx:
     apiKey:
       value: "dev-local-key"      # must be in the Register's REGISTER_API_KEYS
 
+# ---- PULSE — news / adverse-media radar (individually deployable) ---------------
+pulse:
+  enabled: true
+  fullnameOverride: prism-pulse
+  register:
+    baseUrl: http://prism-register
+    tenant: EVAM
+    apiKey:
+      value: "dev-local-key"      # must be in the Register's REGISTER_API_KEYS
+  config:
+    # Point at real feeds in production, e.g.
+    # '[{"name":"google-news","kind":"rss","url":"https://news.google.com/rss/search?q=..."}]'
+    sources: '[{"name": "sample", "kind": "sample"}]'
+    apiKeys: ""                   # SET in production — PULSE's own front door
+  scan:
+    enabled: true
+    schedule: "30 1 * * *"        # 01:30 UTC = 07:00 IST — the morning radar run
+    tenants: [EVAM]
+
+# ---- ATLAS — the live management dashboard service (individually deployable) ----
+atlas:
+  enabled: true
+  fullnameOverride: prism-atlas
+  register:
+    baseUrl: http://prism-register
+    tenant: EVAM
+    apiKey:
+      value: "dev-local-key"      # must be in the Register's REGISTER_API_KEYS
+  access:
+    url: http://prism-access      # view-level RBAC; "" disables gating (dev only)
+    apiKey:
+      value: "dev-local-key"      # must be in the Access service's ACCESS_API_KEYS
+    requireUser: true             # dashboards must be attributable in production
+
 # ---- Object storage (document bytes) ------------------------------------------
 # S3-compatible store for the Data Register uploads. Dev/staging single node; for
 # production set minio.enabled=false and point register.storage.s3.* at a managed S3.

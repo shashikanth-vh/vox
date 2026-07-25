@@ -6,6 +6,36 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **PULSE + ATLAS as individually deployable services — every PRISM module now ships
+  on its own.** Two NEW stateless services on the platform SDK:
+  - **`services/pulse`** — the news / adverse-media radar. Pluggable providers
+    (RSS / JSON endpoint / offline sample), explainable entity matching (name match +
+    configurable RED/GREEN keyword signals), and idempotent intel writes — every
+    (item, entity) pair is keyed `pulse:{tenant}:{entity}:{url-hash}`, so re-running a
+    scan never duplicates an alert. `POST /v1/scan` (cron/Temporal-triggered; the
+    pulse Helm chart ships a CronJob for the 7 AM IST run), `POST /v1/items` (push
+    door for scrapers/webhooks), `GET /v1/digest` (RED/AMBER/GREEN digest payload).
+    Multi-tenant per request via `X-Tenant`; optional own API key (`PULSE_API_KEYS`).
+  - **`services/atlas`** — the live management dashboard service (read-side BFF).
+    `GET /v1/dashboard` (every vertical summarised: counts by stage/status, ₹ Cr
+    amounts, open intel), `GET /v1/today` (due lead actions, lender chases, covenants
+    due), `GET /v1/pipeline/{vertical}`, `GET /v1/entities/{id}/summary`. View-level
+    RBAC through the Access service's admin-editable view matrix (TTL cache +
+    last-known-good, same policy as the gateway); row-level security stays in the
+    Register. Pure aggregation functions live in `app/aggregations.py` (unit-tested
+    in isolation).
+  - **Deploy**: compose grows to 12 services (PULSE :8004, ATLAS :8005); Helm umbrella
+    grows to 10 vendored subcharts, every module behind an `enabled:` flag — install
+    the whole platform, one module, or any subset (see the new
+    **`docs/DEPLOYMENT.md`**: need-basis installs, public-cloud posture with managed
+    Postgres/S3, multi-tenant onboarding, scaling guidance for 1000s of transactions).
+  - **Docs for newcomers**: **`docs/ONBOARDING.md`** — the freshman tour: the
+    60-second mental model, the five platform habits (env config, request-id JSON
+    logs, problem-JSON errors, idempotent writes, optimistic locking), a worked
+    first-change example, and a debugging checklist.
+  - Tests: PULSE (matching unit tests + scan→intel→digest e2e vs a real Register) and
+    ATLAS (aggregation unit tests + composed-view e2e). CI and `make ci` run both.
+
 - **Three-service RBAC architecture — Gateway + Access service + Register (the agreed
   design, implemented).** Two NEW microservices, one rewire:
   - **`services/access`** — user management & access-control facts: `users`, `user_roles`

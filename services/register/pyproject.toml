@@ -54,9 +54,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
-# S101 asserts (tests); B008 FastAPI Depends() defaults; UP046 PEP695 generics (3.12+ only,
+# S101 asserts (tests); B008 FastAPI Depends() defaults;
 # kept back-compatible with 3.11); S105 flags the *dev-default* DB password, not a real secret.
-ignore = ["S101", "B008", "UP046", "S105"]
+ignore = ["S101", "B008", "S105"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests invoke the `alembic` CLI to build the real schema — partial path is fine (S603/S607);

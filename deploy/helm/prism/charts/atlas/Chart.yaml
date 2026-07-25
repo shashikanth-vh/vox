@@ -1,0 +1,11 @@
+apiVersion: v2
+name: atlas
+description: >-
+  PRISM ATLAS — the live management dashboard service (read-side BFF). Composes
+  dashboard / today / pipeline views from the Register and gates each view through the
+  Access service. Stateless; individually deployable.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

@@ -147,9 +147,7 @@ async def import_workbook(
         await session.execute(text(f"TRUNCATE {_BUSINESS_TABLES} RESTART IDENTITY CASCADE"))
 
     # reference vocabularies
-    existing_ref = {
-        (c, v) for c, v in (await session.execute(text("SELECT category, value FROM ref_values"))).all()
-    }
+    existing_ref = set((await session.execute(text("SELECT category, value FROM ref_values"))).all())
     added_ref = 0
     for category, values in REF_VALUES.items():
         for i, value in enumerate(values):

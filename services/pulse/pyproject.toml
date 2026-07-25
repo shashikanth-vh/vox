@@ -1,11 +1,12 @@
 [project]
-name = "prism-gateway"
+name = "prism-pulse"
 version = "0.1.0"
-description = "PRISM Gateway — the REST-API service: cached binary RBAC gate, routing, and the future home of client-specific logic"
+description = "PRISM PULSE — news & adverse-media radar; files external intelligence into the Register"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-    "evam-backend-core",         # shared platform: logging, errors, middleware, rbac artifact
+    "evam-backend-core",
+    "evam-register-client",
     "fastapi==0.115.6",
     "uvicorn[standard]==0.34.0",
     "gunicorn==23.0.0",
@@ -17,12 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest==8.3.4",
-    "pytest-asyncio==0.25.0",
-    "ruff==0.8.4",
-    "mypy==1.14.0",
-]
+dev = ["pytest==8.3.4", "pytest-asyncio==0.25.0", "ruff==0.8.4", "mypy==1.14.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

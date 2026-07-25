@@ -15,11 +15,21 @@ install:  ## Install shared packages, then services (editable, with dev deps)
 	pip install -e "packages/evam-register-client[dev]"
 	pip install -e "services/register[dev]"
 	pip install -e "services/workflows[dev]"
+	pip install -e "services/access[dev]"
+	pip install -e "services/gateway[dev]"
+	pip install -e "services/vocx[dev]"
+	pip install -e "services/pulse[dev]"
+	pip install -e "services/atlas[dev]"
 	@echo "Optional: pre-commit install"
 
 lint:  ## Ruff lint every package + service
 	python -m ruff check services/register/app services/register/scripts services/register/tests
 	python -m ruff check services/workflows/app services/workflows/tests
+	python -m ruff check services/access/app services/access/tests
+	python -m ruff check services/gateway/app services/gateway/tests
+	python -m ruff check services/vocx/app services/vocx/tests
+	python -m ruff check services/pulse/app services/pulse/tests
+	python -m ruff check services/atlas/app services/atlas/tests
 	python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
 	python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
 
@@ -30,12 +40,22 @@ fmt:  ## Auto-format + auto-fix
 type:  ## Type-check everything (mypy)
 	cd services/register && python -m mypy app
 	cd services/workflows && python -m mypy app
+	cd services/access && python -m mypy app
+	cd services/gateway && python -m mypy app
+	cd services/vocx && python -m mypy app
+	cd services/pulse && python -m mypy app
+	cd services/atlas && python -m mypy app
 	cd packages/evam-backend-core && python -m mypy evam_backend_core
 	cd packages/evam-register-client && python -m mypy evam_register_client
 
 test:  ## Run all test suites (needs a Postgres for the Register — see QUICKSTART/CONTRIBUTING)
 	cd services/register && python -m pytest -q
 	cd services/workflows && python -m pytest -q
+	cd services/access && python -m pytest -q
+	cd services/gateway && python -m pytest -q
+	cd services/vocx && python -m pytest -q
+	cd services/pulse && python -m pytest -q
+	cd services/atlas && python -m pytest -q
 	cd packages/evam-register-client && python -m pytest -q
 
 ci: lint type test  ## Everything CI runs

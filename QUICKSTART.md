@@ -127,7 +127,8 @@ docker rm -f prism-testdb
 ## 4) Deploy with Helm
 
 The single **`prism`** umbrella chart contains the modules as subcharts
-(`charts/postgresql`, `charts/register`). Subcharts are vendored, so **no
+(postgresql · register · access · gateway · vocx · pulse · atlas · minio ·
+temporal · workflows). Subcharts are vendored, so **no
 `helm dependency build`** is needed.
 
 You need a local Kubernetes cluster and the Register image available to it.

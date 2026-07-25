@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pulse
+description: >-
+  PRISM PULSE — news / adverse-media radar. Fetches sources, matches Register entities,
+  files RED/AMBER/GREEN external-intelligence rows idempotently (a re-scan never
+  duplicates). Stateless; individually deployable.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

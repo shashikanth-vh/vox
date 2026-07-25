@@ -93,10 +93,7 @@ async def ensure_tenant(session: AsyncSession, code: str, name: str) -> uuid.UUI
 
 
 async def seed_ref_values(session: AsyncSession) -> int:
-    existing = {
-        (c, v)
-        for c, v in (await session.execute(select(RefValue.category, RefValue.value))).all()
-    }
+    existing = set((await session.execute(select(RefValue.category, RefValue.value))).all())
     added = 0
     for category, values in REF_VALUES.items():
         for i, value in enumerate(values):
@@ -126,7 +123,7 @@ async def seed_all(session: AsyncSession, data: dict, tenant_id: uuid.UUID) -> d
     # Curated showcase memberships (ATLAS core-33 / adaptation-10) → entity tags.
     tags_by_code: dict[str, list[str]] = {}
     for pair in data.get("core33", []):
-        code = pair[0] if isinstance(pair, (list, tuple)) else pair
+        code = pair[0] if isinstance(pair, list | tuple) else pair
         if code:
             tags_by_code.setdefault(str(code), []).append("Core 33")
     for code in data.get("adapt10", []):

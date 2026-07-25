@@ -41,7 +41,7 @@ class RequestContext:
     # The acting user (resolved from X-User-Email), when the caller identifies one.
     # None = machine-to-machine call carrying only the API key — RBAC checks then follow
     # settings.enforce_rbac (off: compatibility mode; on: gated operations 403).
-    user: "UserContext | None" = None
+    user: UserContext | None = None
     # The gateway's binary decision for this request ("FULL" | "SCOPED"), trusted under
     # the same rules as the identity headers. None = no gateway decision (direct call) —
     # the Register then falls back to its own code-matrix check.

@@ -34,6 +34,12 @@ dependencies:
   - name: vocx
     version: "0.1.0"
     condition: vocx.enabled
+  - name: pulse
+    version: "0.1.0"
+    condition: pulse.enabled
+  - name: atlas
+    version: "0.1.0"
+    condition: atlas.enabled
   - name: workflows
     version: "0.1.0"
     condition: workflows.enabled

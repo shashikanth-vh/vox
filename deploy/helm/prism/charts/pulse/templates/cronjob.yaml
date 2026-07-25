@@ -1,0 +1,40 @@
+{{- if .Values.scan.enabled }}
+# Scheduled radar runs: one CronJob per tenant POSTing /v1/scan on the service.
+# curl ships in the image-less job via the tiny curlimages image.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "pulse.fullname" . }}-scan
+  labels:
+    {{- include "pulse.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.scan.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "pulse.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: scan
+              image: curlimages/curl:8.11.1
+              args:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  {{- range .Values.scan.tenants }}
+                  curl -fsS -X POST \
+                    -H "X-Tenant: {{ . }}" \
+                    {{- if $.Values.config.apiKeys }}
+                    -H "X-API-Key: {{ (splitList "," $.Values.config.apiKeys) | first }}" \
+                    {{- end }}
+                    "http://{{ include "pulse.fullname" $ }}:{{ $.Values.service.port }}/v1/scan"
+                  {{- end }}
+{{- end }}

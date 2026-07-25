@@ -17,9 +17,9 @@ it is live here.**
 | --- | --- | --- |
 | **Register** | The data foundation — 7 master tables, entity-centric, tenant-aware, versioned. Source of truth. | ✅ **in this repo** (`services/register/`) |
 | CIPHER | Underwriting brain — automated CAM + Internal Risk Grade (IRG). | planned |
-| PULSE | Continuous news / adverse-media intelligence; 7 AM portfolio digest. | planned |
+| **PULSE** | Continuous news / adverse-media intelligence; 7 AM portfolio digest. | ✅ **in this repo** (`services/pulse/`) |
 | **VocX** | Voice-based field touchpoint capture → structured into the Register (formerly "VOX"). | ✅ **in this repo** (`services/vocx/`) |
-| ATLAS | Live management dashboard across Lending / Syndication / Asset Monetisation. | planned |
+| **ATLAS** | Live management dashboard across Lending / Syndication / Asset Monetisation. | ✅ **service in this repo** (`services/atlas/`, UI planned) |
 | SCRIBE | Standardised documents & operations engine. | Phase 2 |
 
 ## The Register
@@ -58,6 +58,10 @@ services/
                        admin-editable access matrix (guardrails; /v1/resolve)
   vocx/                VocX — voice touchpoint capture → Register interactions via the
                        SDK (capture-id idempotency = exactly-once); stateless
+  pulse/               PULSE — news/adverse-media radar → matches Register entities,
+                       files RED/AMBER/GREEN intel idempotently; stateless
+  atlas/               ATLAS — management dashboard service (read-side BFF):
+                       /v1/dashboard, /v1/today, /v1/pipeline; view-level RBAC
   workflows/           Temporal worker — durable orchestration; activities write the
                        Register via the client SDK (the Workflows ring, realized)
 packages/
@@ -69,7 +73,8 @@ deploy/
                        + access + DB + MinIO + Temporal + worker (one command)
   nginx/               NGINX edge config (TLS-ready, routing, rate-limit, correlation id)
   helm/prism/          the PRISM umbrella chart (postgresql · register · access · gateway
-                       · minio · temporal · workflows subcharts)
+                       · vocx · pulse · atlas · minio · temporal · workflows subcharts —
+                       every module toggles with an enabled: flag; see docs/DEPLOYMENT.md)
 docs/                  SCHEMA.md (data model + ERD), openapi.json, adr/ (decision records)
 scripts/               repo tooling (new_service.py — scaffold a vertical)
 postman/               Postman collection + environment (CRUD for every table)
@@ -89,8 +94,9 @@ See **[`BACKEND_STANDARDS.md`](BACKEND_STANDARDS.md)** and **[`CONTRIBUTING.md`]
 
 **One PRISM Helm chart containing the modules as subcharts**, and one architectural
 decision inside it: **PostgreSQL is a shared platform service, not owned by any module.**
-The `postgresql` subchart runs a single database (`prism-postgresql`) that the Register —
-and CIPHER, PULSE, VOX, ATLAS as they arrive — all connect to. Managed vs local is a
+The `postgresql` subchart runs a single database (`prism-postgresql`) that the Register
+and the Access service connect to (VocX, PULSE and ATLAS are stateless — they only
+talk to the Register over HTTP). Managed vs local is a
 per-environment choice: use the bundled DB, or point modules at a managed India-resident
 Postgres.
 

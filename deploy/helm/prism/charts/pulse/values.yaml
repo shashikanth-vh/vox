@@ -1,0 +1,64 @@
+# PRISM PULSE (news / adverse-media radar). Stateless.
+fullnameOverride: ""       # umbrella sets prism-pulse
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/evam/prism-pulse
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+register:
+  baseUrl: http://prism-register
+  tenant: EVAM
+  # Must be present in the Register's REGISTER_API_KEYS.
+  apiKey:
+    existingSecret: ""
+    existingSecretKey: api-key
+    value: "change-me-in-prod"
+
+config:
+  logLevel: INFO
+  logJson: true
+  # News sources, JSON list. kinds: rss | json | sample (offline demo feed).
+  sources: '[{"name": "sample", "kind": "sample"}]'
+  # PULSE's own front door. Empty = open; ALWAYS set in production.
+  apiKeys: ""
+
+# Scheduled scans — a Kubernetes CronJob that POSTs /v1/scan (the 7 AM radar run).
+# PULSE itself has no clock: scheduling lives here, replicas stay identical.
+scan:
+  enabled: true
+  # 01:30 UTC = 07:00 IST.
+  schedule: "30 1 * * *"
+  tenants: [EVAM]
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+serviceAccount:
+  create: true
+  name: ""
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,7 +1,7 @@
 {
  "info": {
   "name": "PRISM Register API",
-  "description": "PRISM platform walkthrough built around ONE dummy company \u2014 EcoSoch Solar Pvt Ltd (code ECOSOCH), a Karnataka C&I rooftop-solar EPC \u2014 which carries a lead, a deal with ALL THREE product lines (lending 25 Cr + syndication 40 Cr + asset monetisation 60 Cr), a lender on the mandate, versioned financials, a PPA, documents, interactions, monitoring, and external intel.\n\nPORTS (single docker-compose):\n- Gateway (REST-API service, RBAC gate) \u2014 http://localhost:8001 \u2014 {{baseUrl}} \u2014 ALL business calls go here\n- Access (users/roles/matrix) \u2014 http://localhost:8002 \u2014 {{accessUrl}} \u2014 governance, Admin-only writes\n- Register (data plane) \u2014 http://localhost:8000 \u2014 {{registerUrl}} \u2014 admin plane (tenants, import) & machine callers\n- NGINX edge \u2014 http://localhost:8080 \u2014 same paths as the gateway\n- VocX \u2014 http://localhost:8003 \u00b7 MinIO console \u2014 :9001 \u00b7 Temporal UI \u2014 :8088\n\nHOW TO RUN: import the 'PRISM \u2014 Local' environment, then run folders 00 \u2192 21 in order \u2014 create requests auto-save ids ({{entityId}}, {{dealId}}, \u2026) into the environment, so every later request already points at the ECOSOCH records. Identity: every request carries X-User-Email {{userEmail}} (default admin@evamfinance.com, seeded with Admin+Management) \u2014 change it to e.g. chetan@evamfinance.com (created in folder 01) to see RBAC denials and SCOPED behaviour. Machine mode: drop X-User-Email and call {{registerUrl}} with just the X-API-Key.",
+  "description": "PRISM platform walkthrough built around ONE dummy company \u2014 EcoSoch Solar Pvt Ltd (code ECOSOCH), a Karnataka C&I rooftop-solar EPC \u2014 which carries a lead, a deal with ALL THREE product lines (lending 25 Cr + syndication 40 Cr + asset monetisation 60 Cr), a lender on the mandate, versioned financials, a PPA, documents, interactions, monitoring, and external intel.\n\nPORTS (single docker-compose):\n- Gateway (REST-API service, RBAC gate) \u2014 http://localhost:8001 \u2014 {{baseUrl}} \u2014 ALL business calls go here\n- Access (users/roles/matrix) \u2014 http://localhost:8002 \u2014 {{accessUrl}} \u2014 governance, Admin-only writes\n- Register (data plane) \u2014 http://localhost:8000 \u2014 {{registerUrl}} \u2014 admin plane (tenants, import) & machine callers\n- NGINX edge \u2014 http://localhost:8080 \u2014 same paths as the gateway\n- VocX \u2014 :8003 \u00b7 PULSE \u2014 :8004 \u00b7 ATLAS \u2014 :8005 \u00b7 MinIO console \u2014 :9001 \u00b7 Temporal UI \u2014 :8088\n\nHOW TO RUN: import the 'PRISM \u2014 Local' environment, then run folders 00 \u2192 21 in order \u2014 create requests auto-save ids ({{entityId}}, {{dealId}}, \u2026) into the environment, so every later request already points at the ECOSOCH records. Identity: every request carries X-User-Email {{userEmail}} (default admin@evamfinance.com, seeded with Admin+Management) \u2014 change it to e.g. chetan@evamfinance.com (created in folder 01) to see RBAC denials and SCOPED behaviour. Machine mode: drop X-User-Email and call {{registerUrl}} with just the X-API-Key.",
   "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
  },
  "item": [
@@ -7153,6 +7153,309 @@
          "language": "json"
         }
        }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "23 \u00b7 PULSE \u2014 news radar (:8004)",
+   "description": "The adverse-media radar. Scans configured sources (the compose default is an offline sample feed that mentions EcoSoch), matches items against the tenant's entities and files RED/AMBER/GREEN external-intelligence rows idempotently \u2014 re-running a scan never duplicates an alert.",
+   "item": [
+    {
+     "name": "Run a scan now",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       }
+      ],
+      "url": {
+       "raw": "{{pulseUrl}}/v1/scan",
+       "host": [
+        "{{pulseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "scan"
+       ]
+      },
+      "description": "Fetch every source, match against the watchlist, file intel. With the sample feed and the ECOSOCH entity created in folder 06, this files one GREEN intel row for EcoSoch."
+     }
+    },
+    {
+     "name": "Push one news item",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{pulseUrl}}/v1/items",
+       "host": [
+        "{{pulseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "items"
+       ]
+      },
+      "description": "The push door for scrapers/webhooks. entity_id pins the target; omit it to auto-match against the watchlist.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"title\": \"Lender consortium approves EcoSoch expansion facility\",\n  \"summary\": \"Two banks approve the 40 Cr syndicated facility.\",\n  \"url\": \"https://example.com/news/ecosoch-facility-approved\",\n  \"source\": \"manual\",\n  \"entity_id\": \"{{entityId}}\",\n  \"signal\": \"GREEN\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "The 7 AM digest payload",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       }
+      ],
+      "url": {
+       "raw": "{{pulseUrl}}/v1/digest?hours=24",
+       "host": [
+        "{{pulseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "digest"
+       ],
+       "query": [
+        {
+         "key": "hours",
+         "value": "24"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "24 \u00b7 ATLAS \u2014 dashboards (:8005)",
+   "description": "The management dashboard service. Read-side compositions over the Register; each view is gated by the Access service's admin-editable view matrix (X-User-Email). With the walkthrough data loaded, every panel has numbers.",
+   "item": [
+    {
+     "name": "Dashboard \u2014 the whole book",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{atlasUrl}}/v1/dashboard",
+       "host": [
+        "{{atlasUrl}}"
+       ],
+       "path": [
+        "v1",
+        "dashboard"
+       ]
+      }
+     }
+    },
+    {
+     "name": "Today \u2014 what needs a human",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{atlasUrl}}/v1/today?horizon_days=7",
+       "host": [
+        "{{atlasUrl}}"
+       ],
+       "path": [
+        "v1",
+        "today"
+       ],
+       "query": [
+        {
+         "key": "horizon_days",
+         "value": "7"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "name": "Pipeline board \u2014 lending",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{atlasUrl}}/v1/pipeline/lending",
+       "host": [
+        "{{atlasUrl}}"
+       ],
+       "path": [
+        "v1",
+        "pipeline",
+        "lending"
+       ]
+      }
+     }
+    },
+    {
+     "name": "Pipeline board \u2014 syndication",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{atlasUrl}}/v1/pipeline/syndication",
+       "host": [
+        "{{atlasUrl}}"
+       ],
+       "path": [
+        "v1",
+        "pipeline",
+        "syndication"
+       ]
+      }
+     }
+    },
+    {
+     "name": "Entity summary (ECOSOCH)",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       },
+       {
+        "key": "X-User-Email",
+        "value": "{{userEmail}}"
+       }
+      ],
+      "url": {
+       "raw": "{{atlasUrl}}/v1/entities/{{entityId}}/summary",
+       "host": [
+        "{{atlasUrl}}"
+       ],
+       "path": [
+        "v1",
+        "entities",
+        "{{entityId}}",
+        "summary"
+       ]
       }
      }
     }

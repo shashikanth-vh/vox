@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "atlas.fullname" . }}
+  labels:
+    {{- include "atlas.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "atlas.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "atlas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: atlas
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: ATLAS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: ATLAS_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: ATLAS_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: ATLAS_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: ATLAS_ACCESS_URL
+              value: {{ .Values.access.url | quote }}
+            - name: ATLAS_ACCESS_API_KEY
+              value: {{ .Values.access.apiKey.value | quote }}
+            - name: ATLAS_REQUIRE_USER
+              value: {{ .Values.access.requireUser | quote }}
+            - name: ATLAS_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.apiKey.existingSecret }}
+                  name: {{ .Values.register.apiKey.existingSecret }}
+                  key: {{ .Values.register.apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "atlas.secretName" . }}
+                  key: register-api-key
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
