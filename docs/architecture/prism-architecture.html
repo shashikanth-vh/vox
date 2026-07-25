@@ -1,0 +1,565 @@
+<title>PRISM — Architecture & Functionality Flows</title>
+<style>
+  :root{
+    --bg:#e9edec; --surface:#fafbfa; --surface-2:#eef1f0; --sunk:#e3e8e7;
+    --ink:#101718; --muted:#5c6d6d; --faint:#8395954d;
+    --line:#d2dad9; --line-strong:#b9c4c3;
+    --accent:#0c7d72; --accent-ink:#0a5f57; --accent-soft:#0c7d7215;
+    --planned:#9a6212; --planned-soft:#9a621212;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1060px;
+    --shadow:0 1px 2px #0a1a1908,0 8px 24px -12px #0a1a1918;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#080c0d; --surface:#0f1618; --surface-2:#0c1214; --sunk:#0a0f10;
+      --ink:#e5edec; --muted:#8ba09f; --faint:#5f77762e;
+      --line:#1e2b2c; --line-strong:#2a3b3c;
+      --accent:#2fc7b6; --accent-ink:#5bd8ca; --accent-soft:#2fc7b615;
+      --planned:#d69a4c; --planned-soft:#d69a4c14;
+      --shadow:0 1px 2px #00000040,0 10px 30px -14px #00000070;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#e9edec; --surface:#fafbfa; --surface-2:#eef1f0; --sunk:#e3e8e7;
+    --ink:#101718; --muted:#5c6d6d; --faint:#8395954d;
+    --line:#d2dad9; --line-strong:#b9c4c3;
+    --accent:#0c7d72; --accent-ink:#0a5f57; --accent-soft:#0c7d7215;
+    --planned:#9a6212; --planned-soft:#9a621212;
+    --shadow:0 1px 2px #0a1a1908,0 8px 24px -12px #0a1a1918;
+  }
+  :root[data-theme="dark"]{
+    --bg:#080c0d; --surface:#0f1618; --surface-2:#0c1214; --sunk:#0a0f10;
+    --ink:#e5edec; --muted:#8ba09f; --faint:#5f77762e;
+    --line:#1e2b2c; --line-strong:#2a3b3c;
+    --accent:#2fc7b6; --accent-ink:#5bd8ca; --accent-soft:#2fc7b615;
+    --planned:#d69a4c; --planned-soft:#d69a4c14;
+    --shadow:0 1px 2px #00000040,0 10px 30px -14px #00000070;
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;margin:0;padding:0 20px 96px}
+  main{max-width:var(--maxw);margin:0 auto}
+  h1,h2,h3{font-family:var(--mono);letter-spacing:-0.01em}
+  h1{font-size:1.65rem;margin:0 0 6px;text-wrap:balance}
+  h2{font-size:1.12rem;margin:0 0 4px}
+  h3{font-size:.94rem;margin:0}
+  p{max-width:74ch}
+  code{font-family:var(--mono);background:var(--sunk);border-radius:4px;padding:1px 5px;font-size:.85em}
+  a{color:var(--accent)}
+
+  header.page{padding:44px 0 14px;border-bottom:2px solid var(--ink);margin-bottom:8px}
+  .kicker{font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;color:var(--accent);margin-bottom:10px}
+  .meta{color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:10px;font-variant-numeric:tabular-nums}
+  .meta b{color:var(--ink);font-weight:600}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:.78rem;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:13px;height:13px;border-radius:3px;display:inline-block}
+  .sw-built{background:var(--accent-soft);border:1.5px solid var(--accent)}
+  .sw-planned{background:var(--planned-soft);border:1.5px dashed var(--planned)}
+
+  section{margin-top:54px}
+  .secno{font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px}
+  .lede{color:var(--muted);max-width:80ch;margin:4px 0 20px}
+
+  /* layered block diagram */
+  .arch{display:flex;flex-direction:column}
+  .layer{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;box-shadow:var(--shadow)}
+  .layer-title{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+  .layer-title .port{color:var(--accent);letter-spacing:0;text-transform:none}
+  .boxes{display:flex;flex-wrap:wrap;gap:10px}
+  .box{border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:9px 13px;min-width:150px;flex:1 1 150px;max-width:360px}
+  .box .t{font-family:var(--mono);font-weight:600;font-size:.84rem}
+  .box .d{font-size:.75rem;color:var(--muted);margin-top:3px;line-height:1.45}
+  .box.planned{border-style:dashed;border-color:var(--planned);background:var(--planned-soft)}
+  .box.planned .t{color:var(--muted)}
+  .conn{text-align:center;color:var(--muted);font-size:.78rem;padding:4px 0}
+  .conn .lbl{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em}
+
+  /* flow cards */
+  .flow{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px 12px;margin-top:26px;box-shadow:var(--shadow)}
+  .flow-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .flow-id{font-family:var(--mono);color:var(--accent);font-size:.78rem;letter-spacing:.08em;font-weight:600}
+  .flow p.about{color:var(--muted);font-size:.87rem;margin:6px 0 10px;max-width:92ch}
+  .flow .endpoints{font-size:.77rem;color:var(--muted);margin:0 0 10px}
+  .diagram{overflow-x:auto;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  pre.mermaid{margin:0;background:transparent;display:flex;justify-content:center}
+
+  /* tables */
+  table{border-collapse:collapse;width:100%;font-size:.84rem}
+  th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  td code{white-space:nowrap}
+  .tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px 8px;box-shadow:var(--shadow)}
+  .pill{display:inline-block;border-radius:99px;padding:1px 10px;font-size:.7rem;font-family:var(--mono);letter-spacing:.04em}
+  .pill.built{background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent)}
+  .pill.planned{background:var(--planned-soft);color:var(--planned);border:1px dashed var(--planned)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}
+  @media (prefers-reduced-motion: reduce){ *{scroll-behavior:auto!important} }
+</style>
+
+<main>
+<header class="page">
+  <div class="kicker">Evam Finance · Platform for Real-asset Intelligence, Screening &amp; Monitoring</div>
+  <h1>PRISM — Architecture &amp; Functionality Flows</h1>
+  <div class="meta">
+    <span>Branch <b>claude/register-service-postgres-4tc9rj</b></span>
+    <span>As of <b>f8bd171</b> · 2026-07-25</span>
+    <span>Tests <b>77 passing (65 register · 5 access · 7 e2e)</b></span>
+  </div>
+  <div class="legend">
+    <span><i class="swatch sw-built"></i> Built &amp; tested</span>
+    <span><i class="swatch sw-planned"></i> Planned (next modules)</span>
+  </div>
+</header>
+
+<!-- ================= 1. SYSTEM ARCHITECTURE ================= -->
+<section>
+  <div class="secno">01 · System architecture</div>
+  <h2>One entry point, one source of truth, one database server</h2>
+  <p class="lede">
+    Every request enters through NGINX, passes the Gateway's cached binary RBAC gate, and lands on
+    the Register — the platform's source of truth, which enforces scoped access next to the data.
+    Identity &amp; the admin-editable access matrix live in the Access service; document bytes live in
+    MinIO/S3; Temporal drives durable workflows. One PostgreSQL server, a database per service.
+  </p>
+
+  <div class="arch">
+    <div class="layer">
+      <div class="layer-title"><span>Clients</span></div>
+      <div class="boxes">
+        <div class="box planned"><div class="t">ATLAS UI</div><div class="d">deal-desk front end · consumes /v1 + the Data Register</div></div>
+        <div class="box planned"><div class="t">VOX</div><div class="d">voice touchpoint capture → interactions</div></div>
+        <div class="box"><div class="t">Postman / curl</div><div class="d">full CRUD collection, every table</div></div>
+        <div class="box"><div class="t">evam-register-client</div><div class="d">typed SDK — auth, retry, idempotency, pagination</div></div>
+      </div>
+    </div>
+    <div class="conn">▼ <span class="lbl">HTTPS · X-API-Key · X-Tenant</span></div>
+
+    <div class="layer">
+      <div class="layer-title"><span>Edge</span><span class="port">:8080</span></div>
+      <div class="boxes">
+        <div class="box"><div class="t">NGINX</div><div class="d">TLS termination · path routing (future verticals slot in as upstreams) · 50 r/s rate-limit · X-Request-ID correlation · gzip · security headers</div></div>
+      </div>
+    </div>
+    <div class="conn">▼ <span class="lbl">proxy → gateway:8000</span></div>
+
+    <div class="layer">
+      <div class="layer-title"><span>Gateway — the REST-API service (services/gateway)</span><span class="port">:8001 dev</span></div>
+      <div class="boxes">
+        <div class="box"><div class="t">Binary RBAC gate (cached)</div><div class="d">route → operation · NONE → 403 HERE · FULL/SCOPED forwarded with X-Authz-Decision + secret-stamped identity headers</div></div>
+        <div class="box"><div class="t">Facts cache ⟷ Access /resolve</div><div class="d">fetched on miss/TTL — never per request · last-known-good on outage · composed /v1/me</div></div>
+        <div class="box planned"><div class="t">Client-specific logic</div><div class="d">future: shaping · composition · versioning — isolated here</div></div>
+      </div>
+    </div>
+    <div class="conn">▼ <span class="lbl">only FULL / SCOPED requests reach the data · Access answers /resolve beside the path</span></div>
+
+    <div class="layer">
+      <div class="layer-title"><span>Service plane — REST APIs on evam-backend-core</span><span class="port">:8000 · :8002</span></div>
+      <div class="boxes">
+        <div class="box"><div class="t">Access (FastAPI)</div><div class="d">users · stacked roles · access matrix as ADMIN-EDITABLE tables (guardrails, versioned) · /v1/resolve · own db</div></div>
+        <div class="box"><div class="t">Register (FastAPI)</div><div class="d">PRISM 7 masters + ATLAS ops + documents catalog &amp; Data Register checklist · optimistic locking · idempotency · RLS · audit · keyset pagination · SCOPED enforcement next to the data (assignments · approvals · admin-only delete)</div></div>
+        <div class="box planned"><div class="t">CIPHER</div><div class="d">financial spreading</div></div>
+        <div class="box planned"><div class="t">PULSE</div><div class="d">external intelligence</div></div>
+        <div class="box planned"><div class="t">SCRIBE</div><div class="d">document ops (OCR, parsing, versioning) — phase 2</div></div>
+      </div>
+    </div>
+    <div class="conn">▼ <span class="lbl">asyncpg pool (bounded, timeouts) · boto3 → S3 API</span></div>
+
+    <div class="layer">
+      <div class="layer-title"><span>Data plane</span><span class="port">:5432 · :9000</span></div>
+      <div class="boxes">
+        <div class="box"><div class="t">PostgreSQL 16 — one server</div><div class="d">db <b>register</b> (source of truth) · db <b>access</b> (identity + matrix) · db <b>temporal</b> ×2 — one server, a database per service</div></div>
+        <div class="box"><div class="t">MinIO / S3</div><div class="d">bucket <b>prism-documents</b> — the bytes behind every document reference · presigned downloads · bucket auto-created</div></div>
+      </div>
+    </div>
+
+    <div class="conn">▲ <span class="lbl">worker activities call the Register via the SDK — the same door as every client</span></div>
+    <div class="layer">
+      <div class="layer-title"><span>Workflow plane</span><span class="port">:7233 · UI :8088</span></div>
+      <div class="boxes">
+        <div class="box"><div class="t">Temporal server</div><div class="d">durable orchestration · persists to the shared PostgreSQL</div></div>
+        <div class="box"><div class="t">PRISM worker</div><div class="d">workflows + activities · workflow-derived idempotency key ⇒ exactly-once effect</div></div>
+        <div class="box"><div class="t">Temporal Web UI</div><div class="d">run history, retries, queues</div></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="lede" style="margin-top:18px">
+    Shared foundations: <code>packages/evam-backend-core</code> (logging, RFC-9457 errors, middleware,
+    bounded pool, CRUD, retry, health, app factory) and <code>packages/evam-register-client</code>
+    (typed async + sync SDK). Every future vertical starts from these — <code>make new-service</code>
+    scaffolds one in minutes.
+  </p>
+</section>
+
+<!-- ================= 2. DEPLOYMENT ================= -->
+<section>
+  <div class="secno">02 · Deployment topology</div>
+  <h2>One Compose file · one Helm umbrella</h2>
+  <p class="lede">Same shape in both: shared PostgreSQL, shared MinIO, the Register as the only writer of
+    record. Production swaps managed services in by values only — disable the bundled DB/MinIO and point
+    <code>database.*</code> / <code>storage.s3.*</code> at RDS / S3.</p>
+  <div class="cols">
+    <div class="layer">
+      <div class="layer-title"><span>Docker Compose — 9 services, one command</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  CMD["docker compose up --build"] --> N["nginx :8080"]
+  CMD --> PG[("postgres
+register · access · temporal ×2")]
+  CMD --> M[("minio :9000")]
+  N --> G["gateway :8001"]
+  G --> R["register :8000"]
+  G -.resolve + cache.-> AC["access :8002"]
+  AC --> PG
+  R --> PG
+  R --> M
+  T["temporal :7233"] --> PG
+  TU["temporal-ui :8088"] --> T
+  W["workflows worker"] --> T
+  W -->|SDK| R
+      </pre></div>
+    </div>
+    <div class="layer">
+      <div class="layer-title"><span>Helm — prism umbrella, 7 vendored subcharts</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  U["helm install prism"] --> P["postgresql → prism-postgresql
+extraDatabases: [access]"]
+  U --> GW["gateway → prism-gateway"]
+  U --> AC["access → prism-access"]
+  U --> RG["register → prism-register"]
+  U --> MO["minio → prism-minio"]
+  U --> TP["temporal → prism-temporal"]
+  U --> WF["workflows → prism-workflows"]
+  GW --> RG
+  GW -.-> AC
+  AC --> P
+  RG --> P
+  RG --> MO
+  TP --> P
+  WF --> TP
+  WF --> RG
+      </pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3. FLOWS ================= -->
+<section>
+  <div class="secno">03 · Functionality flows</div>
+  <h2>Every functionality, end to end</h2>
+  <p class="lede">Thirteen flows, F1–F13. Each shows the exact path a request takes through the system as built.</p>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F1</span><h3>Request pipeline — under every API call</h3></div>
+    <p class="about">The common spine: edge controls, then auth → tenant → row-level-security scope, so a
+      query can never cross tenants even if a filter is forgotten.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant N as NGINX
+  participant G as Gateway
+  participant A as Register API
+  participant P as PostgreSQL
+  C->>N: request + X-API-Key, X-Tenant, X-User-Email
+  N->>G: proxy · rate-limit · mint X-Request-ID
+  G->>G: binary RBAC gate from cache — NONE → 403 here
+  G->>A: forward + secret-stamped identity + X-Authz-Decision
+  A->>A: API-key check → tenant lookup → verify gateway secret
+  A->>P: SET app.current_tenant (RLS) · scoped check if needed
+  P-->>A: rows
+  A-->>C: JSON + ETag · errors as RFC-9457 problems
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F2</span><h3>Create a record — idempotent</h3></div>
+    <p class="about">One surface for all 16 tables. A retried POST with the same
+      <code>Idempotency-Key</code> replays the stored outcome instead of creating a duplicate.</p>
+    <p class="endpoints"><code>POST /v1/&lt;resource&gt;</code> · header <code>Idempotency-Key</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["POST + Idempotency-Key"] --> B{"key seen before?"}
+  B -- yes --> C["replay stored response
+Idempotency-Replay: true"]
+  B -- no --> D["INSERT row (version = 1)"]
+  D --> E["audit_log entry"]
+  E --> F["store key → response (48 h TTL)"]
+  F --> G["201 + ETag"]
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F3</span><h3>Update / delete — optimistic locking</h3></div>
+    <p class="about">No lost updates: every row carries a <code>version</code>; a stale write gets 409 and
+      re-reads. Deadlocks and serialization failures retry server-side with backoff. Deletes are soft and
+      restorable.</p>
+    <p class="endpoints"><code>PATCH /v1/&lt;resource&gt;/{id}</code> · <code>DELETE …</code> · <code>POST …/restore</code> · header <code>If-Match</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["PATCH + If-Match: v"] --> B{"version matches?"}
+  B -- no --> X["409 version_conflict
+re-read and retry"]
+  B -- yes --> C["apply changed fields only"]
+  C --> D["stage/status changed?
+auto-append {from,to,at,by} history"]
+  D --> E["version++ · audit_log"]
+  E --> F["200 + new ETag"]
+  A -.deadlock 40P01 / serialization 40001.-> R["server-side retry, backoff + jitter"] -.-> A
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F4</span><h3>List — keyset pagination, filters, search</h3></div>
+    <p class="about">Stable O(1)-at-depth pagination on <code>(created_at, id)</code> — no page drift at
+      lakhs of rows. Whitelisted equality filters; trigram-backed search.</p>
+    <p class="endpoints"><code>GET /v1/&lt;resource&gt;?q=&amp;limit=&amp;cursor=&amp;with_total=</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["GET list"] --> B["tenant + not-deleted"]
+  B --> C["+ whitelisted filters
+?sector= · ?status= · …"]
+  C --> D["+ q → ILIKE across searchable columns"]
+  D --> E{"cursor?"}
+  E -- yes --> F["WHERE (created_at,id) &lt; cursor"]
+  E -- no --> G["first page"]
+  F --> H["fetch limit+1 → items + next_cursor"]
+  G --> H
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F5</span><h3>Document upload — bytes to MinIO/S3, row to the catalog</h3></div>
+    <p class="about">Multipart upload against any record — lead, deal, lending, syndication, asset-mon,
+      entity, counterparty. The subject is validated <em>before</em> the upload, so no orphan objects.
+      With no object store configured, small files (≤ 400 KB) fall back inline — the ATLAS rule.</p>
+    <p class="endpoints"><code>POST /v1/&lt;subject&gt;/{id}/documents/upload</code> · <code>POST /v1/documents/upload</code> · <code>POST /v1/documents</code> (reference-only)</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant A as Register API
+  participant P as PostgreSQL
+  participant S as MinIO / S3
+  C->>A: multipart file + slot_key, section…
+  A->>P: subject exists? (tenant-scoped)
+  P-->>A: yes → derive entity_id, deal_id
+  A->>S: put_object tenant/subject/uuid-name
+  S-->>A: s3://prism-documents/…
+  A->>P: INSERT documents row — uri, sha-256, size, owner, time
+  A-->>C: 201 catalog row (bytes never echoed back)
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F6</span><h3>Document download — presigned, inline, or reference</h3></div>
+    <p class="about">S3-backed documents redirect to a freshly-signed URL so the browser fetches straight
+      from the store; inline documents stream from the API; metadata-only records say so.</p>
+    <p class="endpoints"><code>GET /v1/documents/{id}/content</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["GET /content"] --> B{"inline bytes?"}
+  B -- yes --> C["stream + Content-Disposition"]
+  B -- no --> D{"storage_uri s3://…?"}
+  D -- yes --> E{"stream-through mode?"}
+  E -- no --> F["302 → presigned URL (1 h)"]
+  E -- yes --> G["fetch from store, stream via API"]
+  D -- "http(s)" --> H["302 redirect"]
+  D -- none --> I["404 — metadata-only"]
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F7</span><h3>Data Register — company-wide checklist rollup</h3></div>
+    <p class="about">The backend of the ATLAS modal (6 sections, 17 required). Documents are
+      <b>entity-scoped</b>: upload the COI once against the lead and it shows on-file from the deal, the
+      lending tracker, the syndication and the entity alike. <code>?scope=subject</code> narrows to one
+      record.</p>
+    <p class="endpoints"><code>GET /v1/&lt;subject&gt;/{id}/data-register</code> · <code>GET /v1/document-checklist/template</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["GET data-register"] --> B["resolve record → entity_id"]
+  B --> C{"has entity and scope ≠ subject?"}
+  C -- yes --> D["docs WHERE entity_id = company
+(uploaded against ANY of its records)"]
+  C -- no --> E["docs of this record only"]
+  D --> F["join checklist template
+24 slots · 17 required"]
+  E --> F
+  F --> G["sections · per-slot on-file/pending
+counts · percent_complete"]
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F8</span><h3>Log an interaction — timeline + roll-ups</h3></div>
+    <p class="about">One append-only record type for manual notes and VOX touchpoints. Writing one also
+      updates everything ATLAS derives from it — in the same transaction.</p>
+    <p class="endpoints"><code>POST /v1/&lt;subject&gt;/{id}/interactions</code> · <code>GET …/interactions</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client / VOX
+  participant A as Register API
+  participant P as PostgreSQL
+  C->>A: interaction (type, direction, notes, transcript…)
+  A->>P: validate subject → denormalise entity_id, deal_id
+  A->>P: INSERT interactions row (append-only)
+  alt syndication + lender + direction
+    A->>P: inbound → lender.response_date · outbound → chased_date
+  end
+  alt subject is a Lead
+    A->>P: roll up last_interaction_date / next_action
+  end
+  A-->>C: 201 — entity &amp; deal timelines aggregate it
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F9</span><h3>Financials — append-only versioning</h3></div>
+    <p class="about">Audited-March vs restated-June never overwrite each other. An advisory lock
+      serialises writers per statement; exactly one version stays <code>is_current</code>.</p>
+    <p class="endpoints"><code>POST /v1/financials</code> · <code>GET /v1/financials/history</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant A as Register API
+  participant P as PostgreSQL
+  C->>A: new statement (entity, type, period, data)
+  A->>P: pg_advisory_xact_lock(entity, type, period)
+  A->>P: max(version_no) → n
+  A->>P: UPDATE old versions is_current = false
+  A->>P: INSERT version_no = n+1, is_current = true
+  A-->>C: 201 — history preserved, one current
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F10</span><h3>MIS import — the real spreadsheet in</h3></div>
+    <p class="about">The authoritative 6-sheet MIS workbook loads through the API; companies dedup into
+      entities, every tracker links back. Verified 100 % company coverage against the source.</p>
+    <p class="endpoints"><code>POST /v1/import/atlas-xlsx?mode=replace|merge</code> · CLI <code>python -m app.seed.xlsx_cli</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["upload .xlsx"] --> B["parse 6 sheets"]
+  B --> C["dedup companies → entities (code-keyed)"]
+  C --> D["leads · deals · lending
+syndication + lenders · asset-mon"]
+  D --> E["fold Mandate Tracker → syndication mandate"]
+  E --> F{"mode"}
+  F -- replace --> G["wipe business rows first"]
+  F -- merge --> H["upsert into existing"]
+  G --> I["counts per table returned"]
+  H --> I
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F11</span><h3>Export — backup &amp; verification</h3></div>
+    <p class="about">Point-in-time snapshot of a tenant: Excel for eyeballing, JSON for exact-typed
+      re-import. Streaming keeps memory flat at lakhs of rows; document bytes are summarised, never dumped.</p>
+    <p class="endpoints"><code>GET /v1/export/excel</code> · <code>GET /v1/export/json</code> · <code>GET /v1/export/counts</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["GET /v1/export/excel · /json"] --> B["stream each table
+tenant-scoped · soft-deletes excluded"]
+  B --> C["coerce: UUID→str · Decimal→float
+bytes → '&lt;N bytes&gt;'"]
+  C --> D["one sheet per table → .xlsx"]
+  C --> E["typed JSON snapshot"]
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F12</span><h3>Durable workflow — exactly-once effect</h3></div>
+    <p class="about">The platform pattern for multi-step operations: orchestration in Temporal, all I/O in
+      activities via the SDK. The idempotency key derives from the workflow id, so Temporal's retries can
+      never double-write the Register.</p>
+    <p class="endpoints">worker <code>services/workflows</code> · task queue <code>prism-workflows</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as Temporal server
+  participant W as PRISM worker
+  participant A as Register API
+  T->>W: run IngestInteractionWorkflow (durable, replayable)
+  W->>A: activity: POST /v1/interactions + key "wf:{workflow_id}"
+  A-->>W: 201 (or replay of the first success)
+  Note over W,A: crash / retry ⇒ same key ⇒ same row — exactly once
+  W->>A: activity: GET /v1/entities/{id}/dossier
+  A-->>W: 360° dossier
+  W-->>T: result recorded in history
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F13</span><h3>Boot — fresh database to usable API</h3></div>
+    <p class="about">The container entrypoint makes a cold start deterministic: migrate, provision (no
+      business data), serve. Data loads on demand afterwards — the real MIS via F10, or the synthetic mock
+      for smoke tests.</p>
+    <p class="endpoints">entrypoint <code>migrate-bootstrap-serve</code> · probes <code>/healthz</code> · <code>/readyz</code></p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["container start"] --> B["wait for PostgreSQL healthy"]
+  B --> C["alembic upgrade head (0001 → 0004)"]
+  C --> D["bootstrap: tenant EVAM · ref values · checklist
+(access service seeds matrix + admin user)"]
+  D --> E["serve — gunicorn × uvicorn workers"]
+  E --> F["/readyz gates traffic"]
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">F14</span><h3>RBAC — the three-service enforcement (summary)</h3></div>
+    <p class="about">Binary decisions at the Gateway from cached facts; SCOPED decided by the
+      Register next to <code>line_assignments</code>; the matrix is admin-editable data in the
+      Access service — a grant change is live platform-wide in seconds, no deploy. Full detail
+      (decision ladder + CF1–CF8): the companion <b>RBAC — Architecture &amp; Call Flows</b> page.</p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A["request + X-User-Email"] --> B{"gateway: matrix[op][roles]
+(cached from Access /resolve)"}
+  B -- NONE --> X["403 at the gateway"]
+  B -- FULL --> C["forward: X-Authz-Decision FULL"]
+  B -- SCOPED --> D["forward: X-Authz-Decision SCOPED"]
+  C --> R["Register: run the operation"]
+  D --> E{"assigned to THIS line?"}
+  E -- yes --> R
+  E -- no --> Y["403 — not your line"]
+    </pre></div>
+  </div>
+</section>
+
+<!-- ================= 4. TRACEABILITY ================= -->
+<section>
+  <div class="secno">04 · Component → code</div>
+  <h2>Where each piece lives</h2>
+  <div class="tbl-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Component</th><th>Path</th><th>Status</th><th>Proof</th></tr></thead>
+      <tbody>
+        <tr><td>Register API</td><td><code>services/register/app</code></td><td><span class="pill built">built</span></td><td>65 tests against real PostgreSQL</td></tr>
+        <tr><td>Gateway — REST-API service</td><td><code>services/gateway</code></td><td><span class="pill built">built</span></td><td>7 e2e tests on the real 3-service stack</td></tr>
+        <tr><td>Access — users, roles, matrix-as-data</td><td><code>services/access</code></td><td><span class="pill built">built</span></td><td>5 tests · guardrails · /v1/resolve</td></tr>
+        <tr><td>Schema — 16 tables + system</td><td><code>migrations/versions/0001 … 0004</code></td><td><span class="pill built">built</span></td><td>hand-written DDL · RLS · reversible</td></tr>
+        <tr><td>Documents + Data Register</td><td><code>app/models/documents.py</code> · <code>app/repositories/documents.py</code></td><td><span class="pill built">built</span></td><td>8 tests incl. cross-record access</td></tr>
+        <tr><td>Object storage (S3/MinIO)</td><td><code>app/storage/</code></td><td><span class="pill built">built</span></td><td>6 tests on in-process S3 (moto)</td></tr>
+        <tr><td>Shared platform</td><td><code>packages/evam-backend-core</code></td><td><span class="pill built">built</span></td><td>the Register runs on it</td></tr>
+        <tr><td>Typed SDK</td><td><code>packages/evam-register-client</code></td><td><span class="pill built">built</span></td><td>16 tests, mock + live</td></tr>
+        <tr><td>Workflow worker</td><td><code>services/workflows</code></td><td><span class="pill built">built</span></td><td>activity tests on Temporal test env</td></tr>
+        <tr><td>Edge — NGINX</td><td><code>deploy/nginx/nginx.conf</code></td><td><span class="pill built">built</span></td><td>in Compose · Ingress plays it in k8s</td></tr>
+        <tr><td>Compose — 9 services</td><td><code>deploy/compose/docker-compose.yml</code></td><td><span class="pill built">built</span></td><td>NGINX → gateway → register · one Postgres · one command</td></tr>
+        <tr><td>Helm — 7 subcharts</td><td><code>deploy/helm/prism</code></td><td><span class="pill built">built</span></td><td>postgresql · register · access · gateway · minio · temporal · workflows</td></tr>
+        <tr><td>CIPHER · PULSE · VOX backends</td><td><code>services/&lt;name&gt;</code> via <code>make new-service</code></td><td><span class="pill planned">planned</span></td><td>scaffolder verified</td></tr>
+        <tr><td>SCRIBE — document ops</td><td>phase 2 — absorbs OCR / parsing / versioning</td><td><span class="pill planned">planned</span></td><td>catalog + bytes already in place</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</main>

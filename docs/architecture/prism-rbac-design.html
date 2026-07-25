@@ -1,0 +1,418 @@
+<title>PRISM RBAC — Architecture & Call Flows (Implemented)</title>
+<style>
+  :root{
+    --bg:#e9edec; --surface:#fafbfa; --surface-2:#eef1f0; --sunk:#e3e8e7;
+    --ink:#101718; --muted:#5c6d6d; --faint:#8395954d;
+    --line:#d2dad9; --line-strong:#b9c4c3;
+    --accent:#0c7d72; --accent-ink:#0a5f57; --accent-soft:#0c7d7215;
+    --planned:#9a6212; --planned-soft:#9a621212;
+    --deny:#a63a2e; --deny-soft:#a63a2e14;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1060px;
+    --shadow:0 1px 2px #0a1a1908,0 8px 24px -12px #0a1a1918;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#080c0d; --surface:#0f1618; --surface-2:#0c1214; --sunk:#0a0f10;
+      --ink:#e5edec; --muted:#8ba09f; --faint:#5f77762e;
+      --line:#1e2b2c; --line-strong:#2a3b3c;
+      --accent:#2fc7b6; --accent-ink:#5bd8ca; --accent-soft:#2fc7b615;
+      --planned:#d69a4c; --planned-soft:#d69a4c14;
+      --deny:#e07362; --deny-soft:#e0736214;
+      --shadow:0 1px 2px #00000040,0 10px 30px -14px #00000070;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#e9edec; --surface:#fafbfa; --surface-2:#eef1f0; --sunk:#e3e8e7;
+    --ink:#101718; --muted:#5c6d6d; --faint:#8395954d;
+    --line:#d2dad9; --line-strong:#b9c4c3;
+    --accent:#0c7d72; --accent-ink:#0a5f57; --accent-soft:#0c7d7215;
+    --planned:#9a6212; --planned-soft:#9a621212;
+    --deny:#a63a2e; --deny-soft:#a63a2e14;
+    --shadow:0 1px 2px #0a1a1908,0 8px 24px -12px #0a1a1918;
+  }
+  :root[data-theme="dark"]{
+    --bg:#080c0d; --surface:#0f1618; --surface-2:#0c1214; --sunk:#0a0f10;
+    --ink:#e5edec; --muted:#8ba09f; --faint:#5f77762e;
+    --line:#1e2b2c; --line-strong:#2a3b3c;
+    --accent:#2fc7b6; --accent-ink:#5bd8ca; --accent-soft:#2fc7b615;
+    --planned:#d69a4c; --planned-soft:#d69a4c14;
+    --deny:#e07362; --deny-soft:#e0736214;
+    --shadow:0 1px 2px #00000040,0 10px 30px -14px #00000070;
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;margin:0;padding:0 20px 96px}
+  main{max-width:var(--maxw);margin:0 auto}
+  h1,h2,h3{font-family:var(--mono);letter-spacing:-.01em}
+  h1{font-size:1.6rem;margin:0 0 6px;text-wrap:balance}
+  h2{font-size:1.12rem;margin:0 0 4px}
+  h3{font-size:.92rem;margin:0}
+  p{max-width:76ch}
+  code{font-family:var(--mono);background:var(--sunk);border-radius:4px;padding:1px 5px;font-size:.85em}
+
+  header.page{padding:44px 0 14px;border-bottom:2px solid var(--ink);margin-bottom:8px}
+  .kicker{font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;color:var(--accent);margin-bottom:10px}
+  .meta{color:var(--muted);font-size:.84rem;display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:10px}
+  .meta b{color:var(--ink);font-weight:600}
+
+  section{margin-top:50px}
+  .secno{font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px}
+  .lede{color:var(--muted);max-width:82ch;margin:4px 0 20px}
+
+  .rule{
+    border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:12px;
+    padding:16px 20px;font-family:var(--mono);font-size:.95rem;margin:18px 0 0;max-width:none
+  }
+  .rule b{color:var(--accent-ink)}
+
+  .layer{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;box-shadow:var(--shadow)}
+  .layer.aside{border-color:var(--planned);}
+  .layer-title{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+  .layer-title .tag{color:var(--accent);letter-spacing:0;text-transform:none}
+  .boxes{display:flex;flex-wrap:wrap;gap:10px}
+  .box{border:1.5px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:9px 13px;min-width:150px;flex:1 1 160px;max-width:420px}
+  .box .t{font-family:var(--mono);font-weight:600;font-size:.84rem}
+  .box .d{font-size:.75rem;color:var(--muted);margin-top:3px;line-height:1.45}
+  .box.deny{border-color:var(--deny);background:var(--deny-soft)}
+  .box.aside{border-color:var(--planned);background:var(--planned-soft)}
+  .box.future{border-style:dashed;border-color:var(--planned);background:transparent}
+  .box.future .t{color:var(--muted)}
+  .conn{text-align:center;color:var(--muted);font-size:.78rem;padding:4px 0}
+  .conn .lbl{font-family:var(--mono);font-size:.68rem;letter-spacing:.05em}
+
+  .ladder{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+  .rung{border-radius:10px;padding:14px 16px;border:1.5px solid var(--line-strong);background:var(--surface)}
+  .rung .sym{font-family:var(--mono);font-weight:700;font-size:1.05rem}
+  .rung.none{border-color:var(--deny)} .rung.none .sym{color:var(--deny)}
+  .rung.full{border-color:var(--accent)} .rung.full .sym{color:var(--accent)}
+  .rung.scoped{border-color:var(--planned)} .rung.scoped .sym{color:var(--planned)}
+  .rung .where{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+  .rung p{font-size:.83rem;color:var(--muted);margin:8px 0 0}
+
+  .flow{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px 12px;margin-top:26px;box-shadow:var(--shadow)}
+  .flow-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .flow-id{font-family:var(--mono);color:var(--accent);font-size:.78rem;letter-spacing:.08em;font-weight:600}
+  .flow p.about{color:var(--muted);font-size:.87rem;margin:6px 0 10px;max-width:92ch}
+  .diagram{overflow-x:auto;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  pre.mermaid{margin:0;background:transparent;display:flex;justify-content:center}
+
+  table{border-collapse:collapse;width:100%;font-size:.84rem}
+  th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px 8px;box-shadow:var(--shadow)}
+  .ok{color:var(--accent);font-weight:600} .no{color:var(--deny);font-weight:600}
+  .later{color:var(--planned);font-weight:600}
+</style>
+
+<main>
+<header class="page">
+  <div class="kicker">PRISM · implemented &amp; verified — commit f8bd171</div>
+  <h1>RBAC — Final Architecture &amp; Call Flows</h1>
+  <div class="meta">
+    <span>Spec <b>ATLAS_RBAC_v3.1.xlsx</b></span>
+    <span>Shape <b>Gateway + Access service + Register</b></span>
+    <span>Tests <b>77 passing — incl. 7 e2e on the real 3-service stack (CF1–CF7)</b></span>
+  </div>
+  <div class="rule">
+    <b>Three services, three jobs:</b><br>
+    · <b>ACCESS</b> owns the facts — users, roles, access-matrix <i>tables</i>, editable by Admin only, no deploy needed.<br>
+    · <b>GATEWAY</b> (REST-API service) decides <b>binary</b> (NONE / FULL) in-process from <i>cached</i> facts — and hosts future client-specific logic.<br>
+    · <b>REGISTER</b> decides <b>SCOPED</b> next to the data, re-verifies binary, and runs the operation — the final authority.
+  </div>
+</header>
+
+<!-- ============ 01 ARCHITECTURE ============ -->
+<section>
+  <div class="secno">01 · Architecture</div>
+  <h2>The request path, top to bottom</h2>
+  <p class="lede">
+    The Access service sits <i>beside</i> the request path, not on it — the gateway pulls facts
+    from it and caches them (refreshed by TTL or on change), so no request ever waits on a
+    "may&nbsp;I?" network call. Only the scoped question travels to the data, because only the
+    data can answer it.
+  </p>
+
+  <div class="layer">
+    <div class="layer-title"><span>Clients</span></div>
+    <div class="boxes">
+      <div class="box"><div class="t">ATLAS UI</div><div class="d">renders menu/buttons from /v1/me — cosmetic; server re-decides everything</div></div>
+      <div class="box"><div class="t">VOX · workers · importers</div><div class="d">API key; forward X-User-Email when acting for a user</div></div>
+    </div>
+  </div>
+  <div class="conn">▼ <span class="lbl">HTTPS · X-API-Key · X-Tenant · X-User-Email</span></div>
+
+  <div class="layer">
+    <div class="layer-title"><span>Edge — NGINX</span><span class="tag">authentication &amp; hygiene</span></div>
+    <div class="boxes">
+      <div class="box"><div class="t">TLS · rate-limit · correlation-id · routing to the gateway</div><div class="d">never the authorization authority</div></div>
+    </div>
+  </div>
+  <div class="conn">▼</div>
+
+  <div class="layer">
+    <div class="layer-title"><span>services/gateway — REST-API service (NEW)</span><span class="tag">the TOP layer + future client logic</span></div>
+    <div class="boxes">
+      <div class="box"><div class="t">① Binary gate — in-process</div><div class="d">route → operation · matrix lookup on cached roles · NONE → 403 HERE (never reaches data) · FULL/SCOPED → forward with X-User-Email + X-User-Roles</div></div>
+      <div class="box"><div class="t">Facts cache</div><div class="d">roles + compiled matrix from ACCESS /resolve · TTL ~60s + version-bump invalidation · gateway keeps serving on last-known-good if ACCESS is briefly down</div></div>
+      <div class="box future"><div class="t">Client-specific logic (future)</div><div class="d">per-client shaping · response composition across services · API versioning · feature flags — isolated HERE so core services never fork per client</div></div>
+    </div>
+  </div>
+  <div class="conn">◄──► <span class="lbl">fetch + cache (TTL / on-change) — NOT per request</span></div>
+
+  <div class="layer aside">
+    <div class="layer-title"><span>services/access — User-Management &amp; Access service (NEW)</span><span class="tag">the facts, Admin-governed</span></div>
+    <div class="boxes">
+      <div class="box aside"><div class="t">users · user_roles</div><div class="d">Employees governance — @evamfinance.com enforced, active flag, reports_to · role stacking</div></div>
+      <div class="box aside"><div class="t">access matrix — TABLES</div><div class="d">view-access + operations grants as DATA · editable by Admin-role users only, live in seconds, no deploy · every change audited · seeded from ATLAS_RBAC_v3.1</div></div>
+      <div class="box aside"><div class="t">Guardrails</div><div class="d">a few cells immutable even to Admin (delete_row = Admin-only · audit/activity-log = Admin-only) — a mis-click can't disable the spec's hard rules</div></div>
+      <div class="box aside"><div class="t">/resolve</div><div class="d">user → roles + compiled matrix + version, for the gateway's cache · /v1/users /roles /access for governance UIs</div></div>
+    </div>
+  </div>
+  <div class="conn">▼ <span class="lbl">only FULL / SCOPED requests ever arrive here</span></div>
+
+  <div class="layer">
+    <div class="layer-title"><span>services/register — the data owner</span><span class="tag">final authority</span></div>
+    <div class="boxes">
+      <div class="box"><div class="t">② Re-verify binary</div><div class="d">one dict lookup on the forwarded roles — defense in depth: an internal caller that bypasses the gateway hits the same wall</div></div>
+      <div class="box"><div class="t">③ SCOPED check</div><div class="d">one indexed query on line_assignments — "assigned to THIS line?" · unassigned line defaults to its vertical Head</div></div>
+      <div class="box"><div class="t">④ The operation</div><div class="d">same transaction — optimistic locking · stage history · audit_log</div></div>
+      <div class="box"><div class="t">line_assignments · change_requests</div><div class="d">stay HERE: assignments are deal-scoped business records; approval applies the change atomically</div></div>
+    </div>
+  </div>
+  <div class="conn">▼</div>
+
+  <div class="layer">
+    <div class="layer-title"><span>Data plane — one PostgreSQL server · MinIO</span></div>
+    <div class="boxes">
+      <div class="box"><div class="t">db register · db access · db temporal ×2</div><div class="d">one server, a database per service — the platform layout</div></div>
+      <div class="box"><div class="t">MinIO / S3</div><div class="d">document bytes (Data Register)</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 LADDER ============ -->
+<section>
+  <div class="secno">02 · The decision ladder</div>
+  <h2>Every request resolves in at most two steps</h2>
+  <div class="ladder">
+    <div class="rung none">
+      <div class="sym">NONE → 403</div>
+      <div class="where">decided at the GATEWAY · no data touched</div>
+      <p>BDRM calls <code>reassign lead</code> · Management calls <code>delete</code>. Cached matrix settles it in-process — the request never crosses into the data plane.</p>
+    </div>
+    <div class="rung full">
+      <div class="sym">FULL → pass</div>
+      <div class="where">decided at the GATEWAY · Register re-verifies</div>
+      <p>Credit Head edits any lending line. Gateway forwards with role headers; Register's re-check is a dict lookup, then the operation runs.</p>
+    </div>
+    <div class="rung scoped">
+      <div class="sym">SCOPED → ask the data</div>
+      <div class="where">decided at the REGISTER, next to the row</div>
+      <p>Deal Analyst edits a syndication line — allowed only if an active <code>line_assignments</code> row ties them to that line. Revoked the moment the assignment ends.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 CALL FLOWS ============ -->
+<section>
+  <div class="secno">03 · Call flows</div>
+  <h2>Eight flows cover every case</h2>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF1</span><h3>First request of a session — facts get cached, menu renders</h3></div>
+    <p class="about">The only time the Access service is on the path — and only until the cache is warm. Afterwards, thousands of requests decide from memory.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as ATLAS UI
+  participant G as Gateway
+  participant AC as Access service
+  participant R as Register
+  U->>G: GET /v1/me  (X-User-Email)
+  G->>AC: /resolve?user=… (cache miss)
+  AC-->>G: roles + compiled matrix + version → cached (TTL ~60s)
+  G->>R: forward with X-User-Roles
+  R-->>U: views{} · operations{} · active assignments[]
+  Note over U: menu & buttons drawn from this — cosmetic only
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF2</span><h3>Binary DENY — stopped at the gateway</h3></div>
+    <p class="about">Spec: “Delete a row — Admin ONLY.” Management is denied at the gate from cache — zero network calls, the Register never sees the request.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant M as Management user
+  participant G as Gateway
+  participant R as Register
+  M->>G: DELETE /v1/entities/{id}
+  G->>G: cache: matrix[delete_row][Management] = NONE
+  G-->>M: 403 forbidden (RFC-9457)
+  Note over R: never reached
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF3</span><h3>Binary ALLOW — FULL access, straight through</h3></div>
+    <p class="about">Gateway decides FULL from cache and forwards; the Register's re-verify is one dict lookup, then the write runs with locking + history + audit in one transaction.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Credit Head
+  participant G as Gateway
+  participant R as Register
+  participant P as PostgreSQL
+  C->>G: PATCH /v1/lending/{id} (If-Match: v)
+  G->>G: cache: matrix[edit_lending_line][Credit Head] = FULL
+  G->>R: forward + X-User-Email, X-User-Roles
+  R->>R: re-verify binary (dict lookup) ✓
+  R->>P: optimistic-lock update · history · audit — one txn
+  R-->>C: 200 + new ETag
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF4</span><h3>SCOPED — the Register answers the residual question</h3></div>
+    <p class="about">The assignment-driven primitive. Same user, same operation: assigned line → 200, any other line → 403. Ending the assignment revokes instantly.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Deal Analyst
+  participant G as Gateway
+  participant R as Register
+  participant P as PostgreSQL
+  A->>G: PATCH /v1/syndication/{lineX}
+  G->>G: cache: SCOPED → forward, flag scope
+  G->>R: forward + role headers
+  R->>P: SELECT 1 FROM line_assignments WHERE user, Syndication, lineX, active
+  alt assigned to lineX
+    R->>P: apply update · history · audit
+    R-->>A: 200
+  else not assigned
+    R-->>A: 403 — not your line
+  end
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF5</span><h3>Admin edits access — live in seconds, no deploy</h3></div>
+    <p class="about">Why the matrix is tables, not code: an Admin-role user changes a grant in the Access service; the version bump invalidates gateway caches. Guardrail cells refuse the edit.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Ad as Admin user
+  participant AC as Access service
+  participant G as Gateway
+  Ad->>AC: PATCH /v1/access {operation, role, grant}
+  AC->>AC: Admin-only check · guardrail check (immutable cells refuse) · audit the change
+  AC-->>Ad: 200 · matrix version++
+  G->>AC: next /resolve (TTL expiry or version poke)
+  AC-->>G: new matrix → cache refreshed
+  Note over G: new rules enforced platform-wide within seconds
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF6</span><h3>Request → approve — routed to the right vertical, applied atomically</h3></div>
+    <p class="about">Stays in the Register: approval must apply the stage change, append history and audit in ONE transaction with the tracker row.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant An as Deal Analyst
+  participant R as Register (via gateway)
+  participant AH as AM Head (wrong vertical)
+  participant CH as Credit Head (right vertical)
+  An->>R: POST /v1/requests {Lending line, stage → "Note Circulated"}
+  R-->>An: 201 Pending (from_value stamped)
+  AH->>R: POST /v1/requests/{id}/approve
+  R-->>AH: 403 — AM Head may not decide Lending
+  CH->>R: POST /v1/requests/{id}/approve
+  R->>R: apply stage · history {from,to,at,by} · audit — one txn
+  R-->>CH: 200 Approved · re-decide later → 409
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF7</span><h3>Bypass attempt — why the Register re-verifies</h3></div>
+    <p class="about">An internal caller (worker, script, misrouted service) reaches the Register without passing the gateway. Defense in depth catches it — the vault defends itself.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W as Internal caller (skips gateway)
+  participant R as Register
+  W->>R: DELETE /v1/deals/{id}  (X-User-Email: mgmt@…)
+  R->>R: re-verify: matrix[delete_row][Management] = NONE
+  R-->>W: 403 — same wall, different door
+  Note over R: no user header → REGISTER_ENFORCE_RBAC governs (trusted-system mode off/on)
+    </pre></div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-head"><span class="flow-id">CF8</span><h3>Future — client-specific logic lives in the gateway only</h3></div>
+    <p class="about">The reason the REST-API service exists as its own deployable: per-client adaptations land here and nowhere else. Core services never fork per client.</p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Client X UI
+  participant G as Gateway
+  participant R as Register
+  participant CI as CIPHER (future)
+  U->>G: GET /v1/clients-x/deal-summary/{id}
+  G->>G: binary gate ✓ · client-X shaping rules
+  par compose
+    G->>R: GET /v1/entities/{id}/dossier
+    G->>CI: GET /v1/spreads/{id}
+  end
+  G->>G: merge + shape per client X's contract
+  G-->>U: one tailored response — Register & CIPHER unchanged
+    </pre></div>
+  </div>
+</section>
+
+<!-- ============ 04 PLACEMENT ============ -->
+<section>
+  <div class="secno">04 · What lives where — the firm split</div>
+  <h2>Ownership &amp; placement</h2>
+  <div class="tbl-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Concern</th><th>Owner</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><code>users</code> · <code>user_roles</code> · access-matrix tables + governance APIs</td><td><span class="later">ACCESS service</span> (own db on the shared Postgres)</td><td>Your requirement: roles &amp; access are Admin-managed DATA — one governance point, changes live without deploys</td></tr>
+        <tr><td>Binary check (NONE / FULL)</td><td><span class="ok">GATEWAY</span>, in-process from cache</td><td>Fail fast; no hot-path network call; one place for all services</td></tr>
+        <tr><td><code>line_assignments</code> · <code>change_requests</code> · SCOPED check · approval-applies-change</td><td><span class="ok">REGISTER</span></td><td>Scoped needs the data; approval must be atomic with the tracker row</td></tr>
+        <tr><td>Binary re-verify (defense in depth)</td><td><span class="ok">REGISTER</span></td><td>Bypass protection — one dict lookup, effectively free</td></tr>
+        <tr><td>Client-specific logic (future)</td><td><span class="ok">GATEWAY</span> only</td><td>Per-client change without touching any other microservice</td></tr>
+        <tr><td>Truth rules (validity, ownership, the spec's hard rules)</td><td><span class="ok">Core services</span>, never the gateway</td><td>The discipline that keeps one source of truth</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 05 BUILD PLAN ============ -->
+<section>
+  <div class="secno">05 · Implementation status — all five increments delivered</div>
+  <h2>What shipped (commit f8bd171)</h2>
+  <div class="tbl-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>#</th><th>Increment</th><th>Delivered</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>services/access</b></td><td><b>Shipped.</b> <code>services/access</code>: users/roles + access-matrix tables seeded from the spec (now the shared artifact <code>evam_backend_core.rbac</code>), guardrails, Admin-only writes, version-bumped edits, <code>/v1/resolve</code>. Own <code>access</code> db on the shared Postgres.</td></tr>
+        <tr><td>2</td><td><b>services/gateway</b></td><td><b>Shipped.</b> <code>services/gateway</code>: route→operation map, cached binary gate, identity headers stamped with the shared secret, composed <code>/v1/me</code>. Stateless; last-known-good cache on Access outage.</td></tr>
+        <tr><td>3</td><td><b>Register rewire</b></td><td><b>Shipped.</b> Migration <code>0004</code> moves identity out; gateway-verified headers in (spoofing rejected); scoped writes on the 5 line resources require an active assignment; scoped list access filters to assigned lines; delete stays Admin-only.</td></tr>
+        <tr><td>4</td><td><b>Deploy</b></td><td><b>Shipped.</b> Compose runs 9 services (NGINX → gateway → register); Helm has 7 subcharts incl. <code>prism-access</code> / <code>prism-gateway</code>; <code>postgresql.extraDatabases: [access]</code>; CI covers all four Python services.</td></tr>
+        <tr><td>5</td><td><b>Tests end-to-end</b></td><td><b>Shipped.</b> CF1–CF7 as e2e tests against the real three-service stack (real uvicorn servers, real Postgres, real migrations + seeds).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="lede" style="margin-top:14px">
+    Every flow on this page is covered by an end-to-end test that runs the REAL stack —
+    Register + Access as live servers on real PostgreSQL, the Gateway in front: gateway deny
+    (CF2), full pass-through (CF3), scoped grant→write→revoke (CF4), <b>admin matrix edit live
+    with no deploy</b> (CF5), machine caller (CF6), and the spoofed-identity bypass wall (CF7).
+    Suite: Register 65 + Access 5 + Gateway e2e 7 = <b>77 passing</b>; mypy + ruff clean.
+  </p>
+</section>
+</main>
