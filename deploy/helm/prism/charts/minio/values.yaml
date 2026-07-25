@@ -1,0 +1,53 @@
+# MinIO — S3-compatible object storage for PRISM document bytes.
+# Dev/staging single-Deployment server. For production use a managed S3 or the MinIO
+# operator, and point register.storage.s3.* at it (set minio.enabled=false).
+
+image:
+  repository: minio/minio
+  tag: "RELEASE.2025-04-22T22-12-26Z"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Root credentials. Provide via an existing secret in production (keys: root-user,
+# root-password); otherwise these values are rendered into a chart-managed secret.
+auth:
+  existingSecret: ""
+  rootUser: prism
+  rootPassword: prism-secret
+
+service:
+  type: ClusterIP
+  apiPort: 9000
+  consolePort: 9001
+
+# Web console (management UI). Off by default; enable for a dev cluster.
+console:
+  enabled: false
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  fsGroup: 1000
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

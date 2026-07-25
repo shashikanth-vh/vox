@@ -2,6 +2,7 @@
 #   from repo root:   docker compose -f deploy/compose/docker-compose.yml up --build
 #   or:               cd deploy/compose && docker compose up --build
 # Edge (through NGINX): http://localhost:8080   ·   Register direct (dev): http://localhost:8000
+# Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
 # Load data on demand afterwards (see the register service's command comment below).
 # The build context is the repo root (../..) so the image can bundle the shared
@@ -26,6 +27,26 @@ services:
     # Cap connections so pool_size * replicas stays well under the ceiling.
     command: ["postgres", "-c", "max_connections=200"]
 
+  # Object storage for document bytes (S3-compatible). The Register stores references;
+  # the actual PDFs/XLSX land here. Console UI: http://localhost:9001 (prism / prism-secret).
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: prism
+      MINIO_ROOT_PASSWORD: prism-secret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   register:
     build:
       # Context is the repo root so the build can install the shared
@@ -34,6 +55,8 @@ services:
       dockerfile: services/register/Dockerfile
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     environment:
       REGISTER_ENVIRONMENT: dev
@@ -46,6 +69,15 @@ services:
       REGISTER_WEB_CONCURRENCY: "4"
       REGISTER_DB_POOL_SIZE: "20"
       REGISTER_LOG_JSON: "true"
+      # Object storage — put document bytes in MinIO (the Register auto-creates the bucket).
+      REGISTER_STORAGE_BACKEND: "s3"
+      REGISTER_S3_ENDPOINT_URL: "http://minio:9000"
+      REGISTER_S3_PUBLIC_ENDPOINT_URL: "http://localhost:9000"  # browser-reachable for presigned URLs
+      REGISTER_S3_BUCKET: "prism-documents"
+      REGISTER_S3_ACCESS_KEY_ID: "prism"
+      REGISTER_S3_SECRET_ACCESS_KEY: "prism-secret"
+      REGISTER_S3_USE_SSL: "false"
+      REGISTER_S3_PATH_STYLE: "true"
     # Migrate, provision the tenant + reference dropdowns (NO business data), then serve.
     # This is "start fresh, but usable" — the API works immediately, the DB has no leads/
     # deals/entities. Use "migrate-serve" for a truly bare DB (you must then create a tenant
@@ -74,3 +106,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

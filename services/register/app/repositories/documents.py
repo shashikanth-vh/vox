@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -25,6 +26,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import storage as storage_mod
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
 from app.models import Document, DocumentChecklistItem
@@ -103,6 +105,67 @@ async def register_document(
 
     _resolve_bytes(data)
     return await _repo.create(session, tenant_id, actor, data)
+
+
+def _object_key(
+    tenant_id: uuid.UUID, subject_type: str, subject_id: uuid.UUID, filename: str | None
+) -> str:
+    """A collision-free, path-like object key: tenant/subject/uuid-safeName."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", (filename or "file")).strip("._") or "file"
+    return f"{tenant_id}/{subject_type}/{subject_id}/{uuid.uuid4().hex}-{safe}"
+
+
+async def store_and_register(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    actor: str,
+    *,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    data: bytes,
+    filename: str | None,
+    content_type: str | None,
+    slot_key: str | None = None,
+    section: str | None = None,
+    title: str | None = None,
+    doc_type: str | None = None,
+    is_required: bool = False,
+    status: str = "On File",
+    notes: str | None = None,
+) -> Document:
+    """Store uploaded bytes in the configured object store (or inline) and catalog them.
+
+    Validates the subject *before* uploading, so we never leave an orphan object in the
+    bucket for a subject that doesn't exist.
+    """
+    if subject_type not in SUBJECTS:
+        raise ValidationAppError(
+            f"Unknown subject_type '{subject_type}'. One of: {', '.join(SUBJECTS)}."
+        )
+    if await load_subject(session, tenant_id, subject_type, subject_id) is None:
+        raise NotFoundError(f"{subject_type} '{subject_id}' not found.")
+
+    payload: dict[str, Any] = {
+        "subject_type": subject_type, "subject_id": subject_id,
+        "section": section, "slot_key": slot_key, "doc_type": doc_type,
+        "title": title or filename or slot_key or "document",
+        "is_required": is_required, "status": status,
+        "content_type": content_type, "size_bytes": len(data),
+        "checksum": hashlib.sha256(data).hexdigest(),
+        "original_filename": filename, "notes": notes,
+    }
+
+    store = storage_mod.get_storage()
+    if store is not None:
+        key = _object_key(tenant_id, subject_type, subject_id, filename)
+        stored = await store.put(key, data, content_type)
+        payload["storage_uri"] = stored.uri
+        payload["storage_backend"] = stored.backend
+    else:
+        # No object store configured → inline fallback (bounded by the size ceiling).
+        payload["content_base64"] = base64.b64encode(data).decode()
+
+    return await register_document(session, tenant_id, actor, payload)
 
 
 async def data_register(

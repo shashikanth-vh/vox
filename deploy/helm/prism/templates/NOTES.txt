@@ -7,6 +7,12 @@ Components:
 {{- if .Values.register.enabled }}
   • Register (module)   → the source of truth; API + migrations (+ seed if enabled)
 {{- end }}
+{{- if .Values.minio.enabled }}
+  • MinIO (object store)→ service prism-minio:9000 (document bytes for the Data Register)
+  {{- if .Values.minio.console.enabled }}
+  • MinIO console       → service prism-minio:9001
+  {{- end }}
+{{- end }}
 {{- if .Values.temporal.enabled }}
   • Temporal (engine)   → service prism-temporal:7233 (the Workflows ring)
   {{- if .Values.temporal.ui.enabled }}

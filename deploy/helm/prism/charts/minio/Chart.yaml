@@ -1,0 +1,17 @@
+apiVersion: v2
+name: minio
+description: >-
+  MinIO for the PRISM Register — an S3-compatible object store that holds document BYTES
+  (the "Data Register" uploads). A dev/staging-grade single-Deployment server with a
+  PersistentVolume. For production, use a managed S3 (or the official MinIO operator) and
+  point `register.storage.s3.*` at it instead.
+type: application
+version: 0.1.0
+appVersion: "RELEASE.2025-04-22"
+keywords:
+  - prism
+  - minio
+  - s3
+  - documents
+maintainers:
+  - name: Evam Finance

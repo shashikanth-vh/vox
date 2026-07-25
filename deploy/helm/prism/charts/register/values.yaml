@@ -128,6 +128,27 @@ apiKeys:
   # Comma-separated. Overridden by existingSecret when set.
   value: "change-me-in-prod"
 
+# Object storage for document bytes (the Data Register). "inline" keeps small files in
+# Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled
+# MinIO, or a managed S3). The catalog rows are identical either way.
+storage:
+  backend: inline          # inline | s3
+  s3:
+    bucket: prism-documents
+    endpointUrl: ""        # e.g. http://prism-minio:9000 ; empty → real AWS S3
+    publicEndpointUrl: ""  # browser-reachable endpoint for presigned URLs (empty → endpointUrl)
+    region: us-east-1
+    useSsl: true
+    pathStyle: true        # MinIO needs path-style
+    presignExpirySeconds: 3600
+    autoCreateBucket: true
+    streamThroughApi: false
+    accessKeyId: ""
+    # Secret key: via an existing secret (preferred) OR inline `secretAccessKey`.
+    existingSecret: ""
+    existingSecretKey: s3-secret-access-key
+    secretAccessKey: ""
+
 livenessProbe:
   httpGet:
     path: /healthz

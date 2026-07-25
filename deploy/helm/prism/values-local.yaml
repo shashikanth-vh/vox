@@ -37,6 +37,29 @@ register:
   config:
     environment: dev
     logJson: false
+  # Document bytes → the bundled MinIO. publicEndpointUrl is what presigned URLs point at;
+  # port-forward MinIO to localhost:9000 to fetch documents:
+  #   kubectl -n prism port-forward svc/prism-minio 9000:9000
+  storage:
+    backend: s3
+    s3:
+      bucket: prism-documents
+      endpointUrl: http://prism-minio:9000
+      publicEndpointUrl: http://localhost:9000
+      useSsl: false
+      pathStyle: true
+      accessKeyId: prism
+      existingSecret: prism-minio-secret
+      existingSecretKey: root-password
+
+# Object storage — bundled MinIO with its console on for local inspection.
+minio:
+  enabled: true
+  console:
+    enabled: true
+  persistence:
+    enabled: true
+    size: 8Gi
 
 # Workflows ring — Temporal on the shared Postgres + the worker (build & load the image:
 #   docker build -f services/workflows/Dockerfile -t prism-workflows:0.1.0 .

@@ -13,10 +13,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import Depends, Query, Response
+from fastapi import Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, or_, select
 
+from app import storage as storage_mod
+from app.core.config import get_settings
 from app.core.errors import NotFoundError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -38,7 +40,7 @@ from app.models.trackers import (
     SyndicationTracker,
 )
 from app.repositories.crud import CRUDRepository
-from app.repositories.documents import data_register, register_document
+from app.repositories.documents import data_register, register_document, store_and_register
 from app.repositories.financials import create_version
 from app.repositories.interactions import create_interaction, timeline
 from app.schemas import resources as s
@@ -490,6 +492,34 @@ async def create_document(
     return s.DocumentRead.model_validate(obj)
 
 
+@router.post("/v1/documents/upload", response_model=s.DocumentRead, status_code=201,
+             tags=["Documents"],
+             summary="Upload a document file (bytes → object storage / inline)")
+async def upload_document(
+    response: Response,
+    file: UploadFile = File(...),
+    subject_type: str = Form(...),
+    subject_id: uuid.UUID = Form(...),
+    slot_key: str | None = Form(default=None),
+    section: str | None = Form(default=None),
+    title: str | None = Form(default=None),
+    doc_type: str | None = Form(default=None),
+    is_required: bool = Form(default=False),
+    status: str = Form(default="On File"),
+    notes: str | None = Form(default=None),
+    ctx: RequestContext = Depends(get_context),
+) -> Any:
+    obj = await store_and_register(
+        ctx.session, ctx.tenant_id, ctx.actor,
+        subject_type=subject_type, subject_id=subject_id, data=await file.read(),
+        filename=file.filename, content_type=file.content_type, slot_key=slot_key,
+        section=section, title=title, doc_type=doc_type, is_required=is_required,
+        status=status, notes=notes,
+    )
+    response.headers["ETag"] = f'"{obj.version}"'
+    return s.DocumentRead.model_validate(obj)
+
+
 def _document_routes(path_prefix: str, subject_type: str) -> None:
     """Register GET/POST /v1/<path_prefix>/{id}/documents and the data-register rollup."""
     label = subject_type.lower()
@@ -521,6 +551,30 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
         data["subject_type"] = subject_type  # path wins over body
         data["subject_id"] = subject_id
         obj = await register_document(ctx.session, ctx.tenant_id, ctx.actor, data)
+        response.headers["ETag"] = f'"{obj.version}"'
+        return s.DocumentRead.model_validate(obj)
+
+    @router.post(f"/v1/{path_prefix}/{{subject_id}}/documents/upload",
+                 response_model=s.DocumentRead, status_code=201, tags=["Documents"],
+                 summary=f"Upload a document file for a {label}",
+                 name=f"upload_document_{subject_type}")
+    async def _upload(subject_id: uuid.UUID, response: Response,
+                      file: UploadFile = File(...),
+                      slot_key: str | None = Form(default=None),
+                      section: str | None = Form(default=None),
+                      title: str | None = Form(default=None),
+                      doc_type: str | None = Form(default=None),
+                      is_required: bool = Form(default=False),
+                      status: str = Form(default="On File"),
+                      notes: str | None = Form(default=None),
+                      ctx: RequestContext = Depends(get_context)) -> Any:
+        obj = await store_and_register(
+            ctx.session, ctx.tenant_id, ctx.actor,
+            subject_type=subject_type, subject_id=subject_id, data=await file.read(),
+            filename=file.filename, content_type=file.content_type, slot_key=slot_key,
+            section=section, title=title, doc_type=doc_type, is_required=is_required,
+            status=status, notes=notes,
+        )
         response.headers["ETag"] = f'"{obj.version}"'
         return s.DocumentRead.model_validate(obj)
 
@@ -593,18 +647,30 @@ async def document_checklist_template(
 async def download_document(
     doc_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
 ) -> Any:
-    """Streams inline-stored bytes; redirects to an http(s) ``storage_uri``; otherwise
-    returns the object-storage reference for the caller to fetch (e.g. via a presigned
-    URL). Metadata-only records (no bytes on record) 404."""
+    """Streams inline-stored bytes; for object-storage-backed documents, redirects to a
+    freshly-signed URL (or streams through the API if configured); redirects to an http(s)
+    ``storage_uri``; otherwise returns the reference. Metadata-only records 404."""
     doc = await _document_repo.get(ctx.session, ctx.tenant_id, doc_id)
+    filename = doc.original_filename or doc.title
     if doc.inline_content is not None:
-        filename = doc.original_filename or doc.title
         return Response(
             content=doc.inline_content,
             media_type=doc.content_type or "application/octet-stream",
             headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
     if doc.storage_uri:
+        parsed = storage_mod.parse_s3_uri(doc.storage_uri)
+        store = storage_mod.get_storage()
+        if parsed and store is not None:
+            _bucket, key = parsed
+            if get_settings().s3_stream_through_api:
+                blob = await store.get(key)
+                return Response(
+                    content=blob,
+                    media_type=doc.content_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                )
+            return RedirectResponse(await store.presigned_get_url(key, filename=filename))
         if doc.storage_uri.startswith(("http://", "https://")):
             return RedirectResponse(doc.storage_uri)
         return {"storage_backend": doc.storage_backend, "storage_uri": doc.storage_uri,

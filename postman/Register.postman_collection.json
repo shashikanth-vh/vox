@@ -1101,6 +1101,130 @@
      }
     },
     {
+     "name": "POST /v1/documents/upload (multipart)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/documents/upload",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "documents",
+        "upload"
+       ]
+      },
+      "body": {
+       "mode": "formdata",
+       "formdata": [
+        {
+         "key": "file",
+         "type": "file",
+         "src": []
+        },
+        {
+         "key": "subject_type",
+         "value": "Lead",
+         "type": "text"
+        },
+        {
+         "key": "subject_id",
+         "value": "{{id}}",
+         "type": "text"
+        },
+        {
+         "key": "slot_key",
+         "value": "coi",
+         "type": "text"
+        },
+        {
+         "key": "section",
+         "value": "KYC & Constitutional",
+         "type": "text"
+        },
+        {
+         "key": "title",
+         "value": "Certificate of Incorporation",
+         "type": "text"
+        },
+        {
+         "key": "is_required",
+         "value": "true",
+         "type": "text"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "name": "POST /v1/leads/{subject_id}/documents/upload (multipart)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "X-API-Key",
+        "value": "{{apiKey}}"
+       },
+       {
+        "key": "X-Tenant",
+        "value": "{{tenant}}"
+       },
+       {
+        "key": "X-Actor",
+        "value": "{{actor}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/v1/leads/{{id}}/documents/upload",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "v1",
+        "leads",
+        "{{id}}",
+        "documents",
+        "upload"
+       ]
+      },
+      "body": {
+       "mode": "formdata",
+       "formdata": [
+        {
+         "key": "file",
+         "type": "file",
+         "src": []
+        },
+        {
+         "key": "slot_key",
+         "value": "company_pan",
+         "type": "text"
+        },
+        {
+         "key": "title",
+         "value": "Company PAN",
+         "type": "text"
+        }
+       ]
+      }
+     }
+    },
+    {
      "name": "GET /v1/documents",
      "request": {
       "method": "GET",

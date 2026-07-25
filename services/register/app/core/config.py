@@ -48,6 +48,36 @@ class Settings(BaseServiceSettings):
     # Mirrors the ATLAS "files up to 400 KB stay viewable" affordance.
     documents_inline_max_bytes: int = 400 * 1024
 
+    # ---- Object storage (S3 / MinIO) ------------------------------------
+    # Where document BYTES live. "inline" keeps small files in Postgres (dev default);
+    # "s3" uploads them to an S3-compatible store (AWS S3 or MinIO) and stores only the
+    # reference. The catalog row is identical either way.
+    storage_backend: str = "inline"  # inline | s3
+    s3_bucket: str = "prism-documents"
+    # MinIO / non-AWS endpoint, e.g. http://minio:9000. None → real AWS S3.
+    s3_endpoint_url: str | None = None
+    # Endpoint browsers should use for presigned URLs (when the in-cluster endpoint above
+    # isn't reachable from outside). Falls back to s3_endpoint_url.
+    s3_public_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_use_ssl: bool = True
+    s3_path_style: bool = True  # MinIO needs path-style addressing; AWS accepts it too
+    s3_presign_expiry_seconds: int = 3600
+    s3_auto_create_bucket: bool = True
+    # Stream bytes back through the API instead of redirecting to a presigned URL. Use when
+    # the object store isn't reachable by the client directly.
+    s3_stream_through_api: bool = False
+
+    @field_validator("storage_backend")
+    @classmethod
+    def _check_storage_backend(cls, v: str) -> str:
+        allowed = {"inline", "s3"}
+        if v not in allowed:
+            raise ValueError(f"storage_backend must be one of {allowed}, got '{v}'.")
+        return v
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def _split_api_keys(cls, v: object) -> object:

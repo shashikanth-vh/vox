@@ -21,7 +21,8 @@ dependencies = [
     "python-json-logger==3.2.1",
     "orjson==3.10.12",
     "openpyxl==3.1.5",           # Excel export/import (backup + MIS load)
-    "python-multipart==0.0.20",  # file uploads (xlsx import endpoint)
+    "python-multipart==0.0.20",  # file uploads (xlsx import + document upload)
+    "boto3==1.35.99",            # S3 / MinIO object storage for document bytes
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,7 @@ dev = [
     "httpx==0.28.1",
     "ruff==0.8.4",
     "mypy==1.14.0",
+    "moto[s3]==5.0.28",          # in-process S3 mock for the object-storage tests
 ]
 
 [build-system]
@@ -57,8 +59,9 @@ select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
 ignore = ["S101", "B008", "UP046", "S105"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests invoke the `alembic` CLI to build the real schema — partial path is fine.
-"tests/*" = ["S603", "S607"]
+# Tests invoke the `alembic` CLI to build the real schema — partial path is fine (S603/S607);
+# S105/S106 flag dummy object-storage credentials used with the in-process S3 mock.
+"tests/*" = ["S603", "S607", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -68,7 +71,7 @@ disallow_untyped_defs = false
 
 # Third-party libs without type stubs.
 [[tool.mypy.overrides]]
-module = ["openpyxl.*"]
+module = ["openpyxl.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 # The generic CRUD router builds routes with per-resource schema classes supplied as

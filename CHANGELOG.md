@@ -6,6 +6,22 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Object storage (S3 / MinIO) for document bytes.** The Register now *stores the bytes*,
+  not just references. New `app/storage/` backend (boto3; works with AWS S3 and MinIO —
+  same API, different endpoint), with blocking calls off the event loop.
+  - **Upload endpoints:** `POST /v1/documents/upload` and nested
+    `POST /v1/<subject>/{id}/documents/upload` (multipart) — the Register puts the bytes in
+    the bucket (auto-created) and catalogs the resulting `storage_uri`.
+  - **Download** (`GET /v1/documents/{id}/content`) redirects to a freshly-signed
+    **presigned URL** (or streams through the API when configured); inline small files
+    still stream directly.
+  - **Backend switch:** `REGISTER_STORAGE_BACKEND=inline|s3` (+ `REGISTER_S3_*`); inline
+    stays the dev default so nothing external is required.
+  - **Deploy:** MinIO added to Docker Compose (console :9001) and as a vendored Helm
+    subchart (`charts/minio`, PVC-backed); the Register subchart gains `storage.s3.*` and
+    wires the secret. Production points `register.storage.s3.*` at a managed S3.
+  - Verified with an in-process S3 mock (moto): put/get/presign/delete, bucket auto-create,
+    and the full upload→catalog→presigned-download path (6 new tests).
 - **Documents & the ATLAS "Data Register".** The catalog + checklist behind ATLAS's
   Data Register modal (17 required documents across 6 sections). Two new tables:
   - `documents` — one row per document on file: a **reference** (`storage_uri` into

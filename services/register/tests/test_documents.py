@@ -129,6 +129,22 @@ async def test_inline_over_limit_rejected(client: AsyncClient):
     assert "object storage" in r.text.lower()
 
 
+async def test_upload_inline_fallback(client: AsyncClient):
+    """With no object store configured (the dev default), a small file upload is kept
+    inline and is downloadable through the API."""
+    lead_id = (await client.post("/v1/leads", json={"company": "Inline"})).json()["id"]
+    blob = b"small inline pdf"
+    r = await client.post(f"/v1/leads/{lead_id}/documents/upload",
+                          files={"file": ("note.pdf", blob, "application/pdf")},
+                          data={"slot_key": "coi", "title": "COI"})
+    assert r.status_code == 201, r.text
+    doc = r.json()
+    assert doc["storage_backend"] == "inline"
+    assert doc["size_bytes"] == len(blob) and doc["checksum"]
+    dl = await client.get(f"/v1/documents/{doc['id']}/content")
+    assert dl.status_code == 200 and dl.content == blob
+
+
 async def test_documents_filter_by_subject(client: AsyncClient):
     eid = await _entity(client, "FILT")
     await client.post(f"/v1/entities/{eid}/documents", json={

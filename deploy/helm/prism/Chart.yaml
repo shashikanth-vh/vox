@@ -19,6 +19,9 @@ dependencies:
   - name: register
     version: "0.1.0"
     condition: register.enabled
+  - name: minio
+    version: "0.1.0"
+    condition: minio.enabled
   - name: temporal
     version: "0.1.0"
     condition: temporal.enabled

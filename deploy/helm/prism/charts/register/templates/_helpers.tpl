@@ -125,4 +125,41 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ include "register.secretName" . }}
       key: api-keys
       {{- end }}
+# Object storage (document bytes) — only wired when the backend is "s3".
+- name: REGISTER_STORAGE_BACKEND
+  value: {{ .Values.storage.backend | quote }}
+{{- if eq .Values.storage.backend "s3" }}
+{{- with .Values.storage.s3 }}
+- name: REGISTER_S3_BUCKET
+  value: {{ .bucket | quote }}
+- name: REGISTER_S3_ENDPOINT_URL
+  value: {{ .endpointUrl | quote }}
+- name: REGISTER_S3_PUBLIC_ENDPOINT_URL
+  value: {{ .publicEndpointUrl | quote }}
+- name: REGISTER_S3_REGION
+  value: {{ .region | quote }}
+- name: REGISTER_S3_USE_SSL
+  value: {{ .useSsl | quote }}
+- name: REGISTER_S3_PATH_STYLE
+  value: {{ .pathStyle | quote }}
+- name: REGISTER_S3_PRESIGN_EXPIRY_SECONDS
+  value: {{ .presignExpirySeconds | quote }}
+- name: REGISTER_S3_AUTO_CREATE_BUCKET
+  value: {{ .autoCreateBucket | quote }}
+- name: REGISTER_S3_STREAM_THROUGH_API
+  value: {{ .streamThroughApi | quote }}
+- name: REGISTER_S3_ACCESS_KEY_ID
+  value: {{ .accessKeyId | quote }}
+- name: REGISTER_S3_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      {{- if .existingSecret }}
+      name: {{ .existingSecret }}
+      key: {{ .existingSecretKey }}
+      {{- else }}
+      name: {{ include "register.secretName" $ }}
+      key: s3-secret-access-key
+      {{- end }}
+{{- end }}
+{{- end }}
 {{- end -}}

@@ -9,7 +9,8 @@ deploy/helm/prism/
   values-local.yaml     one-command local stack (bundled DB + seeded Register)
   charts/
     postgresql/         SHARED PRISM database — service `prism-postgresql`
-    register/           the Register module — connects via database.*
+    register/           the Register module — connects via database.* and storage.*
+    minio/              S3-compatible object store — service `prism-minio:9000` (doc bytes)
     temporal/           Temporal engine (Workflows ring) — service `prism-temporal:7233`
     workflows/          the PRISM worker — activities write the Register via the SDK
     (cipher/ pulse/ vox/ atlas/  ← added here as they are built)
@@ -26,7 +27,10 @@ annotations) — the NGINX role is played by your ingress controller.
 The one architectural decision this encodes: **PostgreSQL is a shared platform service,
 not owned by any module.** The `postgresql` subchart runs one database that every module
 connects to; each module gets its own database on that server
-(`postgresql.extraDatabases`).
+(`postgresql.extraDatabases`). The same holds for **object storage**: `minio` is a shared
+S3-compatible store for document/attachment bytes; the Register keeps only references.
+For production, disable it (`--set minio.enabled=false`) and point
+`register.storage.s3.*` at a managed S3 (or set `register.storage.backend=inline`).
 
 Subcharts are vendored under `charts/`, so there is **no `helm dependency build`** step
 and no external registry — air-gap / localise-everything friendly.
