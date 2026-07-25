@@ -39,6 +39,11 @@ bundle, or just check that the newest item below is present in your copy).
     percent-complete — exactly what the modal renders); `GET /v1/document-checklist/template`;
     `GET /v1/documents/{id}/content` (streams inline bytes / redirects to an http(s)
     reference); plus generic CRUD for both tables.
+  - **Company-wide (entity-scoped) access.** Documents are shared across ALL of a company's
+    records: upload the COI once against the lead and it shows on the Data Register for the
+    deal, the lending tracker, the syndication and the entity alike (the read side keys off
+    the denormalised `entity_id`, like interactions). `?scope=subject` narrows to only what
+    was attached to that exact record; `scope=auto` (default) is the company-wide view.
   - Migration `0002_documents` (reversible); shared polymorphic-subject resolver extracted
     to `app/repositories/subjects.py` (interactions + documents use one definition).
 - **ATLAS MIS xlsx importer.** Load the authoritative 6-sheet MIS spreadsheet into the

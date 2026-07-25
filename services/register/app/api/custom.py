@@ -40,7 +40,12 @@ from app.models.trackers import (
     SyndicationTracker,
 )
 from app.repositories.crud import CRUDRepository
-from app.repositories.documents import data_register, register_document, store_and_register
+from app.repositories.documents import (
+    data_register,
+    documents_for_subject,
+    register_document,
+    store_and_register,
+)
 from app.repositories.financials import create_version
 from app.repositories.interactions import create_interaction, timeline
 from app.schemas import resources as s
@@ -526,20 +531,17 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
 
     @router.get(f"/v1/{path_prefix}/{{subject_id}}/documents",
                 response_model=list[s.DocumentRead], tags=["Documents"],
-                summary=f"Documents on file for a {label}", name=f"documents_{subject_type}")
+                summary=f"Documents on file for a {label} (company-wide by default)",
+                name=f"documents_{subject_type}")
     async def _get(subject_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
-                   limit: int = Query(default=200, ge=1, le=1000)) -> Any:
-        rows = (
-            await ctx.session.execute(
-                select(Document)
-                .where(Document.tenant_id == ctx.tenant_id,
-                       Document.subject_type == subject_type,
-                       Document.subject_id == subject_id,
-                       Document.deleted_at.is_(None))
-                .order_by(Document.uploaded_at.desc().nullslast(), Document.created_at.desc())
-                .limit(limit)
-            )
-        ).scalars().all()
+                   limit: int = Query(default=200, ge=1, le=1000),
+                   scope: str = Query(default="auto",
+                                      description="'auto'/'entity' = all of the company's "
+                                                  "documents; 'subject' = only this record's")
+                   ) -> Any:
+        rows = await documents_for_subject(
+            ctx.session, ctx.tenant_id, subject_type, subject_id, scope=scope, limit=limit
+        )
         return [s.DocumentRead.model_validate(r) for r in rows]
 
     @router.post(f"/v1/{path_prefix}/{{subject_id}}/documents",
@@ -582,8 +584,13 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
                 summary=f"Data Register (checklist + progress) for a {label}",
                 name=f"data_register_{subject_type}")
     async def _rollup(subject_id: uuid.UUID,
-                      ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
-        return await data_register(ctx.session, ctx.tenant_id, subject_type, subject_id)
+                      ctx: RequestContext = Depends(get_context),
+                      scope: str = Query(default="auto",
+                                         description="'auto'/'entity' = the company's whole "
+                                                     "document set; 'subject' = only this record")
+                      ) -> dict[str, Any]:
+        return await data_register(ctx.session, ctx.tenant_id, subject_type, subject_id,
+                                   scope=scope)
 
 
 # Nested document + data-register routes for every subject type (matches ATLAS refType).

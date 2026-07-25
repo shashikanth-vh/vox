@@ -168,22 +168,95 @@ async def store_and_register(
     return await register_document(session, tenant_id, actor, payload)
 
 
+# --------------------------------------------------------------------------- #
+# Access scope — a company's documents are shared across all its records
+# --------------------------------------------------------------------------- #
+async def _resolve_scope(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    scope: str,
+    verify_subject: bool,
+) -> tuple[bool, uuid.UUID | None, Any]:
+    """Work out whether to read documents company-wide (by entity) or for this one record.
+
+    Returns ``(use_entity, entity_id, subject)``. ``use_entity`` is True when the record
+    resolves to a company and the caller didn't force ``scope="subject"``.
+    """
+    if subject_type not in SUBJECTS:
+        raise ValidationAppError(
+            f"Unknown subject_type '{subject_type}'. One of: {', '.join(SUBJECTS)}."
+        )
+    subject = await load_subject(session, tenant_id, subject_type, subject_id)
+    if verify_subject and subject is None:
+        raise NotFoundError(f"{subject_type} '{subject_id}' not found.")
+    entity_id = derive_links(subject_type, subject)[0] if subject is not None else None
+    use_entity = scope != "subject" and entity_id is not None
+    return use_entity, entity_id, subject
+
+
+def _doc_scope_conditions(
+    use_entity: bool, entity_id: uuid.UUID | None, subject_type: str, subject_id: uuid.UUID
+) -> list[Any]:
+    """WHERE conditions selecting a company's documents (entity scope) or one record's."""
+    if use_entity:
+        return [Document.entity_id == entity_id]
+    return [Document.subject_type == subject_type, Document.subject_id == subject_id]
+
+
+async def documents_for_subject(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    subject_type: str,
+    subject_id: uuid.UUID,
+    *,
+    scope: str = "auto",
+    limit: int = 200,
+) -> list[Document]:
+    """The documents visible from a record — company-wide by default (see ``data_register``)."""
+    use_entity, entity_id, _ = await _resolve_scope(
+        session, tenant_id, subject_type, subject_id, scope, verify_subject=True
+    )
+    rows = (
+        await session.execute(
+            select(Document)
+            .where(
+                Document.tenant_id == tenant_id,
+                Document.deleted_at.is_(None),
+                *_doc_scope_conditions(use_entity, entity_id, subject_type, subject_id),
+            )
+            .order_by(Document.uploaded_at.desc().nullslast(), Document.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return list(rows)
+
+
 async def data_register(
     session: AsyncSession,
     tenant_id: uuid.UUID,
     subject_type: str,
     subject_id: uuid.UUID,
     *,
+    scope: str = "auto",
     verify_subject: bool = True,
 ) -> dict[str, Any]:
     """The ATLAS "Data Register" view for one subject: checklist template joined with the
-    documents on file, grouped into sections with per-section and overall progress."""
-    if subject_type not in SUBJECTS:
-        raise ValidationAppError(
-            f"Unknown subject_type '{subject_type}'. One of: {', '.join(SUBJECTS)}."
-        )
-    if verify_subject and await load_subject(session, tenant_id, subject_type, subject_id) is None:
-        raise NotFoundError(f"{subject_type} '{subject_id}' not found.")
+    documents on file, grouped into sections with per-section and overall progress.
+
+    ``scope`` controls which documents count:
+    * ``"auto"`` (default) / ``"entity"`` — every document for the *company* this record
+      belongs to, no matter which record (lead / deal / lending / syndication / …) it was
+      uploaded against. Upload the COI once against the lead, and it shows here for the
+      deal, the lending tracker and the entity alike.
+    * ``"subject"`` — only documents attached to this exact record.
+    Records with no entity (an unlinked lead, a counterparty) always fall back to subject
+    scope.
+    """
+    use_entity, entity_id, _ = await _resolve_scope(
+        session, tenant_id, subject_type, subject_id, scope, verify_subject
+    )
 
     items = (
         await session.execute(
@@ -211,9 +284,8 @@ async def data_register(
             select(Document)
             .where(
                 Document.tenant_id == tenant_id,
-                Document.subject_type == subject_type,
-                Document.subject_id == subject_id,
                 Document.deleted_at.is_(None),
+                *_doc_scope_conditions(use_entity, entity_id, subject_type, subject_id),
             )
             .order_by(Document.uploaded_at.desc().nullslast(), Document.created_at.desc())
         )
@@ -270,6 +342,8 @@ async def data_register(
     return {
         "subject_type": subject_type,
         "subject_id": str(subject_id),
+        "scope": "entity" if use_entity else "subject",
+        "entity_id": str(entity_id) if entity_id else None,
         "required_total": req_total,
         "required_on_file": req_on_file,
         "percent_complete": percent,

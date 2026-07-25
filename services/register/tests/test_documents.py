@@ -129,6 +129,42 @@ async def test_inline_over_limit_rejected(client: AsyncClient):
     assert "object storage" in r.text.lower()
 
 
+async def test_documents_shared_across_a_companys_records(client: AsyncClient):
+    """A document uploaded against ANY of a company's records (lead/deal/lending/…) is
+    visible from ALL of them — the entity-scoped access the Data Register needs."""
+    await _seed_checklist(client)
+    eid = await _entity(client, "SHARED")
+    lead_id = (await client.post("/v1/leads",
+                                 json={"company": "Shared Co", "entity_id": eid})).json()["id"]
+    deal_id = (await client.post("/v1/deals",
+                                 json={"entity_id": eid, "code": "SHARED"})).json()["id"]
+    lend_id = (await client.post("/v1/lending", json={"entity_id": eid})).json()["id"]
+
+    # Upload the COI once — against the LEAD.
+    r = await client.post(f"/v1/leads/{lead_id}/documents", json={
+        "slot_key": "coi", "title": "COI", "storage_uri": "https://x/coi.pdf"})
+    assert r.status_code == 201 and r.json()["entity_id"] == eid
+
+    # It shows on the Data Register from the deal, the lending tracker and the entity.
+    for path, sid in [("deals", deal_id), ("lending", lend_id), ("entities", eid),
+                      ("leads", lead_id)]:
+        body = (await client.get(f"/v1/{path}/{sid}/data-register")).json()
+        assert body["scope"] == "entity" and body["entity_id"] == eid
+        coi = next(i for sec in body["sections"] for i in sec["items"]
+                   if i["slot_key"] == "coi")
+        assert coi["on_file"] is True, f"COI not visible from {path}"
+        assert body["required_on_file"] == 1
+
+    # The nested list is company-wide too (1 doc from the deal's view)…
+    assert len((await client.get(f"/v1/deals/{deal_id}/documents")).json()) == 1
+    # …but scope=subject narrows to only what was attached to that exact record (none).
+    assert len((await client.get(f"/v1/deals/{deal_id}/documents",
+                                 params={"scope": "subject"})).json()) == 0
+    narrowed = (await client.get(f"/v1/deals/{deal_id}/data-register",
+                                 params={"scope": "subject"})).json()
+    assert narrowed["scope"] == "subject" and narrowed["required_on_file"] == 0
+
+
 async def test_upload_inline_fallback(client: AsyncClient):
     """With no object store configured (the dev default), a small file upload is kept
     inline and is downloadable through the API."""
