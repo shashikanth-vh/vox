@@ -28,6 +28,19 @@ config:
   logLevel: INFO
   logJson: true
 
+# The Orchestrator API — same image, `python -m app.api`. The HTTP front door that
+# starts workflows with stable business ids, delivers approve/reject signals and
+# answers status queries. Disable if workflows are only started from code.
+api:
+  enabled: true
+  replicaCount: 1
+  # Empty = open (dev). ALWAYS set in production (comma-separated keys).
+  apiKeys: ""
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+
 serviceAccount:
   create: true
   name: ""

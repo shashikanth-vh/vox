@@ -1,25 +1,29 @@
+{{- if .Values.api.enabled }}
+# The Orchestrator API — the workflow plane's HTTP front door (same image as the
+# worker, `python -m app.api`). Stateless: scale by replicas.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "vocx.fullname" . }}
+  name: {{ include "workflows.fullname" . }}-api
   labels:
-    {{- include "vocx.labels" . | nindent 4 }}
+    {{- include "workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orchestrator-api
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.api.replicaCount }}
   selector:
     matchLabels:
-      {{- include "vocx.selectorLabels" . | nindent 6 }}
+      {{- include "workflows.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: orchestrator-api
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
   template:
     metadata:
-      annotations:
-        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
-        {{- include "vocx.selectorLabels" . | nindent 8 }}
+        {{- include "workflows.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: orchestrator-api
     spec:
-      serviceAccountName: {{ include "vocx.serviceAccountName" . }}
+      serviceAccountName: {{ include "workflows.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -27,34 +31,25 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: vocx
+        - name: orchestrator
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "app.api"]
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
-            - name: VOCX_LOG_LEVEL
+            - name: WORKFLOWS_LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
-            - name: VOCX_LOG_JSON
+            - name: WORKFLOWS_LOG_JSON
               value: {{ .Values.config.logJson | quote }}
-            - name: VOCX_REGISTER_BASE_URL
-              value: {{ .Values.register.baseUrl | quote }}
-            - name: VOCX_REGISTER_TENANT
-              value: {{ .Values.register.tenant | quote }}
-            - name: VOCX_ORCHESTRATOR_URL
-              value: {{ .Values.orchestrator.url | quote }}
-            - name: VOCX_ORCHESTRATOR_API_KEY
-              value: {{ .Values.orchestrator.apiKey | quote }}
-            - name: VOCX_REGISTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  {{- if .Values.register.apiKey.existingSecret }}
-                  name: {{ .Values.register.apiKey.existingSecret }}
-                  key: {{ .Values.register.apiKey.existingSecretKey }}
-                  {{- else }}
-                  name: {{ include "vocx.secretName" . }}
-                  key: register-api-key
-                  {{- end }}
+            - name: WORKFLOWS_TEMPORAL_ADDRESS
+              value: {{ .Values.temporal.address | quote }}
+            - name: WORKFLOWS_TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: WORKFLOWS_TASK_QUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+            - name: WORKFLOWS_API_KEYS
+              value: {{ .Values.api.apiKeys | quote }}
           ports:
             - name: http
               containerPort: 8000
@@ -68,12 +63,6 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-      volumes:
-        - name: tmp
-          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -86,3 +75,4 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}

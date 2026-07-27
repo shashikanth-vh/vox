@@ -19,7 +19,7 @@
 # compose layout), reset once:  docker compose -f deploy/compose/docker-compose.yml down --remove-orphans
 #
 # Edge (NGINX): :8080 · Gateway: :8001 · Register: :8000 · Access: :8002 · VocX: :8003
-# PULSE (news radar): :8004 · ATLAS (dashboard): :8005
+# PULSE (news radar): :8004 · ATLAS (dashboard): :8005 · Orchestrator (workflows): :8006
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # Temporal Web UI: http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
@@ -171,6 +171,8 @@ services:
       VOCX_REGISTER_BASE_URL: "http://register:8000"
       VOCX_REGISTER_API_KEY: "dev-local-key"
       VOCX_REGISTER_TENANT: "EVAM"
+      # Company-name captures (no resolved subject id) run as durable workflows.
+      VOCX_ORCHESTRATOR_URL: "http://orchestrator:8000"
       VOCX_LOG_JSON: "true"
     ports:
       - "8003:8000"   # direct capture endpoint for dev
@@ -281,6 +283,25 @@ services:
       WORKFLOWS_REGISTER_API_KEY: dev-local-key
       WORKFLOWS_REGISTER_TENANT: EVAM
       WORKFLOWS_LOG_JSON: "true"
+    restart: unless-stopped
+
+  # Orchestrator API — the workflow plane's HTTP front door: starts workflows with
+  # stable business ids (vox-{capture_id}, leadconv-{lead_id}), delivers approve/reject
+  # signals, answers status queries. Same image as the worker, different command.
+  orchestrator:
+    build:
+      context: ../..
+      dockerfile: services/workflows/Dockerfile
+    command: ["python", "-m", "app.api"]
+    depends_on:
+      - temporal
+      - workflows
+    environment:
+      WORKFLOWS_TEMPORAL_ADDRESS: temporal:7233
+      WORKFLOWS_TASK_QUEUE: prism-workflows
+      WORKFLOWS_LOG_JSON: "true"
+    ports:
+      - "8006:8000"   # direct workflow-start endpoint for dev
     restart: unless-stopped
 
 volumes:

@@ -11,10 +11,14 @@ dependencies = [
     "temporalio>=1.7",
     "evam-backend-core",
     "evam-register-client",
+    # The Orchestrator API (python -m app.api).
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "orjson==3.10.12",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "httpx", "fastapi", "ruff", "mypy"]
+dev = ["pytest", "pytest-asyncio", "httpx", "ruff", "mypy"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

@@ -15,6 +15,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
@@ -38,9 +39,13 @@ class TouchpointIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # What the touchpoint is about (ATLAS refType/refId).
-    subject_type: str = Field(max_length=30)
-    subject_id: uuid.UUID
+    # What the touchpoint is about. EITHER a resolved subject (ATLAS refType/refId) —
+    # the direct fast path — OR just the company name: with an orchestrator configured,
+    # VocX starts a durable VoxTouchpointWorkflow that resolves the company canonically
+    # and creates the entity + lead when they don't exist yet.
+    subject_type: str | None = Field(default=None, max_length=30)
+    subject_id: uuid.UUID | None = None
+    company_name: str | None = Field(default=None, max_length=300)
     interaction_type: str = Field(default="In-Person Meeting", max_length=60)
     direction: str | None = Field(default=None, max_length=20)
     occurred_at: str | None = None            # ISO timestamp; defaults to now server-side
@@ -60,7 +65,16 @@ class TouchpointIn(BaseModel):
     next_steps: list[Any] | None = None
     next_action: str | None = None
     next_action_date: str | None = None
-    # Stable id of the recording/upload — becomes the idempotency key.
+    next_meeting_date: str | None = None
+    # Workflow-path extras: the recording's storage URI and the owning RM.
+    audio_ref: str | None = Field(default=None, max_length=500)
+    assigned_rm: str | None = Field(default=None, max_length=120)
+    # Hints used only when the workflow has to CREATE the company.
+    sector: str | None = Field(default=None, max_length=60)
+    lens: str | None = Field(default=None, max_length=20)
+    state: str | None = Field(default=None, max_length=60)
+    # Stable id of the recording/upload — becomes the idempotency key (and, on the
+    # workflow path, the business workflow id vox-{capture_id}).
     capture_id: str | None = Field(default=None, max_length=180)
 
 
@@ -76,9 +90,12 @@ def create_app() -> FastAPI:
             tenant=settings.register_tenant,
             actor="vocx",
         )
-        log.info("vocx_started", extra={"register": settings.register_base_url})
+        app.state.http = httpx.AsyncClient(timeout=60.0)
+        log.info("vocx_started", extra={"register": settings.register_base_url,
+                                        "orchestrator": settings.orchestrator_url or None})
         yield
         await app.state.register.aclose()
+        await app.state.http.aclose()
 
     app = FastAPI(title="PRISM VocX", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,
@@ -97,6 +114,35 @@ def create_app() -> FastAPI:
     @app.post("/v1/touchpoints", status_code=201, tags=["Touchpoints"],
               summary="Capture a field touchpoint → an interaction in the Register")
     async def capture_touchpoint(payload: TouchpointIn, request: Request) -> ORJSONResponse:
+        # -- Workflow path: company-centric capture (new or unresolved company) -------
+        if payload.subject_id is None:
+            if not payload.company_name:
+                return ORJSONResponse(status_code=422, content={"error": {
+                    "type": "validation_error", "title": "Validation failed",
+                    "detail": "Provide subject_type+subject_id, or company_name."}})
+            if not settings.orchestrator_url:
+                return ORJSONResponse(status_code=422, content={"error": {
+                    "type": "validation_error", "title": "Validation failed",
+                    "detail": "company_name capture needs the workflow plane: set "
+                              "VOCX_ORCHESTRATOR_URL (see services/workflows)."}})
+            body = payload.model_dump(exclude_none=True,
+                                      exclude={"subject_type", "subject_id"})
+            body.setdefault("capture_id", uuid.uuid4().hex)
+            headers = {}
+            if settings.orchestrator_api_key:
+                headers["X-API-Key"] = settings.orchestrator_api_key
+            try:
+                resp = await request.app.state.http.post(
+                    f"{settings.orchestrator_url.rstrip('/')}/v1/workflows/vox-touchpoints",
+                    json=body, params={"wait": "true"}, headers=headers)
+            except httpx.HTTPError as exc:
+                return ORJSONResponse(status_code=502, content={"error": {
+                    "type": "orchestrator_error", "title": "Orchestrator unreachable",
+                    "detail": str(exc)}})
+            return ORJSONResponse(status_code=resp.status_code if resp.status_code >= 400
+                                  else 201, content=resp.json())
+
+        # -- Direct fast path: the subject is already resolved ------------------------
         if payload.subject_type not in SUBJECT_TYPES:
             return ORJSONResponse(status_code=422, content={"error": {
                 "type": "validation_error", "title": "Validation failed",

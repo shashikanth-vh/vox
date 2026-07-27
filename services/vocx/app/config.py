@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     register_api_key: str = "dev-local-key"
     register_tenant: str = "EVAM"
 
+    # The Orchestrator (workflow plane). When set, captures that carry a company_name
+    # (instead of a resolved subject id) run as durable VoxTouchpointWorkflows —
+    # resolve-or-create company + lead, full-fidelity interaction, follow-up. Captures
+    # with an explicit subject keep the direct fast path below.
+    orchestrator_url: str = ""
+    orchestrator_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

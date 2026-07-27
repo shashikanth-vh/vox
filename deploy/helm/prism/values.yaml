@@ -162,6 +162,11 @@ workflows:
     baseUrl: http://prism-register     # the Register Service (port 80)
     tenant: EVAM
     apiKey: dev-local-key              # OVERRIDE; must be in the Register's REGISTER_API_KEYS
+  # The Orchestrator API (prism-workflows-api): starts workflows over HTTP with stable
+  # business ids, delivers approve/reject signals, answers status queries.
+  api:
+    enabled: true
+    apiKeys: ""                        # SET in production
 
 # Future modules slot in here as they are built, e.g.:
 # cipher:

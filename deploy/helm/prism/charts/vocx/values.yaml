@@ -19,6 +19,12 @@ register:
     existingSecretKey: api-key
     value: "change-me-in-prod"
 
+# Company-name captures run as durable workflows via the Orchestrator API.
+# Empty = workflow path off (direct subject captures only).
+orchestrator:
+  url: http://prism-workflows-api
+  apiKey: ""
+
 config:
   logLevel: INFO
   logJson: true

@@ -16,7 +16,9 @@ from app import activities
 
 def build_mock() -> FastAPI:
     app = FastAPI()
-    app.state.written = []
+    app.state.written = []       # every interaction body, for assertions
+    app.state.entities = []      # rows the entity search returns
+    app.state.leads = {}         # id -> lead row
 
     @app.post("/v1/interactions", status_code=201)
     async def interactions(request: Request):
@@ -32,6 +34,40 @@ def build_mock() -> FastAPI:
     @app.get("/v1/entities/{eid}/dossier")
     async def dossier(eid: str):
         return {"entity": {"id": eid}, "counts": {"interactions": 1, "deals": 0}}
+
+    @app.get("/v1/entities")
+    async def list_entities():
+        # The real Register does trigram search; the mock returns everything and lets
+        # the activity's canonical comparison do the matching.
+        return {"items": app.state.entities, "next_cursor": None}
+
+    @app.post("/v1/entities", status_code=201)
+    async def create_entity(request: Request):
+        body = await request.json()
+        row = {"id": uuid.uuid4().hex, "version": 1, **body}
+        app.state.entities.append(row)
+        return row
+
+    @app.get("/v1/leads")
+    async def list_leads():
+        return {"items": list(app.state.leads.values()), "next_cursor": None}
+
+    @app.post("/v1/leads", status_code=201)
+    async def create_lead(request: Request):
+        body = await request.json()
+        row = {"id": uuid.uuid4().hex, "version": 1, "status": "Active", **body}
+        app.state.leads[row["id"]] = row
+        return row
+
+    @app.get("/v1/leads/{lid}")
+    async def get_lead(lid: str):
+        return app.state.leads[lid]
+
+    @app.patch("/v1/leads/{lid}")
+    async def patch_lead(lid: str, request: Request):
+        body = await request.json()
+        app.state.leads[lid] = {**app.state.leads[lid], **body}
+        return app.state.leads[lid]
 
     return app
 

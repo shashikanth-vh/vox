@@ -6,6 +6,38 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The workflow plane made operational — Orchestrator API + a genuine end-to-end VOX
+  workflow + human-in-the-loop signals** (closing the gaps in the Temporal review):
+  - **Orchestrator API** (`services/workflows/app/api.py`, `python -m app.api`; compose
+    `orchestrator` :8006, Helm `prism-workflows-api`): starts workflows over HTTP with
+    **stable business workflow ids** (`vox-{capture_id}`, `leadconv-{lead_id}`) and
+    **idempotent starts** (an id that already ran attaches instead of duplicating);
+    delivers `approve`/`reject` signals; answers status (execution state + in-workflow
+    stage + result). Nothing needs a Temporal client or CLI anymore.
+  - **`VoxTouchpointWorkflow`** — the full capture flow: resolve company by **canonical
+    name** (suffix-stripped matching), create entity + lead when missing / link & update
+    the active lead when present; the interaction now carries **transcript, audio
+    reference, language, GPS, attendees, key intel, next steps, contact, acting RM +
+    assigned RM, follow-up dates**, the Temporal workflow id in `source_ref`, and a
+    calendar hand-off record in `meta.calendar` for the calendar integration.
+  - **`LeadConversionWorkflow`** — Temporal **signals** (`approve`/`reject` with
+    decided-by + note, first decision wins), a **query** (`status`) and a decision
+    timeout; approval applies deal + product lines + lead Converted atomically through
+    idempotent activities; rejection/timeout is recorded on the lead.
+  - **VocX** routes company-name captures through the orchestrator automatically
+    (`VOCX_ORCHESTRATOR_URL`); resolved-subject captures keep the direct fast path.
+  - **Tests**: canonical-matching + full-payload activity tests on the mock Register,
+    plus a real e2e suite (Orchestrator → Temporal test server → worker → real Register
+    on real Postgres) covering new-company capture, **duplicate-retry replay** (same
+    capture id → same rows, nothing new), existing-company lead linking, and
+    signal-driven conversion approval. The Temporal-runtime tests skip where the test
+    server can't be downloaded (offline sandboxes) and run in CI.
+  - Still deferred from the review, called out honestly: Dex/OIDC identity, ingress
+    hardening, tenant-scoped MIS reconciliation import, the remaining lifecycle
+    workflows (lending stages, syndication chase, document/OCR, CIPHER, Advaya,
+    covenant monitoring), and the production Temporal posture (dedicated HA datastore,
+    mTLS, search attributes, worker versioning) — see docs/DEPLOYMENT.md notes.
+
 - **A full README in every service — each one runnable on its own.** All seven
   services (`register`, `access`, `gateway`, `vocx`, `pulse`, `atlas`, `workflows`)
   now carry the same README shape: what it is and why, the API table, the complete

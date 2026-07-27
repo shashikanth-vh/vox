@@ -13,7 +13,11 @@ from temporalio.worker import Worker
 
 from app import activities
 from app.config import get_settings
-from app.workflows import IngestInteractionWorkflow
+from app.workflows import (
+    IngestInteractionWorkflow,
+    LeadConversionWorkflow,
+    VoxTouchpointWorkflow,
+)
 
 log = get_logger("workflows")
 
@@ -25,8 +29,18 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=s.task_queue,
-        workflows=[IngestInteractionWorkflow],
-        activities=[activities.write_interaction, activities.fetch_dossier],
+        workflows=[IngestInteractionWorkflow, VoxTouchpointWorkflow,
+                   LeadConversionWorkflow],
+        activities=[
+            activities.write_interaction, activities.fetch_dossier,
+            # VOX touchpoint set
+            activities.resolve_entity, activities.create_entity,
+            activities.find_active_lead, activities.create_lead,
+            activities.update_lead_touch, activities.log_touchpoint,
+            # Lead-conversion set
+            activities.get_lead, activities.create_deal, activities.create_line,
+            activities.mark_lead_converted, activities.mark_lead_note,
+        ],
     )
     log.info("worker_started",
              extra={"task_queue": s.task_queue, "temporal": s.temporal_address})
