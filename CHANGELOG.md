@@ -6,6 +6,46 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Security audit — P0 authorization bypasses closed (write/scope/export/tenant/RLS).**
+  - **Company-resource writes deny READ/NONE (P0-1/P0-3).** The company-write helper only
+    checked SCOPED, so a READ-only viewer could PATCH financials / contracts / intel /
+    monitoring / documents. It now requires each resource's specific WRITE operation
+    (`edit_fi_record`, `edit_contract`, `edit_intel`, `edit_monitoring`,
+    `upload_remove_documents`) — READ/NONE roles are refused, SCOPED is company-scoped,
+    FULL passes — and validates the payload's `entity_id` on create. **Entity** profile
+    edits gained a dedicated `edit_client` operation, fixing the inversion where humans
+    were denied while machine callers slipped through.
+  - **Orphan resources are gated (P0-2).** People, counterparties and the document
+    checklist now gate reads by a view and writes by an operation (`edit_employee`,
+    `manage_counterparty`, `manage_checklist`); the flat `/v1/syndication-lenders` route
+    is **read-only** (mutation only through the secured nested routes).
+  - **Conversion & workflow-adjacent writes hardened (P0-4).** Lead conversion rejects
+    any closed lead (not just Converted), is **idempotent** on the Idempotency-Key, and a
+    SCOPED caller now needs **exact write access to the lead** (assignment / own-book /
+    vertical default), not mere company visibility. Assignment and change-request lists
+    are self-scoped (Admin/Management/Heads see all); machine callers ending an assignment
+    honour `enforce_rbac`; change-request approval re-checks the row-lock policy.
+  - **Exports are row-scoped (P0-5).** `/export/excel|json|counts` now apply the caller's
+    row scope for non-admins; `/export/counts` is gated (was open); a full or
+    `include_deleted` backup requires `backup_restore` (Admin-only).
+  - **Tenant administration is Admin-only (P0-6).** A separate `X-Admin-Key` credential
+    (distinct from the shared data-plane key) plus a **verified Admin identity** are
+    required to create / (de)activate tenants — a shared-key holder can no longer
+    administer tenants.
+  - **PostgreSQL RLS is fail-CLOSED (P0-8).** Migration 0005 recreates every tenant
+    table's policy with no NULL escape (missing tenant context → zero rows), extends
+    coverage to the tables 0001 missed (documents, checklist, assignments, change
+    requests, tenant_settings, idempotency, audit), creates a non-owner `register_app`
+    role, and — when `REGISTER_ENFORCE_RLS` is on — FORCEs RLS so even the owner is bound.
+    A two-tenant database-level test proves fail-closed + isolation + WITH-CHECK.
+  - **Identity propagation tightened (P0-7, partial).** Access now verifies the gateway
+    signature on forwarded identity (no Admin impersonation via a shared key); ATLAS Helm
+    gains OIDC config so it validates the bearer itself; a `values-prod.yaml` overlay
+    flips OIDC/requireAuth/enforceRbac/enforceRls on and points the app at `register_app`.
+    (Distinct per-service DB principals and a single authoritative Access/Register decision
+    source remain follow-up work.)
+  - New adversarial tests: 11 write/scope/export/tenant cases + the two-tenant RLS test.
+
 - **Round-3 review close-out — the remaining production-blocking findings, fixed.**
   - **MIS import is now a true upsert, not a re-insert.** A second (merge) import of the
     same workbook previously re-inserted people, counterparties, leads, deals and every

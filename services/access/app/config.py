@@ -32,6 +32,10 @@ class Settings(BaseServiceSettings):
     # When on, governance writes REQUIRE an Admin user context; off keeps
     # machine-to-machine flows working (requests that DO carry a user are always checked).
     enforce_rbac: bool = False
+    # Shared secret proving forwarded identity headers came from the gateway. Empty
+    # (dev/local) = trust X-User-Email as sent; set in any real deployment so a shared
+    # API-key holder cannot impersonate an Admin by asserting their e-mail.
+    gateway_shared_secret: str = ""
 
     @field_validator("api_keys", mode="before")
     @classmethod

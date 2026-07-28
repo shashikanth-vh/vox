@@ -50,6 +50,8 @@ spec:
               value: {{ .Values.config.userEmailDomain | quote }}
             - name: ACCESS_ENFORCE_RBAC
               value: {{ .Values.config.enforceRbac | quote }}
+            - name: ACCESS_GATEWAY_SHARED_SECRET
+              value: {{ .Values.gatewaySharedSecret | default "" | quote }}
             - name: ACCESS_DB_HOST
               value: {{ .Values.database.host | quote }}
             - name: ACCESS_DB_PORT

@@ -34,6 +34,11 @@ class Settings(BaseServiceSettings):
     # Comma-separated API keys accepted by the service (X-API-Key header).
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["dev-local-key"])
     require_api_key: bool = True
+    # A SEPARATE, higher-privilege credential for tenant administration (create/list/
+    # (de)activate tenants). Presented via X-Admin-Key. When set, tenant-admin routes
+    # require it (not the shared data-plane key). Empty = compatibility mode: the shared
+    # key still works but any forwarded human identity must hold the Admin role.
+    admin_api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
     default_tenant_code: str = "EVAM"
     # Enforce PostgreSQL row-level security using the request tenant. Off by default for
     # the single-tenant local build; turn on in multi-tenant deployments.
@@ -90,7 +95,7 @@ class Settings(BaseServiceSettings):
             raise ValueError(f"storage_backend must be one of {allowed}, got '{v}'.")
         return v
 
-    @field_validator("api_keys", mode="before")
+    @field_validator("api_keys", "admin_api_keys", mode="before")
     @classmethod
     def _split_api_keys(cls, v: object) -> object:
         if isinstance(v, str):

@@ -17,14 +17,15 @@ inseparable from the business rows:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import Depends, Query
+from fastapi import Depends, Header, Query
 from sqlalchemy import select
 
 from app import authz
 from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
+from app.core.config import get_settings
 from app.core.errors import (
     ConflictError,
     ForbiddenError,
@@ -33,6 +34,7 @@ from app.core.errors import (
 )
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
+from app.models.system import IdempotencyKey
 from app.models.users import ChangeRequest, LineAssignment
 from app.repositories.crud import CRUDRepository
 from app.repositories.subjects import SUBJECTS, load_subject
@@ -124,6 +126,15 @@ async def list_assignments(ctx: RequestContext = Depends(get_context),
         conds.append(LineAssignment.subject_type == subject_type)
     if subject_id:
         conds.append(LineAssignment.subject_id == subject_id)
+    # Scope: only a FULL 'employees' viewer (Admin/Management) sees the whole tenant's
+    # assignments. Everyone else sees only assignments for themselves and their reports —
+    # the list is no longer a tenant-wide directory of who-is-on-what.
+    if ctx.user is not None:
+        from app.authz.engine import _stacked
+        from app.authz.matrix import VIEW_ACCESS
+
+        if _stacked(VIEW_ACCESS["employees"], ctx.user.roles) is not authz.Access.FULL:
+            conds.append(LineAssignment.user_id.in_([ctx.user.id, *ctx.user.report_ids]))
     rows = (
         await ctx.session.execute(
             select(LineAssignment).where(*conds).order_by(LineAssignment.created_at.desc())
@@ -145,6 +156,10 @@ async def end_assignment(assignment_id: uuid.UUID,
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} may not end a "
             f"{obj.assignment_role} assignment on a {obj.subject_type} line.")
+    if ctx.user is None:
+        # A machine caller ending an assignment must clear the assignment operation
+        # (honours enforce_rbac) — it was previously unchecked.
+        authz.enforce_operation(None, "add_employee_assign_role")
     obj.ended_at = datetime.now(UTC)
     obj.ended_by = ctx.actor
     obj.updated_by = ctx.actor
@@ -205,6 +220,13 @@ async def list_change_requests(ctx: RequestContext = Depends(get_context),
         conds.append(ChangeRequest.status == status)
     if subject_id:
         conds.append(ChangeRequest.subject_id == subject_id)
+    # Scope: Admin / Management / a vertical Head (the approvers) see the whole queue.
+    # An IC sees only the requests they raised — not the tenant-wide request log.
+    if ctx.user is not None:
+        approver_roles = {"Admin", "Management", "BD Head", "Credit Head",
+                          "Syn Head", "AM Head"}
+        if not (ctx.user.roles & approver_roles):
+            conds.append(ChangeRequest.requested_by == ctx.user.email)
     rows = (
         await ctx.session.execute(
             select(ChangeRequest).where(*conds).order_by(ChangeRequest.created_at.desc())
@@ -236,6 +258,19 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
     req.updated_by = ctx.actor
 
     if approve:
+        # Transition/row-lock policy: if the requested target value is a LOCKED state
+        # (a Converted lead, a Disbursed lending line), only a role the lock names may put
+        # it there — the approval path must not bypass the same lock a direct edit obeys.
+        from app.authz.matrix import ROW_LOCKS
+
+        lock = ROW_LOCKS.get(req.subject_type)
+        if lock is not None:
+            field_name, locking_values, allowed_roles = lock
+            if (req.field == field_name and req.to_value in locking_values
+                    and ctx.user is not None and not (ctx.user.roles & allowed_roles)):
+                raise ForbiddenError(
+                    f"Approving this would move {req.subject_type}.{field_name} to "
+                    f"{req.to_value!r}, a locked state only {sorted(allowed_roles)} may set.")
         # Apply the change through the standard repository so history auto-appends and
         # the audit trail records it (stage auto-stamping = the existing history hook).
         model = SUBJECTS[req.subject_type]
@@ -303,41 +338,59 @@ async def authz_check(
              summary="Convert a lead to a deal atomically (deal + lines + lead marked "
                      "Converted, all-or-nothing)")
 async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
-                       ctx: RequestContext = Depends(get_context)) -> Any:
+                       ctx: RequestContext = Depends(get_context),
+                       idempotency_key: str | None = Header(
+                           default=None, alias="Idempotency-Key")) -> Any:
     """The transactional alternative to workflow-side compensation: the whole conversion
     happens in THIS request's transaction, so a failure anywhere rolls the entire thing
     back — no orphan deal or half-created product lines can ever survive. The Orchestrator
     calls this on approval instead of creating rows step-by-step and undoing on error.
 
-    Authorization: ``push_lead_to_deals`` (BDRM+ per the matrix). A SCOPED caller must be
-    in scope of the lead's company.
+    Authorization: ``push_lead_to_deals`` (BDRM+ per the matrix), AND — for a SCOPED
+    caller — EXACT write access to this Lead (assignment / own-book / vertical default),
+    not merely visibility of its company. Only an OPEN lead may be converted. The
+    Idempotency-Key (which the SDK sends) is honoured so a retry returns the first result
+    instead of creating a second deal.
     """
     from app.models import AssetMonetisation, Deal, LendingTracker, SyndicationTracker
     from app.repositories.crud import CRUDRepository as _Repo
 
-    # Human callers are gated on push_lead_to_deals + company scope. Machine callers
-    # (vetted API key: the workflow after the orchestrator verified the approver) are
-    # trusted — the atomic convert grants nothing a machine caller can't already do by
-    # creating the deal + lines + lead-update individually (the ingestion carve-out).
-    granted = authz.Access.FULL
-    if ctx.user is not None:
-        granted = authz.enforce_operation(ctx.user, "push_lead_to_deals")
+    # Idempotent replay: a retried conversion (same key) returns the original outcome.
+    if idempotency_key:
+        prior = (
+            await ctx.session.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.tenant_id == ctx.tenant_id,
+                    IdempotencyKey.key == idempotency_key))
+        ).scalar_one_or_none()
+        if prior is not None:
+            return prior.response_body
+
+    # Human callers are gated on push_lead_to_deals. Machine callers (vetted API key: the
+    # workflow, AFTER the orchestrator verified the approver's identity + role) honour
+    # enforce_rbac like every other operation.
+    granted = authz.enforce_operation(ctx.user, "push_lead_to_deals")
     lead = await load_subject(ctx.session, ctx.tenant_id, "Lead", lead_id)
     if lead is None:
         raise NotFoundError(f"Lead '{lead_id}' not found.")
     entity_id = getattr(lead, "entity_id", None)
     if entity_id is None:
         raise ValidationAppError("Lead has no entity_id — link it to a company first.")
-    if lead.status == "Converted":
-        raise ConflictError("Lead is already Converted.")
+    # Only an OPEN lead converts: a Converted / Lost / Dropped / Rejected lead is closed.
+    if lead.status in {"Converted", "Lost", "Dropped", "Rejected", "Closed"}:
+        raise ConflictError(f"Lead is {lead.status}; only an open lead can be converted.")
 
-    # SCOPED caller: the lead's company must be in scope.
+    # SCOPED human caller: require EXACT write access to the lead line (assignment / own
+    # book / vertical-Head default ownership) — company visibility alone is not enough to
+    # push someone else's lead into a deal.
     if ctx.user is not None and granted is authz.Access.SCOPED:
         from app.authz import scope as scope_mod
 
         user_scope = await scope_mod.build_scope(ctx, ctx.user)
-        if not await scope_mod.entity_in_scope(ctx, user_scope, entity_id):
-            raise ForbiddenError("Scoped access: this lead's company is not in your scope.")
+        if not await scope_mod.can_write_row(ctx, user_scope, "Lead", lead_id):
+            raise ForbiddenError(
+                "Scoped access: this lead is not assigned to you (or your team), so you "
+                "may not convert it.")
 
     deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
         "entity_id": str(entity_id),
@@ -350,6 +403,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "source_detail": f"Converted from lead {lead_id}", "remarks": payload.note,
     })
     line_ids: dict[str, Any] = {}
+    row: Any
     if payload.is_lending:
         row = await _Repo(LendingTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
@@ -371,4 +425,14 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "status": "Converted", "converted_deal_id": str(deal.id),
         "conv": f"Converted by {ctx.actor}"})
 
-    return s.LeadConvertResult(lead_id=lead_id, deal_id=deal.id, **line_ids)
+    result = s.LeadConvertResult(lead_id=lead_id, deal_id=deal.id, **line_ids)
+    if idempotency_key:
+        await ctx.session.flush()
+        ctx.session.add(IdempotencyKey(
+            tenant_id=ctx.tenant_id, key=idempotency_key,
+            request_hash="", method="POST",
+            path=f"/v1/leads/{lead_id}/convert", status_code=200,
+            response_body=result.model_dump(mode="json"),
+            expires_at=datetime.now(UTC) + timedelta(
+                hours=get_settings().idempotency_ttl_hours)))
+    return result

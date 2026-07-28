@@ -33,7 +33,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError
+from app.core.config import get_settings
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
 from app.core.security import _check_api_key, clear_tenant_cache
@@ -76,15 +77,57 @@ class TenantRead(ORMModel):
 # --------------------------------------------------------------------------- #
 # auth: API key only, a plain (un-scoped) transactional session
 # --------------------------------------------------------------------------- #
+def _authorize_tenant_admin(
+    x_api_key: str | None, x_admin_key: str | None,
+    x_user_email: str | None, x_user_roles: str | None, x_gateway_auth: str | None,
+) -> None:
+    """Two-factor gate for tenant administration:
+
+    * a **separately scoped admin credential** (``X-Admin-Key`` ∈ ``admin_api_keys``) —
+      not the shared data-plane key. When ``admin_api_keys`` is unset (dev), the shared
+      key still authenticates, but then a forwarded human identity MUST hold Admin.
+    * a **verified platform-Admin identity** whenever an identity is forwarded: the
+      gateway secret must match (so the identity can't be spoofed) and the roles must
+      include ``Admin``. A non-admin routed through the gateway can never reach here even
+      with a valid key.
+    """
+    import hmac as _hmac
+
+    settings = get_settings()
+    admin_keys = settings.admin_api_keys
+    if admin_keys:
+        if not (x_admin_key and any(_hmac.compare_digest(x_admin_key, k) for k in admin_keys)):
+            raise UnauthorizedError(
+                "Tenant administration requires a valid X-Admin-Key (admin credential).")
+    else:
+        _check_api_key(x_api_key)  # dev/compat: the shared key authenticates the machine
+
+    # If a human identity is forwarded, it must be a verified Admin.
+    if x_user_email:
+        secret = settings.gateway_shared_secret
+        if secret and not (x_gateway_auth and _hmac.compare_digest(x_gateway_auth, secret)):
+            raise ForbiddenError(
+                "Identity headers must come via the gateway (X-Gateway-Auth mismatch).")
+        roles = {r.strip() for r in (x_user_roles or "").split(",") if r.strip()}
+        if "Admin" not in roles:
+            raise ForbiddenError(
+                f"Tenant administration is Admin-only; '{x_user_email}' is not an Admin.")
+
+
 async def admin_session(
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
+    x_user_roles: str | None = Header(default=None, alias="X-User-Roles"),
+    x_gateway_auth: str | None = Header(default=None, alias="X-Gateway-Auth"),
 ) -> AsyncIterator[AsyncSession]:
-    """Authenticate with the API key and yield a session with commit/rollback handling.
+    """Authenticate a tenant-admin caller and yield a session with commit/rollback.
 
     Deliberately does NOT resolve or set a tenant — this router manages tenants
     themselves, which are not tenant-scoped.
     """
-    _check_api_key(x_api_key)
+    _authorize_tenant_admin(x_api_key, x_admin_key, x_user_email, x_user_roles,
+                            x_gateway_auth)
     sm = get_sessionmaker()
     async with sm() as session:
         try:

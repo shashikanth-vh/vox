@@ -81,6 +81,13 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     "reassign_lead":                  _row("F F F - - - - - - -"),
     "push_lead_to_deals":             _row("F F F S - - - - - -"),
     "create_client":                  _row("F F F S - - - - - -"),
+    # Editing a company profile / its client-view records (contracts, intel, monitoring).
+    # Mirrors the clients-view WRITE capability: FULL/SCOPED roles write, the READ-only
+    # roles (Credit Head, Deal Analyst) may NOT — so a read-only viewer cannot PATCH.
+    "edit_client":                    _row("F F F S - - S S S S"),
+    "edit_contract":                  _row("F F F S - - S S S S"),
+    "edit_intel":                     _row("F F F S - - S S S S"),
+    "edit_monitoring":                _row("F F F S - - S S S S"),
     "edit_deal_profile":              _row("F F F S S S S S S S"),
     "edit_deal_ownership":            _row("F F F - - - S - S -"),
     "add_product_line":               _row("F F F S F - S - S -"),
@@ -102,6 +109,10 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     "edit_fi_record":                 _row("F F F - - - F - - -"),
     "edit_employee":                  _row("F F - - - - - - - -"),
     "add_employee_assign_role":       _row("F F - - - - - - - -"),
+    # Directory/reference maintenance (counterparties = banks; the document checklist =
+    # config). Read is broad (see the tools view); mutation is restricted here.
+    "manage_counterparty":            _row("F F - - F - F - - -"),
+    "manage_checklist":               _row("F F - - - - - - - -"),
     "upload_remove_documents":        _row("F F F S F S S S S S"),
     "snooze_today_item":              _row("F F F S S S S S S S"),
     "delete_row":                     _row("F - - - - - - - - -"),

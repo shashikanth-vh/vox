@@ -125,6 +125,7 @@ async def get_context(
     x_tenant: str | None = Header(default=None, alias="X-Tenant"),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
     x_user_email: str | None = Header(default=None, alias="X-User-Email"),
+    x_gateway_auth: str | None = Header(default=None, alias="X-Gateway-Auth"),
 ) -> AsyncIterator[RequestContext]:
     settings = get_settings()
     _check_api_key(x_api_key)
@@ -137,6 +138,14 @@ async def get_context(
             tenant_id = await _resolve_tenant_id(session, tenant_code)
             user = None
             if x_user_email:
+                # The forwarded identity must be gateway-signed when a secret is
+                # configured — otherwise a shared-key holder could claim to be an Admin
+                # and Access would load that user's real (Admin) roles from the DB.
+                secret = settings.gateway_shared_secret
+                if secret and not (x_gateway_auth
+                                   and hmac.compare_digest(x_gateway_auth, secret)):
+                    raise ForbiddenError(
+                        "Identity headers must come via the gateway (X-Gateway-Auth mismatch).")
                 user = await load_acting_user(session, tenant_id, x_user_email)
                 if actor == "api":
                     actor = user.email[:120]

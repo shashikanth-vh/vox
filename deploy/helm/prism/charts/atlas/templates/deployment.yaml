@@ -49,6 +49,14 @@ spec:
               value: {{ .Values.gatewaySharedSecret | default "" | quote }}
             - name: ATLAS_REQUIRE_USER
               value: {{ .Values.access.requireUser | quote }}
+            # OIDC: with an issuer set, ATLAS derives the caller's e-mail from the VERIFIED
+            # bearer token and STOPS trusting a client-asserted X-User-Email.
+            - name: ATLAS_OIDC_ISSUER
+              value: {{ .Values.oidc.issuer | default "" | quote }}
+            - name: ATLAS_OIDC_AUDIENCE
+              value: {{ .Values.oidc.audience | default "" | quote }}
+            - name: ATLAS_OIDC_EMAIL_CLAIM
+              value: {{ .Values.oidc.emailClaim | default "email" | quote }}
             - name: ATLAS_REGISTER_API_KEY
               valueFrom:
                 secretKeyRef:

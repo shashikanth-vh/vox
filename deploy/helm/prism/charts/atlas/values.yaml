@@ -31,6 +31,14 @@ access:
 # user identity ATLAS forwards on reads.
 gatewaySharedSecret: ""
 
+# Verified identity. Set issuer (+ audience) in production so ATLAS validates the OIDC
+# bearer token itself and never trusts a caller-supplied X-User-Email. Empty = dev, where
+# ATLAS reads X-User-Email (only safe behind the authenticated gateway).
+oidc:
+  issuer: ""
+  audience: "prism"
+  emailClaim: "email"
+
 config:
   logLevel: INFO
   logJson: true

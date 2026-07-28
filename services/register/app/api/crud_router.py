@@ -53,6 +53,7 @@ class ResourceSpec:
         subject_type: str | None = None,
         view_name: str | None = None,
         company_scoped: bool = False,
+        write_operation: str | None = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -75,6 +76,10 @@ class ResourceSpec:
         # interactions): list/GET/update scope to the caller's companies via the central
         # evaluator when the clients view is SCOPED. Not a line resource (no assignment).
         self.company_scoped = company_scoped
+        # The specific matrix operation a WRITE (create/update) requires — e.g.
+        # edit_fi_record for financials, edit_contract for contracts. Enforced in
+        # addition to view access, so a READ-only viewer of the module cannot mutate it.
+        self.write_operation = write_operation
 
 
 def _hash_body(payload: dict) -> str:
@@ -123,21 +128,41 @@ async def _enforce_line_write(ctx: "RequestContext", spec: "ResourceSpec",
     decision header (direct/bypass call), fall back to the code-matrix check
     (defense in depth). Row locks apply to every human edit regardless of scope.
     """
-    if ctx.user is None or spec.subject_type is None:
+    if spec.subject_type is None:
         return
+    from app.authz import enforce_operation
     from app.authz import scope as scope_mod
     from app.authz.engine import can_write_line
+    from app.authz.matrix import Access
     from app.core.errors import ForbiddenError
 
+    # Entity (company profile) is NOT an assignment-driven line: its write is gated by a
+    # DEDICATED operation (edit_client) plus company scope. Handling it here — rather than
+    # through can_write_line, which has no Entity mapping — fixes the inversion where every
+    # human was denied while machine callers slipped through. Machine callers (ctx.user
+    # None) go through enforce_operation too, so enforce_rbac governs them consistently.
+    if spec.subject_type == "Entity":
+        granted = enforce_operation(ctx.user, "edit_client")  # NONE→403; None→enforce_rbac
+        await _enforce_row_lock(ctx, spec, obj_id)
+        if ctx.user is None or granted is Access.FULL or ctx.authz_decision == "FULL":
+            return
+        user_scope = await scope_mod.build_scope(ctx, ctx.user)
+        if await scope_mod.entity_in_scope(ctx, user_scope, obj_id):
+            return
+        raise ForbiddenError(
+            "Scoped access: this company is not in your scope to edit.")
+
+    # Assignment-driven lines (Lead/Deal/Lending/Syndication/AssetMonetisation). Machine
+    # callers keep the ingestion carve-out (row-level writes from vetted API keys); when
+    # enforce_rbac is on they carry a user and are checked like everyone else.
+    if ctx.user is None:
+        return
     await _enforce_row_lock(ctx, spec, obj_id)
     if ctx.authz_decision == "FULL":
         return
     if ctx.authz_decision == "SCOPED":
         user_scope = await scope_mod.build_scope(ctx, ctx.user)
-        if spec.subject_type == "Entity":
-            if await scope_mod.entity_in_scope(ctx, user_scope, obj_id):
-                return
-        elif await scope_mod.can_write_row(ctx, user_scope, spec.subject_type, obj_id):
+        if await scope_mod.can_write_row(ctx, user_scope, spec.subject_type, obj_id):
             return
         raise ForbiddenError(
             f"Scoped access: this {spec.subject_type} line is not in your scope "
@@ -149,23 +174,67 @@ async def _enforce_line_write(ctx: "RequestContext", spec: "ResourceSpec",
 
 
 async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
-                                 obj_id: uuid.UUID) -> None:
-    """SCOPED write on an entity-carrying resource (financials, contracts, intel,
-    monitoring, documents): the row's company must be in the caller's scope."""
-    if ctx.user is None or not spec.company_scoped or spec.view_name is None:
+                                 obj_id: uuid.UUID | None = None, *,
+                                 payload_entity_id: Any = None) -> None:
+    """Write authorization for an entity-carrying resource (financials, contracts, intel,
+    monitoring, documents).
+
+    Fixes the bypass where READ/NONE viewers could mutate rows:
+      * NONE / READ  → 403 (a read-only viewer cannot write).
+      * FULL         → allow.
+      * SCOPED       → the target company must be in the caller's scope
+                       (existing row on update; the payload's entity_id on create).
+
+    Enforcement is via the resource's specific WRITE operation (edit_fi_record,
+    edit_contract, …) so the check is exactly the matrix's write column, not merely the
+    view. Machine callers (no user) honour ``enforce_rbac`` through enforce_operation.
+    """
+    if not spec.company_scoped or spec.view_name is None:
         return
+    from app.authz import enforce_operation
     from app.authz import scope as scope_mod
     from app.authz.engine import _stacked
     from app.authz.matrix import VIEW_ACCESS, Access
     from app.core.errors import ForbiddenError
 
-    granted = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
-    if granted is not Access.SCOPED:
-        return
-    obj = await spec.repo.get(ctx.session, ctx.tenant_id, obj_id)
+    if spec.write_operation is not None:
+        granted = enforce_operation(ctx.user, spec.write_operation)  # NONE→403; None→enforce_rbac
+    else:  # safety net: no dedicated op → derive write capability from the view level.
+        if ctx.user is None:
+            return
+        view = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+        if view in (Access.NONE, Access.READ):
+            raise ForbiddenError(
+                f"Role(s) {sorted(ctx.user.roles)} have read-only or no access to "
+                f"{spec.view_name}; cannot write {spec.name}.")
+        granted = view
+
+    if ctx.user is None or granted is Access.FULL:
+        return  # machine caller (compat) or unrestricted writer
+
+    # SCOPED: the target company must be in scope.
     user_scope = await scope_mod.build_scope(ctx, ctx.user)
+    if payload_entity_id is not None:  # create path
+        if not await scope_mod.entity_in_scope(ctx, user_scope, payload_entity_id):
+            raise ForbiddenError(
+                f"Scoped access: this company is not in your scope to add a {spec.name} for.")
+        return
+    assert obj_id is not None  # update path always supplies the row id
+    obj = await spec.repo.get(ctx.session, ctx.tenant_id, obj_id)
     if not scope_mod.company_row_in_scope(user_scope, obj):
         raise ForbiddenError(f"Scoped access: this {spec.name}'s company is not in your scope.")
+
+
+def _enforce_simple_write(ctx: "RequestContext", spec: "ResourceSpec") -> None:
+    """Write gate for a plain directory/reference resource (people, counterparties,
+    document-checklist) that is neither a line nor company-scoped: just require its
+    write operation. Machine callers honour ``enforce_rbac`` via enforce_operation."""
+    if (spec.write_operation is None or spec.company_scoped
+            or spec.subject_type is not None):
+        return
+    from app.authz import enforce_operation
+
+    enforce_operation(ctx.user, spec.write_operation)
 
 
 def build_crud_router(spec: ResourceSpec) -> APIRouter:
@@ -185,6 +254,14 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         ) -> Any:
             body = payload.model_dump(exclude_unset=False)
+            # RBAC on an entity-carrying resource create (contracts, intel, monitoring):
+            # require the resource's write operation AND, for a SCOPED creator, that the
+            # payload's company is in their scope. Closes "creation validates neither the
+            # target company nor a write operation."
+            if spec.company_scoped:
+                await _enforce_company_write(
+                    ctx, spec, payload_entity_id=body.get("entity_id"))
+            _enforce_simple_write(ctx, spec)  # people / counterparties / checklist create
             # RBAC: creating a line resource is gated by its operation from the matrix
             # (add_lead / push_lead_to_deals / add_product_line) — the same operation
             # the gateway checks at the front door (defense in depth). Machine callers
@@ -376,6 +453,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         ) -> Any:
             await _enforce_line_write(ctx, spec, obj_id)
             await _enforce_company_write(ctx, spec, obj_id)
+            _enforce_simple_write(ctx, spec)  # people / counterparties / checklist update
             data = payload.model_dump(exclude_unset=True)
             expected = data.pop("expected_version", None)
             if expected is None:

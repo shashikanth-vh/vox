@@ -127,6 +127,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       {{- end }}
 - name: REGISTER_GATEWAY_SHARED_SECRET
   value: {{ .Values.gatewaySharedSecret | quote }}
+{{- if .Values.adminApiKeys }}
+# Separate admin credential for tenant administration (X-Admin-Key), Secret-backed.
+- name: REGISTER_ADMIN_API_KEYS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "register.secretName" . }}
+      key: admin-api-keys
+{{- end }}
 # RBAC-mandatory mode: gated operations (delete/restore/import/audit/line creates)
 # refuse machine callers without a user context. On by default in the umbrella.
 - name: REGISTER_ENFORCE_RBAC

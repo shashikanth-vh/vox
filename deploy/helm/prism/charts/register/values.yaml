@@ -131,6 +131,9 @@ apiKeys:
 # Shared secret proving identity headers came via the gateway. Empty = dev-trust.
 enforceRbac: false     # umbrella turns this on; standalone installs choose
 gatewaySharedSecret: ""
+# Separate admin credential for tenant administration (X-Admin-Key). Empty = compat
+# (shared key + a forwarded Admin identity). Rendered into the chart Secret when set.
+adminApiKeys: ""
 
 # Object storage for document bytes (the Data Register). "inline" keeps small files in
 # Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled

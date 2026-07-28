@@ -44,6 +44,9 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["role", "inactive"]),
         create_schema=s.PersonCreate, update_schema=s.PersonUpdate, read_schema=s.PersonRead,
         filterable=["role", "inactive"],
+        # Directory data: readable by any employee (employees view = READ for all roles),
+        # editable only by Admin/Management (edit_employee).
+        view_name="employees", write_operation="edit_employee",
     ),
     ResourceSpec(
         name="counterparty", prefix="/v1/counterparties", tags=["Counterparties"],
@@ -51,6 +54,8 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["counterparty_type", "is_active"]),
         create_schema=s.CounterpartyCreate, update_schema=s.CounterpartyUpdate,
         read_schema=s.CounterpartyRead, filterable=["counterparty_type", "is_active"],
+        # Bank/counterparty directory: broad read (tools view), mutation restricted.
+        view_name="tools", write_operation="manage_counterparty",
     ),
     ResourceSpec(
         name="lead", prefix="/v1/leads", tags=["Leads"],
@@ -90,12 +95,18 @@ _SPECS: list[ResourceSpec] = [
         subject_type="Syndication", view_name="syndication",
     ),
     ResourceSpec(
+        # The FLAT lender list — read-only and gated by the syndication view. All MUTATION
+        # goes through the SECURED nested routes (/v1/syndication/{id}/lenders), which
+        # enforce the parent tracker's line scope; leaving create/update/delete on the flat
+        # route open was a scope bypass, so they are disabled here.
         name="syndication lender", prefix="/v1/syndication-lenders", tags=["Syndication Lenders"],
         repo=CRUDRepository(SyndicationLender, searchable=["lender_name", "note"],
                             filterable=["status", "syndication_id", "counterparty_id", "is_existing"]),
         create_schema=s.SyndicationLenderCreate, update_schema=s.SyndicationLenderUpdate,
         read_schema=s.SyndicationLenderRead,
         filterable=["status", "syndication_id", "counterparty_id", "is_existing"],
+        include_create=False, include_update=False, include_delete=False,
+        view_name="syndication",
     ),
     ResourceSpec(
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],
@@ -112,7 +123,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.FinancialCreate, update_schema=s.FinancialUpdate, read_schema=s.FinancialRead,
         filterable=["statement_type", "entity_id", "is_current", "fiscal_year"],
         include_create=False,  # creation goes through the version-aware endpoint
-        view_name="fi_master", company_scoped=True,
+        view_name="fi_master", company_scoped=True, write_operation="edit_fi_record",
     ),
     ResourceSpec(
         name="contract/asset", prefix="/v1/contracts-assets", tags=["Contracts & Assets"],
@@ -121,7 +132,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.ContractAssetCreate, update_schema=s.ContractAssetUpdate,
         read_schema=s.ContractAssetRead,
         filterable=["asset_type", "entity_id", "deal_id", "state"],
-        view_name="clients", company_scoped=True,
+        view_name="clients", company_scoped=True, write_operation="edit_contract",
     ),
     ResourceSpec(
         name="interaction", prefix="/v1/interactions", tags=["Interactions"],
@@ -147,7 +158,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.ExternalIntelCreate, update_schema=s.ExternalIntelUpdate,
         read_schema=s.ExternalIntelRead,
         filterable=["intel_type", "signal", "entity_id", "deal_id"],
-        view_name="clients", company_scoped=True,
+        view_name="clients", company_scoped=True, write_operation="edit_intel",
     ),
     ResourceSpec(
         name="monitoring record", prefix="/v1/monitoring", tags=["Monitoring & Reporting"],
@@ -155,7 +166,7 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["record_type", "entity_id", "deal_id", "feeds_irg"]),
         create_schema=s.MonitoringCreate, update_schema=s.MonitoringUpdate, read_schema=s.MonitoringRead,
         filterable=["record_type", "entity_id", "deal_id", "feeds_irg"],
-        view_name="clients", company_scoped=True,
+        view_name="clients", company_scoped=True, write_operation="edit_monitoring",
     ),
     ResourceSpec(
         name="document", prefix="/v1/documents", tags=["Documents"],
@@ -167,7 +178,7 @@ _SPECS: list[ResourceSpec] = [
         filterable=["subject_type", "subject_id", "section", "slot_key", "status",
                     "entity_id", "deal_id", "is_required"],
         include_create=False,  # creation goes through the subject-aware register endpoint
-        view_name="clients", company_scoped=True,
+        view_name="clients", company_scoped=True, write_operation="upload_remove_documents",
     ),
     ResourceSpec(
         name="document checklist item", prefix="/v1/document-checklist", tags=["Documents"],
@@ -177,6 +188,8 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.DocumentChecklistCreate, update_schema=s.DocumentChecklistUpdate,
         read_schema=s.DocumentChecklistRead,
         filterable=["applies_to", "section", "slot_key", "is_required", "is_active"],
+        # Document-checklist = tenant config: broad read (tools), Admin/Management write.
+        view_name="tools", write_operation="manage_checklist",
     ),
 ]
 

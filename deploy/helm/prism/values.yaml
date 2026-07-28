@@ -36,6 +36,16 @@ register:
   # (Platform services use ungated write paths; flip to false only for bare-Register dev.)
   enforceRbac: true
   gatewaySharedSecret: "prism-gateway-secret"   # must match gateway.gatewaySecret.value
+  # A SEPARATE admin credential for tenant administration (create/(de)activate tenants),
+  # presented as X-Admin-Key — NOT the shared data-plane key. Empty = compat (shared key +
+  # a forwarded Admin identity). Set this in production; keep it out of the data-plane key.
+  adminApiKeys: ""
+  # Enforce PostgreSQL row-level security. When true, migration 0005 FORCEs RLS (binds even
+  # the owner) and the app should connect as the non-owner 'register_app' role. Fail-closed:
+  # a request with no tenant context sees nothing. (values-prod.yaml turns this on and
+  # points database.user at register_app.)
+  config:
+    enforceRls: false
   # Document bytes → the bundled MinIO (below). Reuse MinIO's chart-managed secret for the
   # secret key. Set storage.backend=inline (or point s3.* at a managed S3) to change this.
   storage:
@@ -66,6 +76,9 @@ access:
     existingSecretPasswordKey: postgres-password
   apiKeys:
     value: "dev-local-key"        # OVERRIDE in real deployments
+  # Must match the gateway secret so Access trusts the identity the gateway forwards and a
+  # shared-key holder cannot impersonate an Admin by asserting their e-mail.
+  gatewaySharedSecret: "prism-gateway-secret"
   # Governance requires a user context even from API-key callers — an identity-less
   # holder of the Access key cannot mint users/roles.
   config:
@@ -142,6 +155,12 @@ atlas:
   # Must match register.gatewaySharedSecret so the Register trusts the user identity
   # ATLAS forwards on reads — otherwise user-attributed dashboards are rejected.
   gatewaySharedSecret: "prism-gateway-secret"
+  # Verified identity: set the issuer in production so ATLAS validates the OIDC bearer
+  # itself and never trusts a client-supplied X-User-Email. (values-prod.yaml sets it.)
+  oidc:
+    issuer: ""
+    audience: "prism"
+    emailClaim: "email"
 
 # ---- Object storage (document bytes) ------------------------------------------
 # S3-compatible store for the Data Register uploads. Dev/staging single node; for

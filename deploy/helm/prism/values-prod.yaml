@@ -1,0 +1,52 @@
+# PRISM — production hardening overlay.
+#
+#   helm upgrade --install prism ./deploy/helm/prism \
+#     -f deploy/helm/prism/values.yaml -f deploy/helm/prism/values-prod.yaml \
+#     --set gateway.oidc.issuer=https://idp.example.com \
+#     --set atlas.oidc.issuer=https://idp.example.com \
+#     --set workflows.api.oidcIssuer=https://idp.example.com
+#
+# This overlay flips every enforcement the security review requires ON. Provide your real
+# OIDC issuer and rotate every credential below out of source control (use existingSecret
+# refs or --set from your secret store). It does NOT contain real secrets.
+
+# ---- Identity is MANDATORY everywhere -----------------------------------------
+gateway:
+  oidc:
+    # issuer: set via --set / your values; MUST be non-empty in prod.
+    requireAuth: true            # the edge refuses anonymous requests
+  accessApiKey:
+    value: "CHANGE-ME"           # per-service key, not the shared dev key
+
+# ATLAS validates the OIDC bearer itself → stops trusting client X-User-Email.
+atlas:
+  oidc:
+    # issuer: set via --set; MUST be non-empty in prod.
+    audience: "prism"
+  access:
+    requireUser: true
+
+# The orchestrator's approver/requester identity is token-derived and mandatory.
+workflows:
+  api:
+    requireAuth: true
+    # oidcIssuer: set via --set; MUST be non-empty in prod.
+
+# ---- The Register: RBAC + fail-closed RLS + a separate admin credential --------
+register:
+  enforceRbac: true
+  config:
+    enforceRls: true             # migration 0005 FORCEs RLS; app connects as register_app
+  database:
+    # Connect as the NON-OWNER application role so RLS actually binds (the owner bypasses
+    # it). Create it once:  ALTER ROLE register_app WITH LOGIN PASSWORD '...';  then point
+    # this user + password Secret at it.
+    user: register_app
+  # A dedicated admin credential for tenant administration, separate from the data key.
+  adminApiKeys: "CHANGE-ME-ADMIN-KEY"
+
+# Access validates the gateway signature on forwarded identity (no Admin impersonation).
+access:
+  gatewaySharedSecret: "prism-gateway-secret"   # must equal gateway.gatewaySecret.value
+  config:
+    enforceRbac: true

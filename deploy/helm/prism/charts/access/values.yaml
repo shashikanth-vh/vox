@@ -24,6 +24,10 @@ apiKeys:
   existingSecretKey: api-keys
   value: "change-me-in-prod"
 
+# Must match the gateway secret so forwarded identity headers can't be spoofed by a
+# shared-key holder (empty = dev, trust X-User-Email as sent).
+gatewaySharedSecret: ""
+
 config:
   environment: prod
   logLevel: INFO
