@@ -40,6 +40,9 @@ register:
   # presented as X-Admin-Key — NOT the shared data-plane key. Empty = compat (shared key +
   # a forwarded Admin identity). Set this in production; keep it out of the data-plane key.
   adminApiKeys: ""
+  # Verify the gateway's SIGNED internal context (production identity channel). Must equal
+  # gateway.internalSigningSecret. Empty = legacy header propagation (dev).
+  internalSigningSecret: ""
   # Enforce PostgreSQL row-level security. When true, migration 0005 FORCEs RLS (binds even
   # the owner) and the app should connect as the non-owner 'register_app' role. Fail-closed:
   # a request with no tenant context sees nothing. (values-prod.yaml turns this on and
@@ -94,6 +97,9 @@ gateway:
     value: "dev-local-key"        # must be in the Access service's ACCESS_API_KEYS
   gatewaySecret:
     value: "prism-gateway-secret" # OVERRIDE; must match register.gatewaySharedSecret
+  # Sign the internal context the Register verifies (production identity channel). Must
+  # equal register.internalSigningSecret. Empty = legacy header propagation (dev).
+  internalSigningSecret: ""
   # SSO: point issuer at your IdP (Dex/Auth0/Entra/Keycloak) to require verified bearer
   # tokens at the edge and stop trusting X-User-Email. requireAuth: refuse anonymous.
   oidc:

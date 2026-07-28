@@ -101,6 +101,9 @@ services:
       REGISTER_S3_PATH_STYLE: "true"
       # Trust identity headers only when stamped by the gateway (three-service RBAC).
       REGISTER_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
+      # Production identity channel: verify the gateway's SIGNED internal context and
+      # enforce the live grant it carries. Must equal the gateway's signing secret.
+      REGISTER_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
     # Migrate, provision the tenant + reference dropdowns (NO business data), then serve.
     # This is "start fresh, but usable" — the API works immediately, the DB has no leads/
     # deals/entities. Use "migrate-serve" for a truly bare DB (you must then create a tenant
@@ -153,6 +156,9 @@ services:
       GATEWAY_ACCESS_URL: "http://access:8000"
       GATEWAY_ACCESS_API_KEY: "dev-local-key"
       GATEWAY_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
+      # Mint the SIGNED internal context the Register verifies (production identity
+      # channel). Must equal REGISTER_INTERNAL_SIGNING_SECRET.
+      GATEWAY_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       GATEWAY_CACHE_TTL_S: "30"
       # Verified identity (SSO). Empty issuer = header-trust for the local walkthrough.
       # `docker compose --profile sso up` supplies these so bearer tokens are REQUIRED

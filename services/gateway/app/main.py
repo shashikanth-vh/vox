@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from evam_backend_core.errors import register_exception_handlers
+from evam_backend_core.internal_token import mint_internal_context
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
 from evam_backend_core.oidc import OidcError, OidcVerifier, bearer_token
@@ -37,7 +38,7 @@ _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
                          "transfer-encoding", "upgrade", "expect",
                          "x-authz-decision", "x-gateway-auth", "x-user-email",
                          "x-user-id", "x-user-roles", "x-user-report-ids",
-                         "x-user-reports"}
+                         "x-user-reports", "x-internal-context"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 
@@ -138,6 +139,22 @@ def create_app() -> FastAPI:
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() not in _SKIP_REQUEST_HEADERS}
         if user is not None:
+            # Production channel: a SIGNED internal context carrying identity + the LIVE
+            # effective matrix. The Register verifies the signature and enforces from it —
+            # no static-secret forgery, no stale-matrix divergence.
+            if settings.internal_signing_secret:
+                headers["X-Internal-Context"] = mint_internal_context(
+                    signing_key=settings.internal_signing_secret,
+                    algorithm=settings.internal_signing_algorithm,
+                    ttl_seconds=settings.internal_token_ttl_seconds,
+                    tenant=request.headers.get("X-Tenant", settings.default_tenant_code),
+                    email=user.email, user_id=str(user.id), roles=list(user.roles),
+                    report_ids=[str(r["id"]) for r in user.reports],
+                    report_emails=[r["email"] for r in user.reports],
+                    effective_views=user.views, effective_operations=user.operations,
+                    matrix_version=user.version, decision=decision)
+            # Legacy header propagation (kept for dev / mixed rollout). When the signed
+            # context is on, these are advisory only — the Register prefers the token.
             headers["X-User-Email"] = user.email
             headers["X-User-Id"] = str(user.id)
             headers["X-User-Roles"] = ",".join(user.roles)

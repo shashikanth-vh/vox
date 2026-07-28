@@ -44,6 +44,13 @@ class UserContext:
     # forwarded by the gateway — the basis of a Head's team scope.
     report_ids: list[uuid.UUID] = field(default_factory=list)
     report_emails: list[str] = field(default_factory=list)
+    # The caller's LIVE effective access, by view / operation name, when it arrived in a
+    # signed internal context. When present it is AUTHORITATIVE — the Register enforces it
+    # instead of re-deriving from the compiled static matrix, so a live Access-matrix edit
+    # takes effect immediately and the two services can never disagree. Empty = derive from
+    # the static matrix (dev / legacy header propagation).
+    effective_operations: dict[str, Access] = field(default_factory=dict)
+    effective_views: dict[str, Access] = field(default_factory=dict)
 
     @property
     def is_admin(self) -> bool:
@@ -78,9 +85,50 @@ def user_context_from_headers(
                        report_ids=report_ids, report_emails=report_emails)
 
 
+def _to_access(name: str) -> Access:
+    try:
+        return Access[name]
+    except KeyError:
+        return Access.NONE
+
+
+def user_context_from_internal(ic) -> UserContext:  # noqa: ANN001
+    """Build the acting user from a VERIFIED signed internal context (the production
+    channel). Identity, roles AND the live effective matrices all come from the token, so
+    nothing here is client-assertable."""
+    uid = (uuid.UUID(ic.user_id) if _looks_like_uuid(ic.user_id)
+           else uuid.uuid5(uuid.NAMESPACE_URL, f"prism-user:{ic.email.strip().lower()}"))
+    return UserContext(
+        id=uid,
+        email=ic.email.strip().lower(),
+        full_name=ic.email.split("@")[0],
+        roles=set(ic.roles),
+        report_ids=[uuid.UUID(x) for x in ic.report_ids if _looks_like_uuid(x)],
+        report_emails=[x.strip().lower() for x in ic.report_emails if x.strip()],
+        effective_operations={k: _to_access(v) for k, v in ic.effective_operations.items()},
+        effective_views={k: _to_access(v) for k, v in ic.effective_views.items()},
+    )
+
+
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def _stacked(matrix_row: dict[str, Access], roles: set[str]) -> Access:
     """Role stacking: the highest access across all held roles."""
     return max((matrix_row.get(r, Access.NONE) for r in roles), default=Access.NONE)
+
+
+def view_access(user: UserContext, view: str) -> Access:
+    """A view's access for this user, preferring the LIVE effective grant from a signed
+    context; falls back to the compiled static matrix (dev / legacy)."""
+    if user.effective_views:
+        return user.effective_views.get(view, Access.NONE)
+    return _stacked(VIEW_ACCESS.get(view, {}), user.roles)
 
 
 def effective_views(user: UserContext) -> dict[str, str]:
@@ -94,6 +142,11 @@ def effective_operations(user: UserContext) -> dict[str, str]:
 
 
 def operation_access(user: UserContext, operation: str) -> Access:
+    # Prefer the LIVE effective grant from a signed internal context — so an Admin's live
+    # matrix edit in Access is enforced here immediately, and the Register can never grant
+    # more than Access currently allows. Fall back to the compiled matrix (dev / legacy).
+    if user.effective_operations:
+        return user.effective_operations.get(operation, Access.NONE)
     row = OPERATIONS.get(operation)
     if row is None:
         raise ValueError(f"Unknown operation '{operation}'.")

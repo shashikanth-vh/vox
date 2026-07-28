@@ -104,10 +104,10 @@ async def _ensure_company_read(ctx: RequestContext, entity_id: uuid.UUID | None)
     if ctx.user is None or entity_id is None:
         return
     from app.authz import scope as scope_mod
-    from app.authz.engine import _stacked
-    from app.authz.matrix import VIEW_ACCESS, Access
+    from app.authz.engine import view_access
+    from app.authz.matrix import Access
 
-    granted = _stacked(VIEW_ACCESS["clients"], ctx.user.roles)
+    granted = view_access(ctx.user, "clients")
     if granted is Access.NONE:
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} have no access to company records.")
@@ -372,10 +372,10 @@ async def read_audit(
 ) -> list[dict]:
     # RBAC guardrail: the audit view is Admin-only (immutable even in the live matrix).
     if ctx.user is not None:
-        from app.authz.engine import _stacked
-        from app.authz.matrix import VIEW_ACCESS, Access
+        from app.authz.engine import view_access
+        from app.authz.matrix import Access
 
-        if _stacked(VIEW_ACCESS["audit"], ctx.user.roles) is Access.NONE:
+        if view_access(ctx.user, "audit") is Access.NONE:
             raise ForbiddenError("The audit trail is Admin-only.")
     elif get_settings().enforce_rbac:
         raise ForbiddenError("The audit trail requires a user context (X-User-Email).")

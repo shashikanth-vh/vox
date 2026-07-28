@@ -93,7 +93,21 @@ helm upgrade --install prism ./deploy/helm/prism \
 
 It turns on: mandatory OIDC at the gateway (`requireAuth`), ATLAS validating its own
 bearer token, token-derived orchestrator approvals, Register `enforceRbac`, Access
-gateway-signature verification, a separate tenant-admin key, and **fail-closed RLS**.
+gateway-signature verification, a separate tenant-admin key, **fail-closed RLS**, and the
+**signed internal context** below.
+
+**Signed internal context (identity propagation).** In production the gateway, after
+verifying the OIDC bearer and resolving the caller from Access, mints a short-lived
+**signed** token (`X-Internal-Context`) carrying the identity + the caller's *live*
+effective permissions; the Register verifies the signature and enforces from it. Set the
+same secret on both — `gateway.internalSigningSecret` and `register.internalSigningSecret`
+(rendered into each chart's Secret) — and rotate it out of source control. This replaces
+the plaintext-headers-plus-static-secret channel: a leaked secret can no longer be replayed
+to forge an identity (tokens expire), roles can't be rewritten in flight (they're signed),
+and the Register enforces exactly what Access resolved — so a live matrix edit takes effect
+immediately and the two services can never disagree. HS256 (shared secret) is the default;
+set `internalSigningAlgorithm: RS256` with a gateway private key + Register public key when
+you want the Register to be provably unable to mint gateway tokens.
 
 **Fail-closed RLS requires two DB roles.** Migration `0005` enables fail-closed policies,
 FORCEs RLS when `REGISTER_ENFORCE_RLS=true`, and creates a non-owner `register_app` role.
@@ -110,12 +124,11 @@ The overlay wires this: `register.database.user=register_app` (runtime) +
 `prism-register-app-secret`. With no tenant context set, every policy now denies — a
 forgotten filter returns zero rows instead of leaking the tenant.
 
-> **Known limitation (policy source):** the Access service holds the *live, admin-editable*
-> matrix and the gateway enforces it at the edge, but the Register re-verifies operations
-> against the *compiled* matrix (`evam_backend_core.rbac`). They match at deploy time (Access
-> seeds from it); a live matrix edit is enforced at the gateway immediately but not in the
-> Register's own re-checks until the compiled policy is re-released. Unifying these behind a
-> single signed effective-grant per request is tracked follow-up work.
+> **Policy source (resolved by the signed context).** With `internalSigningSecret` set,
+> the Register enforces the effective grant carried in the signed token — the *live* matrix
+> Access resolved — so an Admin's live matrix edit takes effect immediately and Register and
+> Access cannot diverge. Without it (dev / legacy header propagation) the Register falls back
+> to the compiled matrix, which matches at deploy time but not after a live edit.
 
 ### Multi-tenancy
 

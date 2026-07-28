@@ -26,6 +26,11 @@ gatewaySecret:
   existingSecretKey: gateway-secret
   value: "change-me-in-prod"
 
+# Shared secret used to SIGN the internal context the Register verifies (production
+# identity channel). Must equal register.internalSigningSecret. Empty = legacy header
+# propagation. Rendered into the chart Secret when set.
+internalSigningSecret: ""
+
 config:
   logLevel: INFO
   logJson: true

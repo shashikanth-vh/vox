@@ -89,6 +89,7 @@ async def get_context(
     x_authz_decision: str | None = Header(default=None, alias="X-Authz-Decision"),
     x_user_report_ids: str | None = Header(default=None, alias="X-User-Report-Ids"),
     x_user_reports: str | None = Header(default=None, alias="X-User-Reports"),
+    x_internal_context: str | None = Header(default=None, alias="X-Internal-Context"),
 ) -> AsyncIterator[RequestContext]:
     """FastAPI dependency: authenticate, resolve tenant, open a scoped transaction.
 
@@ -118,7 +119,35 @@ async def get_context(
             #   * no secret configured (dev/local) → headers trusted as sent.
             user = None
             decision = None
-            if x_user_email:
+            # Preferred: a SIGNED internal context. Verifying its signature IS the proof it
+            # came from the gateway — no shared secret to leak, and the caller's identity +
+            # LIVE effective permissions come straight from the token (so the Register
+            # enforces exactly what Access resolved, never a stale compiled copy).
+            if x_internal_context and settings.internal_signing_secret:
+                from evam_backend_core.internal_token import (
+                    InternalTokenError,
+                    verify_internal_context,
+                )
+
+                from app.authz.engine import user_context_from_internal
+                from app.core.errors import ForbiddenError
+
+                try:
+                    ic = verify_internal_context(
+                        x_internal_context,
+                        verify_key=settings.internal_signing_secret,
+                        algorithms=(settings.internal_signing_algorithm,))
+                except InternalTokenError as exc:
+                    raise ForbiddenError(f"Invalid internal context: {exc}") from exc
+                # A token minted for one tenant cannot be replayed against another.
+                if ic.tenant and ic.tenant != tenant_code:
+                    raise ForbiddenError(
+                        "Internal context tenant does not match the request tenant.")
+                user = user_context_from_internal(ic)
+                if ic.decision in ("FULL", "SCOPED"):
+                    decision = ic.decision
+                actor = user.email[:120]
+            elif x_user_email:
                 from app.authz.engine import user_context_from_headers
                 from app.core.errors import ForbiddenError
 

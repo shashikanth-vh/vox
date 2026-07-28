@@ -56,8 +56,17 @@ class Settings(BaseServiceSettings):
     enforce_rbac: bool = False
     # Shared secret proving identity headers came from the gateway. Empty (dev/local) =
     # trust headers as sent; set in any real deployment so identity can't be spoofed by
-    # a caller that reaches the Register directly.
+    # a caller that reaches the Register directly. (Legacy path; prefer the signed
+    # internal context below.)
     gateway_shared_secret: str = ""
+
+    # Signed internal context (the production identity channel). When set, a request
+    # carrying X-Internal-Context is authenticated by VERIFYING the signature, and the
+    # caller's identity + LIVE effective permissions come from the token — not from
+    # plaintext headers, and not re-derived from the compiled static matrix. HS256 uses
+    # this value as the shared secret; RS256 uses it as the PEM PUBLIC key.
+    internal_signing_secret: str = ""
+    internal_signing_algorithm: str = "HS256"
 
     # ---- Documents (Data Register) --------------------------------------
     # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.

@@ -37,7 +37,17 @@ class Settings(BaseSettings):
 
     # Shared secret stamped on forwarded identity headers so the Register can verify
     # they came from the gateway. Empty = dev mode (Register trusts headers as sent).
+    # (Legacy propagation; prefer the SIGNED internal context below for production.)
     gateway_shared_secret: str = ""
+
+    # Signed internal context — the production identity-propagation channel. When set, the
+    # gateway mints a short-lived signed token (X-Internal-Context) carrying the caller's
+    # identity + LIVE effective permissions; the Register verifies the signature and
+    # enforces from it. HS256 uses this value as the shared secret; RS256 uses it as the
+    # PEM private key. Empty = fall back to the legacy header propagation above.
+    internal_signing_secret: str = ""
+    internal_signing_algorithm: str = "HS256"
+    internal_token_ttl_seconds: int = 120
 
     # Verified identity (opt-in). Set the issuer to REQUIRE a valid bearer token and
     # derive the caller's e-mail from it instead of trusting X-User-Email — the

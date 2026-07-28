@@ -141,6 +141,11 @@ gatewaySharedSecret: ""
 # Separate admin credential for tenant administration (X-Admin-Key). Empty = compat
 # (shared key + a forwarded Admin identity). Rendered into the chart Secret when set.
 adminApiKeys: ""
+# Shared secret to VERIFY the gateway's signed internal context (the production identity
+# channel). When set, the Register authenticates via the signed token and enforces the
+# live grant it carries. Must equal gateway.internalSigningSecret. Empty = legacy header
+# propagation. Rendered into the chart Secret (never plaintext env).
+internalSigningSecret: ""
 
 # Object storage for document bytes (the Data Register). "inline" keeps small files in
 # Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled

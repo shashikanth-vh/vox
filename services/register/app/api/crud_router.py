@@ -197,8 +197,8 @@ async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
         return
     from app.authz import enforce_operation
     from app.authz import scope as scope_mod
-    from app.authz.engine import _stacked
-    from app.authz.matrix import VIEW_ACCESS, Access
+    from app.authz.engine import view_access
+    from app.authz.matrix import Access
     from app.core.errors import ForbiddenError
 
     if spec.write_operation is not None:
@@ -206,7 +206,7 @@ async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
     else:  # safety net: no dedicated op → derive write capability from the view level.
         if ctx.user is None:
             return
-        view = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+        view = view_access(ctx.user, spec.view_name)
         if view in (Access.NONE, Access.READ):
             raise ForbiddenError(
                 f"Role(s) {sorted(ctx.user.roles)} have read-only or no access to "
@@ -393,11 +393,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         scope_condition = None
         if ctx.user is not None and spec.view_name is not None:
             from app.authz import scope as scope_mod
-            from app.authz.engine import _stacked
-            from app.authz.matrix import VIEW_ACCESS, Access
+            from app.authz.engine import view_access
+            from app.authz.matrix import Access
             from app.core.errors import ForbiddenError
 
-            granted = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+            granted = view_access(ctx.user, spec.view_name)
             if granted is Access.NONE:
                 raise ForbiddenError(
                     f"Role(s) {sorted(ctx.user.roles)} have no access to {spec.view_name}.")
@@ -459,11 +459,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         # fetch an unrelated row just by knowing its id.
         if ctx.user is not None and spec.view_name is not None:
             from app.authz import scope as scope_mod
-            from app.authz.engine import _stacked
-            from app.authz.matrix import VIEW_ACCESS, Access
+            from app.authz.engine import view_access
+            from app.authz.matrix import Access
             from app.core.errors import ForbiddenError
 
-            granted = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+            granted = view_access(ctx.user, spec.view_name)
             if granted is Access.NONE:
                 raise ForbiddenError(
                     f"Role(s) {sorted(ctx.user.roles)} have no access to {spec.view_name}.")

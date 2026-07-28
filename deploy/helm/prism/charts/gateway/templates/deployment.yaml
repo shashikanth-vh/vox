@@ -73,6 +73,15 @@ spec:
                   name: {{ include "gateway.secretName" . }}
                   key: gateway-secret
                   {{- end }}
+            {{- if .Values.internalSigningSecret }}
+            # Mint the SIGNED internal context the Register verifies (production identity
+            # channel). Must equal register.internalSigningSecret.
+            - name: GATEWAY_INTERNAL_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: internal-signing-secret
+            {{- end }}
           ports:
             - name: http
               containerPort: 8000

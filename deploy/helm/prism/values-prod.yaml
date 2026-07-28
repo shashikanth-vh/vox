@@ -17,6 +17,9 @@ gateway:
     requireAuth: true            # the edge refuses anonymous requests
   accessApiKey:
     value: "CHANGE-ME"           # per-service key, not the shared dev key
+  # Sign the internal context the Register enforces (production identity channel). Rotate
+  # this out of source control; it MUST equal register.internalSigningSecret.
+  internalSigningSecret: "CHANGE-ME-INTERNAL-SIGNING-SECRET"
 
 # ATLAS validates the OIDC bearer itself → stops trusting client X-User-Email.
 atlas:
@@ -52,6 +55,8 @@ register:
     migrationExistingSecretPasswordKey: postgres-password
   # A dedicated admin credential for tenant administration, separate from the data key.
   adminApiKeys: "CHANGE-ME-ADMIN-KEY"
+  # Verify the gateway's signed internal context — MUST equal gateway.internalSigningSecret.
+  internalSigningSecret: "CHANGE-ME-INTERNAL-SIGNING-SECRET"
 
 # Access validates the gateway signature on forwarded identity (no Admin impersonation).
 access:

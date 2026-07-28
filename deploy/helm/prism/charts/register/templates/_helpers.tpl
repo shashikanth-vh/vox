@@ -127,6 +127,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       {{- end }}
 - name: REGISTER_GATEWAY_SHARED_SECRET
   value: {{ .Values.gatewaySharedSecret | quote }}
+{{- if .Values.internalSigningSecret }}
+# Verify the gateway's SIGNED internal context and enforce the live grant it carries.
+# Must equal the gateway's signing secret. Secret-backed, never plaintext env.
+- name: REGISTER_INTERNAL_SIGNING_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "register.secretName" . }}
+      key: internal-signing-secret
+{{- end }}
 {{- if .Values.adminApiKeys }}
 # Separate admin credential for tenant administration (X-Admin-Key), Secret-backed.
 - name: REGISTER_ADMIN_API_KEYS

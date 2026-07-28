@@ -130,10 +130,9 @@ async def list_assignments(ctx: RequestContext = Depends(get_context),
     # assignments. Everyone else sees only assignments for themselves and their reports —
     # the list is no longer a tenant-wide directory of who-is-on-what.
     if ctx.user is not None:
-        from app.authz.engine import _stacked
-        from app.authz.matrix import VIEW_ACCESS
+        from app.authz.engine import view_access
 
-        if _stacked(VIEW_ACCESS["employees"], ctx.user.roles) is not authz.Access.FULL:
+        if view_access(ctx.user, "employees") is not authz.Access.FULL:
             conds.append(LineAssignment.user_id.in_([ctx.user.id, *ctx.user.report_ids]))
     rows = (
         await ctx.session.execute(

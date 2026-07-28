@@ -6,6 +6,25 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Signed internal context — identity propagation realigned to the reference architecture.**
+  The gateway→Register channel moves from *plaintext identity headers + a static shared
+  secret* (with the Register re-deriving authz from its compiled matrix) to the diagram's
+  **"signed user context"**: after OIDC + Access resolve, the gateway mints a short-lived
+  **signed** token (`X-Internal-Context`, `evam_backend_core.internal_token`) carrying the
+  caller's identity + the *live* effective permissions; the Register verifies the signature
+  and enforces from it.
+  - **Tamper-evident & expiring** — roles can't be rewritten in flight, a stolen token dies
+    in ~2 min, and a leaked static secret can no longer be replayed to forge an identity.
+  - **Single source of truth** — `operation_access` / `view_access` prefer the forwarded
+    live grant, so an Admin's live Access-matrix edit is enforced by the Register
+    immediately; Register and Access can no longer disagree (the prior "policy source"
+    caveat is resolved when the secret is set).
+  - **Tenant-bound** — a token minted for one tenant is rejected against another.
+  - Backward compatible: no signing secret → the legacy header path (dev) is unchanged.
+    HS256 default; RS256 supported. Wired through Compose, both Helm charts (Secret-backed)
+    and `values-prod.yaml`. New tests: core mint/verify (tamper/expiry/wrong-key) + Register
+    e2e (identity-from-token, live-grant allow/deny, forged-header-ignored, cross-tenant).
+
 - **Security audit round 5 — custom routes, transitions, conversion race, RLS deployability.**
   - **Custom-route authz bypasses (R5-1).** The versioned financials create gated on the
     loose `add_company_note`; it now requires `edit_fi_record` (a Deal Analyst / AM RM can
