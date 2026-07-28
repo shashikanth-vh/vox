@@ -67,8 +67,10 @@ async def _ensure_subject_scope(ctx: RequestContext, operation: str,
     interaction log): the operation must be granted, and a SCOPED grant must cover
     the referenced line/company through the central evaluator."""
     if ctx.user is None:
-        # Machine caller (vetted API key: VocX/PULSE/workflows) — ingestion stays open;
-        # the RBAC-mandatory flag hard-gates the destructive surfaces instead.
+        # Machine caller: authorize against its SERVICE PRINCIPAL's allowlist (a named
+        # service key), or legacy compat for a generic key. enforce_operation raises 403
+        # when the service is not permitted this operation — no more blanket ingestion pass.
+        authz.enforce_operation(None, operation)
         return
     granted = authz.enforce_operation(ctx.user, operation)
     if granted is not authz.Access.SCOPED:

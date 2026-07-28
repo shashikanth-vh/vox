@@ -176,6 +176,31 @@ CREATE_OPERATION_FOR_SUBJECT: dict[str, str] = {
     "AssetMonetisation": "add_product_line",
 }
 
+# Service principals — a machine caller authenticated by a NAMED service API key may only
+# perform the operations on its allowlist (least privilege), regardless of enforce_rbac. A
+# generic/unnamed API key keeps the legacy compatibility behaviour (governed by enforce_rbac).
+SERVICE_GRANTS: dict[str, set[str]] = {
+    "svc_pulse":     {"run_news_scan", "edit_intel"},
+    "svc_vox":       {"create_client", "add_lead", "edit_lead", "log_interaction",
+                      "add_company_note", "add_employee_assign_role"},
+    "svc_workflows": {"create_client", "add_lead", "edit_lead", "push_lead_to_deals",
+                      "add_product_line", "log_interaction", "add_employee_assign_role",
+                      "add_company_note"},
+    "svc_atlas":     set(),  # read-only BFF — no write operations
+}
+
+# Allowed status/stage transitions per (subject_type, field). A source value maps to the
+# set of targets reachable from it; a transition not listed is rejected (422). Same-value
+# (no-op) is always allowed. Converting a Lead is deliberately absent — it must go through
+# /convert, which creates the deal + product lines atomically.
+ALLOWED_TRANSITIONS: dict[tuple[str, str], dict[str, set[str]]] = {
+    ("Lead", "status"): {
+        "Active":  {"Dropped", "On Hold"},
+        "On Hold": {"Active", "Dropped"},
+        "Dropped": {"Active"},
+    },
+}
+
 # Field Rules sheet, first operational slice: ROW LOCKS. When a row's field holds one
 # of the listed values, further edits require one of the listed roles. (The full
 # per-field policy engine — mandatory fields, per-stage field locks — is layered on

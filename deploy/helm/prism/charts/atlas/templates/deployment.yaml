@@ -57,6 +57,10 @@ spec:
               value: {{ .Values.oidc.audience | default "" | quote }}
             - name: ATLAS_OIDC_EMAIL_CLAIM
               value: {{ .Values.oidc.emailClaim | default "email" | quote }}
+            {{- if .Values.internalSigningSecret }}
+            - name: ATLAS_INTERNAL_SIGNING_SECRET
+              value: {{ .Values.internalSigningSecret | quote }}
+            {{- end }}
             - name: ATLAS_REGISTER_API_KEY
               valueFrom:
                 secretKeyRef:

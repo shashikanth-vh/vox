@@ -89,17 +89,11 @@ async def create_assignment(payload: s.AssignmentCreate,
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} may not assign a {arole} to a {stype} line.")
     elif ctx.user is None:
-        # A machine caller (vetted API key, e.g. the VOX workflow) may create ONLY the
-        # line's PRIMARY-OWNER assignment — a BDRM on their own new lead. That is the
-        # auto-own semantics, not arbitrary reassignment, so it does not need the
-        # add_employee_assign_role operation.
-        from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
-
-        # ONLY the VOX case: a BDRM primary-owner assignment on a LEAD. Anything else
-        # from a machine caller still needs the operation (honours enforce_rbac).
-        vox_primary = (stype == "Lead" and arole == PRIMARY_ASSIGNMENT_ROLE.get("Lead"))
-        if not vox_primary:
-            authz.enforce_operation(None, "add_employee_assign_role")
+        # A machine caller must be a SERVICE principal permitted to assign
+        # (add_employee_assign_role is on svc_vox / svc_workflows). A generic key follows
+        # enforce_rbac. This removes the old blanket "any machine may create a Lead/BDRM"
+        # carve-out — only the vetted capture/workflow services can.
+        authz.enforce_operation(None, "add_employee_assign_role")
 
     # Subject must exist (the assignee is an Access-service user — validated upstream).
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
@@ -262,6 +256,18 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
     req.updated_by = ctx.actor
 
     if approve:
+        # The subject's current value must STILL equal what the request was raised against —
+        # otherwise the world moved on and applying the stale target could clobber a change
+        # (a lost update through the approval path). Reject with 409 so it is re-requested.
+        subject = await load_subject(ctx.session, ctx.tenant_id, req.subject_type,
+                                     req.subject_id)
+        if subject is None:
+            raise NotFoundError(f"{req.subject_type} '{req.subject_id}' no longer exists.")
+        current = getattr(subject, req.field, None)
+        if current != req.from_value:
+            raise ConflictError(
+                f"{req.subject_type}.{req.field} is now {current!r}, not {req.from_value!r} "
+                "as requested — the request is stale; raise a new one.")
         # Transition/row-lock policy: if the requested target value is a LOCKED state
         # (a Converted lead, a Disbursed lending line), only a role the lock names may put
         # it there — the approval path must not bypass the same lock a direct edit obeys.
@@ -356,29 +362,24 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     Idempotency-Key (which the SDK sends) is honoured so a retry returns the first result
     instead of creating a second deal.
     """
-    from app.models import AssetMonetisation, Deal, LendingTracker, SyndicationTracker
+    import hashlib
+
+    import orjson
+
+    from app.models import AssetMonetisation, Deal, LendingTracker, Person, SyndicationTracker
+    from app.models import Lead as _Lead
+    from app.models.users import LineAssignment
     from app.repositories.crud import CRUDRepository as _Repo
 
-    # Idempotent replay: a retried conversion (same key) returns the original outcome.
-    if idempotency_key:
-        prior = (
-            await ctx.session.execute(
-                select(IdempotencyKey).where(
-                    IdempotencyKey.tenant_id == ctx.tenant_id,
-                    IdempotencyKey.key == idempotency_key))
-        ).scalar_one_or_none()
-        if prior is not None:
-            return prior.response_body
+    body_hash = hashlib.sha256(
+        orjson.dumps(payload.model_dump(mode="json"), option=orjson.OPT_SORT_KEYS)).hexdigest()
 
-    # Human callers are gated on push_lead_to_deals. Machine callers (vetted API key: the
-    # workflow, AFTER the orchestrator verified the approver's identity + role) honour
-    # enforce_rbac like every other operation.
+    # AUTHORIZE FIRST — an unauthenticated/unauthorized caller must never get a replayed
+    # result. Human callers are gated on push_lead_to_deals; a machine caller is bound to
+    # its service allowlist (svc_workflows may convert). Only THEN do we touch idempotency.
     granted = authz.enforce_operation(ctx.user, "push_lead_to_deals")
-    # Lock the lead row FOR UPDATE so two concurrent conversions serialise: the second
-    # blocks until the first commits, then sees status=Converted and 409s — no duplicate
-    # deal. (Belt-and-braces with the Idempotency-Key replay above for retries.)
-    from app.models import Lead as _Lead
 
+    # Lock the lead row FOR UPDATE so two concurrent conversions serialise.
     lead = (
         await ctx.session.execute(
             select(_Lead).where(_Lead.id == lead_id, _Lead.tenant_id == ctx.tenant_id,
@@ -386,27 +387,8 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     ).scalar_one_or_none()
     if lead is None:
         raise NotFoundError(f"Lead '{lead_id}' not found.")
-    # Re-check the idempotency key now that we hold the lock: a same-key request that raced
-    # us past the pre-check replays the first result instead of 409-ing.
-    if idempotency_key:
-        prior = (
-            await ctx.session.execute(
-                select(IdempotencyKey).where(
-                    IdempotencyKey.tenant_id == ctx.tenant_id,
-                    IdempotencyKey.key == idempotency_key))
-        ).scalar_one_or_none()
-        if prior is not None:
-            return prior.response_body
-    entity_id = getattr(lead, "entity_id", None)
-    if entity_id is None:
-        raise ValidationAppError("Lead has no entity_id — link it to a company first.")
-    # Only an OPEN lead converts: a Converted / Lost / Dropped / Rejected lead is closed.
-    if lead.status in {"Converted", "Lost", "Dropped", "Rejected", "Closed"}:
-        raise ConflictError(f"Lead is {lead.status}; only an open lead can be converted.")
 
-    # SCOPED human caller: require EXACT write access to the lead line (assignment / own
-    # book / vertical-Head default ownership) — company visibility alone is not enough to
-    # push someone else's lead into a deal.
+    # SCOPED human caller: require EXACT write access to the lead line.
     if ctx.user is not None and granted is authz.Access.SCOPED:
         from app.authz import scope as scope_mod
 
@@ -415,6 +397,47 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             raise ForbiddenError(
                 "Scoped access: this lead is not assigned to you (or your team), so you "
                 "may not convert it.")
+
+    # Idempotency AFTER authorization: replay the first result for a genuine retry, but
+    # reject the SAME key reused with a DIFFERENT body (a key-reuse attack) with 422.
+    if idempotency_key:
+        prior = (
+            await ctx.session.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.tenant_id == ctx.tenant_id,
+                    IdempotencyKey.key == idempotency_key))
+        ).scalar_one_or_none()
+        if prior is not None:
+            if prior.request_hash and prior.request_hash != body_hash:
+                raise ConflictError(
+                    "Idempotency-Key reused with a different request body.")
+            return prior.response_body
+
+    entity_id = getattr(lead, "entity_id", None)
+    if entity_id is None:
+        raise ValidationAppError("Lead has no entity_id — link it to a company first.")
+    if lead.status in {"Converted", "Lost", "Dropped", "Rejected", "Closed"}:
+        raise ConflictError(f"Lead is {lead.status}; only an open lead can be converted.")
+
+    # rm / analyst, if named, must be known people in this tenant — not free-text.
+    for label, name in (("rm", payload.rm), ("analyst", payload.analyst)):
+        if name:
+            known = (await ctx.session.execute(
+                select(Person.id).where(Person.tenant_id == ctx.tenant_id,
+                                        Person.full_name == name,
+                                        Person.deleted_at.is_(None)).limit(1))
+            ).scalar_one_or_none()
+            if known is None:
+                raise ValidationAppError(f"Unknown {label} '{name}' — not a person on record.")
+
+    def _assign(subject_type: str, subject_id, role: str, user_id) -> None:
+        if user_id is None:
+            return
+        ctx.session.add(LineAssignment(
+            tenant_id=ctx.tenant_id, user_id=user_id, subject_type=subject_type,
+            subject_id=subject_id, assignment_role=role, assigned_by=ctx.actor,
+            note="Auto-assigned on lead conversion.", created_by=ctx.actor,
+            updated_by=ctx.actor))
 
     deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
         "entity_id": str(entity_id),
@@ -434,16 +457,19 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
             "stage": "Data Awaited"})
         line_ids["lending_id"] = row.id
+        _assign("Lending", row.id, "Deal Analyst", payload.analyst_id)
     if payload.is_syndication:
         row = await _Repo(SyndicationTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
             "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
             "status": "Deal Sourced"})
         line_ids["syndication_id"] = row.id
+        _assign("Syndication", row.id, "Syn RM", payload.rm_id)
     if payload.is_asset_mon:
         row = await _Repo(AssetMonetisation).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id), "status": "Teaser Prepared"})
         line_ids["asset_mon_id"] = row.id
+        _assign("AssetMonetisation", row.id, "AM RM", payload.rm_id)
 
     await _Repo(SUBJECTS["Lead"]).update(ctx.session, ctx.tenant_id, lead_id, ctx.actor, {
         "status": "Converted", "converted_deal_id": str(deal.id),
@@ -454,7 +480,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         await ctx.session.flush()
         ctx.session.add(IdempotencyKey(
             tenant_id=ctx.tenant_id, key=idempotency_key,
-            request_hash="", method="POST",
+            request_hash=body_hash, method="POST",
             path=f"/v1/leads/{lead_id}/convert", status_code=200,
             response_body=result.model_dump(mode="json"),
             expires_at=datetime.now(UTC) + timedelta(

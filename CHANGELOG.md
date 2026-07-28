@@ -6,6 +6,43 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Security audit round 7 — service principals, mandatory signed context, transitions, RLS bootstrap, deployable prod values.**
+  - **Signed context is now the SOLE identity path once configured.** When
+    `internal_signing_secret` is set the Register no longer accepts legacy `X-User-*`
+    headers (no downgrade), and every token is **bound to the request method + path** so it
+    can't be replayed across routes within its TTL. ATLAS now mints a `GET`-bound signed
+    context (replacing its plaintext headers + shared secret) that can never be replayed to
+    a write route.
+  - **Service principals (least privilege for machines).** A named service key
+    (`svc_pulse`/`svc_vox`/`svc_workflows`/`svc_atlas`) binds a machine caller to an
+    operation allowlist — enforced on line creates, company-scoped writes, custom
+    financial/intel routes, interactions and assignments. `svc_pulse` can write
+    intelligence but not create leads; `svc_atlas` is read-only. Closes "any Register-key
+    holder can create financials / ack intel / log interactions", and unblocks the Temporal
+    conversion under `enforceRbac` (svc_workflows may `push_lead_to_deals`).
+  - **Transitions.** `Lead.status → Converted` is blocked in the generic PATCH for **every**
+    caller (machine included); a transition graph (`ALLOWED_TRANSITIONS`) rejects undefined
+    jumps; and change-request approval now re-checks the current value still equals
+    `from_value` (409 on a stale request).
+  - **Conversion.** Authorization now runs **before** any idempotency replay; the
+    Idempotency-Key stores a real `request_hash` and rejects reuse with a different body;
+    `rm`/`analyst` must be known people; and product-line owner assignments are created from
+    `rm_id`/`analyst_id`.
+  - **Exports & tenant admin.** Each exported table is gated by its own view permission;
+    `include_deleted` always needs `backup_restore` (Admin-only, even for Management);
+    generic-CRUD `include_deleted` is gated on the audit capability; tenant administration
+    requires a **verified Admin identity** in addition to the admin key, stamps the verified
+    actor (not client `X-Actor`), and sets the tenant GUC so its audit insert survives
+    forced RLS.
+  - **RLS is self-bootstrapping and deterministic.** A migrate-time `app.db.apply_rls` step
+    runs every deploy: it creates/refreshes `register_app` (LOGIN + password from
+    `REGISTER_APP_PASSWORD`) and (re)asserts FORCE to match the flag — so flipping
+    `enforceRls` takes effect without hand-editing the DB. The RLS boundary test now
+    honestly SKIPs under a superuser (which bypasses FORCE) instead of passing hollow.
+  - **Production values connect as supplied.** `values-prod.yaml` uses YAML anchors so every
+    cross-service credential matches (gateway↔access key, register data key, per-service
+    keys, signing secret, gateway secret); CI now renders the prod overlay.
+
 - **Signed internal context — identity propagation realigned to the reference architecture.**
   The gateway→Register channel moves from *plaintext identity headers + a static shared
   secret* (with the Register re-deriving authz from its compiled matrix) to the diagram's

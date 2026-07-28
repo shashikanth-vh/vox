@@ -54,8 +54,8 @@ def _check_api_key(provided: str | None) -> None:
         return
     if not provided:
         raise UnauthorizedError("Missing X-API-Key header.")
-    # Constant-time comparison against every configured key.
-    for key in settings.api_keys:
+    # Constant-time comparison against every configured key (generic + named service keys).
+    for key in settings.all_api_keys():
         if hmac.compare_digest(provided, key):
             return
     raise UnauthorizedError("Invalid API key.")
@@ -101,7 +101,13 @@ async def get_context(
     _check_api_key(x_api_key)
 
     tenant_code = (x_tenant or settings.default_tenant_code).strip()
-    actor = (x_actor or "api").strip()[:120]
+    # X-Actor is client-controlled and is only honoured for an UNauthenticated dev call.
+    # A named service key stamps the service as the actor; an authenticated user overrides
+    # it with their verified e-mail (below), so a caller can never masquerade as a person.
+    service = settings.service_for_key(x_api_key)
+    actor = service or (x_actor or "api").strip()[:120]
+    from app.authz.engine import service_ctx
+    service_ctx.set(service)
 
     sm = get_sessionmaker()
     async with sm() as session:
@@ -143,11 +149,21 @@ async def get_context(
                 if ic.tenant and ic.tenant != tenant_code:
                     raise ForbiddenError(
                         "Internal context tenant does not match the request tenant.")
+                # …nor against a different route: the token is bound to the method + path
+                # it was minted for, so it cannot be replayed across routes within its TTL.
+                req_path = request.url.path
+                if ic.method and ic.method != request.method:
+                    raise ForbiddenError("Internal context method mismatch.")
+                if ic.path and ic.path != req_path:
+                    raise ForbiddenError("Internal context path mismatch.")
                 user = user_context_from_internal(ic)
                 if ic.decision in ("FULL", "SCOPED"):
                     decision = ic.decision
                 actor = user.email[:120]
-            elif x_user_email:
+            elif x_user_email and not settings.internal_signing_secret:
+                # LEGACY header propagation — trusted ONLY when the signed context is not
+                # configured. Once signing is on, the signed token is the sole identity
+                # path and plaintext X-User-* headers are ignored (no downgrade).
                 from app.authz.engine import user_context_from_headers
                 from app.core.errors import ForbiddenError
 

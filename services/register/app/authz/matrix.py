@@ -8,6 +8,7 @@ drift. This module keeps the Register's historical import path working.
 from __future__ import annotations
 
 from evam_backend_core.rbac import (
+    ALLOWED_TRANSITIONS,
     APPROVER_FOR_SUBJECT,
     ASSIGNMENT_AUTHORITY,
     CREATE_OPERATION_FOR_SUBJECT,
@@ -16,12 +17,14 @@ from evam_backend_core.rbac import (
     PRIMARY_ASSIGNMENT_ROLE,
     ROLES,
     ROW_LOCKS,
+    SERVICE_GRANTS,
     VIEW_ACCESS,
     Access,
 )
 
 __all__ = [
-    "APPROVER_FOR_SUBJECT", "ASSIGNMENT_AUTHORITY", "CREATE_OPERATION_FOR_SUBJECT",
-    "DEFAULT_LINE_OWNER", "OPERATIONS", "PRIMARY_ASSIGNMENT_ROLE", "ROLES", "ROW_LOCKS",
+    "ALLOWED_TRANSITIONS", "APPROVER_FOR_SUBJECT", "ASSIGNMENT_AUTHORITY",
+    "CREATE_OPERATION_FOR_SUBJECT", "DEFAULT_LINE_OWNER", "OPERATIONS",
+    "PRIMARY_ASSIGNMENT_ROLE", "ROLES", "ROW_LOCKS", "SERVICE_GRANTS",
     "VIEW_ACCESS", "Access",
 ]

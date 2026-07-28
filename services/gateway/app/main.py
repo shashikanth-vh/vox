@@ -106,7 +106,8 @@ def create_app() -> FastAPI:
             return _problem(403, f"Unknown or inactive user '{email}'.")
         except AccessUnavailableError as exc:
             return _problem(502, f"Access service unavailable: {exc}")
-        fwd_headers = _forward_headers(request, user, decision=None)
+        fwd_headers = _forward_headers(request, user, decision=None,
+                                       method="GET", path="/v1/assignments")
         resp = await request.app.state.client.get(
             f"{settings.register_url}/v1/assignments",
             params={"user_id": user.id},
@@ -135,13 +136,16 @@ def create_app() -> FastAPI:
         ident = await verifier.verify(token)
         return ident.email
 
-    def _forward_headers(request: Request, user, decision: str | None) -> dict[str, str]:  # noqa: ANN001
+    def _forward_headers(request: Request, user, decision: str | None,  # noqa: ANN001
+                         *, method: str | None = None, path: str | None = None,
+                         operation: str | None = None) -> dict[str, str]:
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() not in _SKIP_REQUEST_HEADERS}
         if user is not None:
             # Production channel: a SIGNED internal context carrying identity + the LIVE
-            # effective matrix. The Register verifies the signature and enforces from it —
-            # no static-secret forgery, no stale-matrix divergence.
+            # effective matrix, BOUND to the downstream method + path so it cannot be
+            # replayed against another route. The Register verifies the signature and
+            # enforces from it — no static-secret forgery, no stale-matrix divergence.
             if settings.internal_signing_secret:
                 headers["X-Internal-Context"] = mint_internal_context(
                     signing_key=settings.internal_signing_secret,
@@ -152,7 +156,9 @@ def create_app() -> FastAPI:
                     report_ids=[str(r["id"]) for r in user.reports],
                     report_emails=[r["email"] for r in user.reports],
                     effective_views=user.views, effective_operations=user.operations,
-                    matrix_version=user.version, decision=decision)
+                    matrix_version=user.version, decision=decision,
+                    method=method or request.method,
+                    path=path or request.url.path, operation=operation)
             # Legacy header propagation (kept for dev / mixed rollout). When the signed
             # context is on, these are advisory only — the Register prefers the token.
             headers["X-User-Email"] = user.email

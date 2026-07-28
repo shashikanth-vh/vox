@@ -39,6 +39,11 @@ class Settings(BaseServiceSettings):
     # require it (not the shared data-plane key). Empty = compatibility mode: the shared
     # key still works but any forwarded human identity must hold the Admin role.
     admin_api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Named SERVICE principals: "svc_pulse:key1,svc_vox:key2,svc_workflows:key3". A machine
+    # caller presenting one of these keys is bound to that service's operation allowlist
+    # (least privilege). Keys here are ALSO accepted as valid API keys. Format is
+    # name:secret pairs; parsed into {secret: name}.
+    service_api_keys: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
     default_tenant_code: str = "EVAM"
     # Enforce PostgreSQL row-level security using the request tenant. Off by default for
     # the single-tenant local build; turn on in multi-tenant deployments.
@@ -110,6 +115,30 @@ class Settings(BaseServiceSettings):
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
+
+    @field_validator("service_api_keys", mode="before")
+    @classmethod
+    def _parse_service_keys(cls, v: object) -> object:
+        if isinstance(v, str):
+            out: dict[str, str] = {}
+            for pair in v.split(","):
+                pair = pair.strip()
+                if not pair or ":" not in pair:
+                    continue
+                name, secret = pair.split(":", 1)
+                if name.strip() and secret.strip():
+                    out[secret.strip()] = name.strip()
+            return out
+        return v
+
+    def all_api_keys(self) -> list[str]:
+        """Every accepted data-plane key: the generic keys plus every service key."""
+        return [*self.api_keys, *self.service_api_keys.keys()]
+
+    def service_for_key(self, provided: str | None) -> str | None:
+        if not provided:
+            return None
+        return self.service_api_keys.get(provided)
 
 
 @lru_cache

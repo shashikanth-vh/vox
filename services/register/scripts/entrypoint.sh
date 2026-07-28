@@ -12,6 +12,11 @@ BIND="${REGISTER_HOST:-0.0.0.0}:${REGISTER_PORT:-8000}"
 run_migrate() {
   echo "[entrypoint] applying migrations..."
   alembic upgrade head
+  # Converge the RLS posture every deploy (idempotent): create/refresh the register_app
+  # runtime role and (re)assert FORCE to match REGISTER_ENFORCE_RLS — so flipping the flag
+  # takes effect without hand-editing the database.
+  echo "[entrypoint] converging RLS posture (register_app + FORCE)..."
+  python -m app.db.apply_rls
 }
 
 run_seed() {

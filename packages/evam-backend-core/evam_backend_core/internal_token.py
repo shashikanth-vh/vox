@@ -51,6 +51,12 @@ class InternalContext:
     matrix_version: int = 0
     # The gateway's binary decision for THIS request's mapped route, if any.
     decision: str | None = None
+    # Request binding: the token is minted for ONE request and is only valid for that
+    # method + path (+ the operation it was decided against), so it cannot be replayed
+    # against a different route during its short validity.
+    method: str | None = None
+    path: str | None = None
+    operation: str | None = None
 
 
 class InternalTokenError(Exception):
@@ -70,6 +76,9 @@ def mint_internal_context(
     effective_operations: dict[str, str] | None = None,
     matrix_version: int = 0,
     decision: str | None = None,
+    method: str | None = None,
+    path: str | None = None,
+    operation: str | None = None,
     algorithm: str = "HS256",
     ttl_seconds: int = 120,
     now: int | None = None,
@@ -95,6 +104,9 @@ def mint_internal_context(
         "eff_ops": effective_operations or {},
         "matrix_version": matrix_version,
         "decision": decision,
+        "method": method,
+        "path": path,
+        "operation": operation,
     }
     return jwt.encode(claims, signing_key, algorithm=algorithm)
 
@@ -139,4 +151,7 @@ def verify_internal_context(
         effective_operations=dict(claims.get("eff_ops", {})),
         matrix_version=int(claims.get("matrix_version", 0)),
         decision=claims.get("decision"),
+        method=claims.get("method"),
+        path=claims.get("path"),
+        operation=claims.get("operation"),
     )

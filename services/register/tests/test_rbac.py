@@ -322,6 +322,10 @@ async def test_transactional_lead_convert(client: AsyncClient):
     transaction. Replaces the workflow's compensation — nothing partial survives."""
     ent = (await client.post("/v1/entities", json={
         "code": f"CV-{uuid.uuid4().hex[:6]}", "legal_name": "Convert Co"})).json()
+    # rm/analyst named on a conversion must be known people on record.
+    p = await client.post("/v1/people",
+                          json={"name": "Chetan", "full_name": "Chetan", "role": "RM"})
+    assert p.status_code == 201, p.text
     lead = (await client.post("/v1/leads", json={
         "company": "Convert Co", "entity_id": ent["id"], "status": "Active"})).json()
     r = await client.post(f"/v1/leads/{lead['id']}/convert", json={

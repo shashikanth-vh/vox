@@ -188,18 +188,46 @@ def _is_unrestricted(ctx: RequestContext) -> bool:
     return bool(ctx.user.roles & {"Admin", "Management"})
 
 
+# Export table → the view whose access gates it. A caller who cannot VIEW a module cannot
+# export its rows, even inside a bulk export.
+_TABLE_VIEW: dict[str, str] = {
+    "entities": "clients", "people": "employees", "counterparties": "tools",
+    "leads": "leads", "deals": "deals", "lending_tracker": "lending",
+    "syndication_tracker": "syndication", "syndication_lenders": "syndication",
+    "asset_monetisation": "asset_monetisation", "financials": "fi_master",
+    "contracts_assets": "clients", "interactions": "clients",
+    "external_intelligence": "clients", "monitoring_reporting": "clients",
+    "documents": "clients", "document_checklist": "tools", "ref_values": "tools",
+}
+
+
 async def _guard_export(ctx: RequestContext, include_deleted: bool) -> tuple[bool, Any]:
-    """Common export gate. Everyone needs ``export_csv``. A FULL/deleted backup — the
-    whole tenant, or soft-deleted rows — additionally needs ``backup_restore`` (Admin), so
-    a scoped user can never pull the entire book. Returns (restricted, scope)."""
+    """Common export gate. Everyone needs ``export_csv``. Reading SOFT-DELETED rows is a
+    backup operation and ALWAYS needs ``backup_restore`` (Admin-only) — even for Management,
+    which the matrix does not grant it. Returns (restricted, scope)."""
     from app.authz import enforce_operation
 
     enforce_operation(ctx.user, "export_csv")
+    if include_deleted:
+        enforce_operation(ctx.user, "backup_restore")  # soft-deleted rows ⇒ Admin backup
     unrestricted = _is_unrestricted(ctx)
-    if include_deleted and not unrestricted:
-        enforce_operation(ctx.user, "backup_restore")  # include_deleted ⇒ Admin backup
     scope = None if unrestricted else await _export_scope(ctx)
     return (not unrestricted), scope
+
+
+def _viewable(ctx: RequestContext, name: str) -> bool:
+    """Can the caller VIEW this table's module at all? Machine callers keep the export op
+    they already cleared; a human is filtered per-table so a bulk export never leaks a
+    module they have no access to."""
+    if ctx.user is None:
+        return True
+    from app.authz.engine import view_access
+    from app.authz.matrix import Access
+
+    view = _TABLE_VIEW.get(name)
+    if view is None:
+        return True
+    return view_access(ctx.user, view) is not Access.NONE
 
 
 @router.get("/v1/export/excel", summary="Export tables to an Excel workbook (row-scoped)")
@@ -211,6 +239,8 @@ async def export_excel(
     restricted, scope = await _guard_export(ctx, include_deleted)
     wb = Workbook(write_only=True)  # constant-memory writer for large datasets
     for name, model in _selected(tables):
+        if not _viewable(ctx, name):
+            continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
         ws = wb.create_sheet(title=name[:31])
@@ -247,6 +277,8 @@ async def export_json(
         "tables": {},
     }
     for name, model in _selected(tables):
+        if not _viewable(ctx, name):
+            continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
         rows: list[dict] = []
@@ -268,6 +300,8 @@ async def export_counts(
     restricted, scope = await _guard_export(ctx, include_deleted)
     counts: dict[str, int] = {}
     for name, model in _EXPORT_MODELS:
+        if not _viewable(ctx, name):
+            continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
         stmt = select(func.count()).select_from(table)

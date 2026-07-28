@@ -144,6 +144,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ include "register.secretName" . }}
       key: admin-api-keys
 {{- end }}
+{{- if .Values.serviceApiKeys }}
+# Named SERVICE principals (svc_pulse:key,svc_vox:key,...) — each machine caller is bound
+# to its operation allowlist. Secret-backed.
+- name: REGISTER_SERVICE_API_KEYS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "register.secretName" . }}
+      key: service-api-keys
+{{- end }}
 # RBAC-mandatory mode: gated operations (delete/restore/import/audit/line creates)
 # refuse machine callers without a user context. On by default in the umbrella.
 - name: REGISTER_ENFORCE_RBAC

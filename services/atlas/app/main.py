@@ -97,19 +97,41 @@ def create_app() -> FastAPI:
         if not email:
             return {}
         gate: ViewGate = request.app.state.gate
-        headers: dict[str, str] = {"X-User-Email": email}
+        resolved: dict = {}
         if gate.enabled:
             try:
                 resolved = await gate.resolve(tenant, email)
-                headers["X-User-Id"] = str(resolved.get("id", ""))
-                headers["X-User-Roles"] = ",".join(resolved.get("roles", []))
-                if resolved.get("reports"):
-                    headers["X-User-Report-Ids"] = ",".join(
-                        str(r["id"]) for r in resolved["reports"])
-                    headers["X-User-Reports"] = ",".join(
-                        r["email"] for r in resolved["reports"])
             except Exception as exc:  # noqa: BLE001 - identity is best-effort for reads
                 log.warning("atlas_identity_resolve_failed", extra={"error": str(exc)})
+
+        # Production channel: a SIGNED internal context — identity + the live effective
+        # grant, cryptographically bound. GET-bound so it can NEVER be replayed to a write
+        # route. This replaces the plaintext X-User-* headers + shared secret entirely.
+        if settings.internal_signing_secret:
+            from evam_backend_core.internal_token import mint_internal_context
+            reports = resolved.get("reports", []) or []
+            return {"X-Internal-Context": mint_internal_context(
+                signing_key=settings.internal_signing_secret,
+                algorithm=settings.internal_signing_algorithm,
+                tenant=tenant, email=email, user_id=str(resolved.get("id") or email),
+                roles=list(resolved.get("roles", [])),
+                report_ids=[str(r["id"]) for r in reports],
+                report_emails=[r["email"] for r in reports],
+                effective_views=resolved.get("views", {}),
+                effective_operations=resolved.get("operations", {}),
+                matrix_version=int(resolved.get("version", 0)),
+                method="GET")}
+
+        # Legacy channel (dev / no signing secret): plaintext headers + shared secret.
+        headers: dict[str, str] = {"X-User-Email": email}
+        if resolved:
+            headers["X-User-Id"] = str(resolved.get("id", ""))
+            headers["X-User-Roles"] = ",".join(resolved.get("roles", []))
+            if resolved.get("reports"):
+                headers["X-User-Report-Ids"] = ",".join(
+                    str(r["id"]) for r in resolved["reports"])
+                headers["X-User-Reports"] = ",".join(
+                    r["email"] for r in resolved["reports"])
         if settings.gateway_shared_secret:
             headers["X-Gateway-Auth"] = settings.gateway_shared_secret
         return headers

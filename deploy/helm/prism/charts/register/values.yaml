@@ -146,6 +146,11 @@ adminApiKeys: ""
 # live grant it carries. Must equal gateway.internalSigningSecret. Empty = legacy header
 # propagation. Rendered into the chart Secret (never plaintext env).
 internalSigningSecret: ""
+# Named SERVICE principals: "svc_pulse:key,svc_vox:key,svc_workflows:key,svc_atlas:key".
+# Each machine caller presenting its key is bound to that service's operation allowlist
+# (least privilege). Rendered into the chart Secret. Each service must send its own key as
+# its Register API key.
+serviceApiKeys: ""
 
 # Object storage for document bytes (the Data Register). "inline" keeps small files in
 # Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled

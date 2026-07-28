@@ -53,6 +53,16 @@ async def test_rls_is_fail_closed_and_tenant_isolating():
     init_engine(get_settings())
     sm = get_sessionmaker()
 
+    # A SUPERUSER bypasses RLS even with FORCE, so the fail-closed assertions below would be
+    # meaningless. Detect it and honestly SKIP rather than pass a hollow test. In a proper
+    # environment the app connects as a non-owner, non-superuser role and this runs in full.
+    async with sm() as s:
+        is_super = (await s.execute(text(
+            "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"))).scalar_one()
+        if is_super:
+            pytest.skip("current DB role is a superuser — it bypasses FORCE RLS; run the "
+                        "RLS boundary test as a non-superuser (e.g. register_app).")
+
     a_code, b_code = "RLSA", "RLSB"
     try:
         # Seed two tenants + one entity each (as owner, before FORCE).

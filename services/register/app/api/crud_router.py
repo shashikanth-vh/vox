@@ -229,37 +229,73 @@ async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
         raise ForbiddenError(f"Scoped access: this {spec.name}'s company is not in your scope.")
 
 
-def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec", data: dict) -> None:
+async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
+                              obj_id: uuid.UUID, data: dict) -> None:
     """Protected status/stage transitions on a generic update.
 
-    Two gaps this closes (the reviewer's "status transitions can bypass the workflow"):
+    Closes the "status transitions can bypass the workflow" gaps:
 
-    * A row lock (Converted lead, Disbursed lending line) is enforced on the TARGET value,
-      not only the current one — otherwise a scoped/assigned user could set the field
-      straight to the locked value because the row wasn't locked *yet*.
-    * ``Lead.status`` can never be set to ``Converted`` through the generic PATCH — that
-      transition MUST go through ``POST /v1/leads/{id}/convert`` (which atomically creates
-      the deal + product lines). The convert endpoint writes the status via the repository
-      directly, so it is unaffected by this route-level guard.
+    * ``Lead.status`` can never be set to ``Converted`` through the generic PATCH — by ANY
+      caller, machine included — it MUST go through ``POST /v1/leads/{id}/convert``. (The
+      convert endpoint writes the status via the repository directly, unaffected by this.)
+    * The transition itself must be ALLOWED by policy (``ALLOWED_TRANSITIONS``): e.g. a Lead
+      may go Active→Dropped and Dropped→Active, but an arbitrary jump is rejected (422).
+    * A row lock (Converted lead, Disbursed lending) is enforced on the TARGET value, not
+      only once the row is already locked.
     """
-    if ctx.user is None or spec.subject_type is None or not data:
+    if spec.subject_type is None or not data:
         return
-    from app.authz.matrix import ROW_LOCKS
+    from app.authz.matrix import ALLOWED_TRANSITIONS, ROW_LOCKS
     from app.core.errors import ForbiddenError, ValidationAppError
 
+    # Converting a lead is never a bare status edit — for humans AND machines.
     if spec.subject_type == "Lead" and data.get("status") == "Converted":
         raise ValidationAppError(
             "A lead is converted via POST /v1/leads/{id}/convert (which creates the deal "
             "and product lines atomically), not by setting status directly.")
 
+    # Transition-graph validation for fields that have a policy.
+    for field_name, graph in (
+        (f, ALLOWED_TRANSITIONS[(spec.subject_type, f)])
+        for f in list(data)
+        if (spec.subject_type, f) in ALLOWED_TRANSITIONS
+    ):
+        target = data[field_name]
+        if target is None:
+            continue
+        current = getattr(await spec.repo.get(ctx.session, ctx.tenant_id, obj_id),
+                          field_name, None)
+        if target == current:
+            continue  # no-op
+        if target not in graph.get(current or "", set()):
+            raise ValidationAppError(
+                f"{spec.subject_type}.{field_name}: {current!r} → {target!r} is not an "
+                f"allowed transition.")
+
+    # Row locks on the TARGET value (human roles only; machine callers are already bound by
+    # their service allowlist above).
     lock = ROW_LOCKS.get(spec.subject_type)
-    if lock is not None:
+    if lock is not None and ctx.user is not None:
         field_name, locking_values, allowed_roles = lock
         if (field_name in data and data[field_name] in locking_values
                 and not (ctx.user.roles & allowed_roles)):
             raise ForbiddenError(
                 f"Moving {spec.subject_type}.{field_name} to {data[field_name]!r} is a "
                 f"locked transition only {sorted(allowed_roles)} may make.")
+
+
+def _gate_include_deleted(ctx: "RequestContext", include_deleted: bool) -> None:
+    """Reading soft-deleted rows is an audit/backup capability, not a normal read: a human
+    caller must hold the ``audit`` view (Admin). Machine callers follow their service/compat
+    rules. Closes "include_deleted=true remains broadly available"."""
+    if not include_deleted or ctx.user is None:
+        return
+    from app.authz.engine import view_access
+    from app.authz.matrix import Access
+    from app.core.errors import ForbiddenError
+
+    if view_access(ctx.user, "audit") is Access.NONE:
+        raise ForbiddenError("include_deleted requires the audit capability (Admin).")
 
 
 def _enforce_simple_write(ctx: "RequestContext", spec: "ResourceSpec") -> None:
@@ -300,11 +336,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                     ctx, spec, payload_entity_id=body.get("entity_id"))
             _enforce_simple_write(ctx, spec)  # people / counterparties / checklist create
             # RBAC: creating a line resource is gated by its operation from the matrix
-            # (add_lead / push_lead_to_deals / add_product_line) — the same operation
-            # the gateway checks at the front door (defense in depth). Machine callers
-            # (vetted API keys: workflows, VocX, PULSE) keep their write path — the
-            # RBAC-mandatory flag hard-gates the destructive surfaces, not ingestion.
-            if spec.subject_type is not None and ctx.user is not None:
+            # (add_lead / push_lead_to_deals / add_product_line) — for HUMANS and for
+            # machine callers alike. enforce_operation binds a machine caller to its
+            # SERVICE allowlist (svc_vox may add_lead, svc_pulse may not), so ingestion is
+            # least-privilege rather than a blanket write.
+            if spec.subject_type is not None:
                 from app.authz import enforce_operation
                 from app.authz.matrix import CREATE_OPERATION_FOR_SUBJECT
 
@@ -312,8 +348,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                 if op is not None:
                     granted = enforce_operation(ctx.user, op)
                     entity_id = body.get("entity_id")
-                    if (granted.name == "SCOPED" and entity_id is not None
-                            and spec.subject_type != "Entity"):
+                    if (ctx.user is not None and granted.name == "SCOPED"
+                            and entity_id is not None and spec.subject_type != "Entity"):
                         # A SCOPED creator may only open lines for companies in
                         # their scope (their book / connected / team / vertical).
                         from app.authz import scope as scope_mod
@@ -387,6 +423,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         include_deleted: bool = Query(default=False),
         with_total: bool = Query(default=False, description="Include exact total (slower)"),
     ) -> Any:
+        _gate_include_deleted(ctx, include_deleted)
         # RBAC on line-resource lists (user context present): view access NONE → 403;
         # SCOPED → the central scope evaluator (assignment ∪ connected company ∪
         # own/team book ∪ vertical-Head default ownership); READ/FULL → everything.
@@ -454,6 +491,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         ctx: RequestContext = Depends(get_context),
         include_deleted: bool = Query(default=False),
     ) -> Any:
+        _gate_include_deleted(ctx, include_deleted)
         obj = await repo.get(ctx.session, ctx.tenant_id, obj_id, include_deleted=include_deleted)
         # RBAC: direct GET honours the same scope as the list — a SCOPED user cannot
         # fetch an unrelated row just by knowing its id.
@@ -501,7 +539,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             await _enforce_company_write(ctx, spec, obj_id)
             _enforce_simple_write(ctx, spec)  # people / counterparties / checklist update
             data = payload.model_dump(exclude_unset=True)
-            _enforce_transition(ctx, spec, data)  # protected status/stage transitions
+            await _enforce_transition(ctx, spec, obj_id, data)  # protected transitions
             expected = data.pop("expected_version", None)
             if expected is None:
                 expected = _parse_if_match(if_match)

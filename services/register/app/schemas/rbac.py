@@ -73,6 +73,11 @@ class LeadConvertRequest(CreateModel):
     amount_cr: float | None = None
     rm: str | None = Field(default=None, max_length=120)
     analyst: str | None = Field(default=None, max_length=120)
+    # When provided, the primary-owner LineAssignment is created on each new product line
+    # (Deal Analyst on lending, Syn RM on syndication, AM RM on asset-mon), so the owner's
+    # scoped access covers the line immediately — not just the rm/analyst name string.
+    rm_id: uuid.UUID | None = None
+    analyst_id: uuid.UUID | None = None
     note: str | None = None
 
 

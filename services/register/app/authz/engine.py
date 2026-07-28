@@ -15,6 +15,7 @@ Design decisions (from the spec):
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -24,12 +25,18 @@ from app.authz.matrix import (
     APPROVER_FOR_SUBJECT,
     ASSIGNMENT_AUTHORITY,
     OPERATIONS,
+    SERVICE_GRANTS,
     VIEW_ACCESS,
     Access,
 )
 from app.core.config import get_settings
 from app.core.errors import ForbiddenError
 from app.models.users import LineAssignment
+
+# The named service principal for an identity-less (machine) request, resolved from the
+# API key in get_context. None = generic key (legacy compatibility). Set per request; read
+# by enforce_operation so no call site needs to thread it through.
+service_ctx: ContextVar[str | None] = ContextVar("service_ctx", default=None)
 
 
 @dataclass
@@ -157,14 +164,24 @@ def enforce_operation(user: UserContext | None, operation: str) -> Access:
     """Gate an endpoint on an operation from the matrix.
 
     Returns the granted access level (FULL vs SCOPED — callers use it to narrow rows).
-    No user context → allowed in compatibility mode, 403 when RBAC is enforced.
+    Machine callers (no user) are resolved against their SERVICE PRINCIPAL:
+      * a NAMED service key (svc_pulse / svc_vox / svc_workflows / svc_atlas) may perform
+        ONLY the operations on its allowlist — least privilege, regardless of enforce_rbac;
+      * a generic/unnamed key keeps the legacy behaviour (compat off, 403 when enforced).
     """
     if user is None:
+        service = service_ctx.get()
+        if service is not None:
+            allowed = SERVICE_GRANTS.get(service, set())
+            if operation in allowed:
+                return Access.FULL
+            raise ForbiddenError(
+                f"Service '{service}' is not permitted to perform '{operation}'.")
         if get_settings().enforce_rbac:
             raise ForbiddenError(
                 f"Operation '{operation}' requires a user context (X-User-Email)."
             )
-        return Access.FULL  # machine-to-machine / dev mode: API key already vetted
+        return Access.FULL  # generic machine key / dev mode: API key already vetted
     granted = operation_access(user, operation)
     if granted is Access.NONE:
         raise ForbiddenError(

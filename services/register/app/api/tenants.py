@@ -99,6 +99,12 @@ def _authorize_tenant_admin(
         if not (x_admin_key and any(_hmac.compare_digest(x_admin_key, k) for k in admin_keys)):
             raise UnauthorizedError(
                 "Tenant administration requires a valid X-Admin-Key (admin credential).")
+        # With the admin credential configured (production posture), the key is NOT enough:
+        # a verified human Admin identity is ALSO required. A key alone can never administer
+        # tenants.
+        if not x_user_email:
+            raise ForbiddenError(
+                "Tenant administration requires a verified Admin identity, not just the key.")
     else:
         _check_api_key(x_api_key)  # dev/compat: the shared key authenticates the machine
 
@@ -138,8 +144,15 @@ async def admin_session(
             raise
 
 
-def _audit(session: AsyncSession, actor: str, action: str, tenant: Tenant,
-           changes: dict | None = None) -> None:
+async def _audit(session: AsyncSession, actor: str, action: str, tenant: Tenant,
+                 changes: dict | None = None) -> None:
+    # This router runs without a tenant GUC (it manages tenants, which aren't tenant-scoped)
+    # — but the audit_log IS RLS-covered, so under FORCE RLS the insert's WITH CHECK needs
+    # the GUC bound to the affected tenant. Set it transaction-locally right here.
+    from sqlalchemy import text as _text
+
+    await session.execute(
+        _text("SELECT set_config('app.current_tenant', :t, true)"), {"t": str(tenant.id)})
     session.add(
         AuditLog(
             tenant_id=tenant.id,
@@ -173,8 +186,10 @@ async def create_tenant(
     payload: TenantCreate,
     session: AsyncSession = Depends(admin_session),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ) -> TenantRead:
-    actor = (x_actor or "api").strip()[:120]
+    # Prefer the verified Admin identity over the client-controlled X-Actor.
+    actor = (x_user_email or x_actor or "api").strip()[:120]
     code = payload.code.strip()
     existing = (await session.execute(select(Tenant).where(Tenant.code == code))).scalar_one_or_none()
     if existing is not None:
@@ -183,7 +198,7 @@ async def create_tenant(
                  created_by=actor, updated_by=actor)
     session.add(row)
     await session.flush()
-    _audit(session, actor, "create", row)
+    await _audit(session, actor, "create", row)
     await session.refresh(row)  # load server-side defaults (id, timestamps) before serialising
     clear_tenant_cache()  # so the new tenant resolves on the very next request
     return TenantRead.model_validate(row)
@@ -218,8 +233,10 @@ async def update_tenant(
     payload: TenantUpdate,
     session: AsyncSession = Depends(admin_session),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ) -> TenantRead:
-    actor = (x_actor or "api").strip()[:120]
+    # Prefer the verified Admin identity over the client-controlled X-Actor.
+    actor = (x_user_email or x_actor or "api").strip()[:120]
     row = await _find(session, code)
     if row is None:
         raise NotFoundError(f"No tenant '{code}'.")
@@ -232,7 +249,7 @@ async def update_tenant(
     if changed:
         row.updated_by = actor
         await session.flush()
-        _audit(session, actor, "update", row, changes={"fields": changed})
+        await _audit(session, actor, "update", row, changes={"fields": changed})
         await session.refresh(row)  # reload server-updated updated_at
         clear_tenant_cache()  # (de)activation must take effect immediately
     return TenantRead.model_validate(row)
@@ -243,10 +260,11 @@ async def deactivate_tenant(
     code: str,
     session: AsyncSession = Depends(admin_session),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ) -> TenantRead:
     """Soft-deactivate: a tenant is never hard-deleted because its business rows
     reference ``tenant_id``. Sets ``is_active=false``; reactivate via PATCH."""
-    actor = (x_actor or "api").strip()[:120]
+    actor = (x_user_email or x_actor or "api").strip()[:120]
     row = await _find(session, code)
     if row is None:
         raise NotFoundError(f"No tenant '{code}'.")
@@ -254,7 +272,7 @@ async def deactivate_tenant(
         row.is_active = False
         row.updated_by = actor
         await session.flush()
-        _audit(session, actor, "deactivate", row)
+        await _audit(session, actor, "deactivate", row)
         await session.refresh(row)  # reload server-updated updated_at
         clear_tenant_cache()
     return TenantRead.model_validate(row)

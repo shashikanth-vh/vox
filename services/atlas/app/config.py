@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # dev: the Register trusts forwarded headers as sent.
     gateway_shared_secret: str = ""
 
+    # Signed internal context — the production identity channel. When set, ATLAS mints a
+    # short-lived signed token (GET-bound, so it can never be replayed to a write route)
+    # carrying the caller's identity + live effective grant, and STOPS sending plaintext
+    # X-User-* headers + the shared secret. Must equal the Register's signing secret.
+    internal_signing_secret: str = ""
+    internal_signing_algorithm: str = "HS256"
+
     # Verified identity (opt-in). Set the issuer to derive the caller's e-mail from a
     # bearer token instead of trusting X-User-Email. In production either set this OR
     # front ATLAS with the authenticated gateway.

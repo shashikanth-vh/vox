@@ -232,6 +232,9 @@ services:
       # Must match the Register's REGISTER_GATEWAY_SHARED_SECRET so the Register trusts
       # the user identity ATLAS forwards (otherwise user-attributed reads are rejected).
       ATLAS_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
+      # Mint the SIGNED internal context (GET-bound) the Register verifies — must equal
+      # REGISTER_INTERNAL_SIGNING_SECRET; replaces plaintext X-User-* + shared secret.
+      ATLAS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       ATLAS_LOG_JSON: "true"
     ports:
       - "8005:8000"   # direct dashboard endpoint for dev

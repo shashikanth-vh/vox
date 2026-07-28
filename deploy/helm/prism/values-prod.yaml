@@ -6,60 +6,94 @@
 #     --set atlas.oidc.issuer=https://idp.example.com \
 #     --set workflows.api.oidcIssuer=https://idp.example.com
 #
-# This overlay flips every enforcement the security review requires ON. Provide your real
-# OIDC issuer and rotate every credential below out of source control (use existingSecret
-# refs or --set from your secret store). It does NOT contain real secrets.
+# This overlay (a) turns ON every enforcement the security review requires, and (b) keeps
+# every cross-service credential CONSISTENT via YAML anchors so a merged render actually
+# connects. Every value below is a PLACEHOLDER — rotate all of them out of source control
+# (helm --set from your secret manager, or existingSecret refs). OIDC issuers MUST be
+# supplied via --set; the chart does not ship one.
+
+# Placeholder credentials, defined once and referenced everywhere so the services agree.
+# Anchors are resolved by the YAML parser before Helm sees them, so *ref == &def.
+_credentials:
+  registerHumanKey: &registerKey    "REPLACE-register-data-key"
+  accessKey:        &accessKey       "REPLACE-access-service-key"
+  gatewaySecret:    &gwSecret        "REPLACE-gateway-shared-secret"
+  signingSecret:    &signingSecret   "REPLACE-internal-signing-secret"
+  adminKey:         &adminKey        "REPLACE-tenant-admin-key"
+  svcAtlasKey:      &svcAtlas        "REPLACE-svc-atlas-key"
+  svcVoxKey:        &svcVox          "REPLACE-svc-vox-key"
+  svcPulseKey:      &svcPulse        "REPLACE-svc-pulse-key"
+  svcWorkflowsKey:  &svcWorkflows    "REPLACE-svc-workflows-key"
+  pulseFrontKey:    &pulseFront      "REPLACE-pulse-front-door-key"
 
 # ---- Identity is MANDATORY everywhere -----------------------------------------
 gateway:
   oidc:
     # issuer: set via --set / your values; MUST be non-empty in prod.
-    requireAuth: true            # the edge refuses anonymous requests
+    requireAuth: true                     # the edge refuses anonymous requests
   accessApiKey:
-    value: "CHANGE-ME"           # per-service key, not the shared dev key
-  # Sign the internal context the Register enforces (production identity channel). Rotate
-  # this out of source control; it MUST equal register.internalSigningSecret.
-  internalSigningSecret: "CHANGE-ME-INTERNAL-SIGNING-SECRET"
+    value: *accessKey                     # must be accepted by the Access service
+  gatewaySecret:
+    value: *gwSecret                      # must equal register/access gatewaySharedSecret
+  internalSigningSecret: *signingSecret   # must equal register.internalSigningSecret
 
-# ATLAS validates the OIDC bearer itself → stops trusting client X-User-Email.
+# ATLAS validates the OIDC bearer itself → stops trusting client X-User-Email; it presents
+# its own service key (svc_atlas: read-only allowlist) to the Register.
 atlas:
   oidc:
-    # issuer: set via --set; MUST be non-empty in prod.
     audience: "prism"
   access:
     requireUser: true
+  register:
+    apiKey:
+      value: *svcAtlas
+  gatewaySharedSecret: *gwSecret
+  internalSigningSecret: *signingSecret
 
-# The orchestrator's approver/requester identity is token-derived and mandatory.
-workflows:
-  api:
-    requireAuth: true
-    # oidcIssuer: set via --set; MUST be non-empty in prod.
-
-# ---- The Register: RBAC + fail-closed RLS + a separate admin credential --------
+# ---- The Register: RBAC + fail-closed RLS + separate admin + service principals -
 register:
   enforceRbac: true
   config:
-    enforceRls: true             # migration 0005 FORCEs RLS; app connects as register_app
+    enforceRls: true
   database:
-    # RUNTIME connects as the NON-OWNER application role so RLS actually binds (the owner
-    # bypasses it). Migration 0005 creates register_app; give it a login once:
-    #   ALTER ROLE register_app WITH LOGIN PASSWORD '<from-your-secret>';
-    # then point this user + its password Secret at it.
+    # RUNTIME connects as the NON-OWNER role so RLS binds; the migrate Job runs as the OWNER
+    # so it can create the role + FORCE RLS. The migrate step self-provisions register_app's
+    # login from REGISTER_APP_PASSWORD (set it from prism-register-app-secret in the Job env).
     user: register_app
-    existingSecret: prism-register-app-secret     # holds register_app's password
+    existingSecret: prism-register-app-secret
     existingSecretPasswordKey: password
-    # The migration Job still runs as the OWNER so it can run DDL / create the role / FORCE
-    # RLS — the non-owner runtime role cannot.
     migrationUser: prism
     migrationExistingSecret: prism-postgresql-secret
     migrationExistingSecretPasswordKey: postgres-password
-  # A dedicated admin credential for tenant administration, separate from the data key.
-  adminApiKeys: "CHANGE-ME-ADMIN-KEY"
-  # Verify the gateway's signed internal context — MUST equal gateway.internalSigningSecret.
-  internalSigningSecret: "CHANGE-ME-INTERNAL-SIGNING-SECRET"
+  apiKeys:
+    value: *registerKey                   # human traffic (via the gateway)
+  gatewaySharedSecret: *gwSecret
+  internalSigningSecret: *signingSecret
+  adminApiKeys: *adminKey
+  # Each machine caller is bound to its service allowlist (least privilege).
+  serviceApiKeys: "svc_atlas:REPLACE-svc-atlas-key,svc_vox:REPLACE-svc-vox-key,svc_pulse:REPLACE-svc-pulse-key,svc_workflows:REPLACE-svc-workflows-key"
 
-# Access validates the gateway signature on forwarded identity (no Admin impersonation).
+# Access accepts the SAME key the gateway presents; it verifies the gateway signature too.
 access:
-  gatewaySharedSecret: "prism-gateway-secret"   # must equal gateway.gatewaySecret.value
+  apiKeys:
+    value: *accessKey
+  gatewaySharedSecret: *gwSecret
   config:
     enforceRbac: true
+
+# VocX / PULSE / workflows each present THEIR OWN service key to the Register.
+vocx:
+  register:
+    apiKey:
+      value: *svcVox
+pulse:
+  register:
+    apiKey:
+      value: *svcPulse
+  apiKeys: *pulseFront                     # PULSE's own inbound key (news-scan trigger)
+workflows:
+  register:
+    apiKey: *svcWorkflows
+  api:
+    requireAuth: true
+    # oidcIssuer: set via --set; MUST be non-empty in prod.
