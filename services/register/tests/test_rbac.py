@@ -267,3 +267,43 @@ async def test_audit_and_restore_guardrails(client: AsyncClient):
     assert denied.status_code == 403
     assert (await client.post(f"/v1/entities/{ent['id']}/restore",
                               headers=ADMIN)).status_code == 200
+
+
+async def test_company_scoped_resources_and_unknown_filter(client: AsyncClient):
+    """Entity-carrying resources (financials/monitoring/intel/documents/interactions)
+    are now company-scoped: a Syn RM assigned to EcoSoch's syndication sees EcoSoch's
+    financials but not GH2's — the ATLAS-aggregation leak the reviewer flagged. And an
+    unknown query filter is refused (422), not silently ignored."""
+    eco = (await client.post("/v1/entities", json={
+        "code": f"ECO-{uuid.uuid4().hex[:6]}", "legal_name": "EcoSoch Solar"})).json()
+    gh2 = (await client.post("/v1/entities", json={
+        "code": f"GH2-{uuid.uuid4().hex[:6]}", "legal_name": "GH2 Solar"})).json()
+    eco_syn = (await client.post("/v1/syndication", json={"entity_id": eco["id"]})).json()
+    # Financials + monitoring on BOTH companies (created by the API key, no owner).
+    eco_fin = (await client.post("/v1/financials", json={
+        "entity_id": eco["id"], "statement_type": "Audited", "period_end": "2026-03-31",
+        "revenue": 84.6})).json()
+    gh2_fin = (await client.post("/v1/financials", json={
+        "entity_id": gh2["id"], "statement_type": "Audited", "period_end": "2026-03-31",
+        "revenue": 12.0})).json()
+
+    riya_id = uuid.uuid4()
+    riya = _as("riya@evamfinance.com", "Syn RM", riya_id)
+    r = await client.post("/v1/assignments", json={
+        "user_id": str(riya_id), "subject_type": "Syndication",
+        "subject_id": eco_syn["id"], "assignment_role": "Syn RM"},
+        headers=_as("synhead@evamfinance.com", "Syn Head"))
+    assert r.status_code == 201, r.text
+
+    # Financials list is scoped to her connected company.
+    lst = (await client.get("/v1/financials", headers=riya, params={"limit": 200})).json()
+    ids = {r["id"] for r in lst["items"]}
+    assert eco_fin["id"] in ids and gh2_fin["id"] not in ids
+    # Direct GET honours the same scope.
+    assert (await client.get(f"/v1/financials/{eco_fin['id']}", headers=riya)).status_code == 200
+    assert (await client.get(f"/v1/financials/{gh2_fin['id']}", headers=riya)).status_code == 403
+
+    # Unknown filter param → 422 (never silently ignored).
+    bad = await client.get("/v1/leads", params={"entity_idd": eco["id"]})
+    assert bad.status_code == 422
+    assert "Unknown query parameter" in bad.text

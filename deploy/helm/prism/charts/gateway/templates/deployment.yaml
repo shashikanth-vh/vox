@@ -57,6 +57,12 @@ spec:
                   name: {{ include "gateway.secretName" . }}
                   key: access-api-key
                   {{- end }}
+            - name: GATEWAY_OIDC_ISSUER
+              value: {{ .Values.oidc.issuer | default "" | quote }}
+            - name: GATEWAY_OIDC_AUDIENCE
+              value: {{ .Values.oidc.audience | default "" | quote }}
+            - name: GATEWAY_REQUIRE_AUTH
+              value: {{ .Values.oidc.requireAuth | default false | quote }}
             - name: GATEWAY_GATEWAY_SHARED_SECRET
               valueFrom:
                 secretKeyRef:

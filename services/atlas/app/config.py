@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # dev: the Register trusts forwarded headers as sent.
     gateway_shared_secret: str = ""
 
+    # Verified identity (opt-in). Set the issuer to derive the caller's e-mail from a
+    # bearer token instead of trusting X-User-Email. In production either set this OR
+    # front ATLAS with the authenticated gateway.
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_email_claim: str = "email"
+
     # How many rows per vertical the aggregations read, page-cap. 10 pages x 200 rows
     # covers the ATLAS book comfortably; raise deliberately for very large tenants.
     max_pages_per_resource: int = 10

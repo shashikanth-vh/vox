@@ -112,6 +112,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.FinancialCreate, update_schema=s.FinancialUpdate, read_schema=s.FinancialRead,
         filterable=["statement_type", "entity_id", "is_current", "fiscal_year"],
         include_create=False,  # creation goes through the version-aware endpoint
+        view_name="fi_master", company_scoped=True,
     ),
     ResourceSpec(
         name="contract/asset", prefix="/v1/contracts-assets", tags=["Contracts & Assets"],
@@ -120,6 +121,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.ContractAssetCreate, update_schema=s.ContractAssetUpdate,
         read_schema=s.ContractAssetRead,
         filterable=["asset_type", "entity_id", "deal_id", "state"],
+        view_name="clients", company_scoped=True,
     ),
     ResourceSpec(
         name="interaction", prefix="/v1/interactions", tags=["Interactions"],
@@ -135,6 +137,7 @@ _SPECS: list[ResourceSpec] = [
         include_create=False,  # creation goes through the timeline-aware endpoint
         include_update=False,  # append-only: interactions are never edited...
         include_delete=False,  # ...nor deleted (ATLAS: "Records are append-only")
+        view_name="clients", company_scoped=True,
     ),
     ResourceSpec(
         name="external-intelligence record", prefix="/v1/external-intelligence",
@@ -144,6 +147,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.ExternalIntelCreate, update_schema=s.ExternalIntelUpdate,
         read_schema=s.ExternalIntelRead,
         filterable=["intel_type", "signal", "entity_id", "deal_id"],
+        view_name="clients", company_scoped=True,
     ),
     ResourceSpec(
         name="monitoring record", prefix="/v1/monitoring", tags=["Monitoring & Reporting"],
@@ -151,6 +155,7 @@ _SPECS: list[ResourceSpec] = [
                             filterable=["record_type", "entity_id", "deal_id", "feeds_irg"]),
         create_schema=s.MonitoringCreate, update_schema=s.MonitoringUpdate, read_schema=s.MonitoringRead,
         filterable=["record_type", "entity_id", "deal_id", "feeds_irg"],
+        view_name="clients", company_scoped=True,
     ),
     ResourceSpec(
         name="document", prefix="/v1/documents", tags=["Documents"],
@@ -162,6 +167,7 @@ _SPECS: list[ResourceSpec] = [
         filterable=["subject_type", "subject_id", "section", "slot_key", "status",
                     "entity_id", "deal_id", "is_required"],
         include_create=False,  # creation goes through the subject-aware register endpoint
+        view_name="clients", company_scoped=True,
     ),
     ResourceSpec(
         name="document checklist item", prefix="/v1/document-checklist", tags=["Documents"],

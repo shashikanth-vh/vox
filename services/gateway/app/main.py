@@ -35,8 +35,9 @@ log = get_logger("gateway")
 # survive the hop (with the gateway then stamping its valid secret on the forgery).
 _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
                          "transfer-encoding", "upgrade", "expect",
-                         "x-authz-decision", "x-gateway-auth", "x-user-id",
-                         "x-user-roles", "x-user-report-ids", "x-user-reports"}
+                         "x-authz-decision", "x-gateway-auth", "x-user-email",
+                         "x-user-id", "x-user-roles", "x-user-report-ids",
+                         "x-user-reports"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 
@@ -118,10 +119,14 @@ def create_app() -> FastAPI:
         })
 
     async def _trusted_email(request: Request) -> str | None:
-        """The caller's e-mail. With OIDC configured it comes from the VERIFIED bearer
-        token (client cannot assert it); otherwise from X-User-Email (dev/trusted mesh)."""
+        """The caller's e-mail. When OIDC is configured (or ``require_auth`` is on) it
+        comes ONLY from the VERIFIED bearer token — X-User-Email is never trusted, so a
+        client cannot assert an identity. Header-trust applies ONLY in pure dev mode
+        (no OIDC, no require_auth: a trusted mesh)."""
         verifier: OidcVerifier | None = request.app.state.oidc
         if verifier is None:
+            if settings.require_auth:
+                return None  # no token source configured but anonymous is refused
             return request.headers.get("X-User-Email")
         token = bearer_token(request.headers.get("Authorization"))
         if not token:
@@ -152,10 +157,15 @@ def create_app() -> FastAPI:
         method = request.method
         full_path = "/" + path
         tenant = request.headers.get("X-Tenant", settings.default_tenant_code)
+        verifier: OidcVerifier | None = request.app.state.oidc
         try:
             email = await _trusted_email(request)
         except OidcError as exc:
             return _problem(401, f"Invalid bearer token: {exc}")
+        # OIDC on (or require_auth) → no verified identity means 401, NOT a silent
+        # machine-caller passthrough that would let an anonymous request reach the data.
+        if (verifier is not None or settings.require_auth) and not email:
+            return _problem(401, "Authentication required (Bearer token).")
 
         user = None
         decision: str | None = None

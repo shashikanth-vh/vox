@@ -101,6 +101,22 @@ async def build_scope(ctx: RequestContext, user: UserContext) -> UserScope:
             )
         ).scalars().all()
         scope.entity_ids.update(entity_ids)
+
+    # Vertical-Head default ownership at the COMPANY level: a Head also "connects" to any
+    # company that has an UNASSIGNED line in their vertical. Computed once here so list
+    # filtering, direct GET and company reads all agree cheaply.
+    for subject_type, model in _SUBJECT_MODELS.items():
+        if not scope.default_owner_of(subject_type):
+            continue
+        owned = (
+            await ctx.session.execute(
+                select(model.entity_id).where(
+                    model.tenant_id == ctx.tenant_id,
+                    model.entity_id.is_not(None),
+                    _no_assignment_exists(subject_type, model))
+            )
+        ).scalars().all()
+        scope.entity_ids.update(owned)
     return scope
 
 
@@ -128,6 +144,26 @@ def list_condition(scope: UserScope, subject_type: str) -> ColumnElement:
     if scope.default_owner_of(subject_type):
         clauses.append(_no_assignment_exists(subject_type, model))
     return or_(*clauses)
+
+
+def company_scoped_condition(scope: UserScope, model) -> ColumnElement:  # noqa: ANN001
+    """List clause for an entity-carrying resource (financials, contracts, intel,
+    monitoring, documents, interactions): visible when the company is in scope, or the
+    row is in the user's own/team book."""
+    clauses: list[ColumnElement] = [model.created_by.in_(scope.own_emails)]
+    if scope.entity_ids:
+        clauses.append(model.entity_id.in_(scope.entity_ids))
+    else:
+        clauses.append(model.entity_id.in_({uuid.UUID(int=0)}))  # nothing in scope
+    return or_(*clauses)
+
+
+def company_row_in_scope(scope: UserScope, row) -> bool:  # noqa: ANN001
+    """Direct-GET / write scope for an entity-carrying resource."""
+    if getattr(row, "created_by", None) in scope.own_emails:
+        return True
+    eid = getattr(row, "entity_id", None)
+    return eid is not None and eid in scope.entity_ids
 
 
 def entity_list_condition(scope: UserScope, model) -> ColumnElement:  # noqa: ANN001

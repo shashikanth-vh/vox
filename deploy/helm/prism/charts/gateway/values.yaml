@@ -71,3 +71,10 @@ ingress:
   host: ""
   annotations: {}
   tls: []
+
+# Verified identity (SSO). Set issuer to your IdP to REQUIRE bearer tokens and ignore
+# X-User-Email. requireAuth refuses anonymous even without OIDC (a no-anonymous mesh).
+oidc:
+  issuer: ""
+  audience: "prism"
+  requireAuth: false

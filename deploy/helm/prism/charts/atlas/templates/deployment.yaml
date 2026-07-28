@@ -45,6 +45,8 @@ spec:
               value: {{ .Values.access.url | quote }}
             - name: ATLAS_ACCESS_API_KEY
               value: {{ .Values.access.apiKey.value | quote }}
+            - name: ATLAS_GATEWAY_SHARED_SECRET
+              value: {{ .Values.gatewaySharedSecret | default "" | quote }}
             - name: ATLAS_REQUIRE_USER
               value: {{ .Values.access.requireUser | quote }}
             - name: ATLAS_REGISTER_API_KEY

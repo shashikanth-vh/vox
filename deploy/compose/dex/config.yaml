@@ -1,0 +1,30 @@
+# Dex — a dev OIDC IdP for exercising PRISM's verified-identity path end to end.
+# Enable with:  docker compose --profile sso up
+# Then the gateway validates bearer tokens issued here; obtain one with the
+# password grant (see docs/DEPLOYMENT.md → "Turning on SSO locally").
+issuer: http://dex:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  passwordConnector: local
+  skipApprovalScreen: true
+staticClients:
+  - id: prism
+    name: PRISM
+    public: true
+    redirectURIs:
+      - http://localhost:8080/callback
+enablePasswordDB: true
+# Two demo users mirroring the seeded PRISM identities. Password for both: "prism".
+# bcrypt of "prism":
+staticPasswords:
+  - email: admin@evamfinance.com
+    hash: "$2y$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: admin
+    userID: admin-uid
+  - email: chetan@evamfinance.com
+    hash: "$2y$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: chetan
+    userID: chetan-uid

@@ -154,6 +154,12 @@ services:
       GATEWAY_ACCESS_API_KEY: "dev-local-key"
       GATEWAY_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
       GATEWAY_CACHE_TTL_S: "30"
+      # Verified identity (SSO). Empty issuer = header-trust for the local walkthrough.
+      # `docker compose --profile sso up` supplies these so bearer tokens are REQUIRED
+      # and X-User-Email is ignored. Override the two ${...} to point at a real IdP.
+      GATEWAY_OIDC_ISSUER: "${GATEWAY_OIDC_ISSUER:-}"
+      GATEWAY_OIDC_AUDIENCE: "${GATEWAY_OIDC_AUDIENCE:-prism}"
+      GATEWAY_REQUIRE_AUTH: "${GATEWAY_REQUIRE_AUTH:-false}"
       GATEWAY_LOG_JSON: "true"
     ports:
       - "8001:8000"   # direct gateway access for dev
@@ -216,9 +222,25 @@ services:
       ATLAS_REGISTER_TENANT: "EVAM"
       ATLAS_ACCESS_URL: "http://access:8000"
       ATLAS_ACCESS_API_KEY: "dev-local-key"
+      # Must match the Register's REGISTER_GATEWAY_SHARED_SECRET so the Register trusts
+      # the user identity ATLAS forwards (otherwise user-attributed reads are rejected).
+      ATLAS_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
       ATLAS_LOG_JSON: "true"
     ports:
       - "8005:8000"   # direct dashboard endpoint for dev
+    restart: unless-stopped
+
+  # Dev OIDC IdP (opt-in): `docker compose --profile sso up`. Turns the gateway's
+  # verified-identity path on so you can exercise real bearer-token auth locally.
+  # See docs/DEPLOYMENT.md for how to get a token and set the env that enables it.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    profiles: ["sso"]
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "5556:5556"
     restart: unless-stopped
 
   # Edge reverse proxy — TLS (prod), routing, load-balancing, edge rate-limit, correlation id.

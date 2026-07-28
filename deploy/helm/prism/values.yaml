@@ -81,6 +81,12 @@ gateway:
     value: "dev-local-key"        # must be in the Access service's ACCESS_API_KEYS
   gatewaySecret:
     value: "prism-gateway-secret" # OVERRIDE; must match register.gatewaySharedSecret
+  # SSO: point issuer at your IdP (Dex/Auth0/Entra/Keycloak) to require verified bearer
+  # tokens at the edge and stop trusting X-User-Email. requireAuth: refuse anonymous.
+  oidc:
+    issuer: ""
+    audience: "prism"
+    requireAuth: false
   # The public entry point: enable + set a host to expose the platform. The Register
   # itself has an ingress template too, but keep it OFF — traffic must enter here.
   ingress:
@@ -133,6 +139,9 @@ atlas:
     apiKey:
       value: "dev-local-key"      # must be in the Access service's ACCESS_API_KEYS
     requireUser: true             # dashboards must be attributable in production
+  # Must match register.gatewaySharedSecret so the Register trusts the user identity
+  # ATLAS forwards on reads — otherwise user-attributed dashboards are rejected.
+  gatewaySharedSecret: "prism-gateway-secret"
 
 # ---- Object storage (document bytes) ------------------------------------------
 # S3-compatible store for the Data Register uploads. Dev/staging single node; for

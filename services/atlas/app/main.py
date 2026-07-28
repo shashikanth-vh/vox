@@ -28,6 +28,8 @@ import httpx
 from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
+from evam_backend_core.oidc import OidcError, OidcVerifier
+from evam_backend_core.oidc import bearer_token as _bearer
 from evam_register_client import AsyncRegisterClient
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import ORJSONResponse
@@ -65,15 +67,17 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # noqa: ANN202
-        app.state.register_clients = {}
         app.state.http = httpx.AsyncClient(timeout=10.0)
         app.state.gate = ViewGate(app.state.http, settings.access_url,
                                   settings.access_api_key, settings.permission_cache_ttl_s)
+        app.state.oidc = (
+            OidcVerifier(settings.oidc_issuer, settings.oidc_audience or None,
+                         app.state.http, email_claim=settings.oidc_email_claim)
+            if settings.oidc_issuer else None)
         log.info("atlas_started", extra={"register": settings.register_base_url,
-                                         "view_gating": app.state.gate.enabled})
+                                         "view_gating": app.state.gate.enabled,
+                                         "oidc": bool(settings.oidc_issuer)})
         yield
-        for client in app.state.register_clients.values():
-            await client.aclose()
         await app.state.http.aclose()
 
     app = FastAPI(title="PRISM ATLAS", version="0.1.0",
@@ -112,20 +116,17 @@ def create_app() -> FastAPI:
 
     async def _client(request: Request, tenant: str,
                       email: str | None) -> AsyncRegisterClient:
-        """A Register client that carries the CALLER's identity, so the Register scopes
-        every read to that user (a machine 'atlas' actor would see the whole tenant).
-        Cached per (tenant, identity) — identity is bounded (the tenant's users)."""
+        """A Register client carrying the caller's identity, built FRESH per request so a
+        role/reporting change takes effect on the next call — a cached identity client
+        would keep stale role headers (the reviewer's finding). The identity itself comes
+        from the TTL-cached ViewGate.resolve, so this stays cheap. The caller closes it."""
         headers = await _identity_headers(request, tenant, email)
-        key = (tenant, email or "")
-        clients: dict = request.app.state.register_clients
-        if key not in clients:
-            from evam_register_client.config import RegisterClientConfig
+        from evam_register_client.config import RegisterClientConfig
 
-            cfg = RegisterClientConfig(
-                base_url=settings.register_base_url, api_key=settings.register_api_key,
-                tenant=tenant, actor="atlas", extra_headers=headers)
-            clients[key] = AsyncRegisterClient(config=cfg)
-        return clients[key]
+        cfg = RegisterClientConfig(
+            base_url=settings.register_base_url, api_key=settings.register_api_key,
+            tenant=tenant, actor="atlas", extra_headers=headers)
+        return AsyncRegisterClient(config=cfg)
 
     async def _gate(request: Request, tenant: str, email: str | None,
                     view: str) -> ORJSONResponse | None:
@@ -174,20 +175,34 @@ def create_app() -> FastAPI:
         request.app.state.gate.invalidate()
         return {"invalidated": True}
 
+    async def _trusted_email(request: Request) -> str | None:
+        """The caller's e-mail. With ATLAS_OIDC_ISSUER set it comes from the VERIFIED
+        bearer token (client cannot assert it); otherwise from X-User-Email (dev, or
+        behind the authenticated gateway). Raises OidcError on a bad token."""
+        verifier = request.app.state.oidc
+        if verifier is None:
+            return request.headers.get("X-User-Email")
+        token = _bearer(request.headers.get("Authorization"))
+        if not token:
+            return None
+        return (await verifier.verify(token)).email
+
     @app.get("/v1/dashboard", tags=["Dashboard"],
              summary="The whole book summarised: every vertical, amounts, open intel")
-    async def dashboard(request: Request, tenant: str = Depends(tenant_of),
-                        x_user_email: str | None = Header(default=None,
-                                                          alias="X-User-Email")) -> Any:
-        if (denied := await _gate(request, tenant, x_user_email, "dashboard")) is not None:
+    async def dashboard(request: Request, tenant: str = Depends(tenant_of)) -> Any:
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, "Unauthorized", f"Invalid token: {exc}")
+        if (denied := await _gate(request, tenant, email, "dashboard")) is not None:
             return denied
-        client = await _client(request, tenant, x_user_email)
-        leads = await _rows(client, "leads")
-        deals = await _rows(client, "deals")
-        lending = await _rows(client, "lending")
-        syndication = await _rows(client, "syndication")
-        asset_mon = await _rows(client, "asset-monetisation")
-        intel = await _rows(client, "external-intelligence")
+        async with await _client(request, tenant, email) as client:
+            leads = await _rows(client, "leads")
+            deals = await _rows(client, "deals")
+            lending = await _rows(client, "lending")
+            syndication = await _rows(client, "syndication")
+            asset_mon = await _rows(client, "asset-monetisation")
+            intel = await _rows(client, "external-intelligence")
         return {
             "tenant": tenant,
             "generated_at": datetime.now(UTC).isoformat(),
@@ -202,16 +217,18 @@ def create_app() -> FastAPI:
     @app.get("/v1/today", tags=["Dashboard"],
              summary="What needs a human today: due actions, lender chases, covenants")
     async def today_view(request: Request, tenant: str = Depends(tenant_of),
-                         horizon_days: int = Query(default=7, ge=0, le=90),
-                         x_user_email: str | None = Header(default=None,
-                                                           alias="X-User-Email")) -> Any:
-        if (denied := await _gate(request, tenant, x_user_email, "today")) is not None:
+                         horizon_days: int = Query(default=7, ge=0, le=90)) -> Any:
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, "Unauthorized", f"Invalid token: {exc}")
+        if (denied := await _gate(request, tenant, email, "today")) is not None:
             return denied
-        client = await _client(request, tenant, x_user_email)
         today = datetime.now(UTC).date()
-        leads = await _rows(client, "leads", status="Active")
-        lenders = await _rows(client, "syndication-lenders")
-        monitoring = await _rows(client, "monitoring")
+        async with await _client(request, tenant, email) as client:
+            leads = await _rows(client, "leads", status="Active")
+            lenders = await _rows(client, "syndication-lenders")
+            monitoring = await _rows(client, "monitoring")
         return {
             "tenant": tenant,
             "date": today.isoformat(),
@@ -223,29 +240,34 @@ def create_app() -> FastAPI:
     @app.get("/v1/pipeline/{vertical}", tags=["Dashboard"],
              summary="Slim rows for one vertical's board (leads / deals / lending / "
                      "syndication / asset-monetisation)")
-    async def pipeline(vertical: str, request: Request, tenant: str = Depends(tenant_of),
-                       x_user_email: str | None = Header(default=None,
-                                                         alias="X-User-Email")) -> Any:
+    async def pipeline(vertical: str, request: Request,
+                       tenant: str = Depends(tenant_of)) -> Any:
         if vertical not in VERTICALS:
             return _problem(404, "Not found",
                             f"Unknown vertical '{vertical}'. One of: {', '.join(VERTICALS)}.")
         resource, view = VERTICALS[vertical]
-        if (denied := await _gate(request, tenant, x_user_email, view)) is not None:
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, "Unauthorized", f"Invalid token: {exc}")
+        if (denied := await _gate(request, tenant, email, view)) is not None:
             return denied
-        client = await _client(request, tenant, x_user_email)
-        rows = await _rows(client, resource)
+        async with await _client(request, tenant, email) as client:
+            rows = await _rows(client, resource)
         return {"tenant": tenant, "vertical": vertical, "total": len(rows), "rows": rows}
 
     @app.get("/v1/entities/{entity_id}/summary", tags=["Dashboard"],
              summary="One company composed — the Register's 360° dossier, passed through")
     async def entity_summary(entity_id: uuid.UUID, request: Request,
-                             tenant: str = Depends(tenant_of),
-                             x_user_email: str | None = Header(default=None,
-                                                               alias="X-User-Email")) -> Any:
-        if (denied := await _gate(request, tenant, x_user_email, "clients")) is not None:
+                             tenant: str = Depends(tenant_of)) -> Any:
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, "Unauthorized", f"Invalid token: {exc}")
+        if (denied := await _gate(request, tenant, email, "clients")) is not None:
             return denied
-        client = await _client(request, tenant, x_user_email)
-        return await client.dossier(str(entity_id))
+        async with await _client(request, tenant, email) as client:
+            return await client.dossier(str(entity_id))
 
     return app
 

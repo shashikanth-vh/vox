@@ -27,6 +27,10 @@ access:
     value: "change-me-in-prod"
   requireUser: true
 
+# Must match the Register's gatewaySharedSecret so the Register trusts the
+# user identity ATLAS forwards on reads.
+gatewaySharedSecret: ""
+
 config:
   logLevel: INFO
   logJson: true

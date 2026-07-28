@@ -52,6 +52,7 @@ class ResourceSpec:
         include_delete: bool = True,
         subject_type: str | None = None,
         view_name: str | None = None,
+        company_scoped: bool = False,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -70,6 +71,10 @@ class ResourceSpec:
         # is present. None = not a line resource; only the delete gate applies.
         self.subject_type = subject_type
         self.view_name = view_name
+        # Entity-carrying resource (financials, contracts, intel, monitoring, documents,
+        # interactions): list/GET/update scope to the caller's companies via the central
+        # evaluator when the clients view is SCOPED. Not a line resource (no assignment).
+        self.company_scoped = company_scoped
 
 
 def _hash_body(payload: dict) -> str:
@@ -141,6 +146,26 @@ async def _enforce_line_write(ctx: "RequestContext", spec: "ResourceSpec",
                                 spec.subject_type, obj_id):
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} may not write this {spec.subject_type} line.")
+
+
+async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
+                                 obj_id: uuid.UUID) -> None:
+    """SCOPED write on an entity-carrying resource (financials, contracts, intel,
+    monitoring, documents): the row's company must be in the caller's scope."""
+    if ctx.user is None or not spec.company_scoped or spec.view_name is None:
+        return
+    from app.authz import scope as scope_mod
+    from app.authz.engine import _stacked
+    from app.authz.matrix import VIEW_ACCESS, Access
+    from app.core.errors import ForbiddenError
+
+    granted = _stacked(VIEW_ACCESS[spec.view_name], ctx.user.roles)
+    if granted is not Access.SCOPED:
+        return
+    obj = await spec.repo.get(ctx.session, ctx.tenant_id, obj_id)
+    user_scope = await scope_mod.build_scope(ctx, ctx.user)
+    if not scope_mod.company_row_in_scope(user_scope, obj):
+        raise ForbiddenError(f"Scoped access: this {spec.name}'s company is not in your scope.")
 
 
 def build_crud_router(spec: ResourceSpec) -> APIRouter:
@@ -269,8 +294,23 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                         user_scope, spec.repo.model)
                 else:
                     scope_condition = scope_mod.list_condition(user_scope, spec.subject_type)
+            elif granted is Access.SCOPED and spec.company_scoped:
+                user_scope = await scope_mod.build_scope(ctx, ctx.user)
+                scope_condition = scope_mod.company_scoped_condition(
+                    user_scope, spec.repo.model)
 
-        # Whitelisted equality filters pulled straight from the query string.
+        # Filters: only whitelisted equality filters are honoured. Reject an UNKNOWN
+        # filter param loudly (422) rather than silently ignoring it — a dropped filter
+        # is how the wrong-company lead bug leaked data.
+        _reserved = {"q", "limit", "cursor", "include_deleted", "with_total", "scope"}
+        unknown = [k for k in request.query_params
+                   if k not in spec.filterable and k not in _reserved]
+        if unknown:
+            from app.core.errors import ValidationAppError
+
+            raise ValidationAppError(
+                f"Unknown query parameter(s) {unknown} for {spec.name}. "
+                f"Filterable: {sorted(spec.filterable)}.")
         filters = {
             k: request.query_params[k] for k in spec.filterable if k in request.query_params
         }
@@ -298,7 +338,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         obj = await repo.get(ctx.session, ctx.tenant_id, obj_id, include_deleted=include_deleted)
         # RBAC: direct GET honours the same scope as the list — a SCOPED user cannot
         # fetch an unrelated row just by knowing its id.
-        if ctx.user is not None and spec.view_name is not None and spec.subject_type is not None:
+        if ctx.user is not None and spec.view_name is not None:
             from app.authz import scope as scope_mod
             from app.authz.engine import _stacked
             from app.authz.matrix import VIEW_ACCESS, Access
@@ -312,11 +352,15 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                 user_scope = await scope_mod.build_scope(ctx, ctx.user)
                 if spec.subject_type == "Entity":
                     ok = await scope_mod.entity_in_scope(ctx, user_scope, obj.id)
-                else:
+                elif spec.subject_type is not None:
                     ok = await scope_mod.row_in_scope(ctx, user_scope, spec.subject_type, obj)
+                elif spec.company_scoped:
+                    ok = scope_mod.company_row_in_scope(user_scope, obj)
+                else:
+                    ok = True
                 if not ok:
                     raise ForbiddenError(
-                        f"Scoped access: this {spec.subject_type} is not in your scope.")
+                        f"Scoped access: this {spec.name} is not in your scope.")
         response.headers["ETag"] = f'"{obj.version}"'
         return spec.read_schema.model_validate(obj)
 
@@ -331,6 +375,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             if_match: str | None = Header(default=None, alias="If-Match"),
         ) -> Any:
             await _enforce_line_write(ctx, spec, obj_id)
+            await _enforce_company_write(ctx, spec, obj_id)
             data = payload.model_dump(exclude_unset=True)
             expected = data.pop("expected_version", None)
             if expected is None:

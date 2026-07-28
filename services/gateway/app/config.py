@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""
     oidc_audience: str = ""
     oidc_email_claim: str = "email"
+    # Refuse any proxied request without a verified identity (401), even when OIDC is
+    # off — a trusted-mesh that still wants no-anonymous. Implied true when OIDC is on.
+    require_auth: bool = False
 
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0
