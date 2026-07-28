@@ -133,3 +133,132 @@ async def test_gateway_secret_blocks_spoofed_identity(client: AsyncClient, monke
         assert r.status_code == 200
     finally:
         monkeypatch.setattr(settings, "gateway_shared_secret", "")
+
+
+# --------------------------------------------------------------------------- #
+# RBAC 3.1 scope scenarios — the central evaluator, exercised end to end
+# (the "EcoSoch" cases: auto-ownership, direct-GET protection, connected company,
+#  team scope, vertical-Head default ownership, row locks, audit guardrail)
+# --------------------------------------------------------------------------- #
+ARUN_ID = uuid.uuid4()
+ARUN = _as("arun@evamfinance.com", "BDRM", ARUN_ID)
+MEERA_ID = uuid.uuid4()
+MEERA = _as("meera@evamfinance.com", "Deal Analyst", MEERA_ID)
+
+
+async def test_bdrm_auto_owns_created_lead(client: AsyncClient):
+    """Arun creates an EcoSoch lead → he is auto-assigned and his scoped list shows it."""
+    lead = (await client.post("/v1/leads", json={"company": "EcoSoch Solar (auto)"},
+                              headers=ARUN)).json()
+    assigns = (await client.get("/v1/assignments", headers=ADMIN,
+                                params={"subject_type": "Lead",
+                                        "subject_id": lead["id"]})).json()
+    assert any(str(ARUN_ID) == a["user_id"] and a["assignment_role"] == "BDRM"
+               for a in assigns)
+    # His scoped lead list can never hide the lead he just created…
+    mine = (await client.get("/v1/leads", headers=ARUN, params={"limit": 200})).json()
+    assert any(r["id"] == lead["id"] for r in mine["items"])
+    # …and neither can direct GET.
+    assert (await client.get(f"/v1/leads/{lead['id']}", headers=ARUN)).status_code == 200
+
+
+async def test_direct_get_scope_protection(client: AsyncClient):
+    """Meera (assigned to EcoSoch Lending) can read EcoSoch rows but NOT an unrelated
+    company's — even knowing the id (the direct-GET hole, closed)."""
+    eco = (await client.post("/v1/entities", json={"code": f"ECO-{uuid.uuid4().hex[:6]}",
+                                                   "legal_name": "EcoSoch Solar"})).json()
+    gh2 = (await client.post("/v1/entities", json={"code": f"GH2-{uuid.uuid4().hex[:6]}",
+                                                   "legal_name": "GH2 Solar"})).json()
+    eco_deal = (await client.post("/v1/deals", json={"entity_id": eco["id"]})).json()
+    eco_lend = (await client.post("/v1/lending", json={"entity_id": eco["id"]})).json()
+    gh2_lend = (await client.post("/v1/lending", json={"entity_id": gh2["id"]})).json()
+    r = await client.post("/v1/assignments", json={
+        "user_id": str(MEERA_ID), "subject_type": "Lending", "subject_id": eco_lend["id"],
+        "assignment_role": "Deal Analyst"}, headers=CREDIT_HEAD)
+    assert r.status_code == 201, r.text
+
+    # Her line: yes. The unrelated line: 403 despite knowing the id.
+    assert (await client.get(f"/v1/lending/{eco_lend['id']}", headers=MEERA)).status_code == 200
+    assert (await client.get(f"/v1/lending/{gh2_lend['id']}", headers=MEERA)).status_code == 403
+    # Connected company: the EcoSoch DEAL is readable through her Lending assignment.
+    assert (await client.get(f"/v1/deals/{eco_deal['id']}", headers=MEERA)).status_code == 200
+    # Meera (Deal Analyst) holds READ on the clients view per the matrix — any company
+    # profile opens for her. The connected-company restriction bites for roles with
+    # SCOPED clients access (BDRM / Syn RM / AM RM): assigned company yes, other no.
+    assert (await client.get(f"/v1/entities/{eco['id']}/dossier", headers=MEERA)).status_code == 200
+    riya_id = uuid.uuid4()
+    riya = _as("riya@evamfinance.com", "Syn RM", riya_id)
+    eco_syn = (await client.post("/v1/syndication", json={"entity_id": eco["id"]})).json()
+    r2 = await client.post("/v1/assignments", json={
+        "user_id": str(riya_id), "subject_type": "Syndication", "subject_id": eco_syn["id"],
+        "assignment_role": "Syn RM"}, headers=_as("synhead2@evamfinance.com", "Syn Head"))
+    assert r2.status_code == 201, r2.text
+    assert (await client.get(f"/v1/entities/{eco['id']}/dossier", headers=riya)).status_code == 200
+    assert (await client.get(f"/v1/entities/{gh2['id']}/dossier", headers=riya)).status_code == 403
+    # Scoped lending list contains her line, not the unrelated one.
+    lst = (await client.get("/v1/lending", headers=MEERA, params={"limit": 200})).json()
+    ids = {r["id"] for r in lst["items"]}
+    assert eco_lend["id"] in ids and gh2_lend["id"] not in ids
+
+
+async def test_team_scope_via_reports_headers(client: AsyncClient):
+    """A senior's scope includes their reports' assignments (X-User-Report-Ids,
+    resolved by Access and forwarded by the gateway)."""
+    ent = (await client.post("/v1/entities", json={"code": f"TEAM-{uuid.uuid4().hex[:6]}",
+                                                   "legal_name": "Team Scope Co"})).json()
+    lend = (await client.post("/v1/lending", json={"entity_id": ent["id"]})).json()
+    junior_id = uuid.uuid4()
+    r = await client.post("/v1/assignments", json={
+        "user_id": str(junior_id), "subject_type": "Lending", "subject_id": lend["id"],
+        "assignment_role": "Deal Analyst"}, headers=CREDIT_HEAD)
+    assert r.status_code == 201
+    senior = {**_as("senior@evamfinance.com", "Deal Analyst", uuid.uuid4()),
+              "X-User-Report-Ids": str(junior_id),
+              "X-User-Reports": "junior@evamfinance.com"}
+    stranger = _as("stranger@evamfinance.com", "Deal Analyst", uuid.uuid4())
+    assert (await client.get(f"/v1/lending/{lend['id']}", headers=senior)).status_code == 200
+    assert (await client.get(f"/v1/lending/{lend['id']}", headers=stranger)).status_code == 403
+
+
+async def test_vertical_head_default_ownership(client: AsyncClient):
+    """An UNASSIGNED syndication line belongs to the Syn Head (clients view is SCOPED
+    for them) — operational, not descriptive: the company dossier opens for them."""
+    syn_head = _as("synhead@evamfinance.com", "Syn Head", uuid.uuid4())
+    with_line = (await client.post("/v1/entities", json={
+        "code": f"OWN-{uuid.uuid4().hex[:6]}", "legal_name": "Unassigned Syn Co"})).json()
+    await client.post("/v1/syndication", json={"entity_id": with_line["id"]})
+    without = (await client.post("/v1/entities", json={
+        "code": f"NON-{uuid.uuid4().hex[:6]}", "legal_name": "No Syn Co"})).json()
+    assert (await client.get(f"/v1/entities/{with_line['id']}/dossier",
+                             headers=syn_head)).status_code == 200
+    assert (await client.get(f"/v1/entities/{without['id']}/dossier",
+                             headers=syn_head)).status_code == 403
+
+
+async def test_row_lock_converted_lead(client: AsyncClient):
+    """Field Rules slice: a Converted lead refuses further edits except from
+    Admin/Management/BD Head (the push-to-deals lock)."""
+    lead = (await client.post("/v1/leads", json={"company": "Locked Lead Co"},
+                              headers=ARUN)).json()
+    upd = await client.patch(f"/v1/leads/{lead['id']}", json={"status": "Converted"},
+                             headers=ADMIN)
+    assert upd.status_code == 200, upd.text
+    locked = await client.patch(f"/v1/leads/{lead['id']}", json={"notes": "nope"},
+                                headers=ARUN)
+    assert locked.status_code == 403
+    allowed = await client.patch(f"/v1/leads/{lead['id']}", json={"notes": "head ok"},
+                                 headers=_as("bdhead@evamfinance.com", "BD Head"))
+    assert allowed.status_code == 200, allowed.text
+
+
+async def test_audit_and_restore_guardrails(client: AsyncClient):
+    """Audit view + restore are Admin-only for any user context."""
+    assert (await client.get("/v1/audit", headers=MEERA)).status_code == 403
+    assert (await client.get("/v1/audit", headers=ADMIN)).status_code == 200
+    ent = (await client.post("/v1/entities", json={"code": f"RES-{uuid.uuid4().hex[:6]}",
+                                                   "legal_name": "Restore Co"})).json()
+    assert (await client.delete(f"/v1/entities/{ent['id']}", headers=ADMIN)).status_code == 204
+    denied = await client.post(f"/v1/entities/{ent['id']}/restore", headers=MEERA)
+    assert denied.status_code == 403
+    assert (await client.post(f"/v1/entities/{ent['id']}/restore",
+                              headers=ADMIN)).status_code == 200

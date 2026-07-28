@@ -36,6 +36,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.EntityCreate, update_schema=s.EntityUpdate, read_schema=s.EntityRead,
         filterable=["sector", "lens", "register_status", "entity_type", "state",
                     "promoter_group_code", "code"],
+        subject_type="Entity", view_name="clients",
     ),
     ResourceSpec(
         name="person", prefix="/v1/people", tags=["People"],

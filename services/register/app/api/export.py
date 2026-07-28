@@ -124,6 +124,9 @@ async def export_excel(
     include_deleted: bool = Query(default=False),
     tables: str | None = Query(default=None, description="Comma-separated subset, e.g. leads,deals"),
 ) -> StreamingResponse:
+    from app.authz import enforce_operation
+
+    enforce_operation(ctx.user, "export_csv")
     wb = Workbook(write_only=True)  # constant-memory writer for large datasets
     for name, model in _selected(tables):
         table: Table = model.__table__
@@ -152,6 +155,9 @@ async def export_json(
     include_deleted: bool = Query(default=False),
     tables: str | None = Query(default=None),
 ) -> ORJSONResponse:
+    from app.authz import enforce_operation
+
+    enforce_operation(ctx.user, "export_csv")
     out: dict[str, Any] = {
         "tenant": ctx.tenant_code,
         "exported_at": datetime.now(UTC).isoformat(),

@@ -31,7 +31,7 @@ from app.schemas import (
     UserRead,
     UserUpdate,
 )
-from app.security import RequestContext, get_context, require_admin
+from app.security import RequestContext, get_context, require_admin, require_governance
 
 router = api_router()
 
@@ -87,7 +87,7 @@ async def _user_read(ctx: RequestContext, obj: User) -> UserRead:
 @router.post("/v1/users", response_model=UserRead, status_code=201, tags=["Users"],
              summary="Add a user (employee) — optionally with initial roles")
 async def create_user(payload: UserCreate, ctx: RequestContext = Depends(get_context)) -> Any:
-    require_admin(ctx, "add user")
+    require_governance(ctx, "add user")
     data = payload.model_dump(exclude_unset=False)
     roles = data.pop("roles", None) or []
     data["email"] = _validate_email(data["email"])
@@ -132,7 +132,7 @@ async def get_user(user_id: uuid.UUID, ctx: RequestContext = Depends(get_context
               summary="Edit a user — Admin-only")
 async def update_user(user_id: uuid.UUID, payload: UserUpdate,
                       ctx: RequestContext = Depends(get_context)) -> Any:
-    require_admin(ctx, "edit user")
+    require_governance(ctx, "edit user")
     obj = await _get_user(ctx, user_id)
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
@@ -146,7 +146,7 @@ async def update_user(user_id: uuid.UUID, payload: UserUpdate,
              tags=["Users"], summary="Grant a role (role stacking) — Admin-only")
 async def grant_role(user_id: uuid.UUID, payload: RoleGrant,
                      ctx: RequestContext = Depends(get_context)) -> Any:
-    require_admin(ctx, "grant role")
+    require_governance(ctx, "grant role")
     role = _validate_role(payload.role)
     obj = await _get_user(ctx, user_id)
     if role in await _roles_of(ctx, user_id):
@@ -161,7 +161,7 @@ async def grant_role(user_id: uuid.UUID, payload: RoleGrant,
                summary="Revoke a role — Admin-only")
 async def revoke_role(user_id: uuid.UUID, role: str,
                       ctx: RequestContext = Depends(get_context)) -> Any:
-    require_admin(ctx, "revoke role")
+    require_governance(ctx, "revoke role")
     obj = await _get_user(ctx, user_id)
     row = (
         await ctx.session.execute(
@@ -217,9 +217,38 @@ async def _resolve(ctx: RequestContext, email: str) -> ResolveRead:
     matrix, version = await mx.compiled_matrix(ctx.session, ctx.tenant_id)
     views = {item: mx.stacked(row, roles) for item, row in matrix["view"].items()}
     operations = {item: mx.stacked(row, roles) for item, row in matrix["operation"].items()}
+
+    # The user's reporting tree (transitive): the basis of a Head's TEAM scope in the
+    # Register. Resolved here — the one service that knows reports_to — and forwarded
+    # by the gateway as X-User-Report-Ids / X-User-Reports.
+    all_rows = (
+        await ctx.session.execute(
+            select(User.id, User.email, User.reports_to).where(
+                User.tenant_id == ctx.tenant_id, User.deleted_at.is_(None),
+                User.is_active.is_(True))
+        )
+    ).all()
+    children: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
+    for uid, uemail, boss in all_rows:
+        if boss is not None:
+            children.setdefault(boss, []).append((uid, uemail))
+    reports: list[dict] = []
+    frontier = [user.id]
+    seen = {user.id}
+    while frontier:
+        nxt: list[uuid.UUID] = []
+        for boss in frontier:
+            for uid, uemail in children.get(boss, []):
+                if uid not in seen:
+                    seen.add(uid)
+                    reports.append({"id": uid, "email": uemail})
+                    nxt.append(uid)
+        frontier = nxt
+
     return ResolveRead(id=user.id, email=user.email, full_name=user.full_name,
                        is_active=user.is_active, roles=sorted(roles),
-                       views=views, operations=operations, version=version)
+                       views=views, operations=operations, version=version,
+                       reports=reports)
 
 
 @router.get("/v1/resolve", response_model=ResolveRead, tags=["Resolve"],

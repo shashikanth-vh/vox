@@ -76,3 +76,5 @@ class ResolveRead(BaseModel):
     views: dict[str, str]
     operations: dict[str, str]
     version: int
+    # Transitive subordinates (id + email) — a Head's team, for Register team scope.
+    reports: list[dict] = []

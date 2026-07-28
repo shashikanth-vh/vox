@@ -40,6 +40,10 @@ class UserContext:
     email: str
     full_name: str
     roles: set[str] = field(default_factory=set)
+    # The user's reporting team (transitive), resolved by the Access service and
+    # forwarded by the gateway — the basis of a Head's team scope.
+    report_ids: list[uuid.UUID] = field(default_factory=list)
+    report_emails: list[str] = field(default_factory=list)
 
     @property
     def is_admin(self) -> bool:
@@ -51,7 +55,8 @@ class UserContext:
 
 
 def user_context_from_headers(
-    email: str, roles_header: str | None, user_id_header: str | None
+    email: str, roles_header: str | None, user_id_header: str | None,
+    report_ids_header: str | None = None, report_emails_header: str | None = None,
 ) -> UserContext:
     """Build the acting user from gateway-forwarded (or dev-trusted) identity headers.
 
@@ -65,7 +70,12 @@ def user_context_from_headers(
         uid = uuid.UUID(user_id_header)
     else:
         uid = uuid.uuid5(uuid.NAMESPACE_URL, f"prism-user:{email}")
-    return UserContext(id=uid, email=email, full_name=email.split("@")[0], roles=roles)
+    report_ids = [uuid.UUID(x.strip()) for x in (report_ids_header or "").split(",")
+                  if x.strip()]
+    report_emails = [x.strip().lower() for x in (report_emails_header or "").split(",")
+                     if x.strip()]
+    return UserContext(id=uid, email=email, full_name=email.split("@")[0], roles=roles,
+                       report_ids=report_ids, report_emails=report_emails)
 
 
 def _stacked(matrix_row: dict[str, Access], roles: set[str]) -> Access:
@@ -160,7 +170,14 @@ async def can_write_line(
     if granted is Access.FULL:
         return True
     if granted is Access.SCOPED:
-        return await is_assigned(session, tenant_id, user.id, subject_type, subject_id)
+        # The full scope rule (assignment / team / vertical-Head default ownership of
+        # an unassigned line) lives in the central evaluator.
+        from app.authz import scope as scope_mod
+        from app.core.security import RequestContext
+
+        ctx = RequestContext(session, tenant_id, "", "", user=user)
+        user_scope = await scope_mod.build_scope(ctx, user)
+        return await scope_mod.can_write_row(ctx, user_scope, subject_type, subject_id)
     return False
 
 

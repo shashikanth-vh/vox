@@ -8,7 +8,7 @@ serving the last-known-good answer if the Access service is briefly unreachable.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from evam_backend_core.logging import get_logger
@@ -27,6 +27,9 @@ class ResolvedUser:
     operations: dict[str, str]
     version: int
     fetched_at: float
+    # Transitive subordinates from the Access service — forwarded to the Register
+    # as the basis of a Head's TEAM scope.
+    reports: list[dict] = field(default_factory=list)
 
 
 class UserDeniedError(Exception):
@@ -72,6 +75,7 @@ class Resolver:
             id=body["id"], email=body["email"], roles=body["roles"],
             views=body["views"], operations=body["operations"],
             version=body["version"], fetched_at=time.monotonic(),
+            reports=body.get("reports", []),
         )
         self._cache[key] = resolved
         return resolved

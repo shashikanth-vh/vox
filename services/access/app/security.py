@@ -97,7 +97,7 @@ async def load_acting_user(
 
 
 def require_admin(ctx: RequestContext, action: str) -> None:
-    """Governance writes are Admin-only (the user's requirement). Compatibility mode:
+    """The access MATRIX is Admin-only. Compatibility mode:
     no user context → allowed unless ACCESS_ENFORCE_RBAC is on."""
     if ctx.user is None:
         if get_settings().enforce_rbac:
@@ -105,6 +105,18 @@ def require_admin(ctx: RequestContext, action: str) -> None:
         return
     if not ctx.user.is_admin:
         raise ForbiddenError(f"'{action}' is Admin-only; role(s) {sorted(ctx.user.roles)} denied.")
+
+
+def require_governance(ctx: RequestContext, action: str) -> None:
+    """USER governance (employees, role grants) — Admin OR Management, per RBAC 3.1
+    (`edit_employee` / `add_employee_assign_role` grant FULL to both)."""
+    if ctx.user is None:
+        if get_settings().enforce_rbac:
+            raise ForbiddenError(f"'{action}' requires a user context (X-User-Email).")
+        return
+    if not (ctx.user.is_admin or "Management" in ctx.user.roles):
+        raise ForbiddenError(
+            f"'{action}' needs Admin or Management; role(s) {sorted(ctx.user.roles)} denied.")
 
 
 async def get_context(

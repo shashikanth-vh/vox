@@ -17,9 +17,10 @@ from fastapi import Depends, File, Form, Header, Query, Response, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, or_, select
 
+from app import authz
 from app import storage as storage_mod
 from app.core.config import get_settings
-from app.core.errors import NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.db.base import AuditLog
@@ -48,9 +49,73 @@ from app.repositories.documents import (
 )
 from app.repositories.financials import create_version
 from app.repositories.interactions import create_interaction, timeline
+from app.repositories.subjects import load_subject
 from app.schemas import resources as s
 
 router = api_router()
+
+
+# --------------------------------------------------------------------------- #
+# RBAC helpers — every custom endpoint funnels through these two, which in turn
+# funnel through the CENTRAL scope evaluator (app.authz.scope). One definition
+# of "in my scope" across list, GET, documents, timelines, dossier and audit.
+# --------------------------------------------------------------------------- #
+async def _ensure_subject_scope(ctx: RequestContext, operation: str,
+                                subject_type: str | None,
+                                subject_id: uuid.UUID | None) -> None:
+    """Gate a WRITE that references a polymorphic subject (document upload,
+    interaction log): the operation must be granted, and a SCOPED grant must cover
+    the referenced line/company through the central evaluator."""
+    if ctx.user is None:
+        # Machine caller (vetted API key: VocX/PULSE/workflows) — ingestion stays open;
+        # the RBAC-mandatory flag hard-gates the destructive surfaces instead.
+        return
+    granted = authz.enforce_operation(ctx.user, operation)
+    if granted is not authz.Access.SCOPED:
+        return
+    if subject_type is None or subject_id is None:
+        return  # subject validated (and 404ed) by the caller
+    from app.authz import scope as scope_mod
+
+    user_scope = await scope_mod.build_scope(ctx, ctx.user)
+    subj = await load_subject(ctx.session, ctx.tenant_id, subject_type, subject_id)
+    if subj is None:
+        return  # the caller raises the proper 404
+    if subject_type == "Entity":
+        if await scope_mod.entity_in_scope(ctx, user_scope, subj.id):
+            return
+    elif subject_type == "Counterparty":
+        return  # FI records carry no company linkage; the operation grant governs
+    else:
+        if await scope_mod.row_in_scope(ctx, user_scope, subject_type, subj):
+            return
+        entity_id = getattr(subj, "entity_id", None)
+        if entity_id is not None and await scope_mod.entity_in_scope(
+            ctx, user_scope, entity_id
+        ):
+            return
+    raise ForbiddenError(
+        f"Scoped access: this {subject_type}'s company is not in your scope.")
+
+
+async def _ensure_company_read(ctx: RequestContext, entity_id: uuid.UUID | None) -> None:
+    """Gate a company-wide READ (dossier, documents, timeline, data register) on the
+    clients view: NONE → 403; SCOPED → the company must be connected to the user."""
+    if ctx.user is None or entity_id is None:
+        return
+    from app.authz import scope as scope_mod
+    from app.authz.engine import _stacked
+    from app.authz.matrix import VIEW_ACCESS, Access
+
+    granted = _stacked(VIEW_ACCESS["clients"], ctx.user.roles)
+    if granted is Access.NONE:
+        raise ForbiddenError(
+            f"Role(s) {sorted(ctx.user.roles)} have no access to company records.")
+    if granted is not Access.SCOPED:
+        return
+    user_scope = await scope_mod.build_scope(ctx, ctx.user)
+    if not await scope_mod.entity_in_scope(ctx, user_scope, entity_id):
+        raise ForbiddenError("Scoped access: this company is not in your scope.")
 
 _financial_repo = CRUDRepository(Financial)
 _synlender_repo = CRUDRepository(
@@ -171,6 +236,8 @@ async def log_interaction(
     ctx: RequestContext = Depends(get_context),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Any:
+    await _ensure_subject_scope(ctx, "log_interaction",
+                                payload.subject_type, payload.subject_id)
     # Idempotent like the generic creates: a retried capture (VocX flaky uplink, SDK
     # retry) with the same key replays the original interaction instead of duplicating.
     if idempotency_key:
@@ -220,6 +287,9 @@ def _timeline_routes(path_prefix: str, subject_type: str) -> None:
                 summary=f"Interaction timeline for a {label}", name=f"timeline_{subject_type}")
     async def _get(subject_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
                    limit: int = Query(default=100, ge=1, le=1000)) -> Any:
+        subj = await load_subject(ctx.session, ctx.tenant_id, subject_type, subject_id)
+        entity_id = subj.id if subject_type == "Entity" else getattr(subj, "entity_id", None)
+        await _ensure_company_read(ctx, entity_id)
         rows = await timeline(ctx.session, ctx.tenant_id, subject_type, subject_id, limit=limit)
         return [s.InteractionRead.model_validate(r) for r in rows]
 
@@ -228,6 +298,7 @@ def _timeline_routes(path_prefix: str, subject_type: str) -> None:
                  summary=f"Log an interaction against a {label}", name=f"log_{subject_type}")
     async def _post(subject_id: uuid.UUID, payload: s.InteractionCreate,
                     ctx: RequestContext = Depends(get_context)) -> Any:
+        await _ensure_subject_scope(ctx, "log_interaction", subject_type, subject_id)
         data = payload.model_dump(exclude_unset=False)
         data["subject_type"] = subject_type  # path wins over body
         data["subject_id"] = subject_id
@@ -287,6 +358,15 @@ async def read_audit(
     resource_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> list[dict]:
+    # RBAC guardrail: the audit view is Admin-only (immutable even in the live matrix).
+    if ctx.user is not None:
+        from app.authz.engine import _stacked
+        from app.authz.matrix import VIEW_ACCESS, Access
+
+        if _stacked(VIEW_ACCESS["audit"], ctx.user.roles) is Access.NONE:
+            raise ForbiddenError("The audit trail is Admin-only.")
+    elif get_settings().enforce_rbac:
+        raise ForbiddenError("The audit trail requires a user context (X-User-Email).")
     conds = [AuditLog.tenant_id == ctx.tenant_id]
     if resource_type:
         conds.append(AuditLog.resource_type == resource_type)
@@ -319,6 +399,7 @@ async def entity_dossier(
     """Stitches a company's whole footprint onto one response — the payoff of the
     entity-centric (not deal-centric) model: how many deals, across which businesses,
     with what current financials, latest interactions and open intelligence."""
+    await _ensure_company_read(ctx, entity_id)
     tid = ctx.tenant_id
 
     async def _count(model) -> int:  # noqa: ANN001
@@ -338,8 +419,6 @@ async def entity_dossier(
         )
     ).scalar_one_or_none()
     if entity is None:
-        from app.core.errors import NotFoundError
-
         raise NotFoundError(f"entity '{entity_id}' not found.")
 
     deals = (
@@ -440,6 +519,11 @@ async def get_tenant_settings(ctx: RequestContext = Depends(get_context)) -> Any
 async def put_tenant_settings(
     payload: s.SettingsUpdate, ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    # Tenant-wide business config is a leadership control, not a data operation.
+    if ctx.user is not None and not (ctx.user.roles & {"Admin", "Management"}):
+        raise ForbiddenError("Tenant settings may only be changed by Admin/Management.")
+    if ctx.user is None and get_settings().enforce_rbac:
+        raise ForbiddenError("Tenant settings require a user context (X-User-Email).")
     row = (
         await ctx.session.execute(
             select(TenantSettings).where(TenantSettings.tenant_id == ctx.tenant_id)
@@ -524,6 +608,8 @@ async def create_document(
     response: Response,
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    await _ensure_subject_scope(ctx, "upload_remove_documents",
+                                payload.subject_type, payload.subject_id)
     obj = await register_document(
         ctx.session, ctx.tenant_id, ctx.actor, payload.model_dump(exclude_unset=False)
     )
@@ -548,6 +634,7 @@ async def upload_document(
     notes: str | None = Form(default=None),
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    await _ensure_subject_scope(ctx, "upload_remove_documents", subject_type, subject_id)
     obj = await store_and_register(
         ctx.session, ctx.tenant_id, ctx.actor,
         subject_type=subject_type, subject_id=subject_id, data=await file.read(),
@@ -573,6 +660,10 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
                                       description="'auto'/'entity' = all of the company's "
                                                   "documents; 'subject' = only this record's")
                    ) -> Any:
+        subj = await load_subject(ctx.session, ctx.tenant_id, subject_type, subject_id)
+        if subj is not None:
+            eid = subj.id if subject_type == "Entity" else getattr(subj, "entity_id", None)
+            await _ensure_company_read(ctx, eid)
         rows = await documents_for_subject(
             ctx.session, ctx.tenant_id, subject_type, subject_id, scope=scope, limit=limit
         )
@@ -583,6 +674,7 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
                  summary=f"Register a document against a {label}", name=f"add_document_{subject_type}")
     async def _post(subject_id: uuid.UUID, payload: s.DocumentCreate,
                     response: Response, ctx: RequestContext = Depends(get_context)) -> Any:
+        await _ensure_subject_scope(ctx, "upload_remove_documents", subject_type, subject_id)
         data = payload.model_dump(exclude_unset=False)
         data["subject_type"] = subject_type  # path wins over body
         data["subject_id"] = subject_id
@@ -604,6 +696,7 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
                       status: str = Form(default="On File"),
                       notes: str | None = Form(default=None),
                       ctx: RequestContext = Depends(get_context)) -> Any:
+        await _ensure_subject_scope(ctx, "upload_remove_documents", subject_type, subject_id)
         obj = await store_and_register(
             ctx.session, ctx.tenant_id, ctx.actor,
             subject_type=subject_type, subject_id=subject_id, data=await file.read(),
@@ -692,6 +785,8 @@ async def download_document(
     freshly-signed URL (or streams through the API if configured); redirects to an http(s)
     ``storage_uri``; otherwise returns the reference. Metadata-only records 404."""
     doc = await _document_repo.get(ctx.session, ctx.tenant_id, doc_id)
+    # Scope: the bytes are as sensitive as the company file they belong to.
+    await _ensure_company_read(ctx, doc.entity_id)
     filename = doc.original_filename or doc.title
     if doc.inline_content is not None:
         return Response(

@@ -85,3 +85,33 @@ async def test_me(client: AsyncClient):
     assert me["email"] == "admin@evamfinance.com"
     assert me["operations"]["delete_row"] == "FULL"
     assert (await client.get("/v1/me")).status_code == 403  # requires user context
+
+
+async def test_management_governs_users_and_resolve_reports(client: AsyncClient):
+    """RBAC 3.1: edit_employee / add_employee_assign_role grant FULL to Management too
+    (the matrix stays Admin-only — covered above). And /v1/resolve carries the
+    transitive reporting tree for Register team scope."""
+    r = await client.post("/v1/users", headers=ADMIN, json={
+        "email": "mgr2@evamfinance.com", "full_name": "Manager Two",
+        "roles": ["Management"]})
+    assert r.status_code == 201, r.text
+    mgmt = {"X-User-Email": "mgr2@evamfinance.com"}
+    # Management may create users and grant roles…
+    r = await client.post("/v1/users", headers=mgmt, json={
+        "email": "head2@evamfinance.com", "full_name": "Head Two", "roles": ["BD Head"]})
+    assert r.status_code == 201, r.text
+    head_id = r.json()["id"]
+    r = await client.post("/v1/users", headers=mgmt, json={
+        "email": "junior2@evamfinance.com", "full_name": "Junior Two", "roles": ["BDRM"],
+        "reports_to": head_id})
+    assert r.status_code == 201, r.text
+    junior_id = r.json()["id"]
+    # …and the head's resolve now includes the junior as a report.
+    res = (await client.get("/v1/resolve",
+                            params={"email": "head2@evamfinance.com"})).json()
+    assert {"id": junior_id, "email": "junior2@evamfinance.com"} in [
+        {"id": x["id"], "email": x["email"]} for x in res["reports"]]
+    # An IC role still may not govern users.
+    r = await client.post("/v1/users", headers={"X-User-Email": "junior2@evamfinance.com"},
+                          json={"email": "nope@evamfinance.com", "full_name": "Nope"})
+    assert r.status_code == 403

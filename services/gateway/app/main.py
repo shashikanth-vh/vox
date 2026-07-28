@@ -111,6 +111,9 @@ def create_app() -> FastAPI:
             headers["X-User-Email"] = user.email
             headers["X-User-Id"] = str(user.id)
             headers["X-User-Roles"] = ",".join(user.roles)
+            if user.reports:
+                headers["X-User-Report-Ids"] = ",".join(str(r["id"]) for r in user.reports)
+                headers["X-User-Reports"] = ",".join(r["email"] for r in user.reports)
         if decision is not None:
             headers["X-Authz-Decision"] = decision
         if settings.gateway_shared_secret:

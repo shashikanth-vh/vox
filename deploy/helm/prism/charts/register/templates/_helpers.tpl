@@ -127,6 +127,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       {{- end }}
 - name: REGISTER_GATEWAY_SHARED_SECRET
   value: {{ .Values.gatewaySharedSecret | quote }}
+# RBAC-mandatory mode: gated operations (delete/restore/import/audit/line creates)
+# refuse machine callers without a user context. On by default in the umbrella.
+- name: REGISTER_ENFORCE_RBAC
+  value: {{ .Values.enforceRbac | quote }}
 # Object storage (document bytes) — only wired when the backend is "s3".
 - name: REGISTER_STORAGE_BACKEND
   value: {{ .Values.storage.backend | quote }}

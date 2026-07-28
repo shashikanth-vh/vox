@@ -5,11 +5,11 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
+from evam_backend_core.db.base import Base
 from sqlalchemy import engine_from_config, pool
 
 from app.config import get_settings
 from app.models import Tenant  # noqa: F401 - registers tables on the shared metadata
-from evam_backend_core.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:

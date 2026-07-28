@@ -6,6 +6,47 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **RBAC 3.1 scope completion — ONE central scope evaluator, invoked everywhere**
+  (closing the scope-scenario gaps in the RBAC review):
+  - **`app/authz/scope.py`** — the single definition of "in my scope": direct
+    **assignment** ∪ **connected company** (assigned to any line of the company →
+    READ across its records) ∪ **own book** (rows you created — authenticated writes
+    are now stamped with the VERIFIED user e-mail, never the spoofable X-Actor) ∪
+    **team** (the Access service resolves the transitive `reports_to` tree; the
+    gateway forwards it as `X-User-Report-Ids`/`X-User-Reports`) ∪ **vertical-Head
+    default ownership** (an UNASSIGNED line belongs to Credit/Syn/AM Head —
+    operational, not descriptive).
+  - Invoked consistently: **list** filtering (SQL disjunction incl. unassigned-line
+    ownership), **direct GET-by-id** (a scoped user can no longer fetch an unrelated
+    row by knowing its id — the EcoSoch/Meera hole, closed), **create** (operation
+    gate from the matrix + **auto-assignment**: a BDRM's new lead is assigned to them
+    at birth, so their scoped list can never hide it), **update** (evaluator-backed),
+    **documents** (subject writes verify the referenced line/company; downloads check
+    the company), **interaction timelines** (log + read), **dossier**, **entities**
+    (the clients view is now scope-aware), **audit** (Admin-only guardrail enforced),
+    **restore** (mirrors Admin-only delete), **MIS import** (backup_restore,
+    Admin-only), **settings** (Admin/Management), **exports** (export_csv).
+  - **Field Rules, first slice — row locks** (`ROW_LOCKS` in the shared policy):
+    a Converted lead locks against edits except Admin/Management/BD Head; a
+    Disbursed lending line except Admin/Management/Credit Head.
+  - **Access service**: user governance (create/edit users, grant/revoke roles) now
+    allows **Management** as the spec says (`edit_employee` = F F …); the access
+    MATRIX stays Admin-only. `/v1/resolve` returns the transitive reporting tree.
+  - **Machine-caller policy made explicit**: vetted API keys (VocX/PULSE/workflows)
+    keep ingestion write paths; the RBAC-mandatory flag hard-gates the destructive /
+    audit surfaces for identity-less callers. The Helm umbrella now ships
+    `register.enforceRbac: true`, and the platform's ingress moved to the **gateway
+    chart** (Register + Access stay cluster-internal).
+  - **Tests** (register 65 → 71; access 5 → 6): the concrete review scenarios —
+    Arun's auto-owned lead, Meera's direct-GET wall + connected-company reads,
+    Syn RM connected-dossier protection, team scope via reports headers, vertical-Head
+    default ownership, the Converted-lead lock, audit/restore guardrails, Management
+    governance + resolve reports.
+  - Still open from the review, called out honestly: Dex/OIDC token-derived identity,
+    the full field-policy engine (mandatory fields, per-stage field locks, author-only
+    interaction edits, duplicate matching), tenant-scoped MIS reconciliation, and the
+    ATLAS v17 front-end wiring.
+
 - **The workflow plane made operational — Orchestrator API + a genuine end-to-end VOX
   workflow + human-in-the-loop signals** (closing the gaps in the Temporal review):
   - **Orchestrator API** (`services/workflows/app/api.py`, `python -m app.api`; compose

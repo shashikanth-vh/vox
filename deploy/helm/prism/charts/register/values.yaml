@@ -129,6 +129,7 @@ apiKeys:
   value: "change-me-in-prod"
 
 # Shared secret proving identity headers came via the gateway. Empty = dev-trust.
+enforceRbac: false     # umbrella turns this on; standalone installs choose
 gatewaySharedSecret: ""
 
 # Object storage for document bytes (the Data Register). "inline" keeps small files in

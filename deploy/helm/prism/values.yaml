@@ -32,6 +32,9 @@ register:
     asHook: false
     seed: false
   waitForDb: true
+  # RBAC-mandatory: gated operations require a user identity even from machine callers.
+  # (Platform services use ungated write paths; flip to false only for bare-Register dev.)
+  enforceRbac: true
   gatewaySharedSecret: "prism-gateway-secret"   # must match gateway.gatewaySecret.value
   # Document bytes → the bundled MinIO (below). Reuse MinIO's chart-managed secret for the
   # secret key. Set storage.backend=inline (or point s3.* at a managed S3) to change this.
@@ -74,6 +77,14 @@ gateway:
     value: "dev-local-key"        # must be in the Access service's ACCESS_API_KEYS
   gatewaySecret:
     value: "prism-gateway-secret" # OVERRIDE; must match register.gatewaySharedSecret
+  # The public entry point: enable + set a host to expose the platform. The Register
+  # itself has an ingress template too, but keep it OFF — traffic must enter here.
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}
+    tls: []
 
 # ---- VocX — voice touchpoint capture (individually deployable) -----------------
 vocx:

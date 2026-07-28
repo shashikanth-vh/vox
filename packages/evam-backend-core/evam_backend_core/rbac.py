@@ -142,11 +142,35 @@ APPROVER_FOR_SUBJECT: dict[str, set[str]] = {
     "Deal":              {"BD Head", "Admin", "Management"},
 }
 
-# Assignment role expected per line for the "primary owner" (used for defaulting/display).
+# Assignment role expected per line for the "primary owner". Doubly operational:
+# creating a line while holding this role AUTO-ASSIGNS the creator (spec: "BDRM
+# automatically owns a newly created lead"), and unassigned lines default to the
+# vertical Head (DEFAULT_LINE_OWNER above).
 PRIMARY_ASSIGNMENT_ROLE: dict[str, str] = {
     "Lending": "Deal Analyst",
     "Syndication": "Syn RM",
     "AssetMonetisation": "AM RM",
     "Lead": "BDRM",
     "Deal": "BDRM",
+}
+
+# Which operation gates CREATING each line resource (the Register's fallback check —
+# the gateway maps the same routes to the same operations at the front door).
+CREATE_OPERATION_FOR_SUBJECT: dict[str, str] = {
+    "Entity": "create_client",
+    "Lead": "add_lead",
+    "Deal": "push_lead_to_deals",
+    "Lending": "add_product_line",
+    "Syndication": "add_product_line",
+    "AssetMonetisation": "add_product_line",
+}
+
+# Field Rules sheet, first operational slice: ROW LOCKS. When a row's field holds one
+# of the listed values, further edits require one of the listed roles. (The full
+# per-field policy engine — mandatory fields, per-stage field locks — is layered on
+# this same structure later.)
+ROW_LOCKS: dict[str, tuple[str, set[str], set[str]]] = {
+    # subject → (field, locking values, roles still allowed to edit)
+    "Lead":    ("status", {"Converted"}, {"Admin", "Management", "BD Head"}),
+    "Lending": ("stage", {"Disbursed"}, {"Admin", "Management", "Credit Head"}),
 }

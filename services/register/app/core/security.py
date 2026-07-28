@@ -87,6 +87,8 @@ async def get_context(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_gateway_auth: str | None = Header(default=None, alias="X-Gateway-Auth"),
     x_authz_decision: str | None = Header(default=None, alias="X-Authz-Decision"),
+    x_user_report_ids: str | None = Header(default=None, alias="X-User-Report-Ids"),
+    x_user_reports: str | None = Header(default=None, alias="X-User-Reports"),
 ) -> AsyncIterator[RequestContext]:
     """FastAPI dependency: authenticate, resolve tenant, open a scoped transaction.
 
@@ -125,11 +127,14 @@ async def get_context(
                     raise ForbiddenError(
                         "Identity headers must come via the gateway (X-Gateway-Auth mismatch)."
                     )
-                user = user_context_from_headers(x_user_email, x_user_roles, x_user_id)
+                user = user_context_from_headers(x_user_email, x_user_roles, x_user_id,
+                                                 x_user_report_ids, x_user_reports)
                 if x_authz_decision in ("FULL", "SCOPED"):
                     decision = x_authz_decision
-                if actor == "api":
-                    actor = user.email[:120]
+                # Authenticated writes are stamped with the VERIFIED user identity —
+                # X-Actor is client-controlled and must never masquerade as a person.
+                # (Own-book scope matches rows on created_by == user e-mail.)
+                actor = user.email[:120]
             tenant_ctx.set(tenant_code)
             actor_ctx.set(actor)
             request.state.tenant_id = tenant_id

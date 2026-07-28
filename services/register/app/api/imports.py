@@ -28,6 +28,10 @@ async def import_atlas_xlsx(
     mode: str = Query(default="merge", pattern="^(merge|replace)$",
                       description="replace = wipe the tenant's data first; merge = upsert"),
 ) -> dict[str, Any]:
+    # RBAC guardrail: a tenant-wide import is a restore-class operation — Admin only.
+    from app.authz import enforce_operation
+
+    enforce_operation(ctx.user, "backup_restore")
     name = (file.filename or "").lower()
     if not name.endswith((".xlsx", ".xlsm")):
         raise ValidationAppError("Upload an .xlsx workbook.")

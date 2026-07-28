@@ -63,3 +63,11 @@ podSecurityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Expose the gateway as the platform's public entry point (TLS at the edge).
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
