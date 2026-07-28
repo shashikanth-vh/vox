@@ -214,6 +214,106 @@ sequenceDiagram
 | **Central scope** (`app.authz.scope`) | One evaluator answers "is this row mine?" — assignment ∪ own book ∪ team ∪ vertical default — for list, GET, and write alike. |
 | **Append-only audit** | Every mutation writes an audit row; the timeline and dossier compose from immutable interaction records. |
 
+---
+
+## 5. Deployment topology
+
+The same images ship two ways: a single Docker Compose stack for dev/demo, and a Helm
+umbrella whose subcharts each toggle with an `enabled` flag. The identity signing secret is
+shared gateway↔Register, and Postgres runs with **two roles** — the migration Job as owner,
+the runtime as the non-owner `register_app` so RLS actually binds.
+
+### Docker Compose — dev / demo
+
+Every service is reachable on a dev port; production traffic enters only through NGINX. The
+`sso` profile adds Dex and flips OIDC on.
+
+```mermaid
+flowchart TB
+  subgraph EDGE["Edge"]
+    NG["nginx · :8080"]
+    DEX["dex · :5556<br/>profile sso"]
+  end
+  subgraph APP["App services"]
+    GW["gateway · :8001"]
+    AC["access · :8002"]
+    RG["register · :8000"]
+    AT["atlas · :8005"]
+    VX["vocx · :8003"]
+    PU["pulse · :8004"]
+  end
+  subgraph WF["Workflow plane"]
+    OR["orchestrator · :8006"]
+    WK["workflows worker"]
+    TE["temporal · :7233"]
+    TU["temporal-ui · :8088"]
+  end
+  subgraph BK["Backing services"]
+    PG[("postgres · :5432")]
+    MO[("minio · :9000 / :9001")]
+  end
+  NG --> GW
+  NG -. /atlas .-> AT
+  NG -. /orchestrator .-> OR
+  GW --> AC
+  GW -->|signed context| RG
+  AT --> RG
+  PU --> RG
+  VX --> OR
+  OR --> TE
+  WK --> TE
+  WK -->|activities| RG
+  TU -. reads .-> TE
+  RG --> PG
+  RG --> MO
+  GW -. verify token .-> DEX
+```
+
+### Helm umbrella — Kubernetes / production
+
+Ten subcharts (`postgresql`, `register`, `access`, `gateway`, `minio`, `temporal`, `vocx`,
+`pulse`, `atlas`, `workflows`) under one release, each gated by `X.enabled`.
+`values-prod.yaml` turns on OIDC + `requireAuth`, `enforceRbac`, fail-closed RLS, the signed
+context, and the separate tenant-admin key. Secrets are per-chart and never in values.
+
+```mermaid
+flowchart TB
+  IDP["OIDC IdP · external"]
+  ING["Ingress · TLS"]
+  subgraph UM["Helm umbrella: prism · each subchart X.enabled"]
+    GWc["gateway"]
+    ACc["access"]
+    RGc["register"]
+    ATc["atlas"]
+    VXc["vocx"]
+    PUc["pulse"]
+    WFc["workflows + api"]
+    PGc["postgresql"]
+    MOc["minio"]
+    TEc["temporal"]
+  end
+  subgraph ROLES["Register &harr; PostgreSQL · two roles"]
+    MIG["migrate Job = OWNER<br/>DDL · create register_app · FORCE RLS"]
+    RUN["Deployment = register_app<br/>non-owner → RLS binds, fail-closed"]
+  end
+  ING --> GWc
+  IDP -. verify token .-> GWc
+  GWc -->|resolve| ACc
+  GWc -->|signed context| RGc
+  ATc --> RGc
+  PUc --> RGc
+  WFc --> TEc
+  WFc -->|activities| RGc
+  RGc --> MOc
+  RGc -. migrate .-> MIG
+  RGc -. serve .-> RUN
+  MIG --> PGc
+  RUN --> PGc
+```
+
+In production, set `postgresql.enabled=false` / `minio.enabled=false` and point at managed
+Postgres + S3; the bundled charts are for a self-contained install.
+
 > Rendered, theme-aware version of these diagrams: publish `docs/ARCHITECTURE.md` locally, or
 > see the shared artifact deck. Green rungs of the ladder are enforced at the gateway and
 > re-verified at the Register; data-adjacent rungs live next to the data.
