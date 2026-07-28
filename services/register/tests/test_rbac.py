@@ -242,12 +242,20 @@ async def test_vertical_head_default_ownership(client: AsyncClient):
 
 async def test_row_lock_converted_lead(client: AsyncClient):
     """Field Rules slice: a Converted lead refuses further edits except from
-    Admin/Management/BD Head (the push-to-deals lock)."""
-    lead = (await client.post("/v1/leads", json={"company": "Locked Lead Co"},
+    Admin/Management/BD Head (the push-to-deals lock). Conversion goes through the
+    proper /convert endpoint — status cannot be set to Converted by a direct PATCH."""
+    ent = (await client.post("/v1/entities",
+                             json={"code": "LOCKENT", "legal_name": "Locked Lead Co"})).json()
+    lead = (await client.post("/v1/leads",
+                              json={"company": "Locked Lead Co", "entity_id": ent["id"]},
                               headers=ARUN)).json()
-    upd = await client.patch(f"/v1/leads/{lead['id']}", json={"status": "Converted"},
+    # Direct status=Converted is refused for everyone — must use /convert.
+    bad = await client.patch(f"/v1/leads/{lead['id']}", json={"status": "Converted"},
                              headers=ADMIN)
-    assert upd.status_code == 200, upd.text
+    assert bad.status_code == 422, bad.text
+    conv = await client.post(f"/v1/leads/{lead['id']}/convert",
+                             json={"is_lending": True, "amount_cr": 1}, headers=ADMIN)
+    assert conv.status_code == 200, conv.text
     locked = await client.patch(f"/v1/leads/{lead['id']}", json={"notes": "nope"},
                                 headers=ARUN)
     assert locked.status_code == 403

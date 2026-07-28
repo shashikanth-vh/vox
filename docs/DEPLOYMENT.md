@@ -80,6 +80,43 @@ Every PRISM container is disposable; all state lives in PostgreSQL and S3.
 5. **Rotate every default**: API keys (`REGISTER_API_KEYS`, `ACCESS_API_KEYS`,
    `PULSE_API_KEYS`), the gateway shared secret, DB and MinIO passwords.
 
+### Production security hardening (the `values-prod.yaml` overlay)
+
+Ship the hardening overlay alongside the base values and provide your real OIDC issuer:
+
+```
+helm upgrade --install prism ./deploy/helm/prism \
+  -f deploy/helm/prism/values.yaml -f deploy/helm/prism/values-prod.yaml \
+  --set gateway.oidc.issuer=$IDP --set atlas.oidc.issuer=$IDP \
+  --set workflows.api.oidcIssuer=$IDP
+```
+
+It turns on: mandatory OIDC at the gateway (`requireAuth`), ATLAS validating its own
+bearer token, token-derived orchestrator approvals, Register `enforceRbac`, Access
+gateway-signature verification, a separate tenant-admin key, and **fail-closed RLS**.
+
+**Fail-closed RLS requires two DB roles.** Migration `0005` enables fail-closed policies,
+FORCEs RLS when `REGISTER_ENFORCE_RLS=true`, and creates a non-owner `register_app` role.
+Because RLS is bypassed by the table owner, the **runtime** must connect as `register_app`
+while **migrations** keep running as the owner:
+
+```sql
+-- one-time, as the schema owner, after the first migrate:
+ALTER ROLE register_app WITH LOGIN PASSWORD '<store-in-a-secret>';
+```
+
+The overlay wires this: `register.database.user=register_app` (runtime) +
+`register.database.migrationUser=<owner>` (migration Job). Put `register_app`'s password in
+`prism-register-app-secret`. With no tenant context set, every policy now denies — a
+forgotten filter returns zero rows instead of leaking the tenant.
+
+> **Known limitation (policy source):** the Access service holds the *live, admin-editable*
+> matrix and the gateway enforces it at the edge, but the Register re-verifies operations
+> against the *compiled* matrix (`evam_backend_core.rbac`). They match at deploy time (Access
+> seeds from it); a live matrix edit is enforced at the gateway immediately but not in the
+> Register's own re-checks until the compiled policy is re-released. Unifying these behind a
+> single signed effective-grant per request is tracked follow-up work.
+
 ### Multi-tenancy
 
 One deployment serves many tenants. Every row in every database carries `tenant_id`;

@@ -183,6 +183,76 @@ async def test_export_counts_are_scoped_and_backup_gated(client: AsyncClient):
                              headers=ADMIN)).status_code == 200
 
 
+CREDIT_HEAD_ANALYST = _as("da.e2e@evamfinance.com", "Deal Analyst")
+SYN_RM = _as("synrm2@evamfinance.com", "Syn RM", uuid.uuid4())
+
+
+# --------------------------------------------------------------------------- #
+# R5-1 — custom financial / intelligence / lender routes gate correctly
+# --------------------------------------------------------------------------- #
+async def test_custom_financial_create_requires_fi_write_op(client: AsyncClient):
+    eid = (await client.post("/v1/entities",
+                             json={"code": "R5-FI", "legal_name": "FI"})).json()["id"]
+    body = {"entity_id": eid, "statement_type": "P&L", "period_end": "2025-03-31"}
+    # Deal Analyst has edit_fi_record = NONE → the custom versioned-create is refused
+    # (it used to gate on the far-looser add_company_note).
+    assert (await client.post("/v1/financials", json=body,
+                              headers=CREDIT_HEAD_ANALYST)).status_code == 403
+    assert (await client.post("/v1/financials", json=body, headers=ADMIN)).status_code == 201
+
+
+async def test_intel_acknowledge_requires_write_op(client: AsyncClient):
+    eid = (await client.post("/v1/entities",
+                             json={"code": "R5-IN", "legal_name": "IN"})).json()["id"]
+    intel = (await client.post("/v1/external-intelligence",
+                               json={"entity_id": eid, "intel_type": "News"},
+                               headers=ADMIN)).json()
+    # Credit Head is READ-only on clients → edit_intel NONE → cannot acknowledge/dismiss.
+    assert (await client.post(f"/v1/external-intelligence/{intel['id']}/acknowledge",
+                              headers=CREDIT_HEAD)).status_code == 403
+    assert (await client.post(f"/v1/external-intelligence/{intel['id']}/dismiss",
+                              headers=ADMIN)).status_code == 200
+
+
+async def test_flat_lender_list_is_company_scoped(client: AsyncClient):
+    eid = (await client.post("/v1/entities",
+                             json={"code": "R5-LN", "legal_name": "LN"})).json()["id"]
+    syn = (await client.post("/v1/syndication", json={"entity_id": eid})).json()
+    await client.post(f"/v1/syndication/{syn['id']}/lenders",
+                      json={"lender_name": "Axis"}, headers=ADMIN)
+    # A Syn RM with no assignment to this line sees no lenders via the flat route…
+    scoped = (await client.get("/v1/syndication-lenders", headers=SYN_RM)).json()
+    assert all(r["syndication_id"] != syn["id"] for r in scoped["items"])
+    # …Admin sees it.
+    full = (await client.get("/v1/syndication-lenders", headers=ADMIN)).json()
+    assert any(r["syndication_id"] == syn["id"] for r in full["items"])
+
+
+# --------------------------------------------------------------------------- #
+# R5-2 — status transitions cannot bypass the workflow
+# --------------------------------------------------------------------------- #
+async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
+    eid = (await client.post("/v1/entities",
+                             json={"code": "R5-TR", "legal_name": "TR"})).json()["id"]
+    lead = (await client.post("/v1/leads",
+                              json={"company": "TR", "entity_id": eid})).json()
+    # Direct status=Converted via PATCH is refused (must use /convert).
+    assert (await client.patch(f"/v1/leads/{lead['id']}", json={"status": "Converted"},
+                               headers=ADMIN)).status_code == 422
+    # A change request that would convert the lead is refused too (BD Head may request
+    # stage changes, but conversion specifically must go through /convert).
+    cr = await client.post("/v1/requests", json={
+        "subject_type": "Lead", "subject_id": lead["id"], "field": "status",
+        "to_value": "Converted"}, headers=BD_HEAD)
+    assert cr.status_code == 422, cr.text
+    # A lending line can't be PATCHed straight to the locked Disbursed state by a
+    # non-lock role (BDRM), even assigned — that's Credit Head / Admin / Management only.
+    lend = (await client.post("/v1/lending", json={"entity_id": eid})).json()
+    r = await client.patch(f"/v1/lending/{lend['id']}", json={"stage": "Disbursed"},
+                           headers=BDRM)
+    assert r.status_code == 403, r.text
+
+
 # --------------------------------------------------------------------------- #
 # P0-6 — tenant administration requires a verified Admin identity
 # --------------------------------------------------------------------------- #

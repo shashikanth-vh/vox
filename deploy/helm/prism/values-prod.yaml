@@ -38,10 +38,18 @@ register:
   config:
     enforceRls: true             # migration 0005 FORCEs RLS; app connects as register_app
   database:
-    # Connect as the NON-OWNER application role so RLS actually binds (the owner bypasses
-    # it). Create it once:  ALTER ROLE register_app WITH LOGIN PASSWORD '...';  then point
-    # this user + password Secret at it.
+    # RUNTIME connects as the NON-OWNER application role so RLS actually binds (the owner
+    # bypasses it). Migration 0005 creates register_app; give it a login once:
+    #   ALTER ROLE register_app WITH LOGIN PASSWORD '<from-your-secret>';
+    # then point this user + its password Secret at it.
     user: register_app
+    existingSecret: prism-register-app-secret     # holds register_app's password
+    existingSecretPasswordKey: password
+    # The migration Job still runs as the OWNER so it can run DDL / create the role / FORCE
+    # RLS — the non-owner runtime role cannot.
+    migrationUser: prism
+    migrationExistingSecret: prism-postgresql-secret
+    migrationExistingSecretPasswordKey: postgres-password
   # A dedicated admin credential for tenant administration, separate from the data key.
   adminApiKeys: "CHANGE-ME-ADMIN-KEY"
 

@@ -41,6 +41,20 @@ spec:
           args: [{{ if .Values.migrations.seed }}"migrate-seed"{{ else if .Values.migrations.bootstrap }}"migrate-bootstrap"{{ else }}"migrate"{{ end }}]
           env:
             {{- include "register.envVars" . | nindent 12 }}
+            {{- if .Values.database.migrationUser }}
+            # Migrations run DDL + create the register_app role + FORCE RLS, so they must
+            # connect as the schema OWNER — not the non-owner runtime role the Deployment
+            # uses. These duplicate names override the shared block (last value wins).
+            - name: REGISTER_DB_USER
+              value: {{ .Values.database.migrationUser | quote }}
+            {{- if .Values.database.migrationExistingSecret }}
+            - name: REGISTER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.migrationExistingSecret }}
+                  key: {{ .Values.database.migrationExistingSecretPasswordKey | default "postgres-password" }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp

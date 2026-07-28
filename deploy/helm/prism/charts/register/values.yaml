@@ -110,11 +110,18 @@ database:
   host: prism-postgresql        # shared platform DB service; or a managed host
   port: 5432
   name: register
-  user: prism
+  user: prism                   # RUNTIME role — set to register_app when enforceRls is on
   # Provide the password via an existing secret (preferred) OR inline `password`.
   existingSecret: ""
   existingSecretPasswordKey: password
   password: ""
+  # The migration Job runs DDL + creates register_app + FORCEs RLS, so it must connect as
+  # the schema OWNER, not the non-owner runtime role. When enforceRls is on, set
+  # database.user=register_app AND migrationUser=<owner> (+ its password secret). Empty =
+  # migrations use database.user (fine when the runtime role already owns the schema).
+  migrationUser: ""
+  migrationExistingSecret: ""
+  migrationExistingSecretPasswordKey: postgres-password
 
 # Block app + migration pods on an initContainer until PostgreSQL is reachable — makes
 # the Register robust to the shared DB starting up alongside it. Uses a small psql image.

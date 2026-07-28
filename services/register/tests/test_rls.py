@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import text
 
 from app.core.config import get_settings
@@ -22,6 +23,29 @@ from app.core.security import clear_tenant_cache
 from app.db.session import dispose_engine, get_sessionmaker, init_engine
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_app_crud_works_under_forced_rls(client: AsyncClient):
+    """Deployability check: with FORCE RLS on (the production posture), the app's normal
+    per-request pattern — set app.current_tenant transaction-locally, then read/write —
+    still works. This is what proves RLS is *deployable*, not just fail-closed: the API
+    keeps functioning when the owner no longer bypasses the policy."""
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text("ALTER TABLE entities FORCE ROW LEVEL SECURITY"))
+        await s.commit()
+    try:
+        created = await client.post("/v1/entities",
+                                    json={"code": "RLSAPP", "legal_name": "RLS App Co"})
+        assert created.status_code == 201, created.text
+        got = await client.get(f"/v1/entities/{created.json()['id']}")
+        assert got.status_code == 200 and got.json()["code"] == "RLSAPP"
+        listed = await client.get("/v1/entities", params={"with_total": True})
+        assert listed.json()["total"] >= 1
+    finally:
+        async with sm() as s:
+            await s.execute(text("ALTER TABLE entities NO FORCE ROW LEVEL SECURITY"))
+            await s.commit()
 
 
 async def test_rls_is_fail_closed_and_tenant_isolating():

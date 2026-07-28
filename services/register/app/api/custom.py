@@ -155,8 +155,11 @@ async def create_financial_version(
     response: Response,
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
-    # Financials are company data: a SCOPED caller must be connected to the company.
-    await _ensure_subject_scope(ctx, "add_company_note", "Entity", payload.entity_id)
+    # Financials are FI data: writing one requires the FI write operation (edit_fi_record),
+    # not the far-looser add_company_note — otherwise a Deal Analyst / AM RM who may only
+    # *note* a company could publish financial statements. A SCOPED writer must also be
+    # connected to the company.
+    await _ensure_subject_scope(ctx, "edit_fi_record", "Entity", payload.entity_id)
     obj = await create_version(ctx.session, ctx.tenant_id, ctx.actor,
                                payload.model_dump(exclude_unset=False))
     response.headers["ETag"] = f'"{obj.version}"'
@@ -490,7 +493,9 @@ async def acknowledge_intel(
     intel_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
 ) -> Any:
     row = await _intel_repo.get(ctx.session, ctx.tenant_id, intel_id)
-    await _ensure_company_read(ctx, row.entity_id)
+    # Acknowledging is a WRITE, not a read: require the intel write op (edit_intel) so a
+    # read-only clients viewer (Credit Head / Deal Analyst) cannot mutate the signal.
+    await _ensure_subject_scope(ctx, "edit_intel", "Entity", row.entity_id)
     obj = await _intel_repo.update(
         ctx.session, ctx.tenant_id, intel_id, ctx.actor,
         {"acknowledged_by": ctx.actor, "acknowledged_at": datetime.now(UTC), "is_dismissed": False},
@@ -505,7 +510,8 @@ async def dismiss_intel(
     intel_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
 ) -> Any:
     row = await _intel_repo.get(ctx.session, ctx.tenant_id, intel_id)
-    await _ensure_company_read(ctx, row.entity_id)
+    # Dismissing hides a signal — a WRITE gated on edit_intel + company scope.
+    await _ensure_subject_scope(ctx, "edit_intel", "Entity", row.entity_id)
     obj = await _intel_repo.update(
         ctx.session, ctx.tenant_id, intel_id, ctx.actor,
         {"is_dismissed": True, "acknowledged_by": ctx.actor, "acknowledged_at": datetime.now(UTC)},

@@ -6,6 +6,30 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Security audit round 5 — custom routes, transitions, conversion race, RLS deployability.**
+  - **Custom-route authz bypasses (R5-1).** The versioned financials create gated on the
+    loose `add_company_note`; it now requires `edit_fi_record` (a Deal Analyst / AM RM can
+    no longer publish financials). Intelligence acknowledge/dismiss required only company
+    READ; they now require `edit_intel`, so a read-only clients viewer (Credit Head, Deal
+    Analyst) cannot mutate a signal. The flat `/v1/syndication-lenders` list is now scoped
+    by the parent syndication tracker's company — a scoped Syn RM no longer reads every
+    lender tenant-wide.
+  - **Status transitions cannot bypass the workflow (R5-2).** A generic PATCH can no
+    longer set `Lead.status` to `Converted` (that must go through `/convert`, which creates
+    the deal + product lines atomically), the change-request flow refuses the same
+    transition, and a row lock (Converted lead, Disbursed lending) is now enforced on the
+    **target** value of a generic update — not only once the row is already locked.
+  - **Conversion concurrency & idempotency (R5-3).** The lead row is locked
+    `FOR UPDATE` for the whole conversion, so two concurrent converts serialise (the second
+    sees Converted → 409) instead of racing to two deals; the Idempotency-Key is re-checked
+    under the lock so a same-key retry replays the first result.
+  - **RLS is genuinely deployable (R5-4).** The migration Job now runs as the schema
+    **owner** (`database.migrationUser`) while the Deployment runs as the non-owner
+    `register_app` — so DDL / role-creation / FORCE succeed and the runtime is actually
+    bound by RLS. A new test drives real API CRUD with FORCE RLS on to prove the
+    per-request GUC pattern keeps working; `values-prod.yaml` and DEPLOYMENT.md document
+    the two-role setup.
+
 - **Security audit — P0 authorization bypasses closed (write/scope/export/tenant/RLS).**
   - **Company-resource writes deny READ/NONE (P0-1/P0-3).** The company-write helper only
     checked SCOPED, so a READ-only viewer could PATCH financials / contracts / intel /

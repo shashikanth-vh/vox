@@ -107,6 +107,9 @@ _SPECS: list[ResourceSpec] = [
         filterable=["status", "syndication_id", "counterparty_id", "is_existing"],
         include_create=False, include_update=False, include_delete=False,
         view_name="syndication",
+        # A SCOPED syndication user sees only lenders on lines whose company is in scope
+        # (via the parent tracker), not every lender in the tenant.
+        parent_scope=(SyndicationTracker, "syndication_id"),
     ),
     ResourceSpec(
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],

@@ -54,6 +54,7 @@ class ResourceSpec:
         view_name: str | None = None,
         company_scoped: bool = False,
         write_operation: str | None = None,
+        parent_scope: tuple | None = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -80,6 +81,9 @@ class ResourceSpec:
         # edit_fi_record for financials, edit_contract for contracts. Enforced in
         # addition to view access, so a READ-only viewer of the module cannot mutate it.
         self.write_operation = write_operation
+        # For a child resource with no entity_id of its own (syndication lenders), scope
+        # by the PARENT line's company: (parent_model, fk_attr_name).
+        self.parent_scope = parent_scope
 
 
 def _hash_body(payload: dict) -> str:
@@ -223,6 +227,39 @@ async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
     obj = await spec.repo.get(ctx.session, ctx.tenant_id, obj_id)
     if not scope_mod.company_row_in_scope(user_scope, obj):
         raise ForbiddenError(f"Scoped access: this {spec.name}'s company is not in your scope.")
+
+
+def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec", data: dict) -> None:
+    """Protected status/stage transitions on a generic update.
+
+    Two gaps this closes (the reviewer's "status transitions can bypass the workflow"):
+
+    * A row lock (Converted lead, Disbursed lending line) is enforced on the TARGET value,
+      not only the current one — otherwise a scoped/assigned user could set the field
+      straight to the locked value because the row wasn't locked *yet*.
+    * ``Lead.status`` can never be set to ``Converted`` through the generic PATCH — that
+      transition MUST go through ``POST /v1/leads/{id}/convert`` (which atomically creates
+      the deal + product lines). The convert endpoint writes the status via the repository
+      directly, so it is unaffected by this route-level guard.
+    """
+    if ctx.user is None or spec.subject_type is None or not data:
+        return
+    from app.authz.matrix import ROW_LOCKS
+    from app.core.errors import ForbiddenError, ValidationAppError
+
+    if spec.subject_type == "Lead" and data.get("status") == "Converted":
+        raise ValidationAppError(
+            "A lead is converted via POST /v1/leads/{id}/convert (which creates the deal "
+            "and product lines atomically), not by setting status directly.")
+
+    lock = ROW_LOCKS.get(spec.subject_type)
+    if lock is not None:
+        field_name, locking_values, allowed_roles = lock
+        if (field_name in data and data[field_name] in locking_values
+                and not (ctx.user.roles & allowed_roles)):
+            raise ForbiddenError(
+                f"Moving {spec.subject_type}.{field_name} to {data[field_name]!r} is a "
+                f"locked transition only {sorted(allowed_roles)} may make.")
 
 
 def _enforce_simple_write(ctx: "RequestContext", spec: "ResourceSpec") -> None:
@@ -375,6 +412,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                 user_scope = await scope_mod.build_scope(ctx, ctx.user)
                 scope_condition = scope_mod.company_scoped_condition(
                     user_scope, spec.repo.model)
+            elif granted is Access.SCOPED and spec.parent_scope is not None:
+                user_scope = await scope_mod.build_scope(ctx, ctx.user)
+                parent_model, fk_attr = spec.parent_scope
+                scope_condition = scope_mod.parent_company_condition(
+                    user_scope, spec.repo.model, parent_model, fk_attr)
 
         # Filters: only whitelisted equality filters are honoured. Reject an UNKNOWN
         # filter param loudly (422) rather than silently ignoring it — a dropped filter
@@ -433,6 +475,10 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                     ok = await scope_mod.row_in_scope(ctx, user_scope, spec.subject_type, obj)
                 elif spec.company_scoped:
                     ok = scope_mod.company_row_in_scope(user_scope, obj)
+                elif spec.parent_scope is not None:
+                    parent_model, fk_attr = spec.parent_scope
+                    ok = await scope_mod.parent_company_row_in_scope(
+                        ctx, user_scope, obj, parent_model, fk_attr)
                 else:
                     ok = True
                 if not ok:
@@ -455,6 +501,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             await _enforce_company_write(ctx, spec, obj_id)
             _enforce_simple_write(ctx, spec)  # people / counterparties / checklist update
             data = payload.model_dump(exclude_unset=True)
+            _enforce_transition(ctx, spec, data)  # protected status/stage transitions
             expected = data.pop("expected_version", None)
             if expected is None:
                 expected = _parse_if_match(if_match)

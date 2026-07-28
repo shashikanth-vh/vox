@@ -166,6 +166,35 @@ def company_row_in_scope(scope: UserScope, row) -> bool:  # noqa: ANN001
     return eid is not None and eid in scope.entity_ids
 
 
+def parent_company_condition(scope: UserScope, model, parent_model,  # noqa: ANN001
+                             fk_attr: str) -> ColumnElement:
+    """List clause for a child resource (e.g. a syndication lender) that has NO entity_id
+    of its own: it is in scope when its PARENT line's company is in scope, or the row is in
+    the user's own/team book. Keeps a scoped Syn RM from reading every lender tenant-wide
+    via the flat route while still letting them see their own lines' lenders."""
+    empty = {uuid.UUID(int=0)}
+    parent_ids = select(parent_model.id).where(
+        parent_model.entity_id.in_(scope.entity_ids or empty))
+    return or_(getattr(model, fk_attr).in_(parent_ids),
+               model.created_by.in_(scope.own_emails or {""}))
+
+
+async def parent_company_row_in_scope(ctx: RequestContext, scope: UserScope, row,  # noqa: ANN001
+                                      parent_model, fk_attr: str) -> bool:
+    """Direct-GET scope for a child resource: resolve its parent line's entity and check."""
+    if getattr(row, "created_by", None) in scope.own_emails:
+        return True
+    parent_id = getattr(row, fk_attr, None)
+    if parent_id is None:
+        return False
+    entity_id = (
+        await ctx.session.execute(
+            select(parent_model.entity_id).where(
+                parent_model.tenant_id == ctx.tenant_id, parent_model.id == parent_id))
+    ).scalar_one_or_none()
+    return entity_id is not None and entity_id in scope.entity_ids
+
+
 def entity_list_condition(scope: UserScope, model) -> ColumnElement:  # noqa: ANN001
     """Scope clause for the ENTITIES list (the clients view): connected companies +
     companies the user (or team) created."""

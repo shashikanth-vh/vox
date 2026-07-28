@@ -185,6 +185,11 @@ async def create_change_request(payload: s.ChangeRequestCreate,
     if field not in allowed_fields:
         raise ValidationAppError(
             f"Field '{field}' is not requestable on {stype} (allowed: {', '.join(allowed_fields)}).")
+    # A lead conversion is not a mere status change — it must create the deal + product
+    # lines atomically. Route it to /convert, never through the request→approve flow.
+    if stype == "Lead" and field == "status" and data.get("to_value") == "Converted":
+        raise ValidationAppError(
+            "Converting a lead goes through POST /v1/leads/{id}/convert, not a change request.")
     subject = await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"])
     if subject is None:
         raise NotFoundError(f"{stype} '{data['subject_id']}' not found.")
@@ -370,9 +375,29 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     # workflow, AFTER the orchestrator verified the approver's identity + role) honour
     # enforce_rbac like every other operation.
     granted = authz.enforce_operation(ctx.user, "push_lead_to_deals")
-    lead = await load_subject(ctx.session, ctx.tenant_id, "Lead", lead_id)
+    # Lock the lead row FOR UPDATE so two concurrent conversions serialise: the second
+    # blocks until the first commits, then sees status=Converted and 409s — no duplicate
+    # deal. (Belt-and-braces with the Idempotency-Key replay above for retries.)
+    from app.models import Lead as _Lead
+
+    lead = (
+        await ctx.session.execute(
+            select(_Lead).where(_Lead.id == lead_id, _Lead.tenant_id == ctx.tenant_id,
+                                _Lead.deleted_at.is_(None)).with_for_update())
+    ).scalar_one_or_none()
     if lead is None:
         raise NotFoundError(f"Lead '{lead_id}' not found.")
+    # Re-check the idempotency key now that we hold the lock: a same-key request that raced
+    # us past the pre-check replays the first result instead of 409-ing.
+    if idempotency_key:
+        prior = (
+            await ctx.session.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.tenant_id == ctx.tenant_id,
+                    IdempotencyKey.key == idempotency_key))
+        ).scalar_one_or_none()
+        if prior is not None:
+            return prior.response_body
     entity_id = getattr(lead, "entity_id", None)
     if entity_id is None:
         raise ValidationAppError("Lead has no entity_id — link it to a company first.")
