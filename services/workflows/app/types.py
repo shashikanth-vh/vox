@@ -68,9 +68,12 @@ class VoxTouchpoint:
     contact_name: str | None = None
 
     # People. performed_by = the acting RM in the field; assigned_rm = who owns the
-    # company/lead (defaults to the acting RM for a brand-new lead).
+    # company/lead (defaults to the acting RM for a brand-new lead). assigned_rm_id is
+    # that RM's Access user id — when present, a VOX-created lead is ASSIGNED to them
+    # (a real LineAssignment), so the actual BDRM owns it, not just a name string.
     performed_by: str | None = None
     assigned_rm: str | None = None
+    assigned_rm_id: str | None = None
 
     # Follow-up (drives the lead's next_action / next meeting; the calendar hand-off is
     # recorded on the interaction's meta for a calendar integration to pick up).

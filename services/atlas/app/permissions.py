@@ -49,8 +49,10 @@ class ViewGate:
     def enabled(self) -> bool:
         return bool(self._access_url)
 
-    async def views_for(self, tenant: str, email: str) -> dict[str, str]:
-        """The user's effective view matrix, e.g. ``{"dashboard": "FULL", ...}``."""
+    async def resolve(self, tenant: str, email: str) -> dict:
+        """The user's full resolution (id, roles, views, reports) — cached. This is the
+        one Access round-trip; the view gate and the Register identity-forwarding both
+        read from it."""
         key = (tenant, email.lower())
         cached = self._cache.get(key)
         now = time.monotonic()
@@ -68,9 +70,13 @@ class ViewGate:
         if resp.status_code == 404:
             raise UserUnknownError(email)
         resp.raise_for_status()
-        views = resp.json().get("views", {})
-        self._cache[key] = (now + self._ttl_s, views)
-        return views
+        body = resp.json()
+        self._cache[key] = (now + self._ttl_s, body)
+        return body
+
+    async def views_for(self, tenant: str, email: str) -> dict[str, str]:
+        """The user's effective view matrix, e.g. ``{"dashboard": "FULL", ...}``."""
+        return (await self.resolve(tenant, email)).get("views", {})
 
     async def check(self, tenant: str, email: str, view: str) -> None:
         """Raise ``ViewDeniedError`` unless the user's stacked roles grant the view."""

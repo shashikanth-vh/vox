@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # How long resolved permissions are cached before re-asking the Access service.
     permission_cache_ttl_s: float = 30.0
 
+    # ATLAS forwards the CALLER's verified identity to the Register so row-level scope
+    # applies to reads (not just the view gate). The shared secret must match the
+    # Register's REGISTER_GATEWAY_SHARED_SECRET (same trust as the gateway). Empty =
+    # dev: the Register trusts forwarded headers as sent.
+    gateway_shared_secret: str = ""
+
     # How many rows per vertical the aggregations read, page-cap. 10 pages x 200 rows
     # covers the ATLAS book comfortably; raise deliberately for very large tenants.
     max_pages_per_resource: int = 10

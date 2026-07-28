@@ -49,8 +49,17 @@ def build_mock() -> FastAPI:
         return row
 
     @app.get("/v1/leads")
-    async def list_leads():
-        return {"items": list(app.state.leads.values()), "next_cursor": None}
+    async def list_leads(request: Request):
+        # Honour entity_id/status like the real Register — a mock that ignores
+        # filters is how the wrong-company lead bug slipped past the tests.
+        rows = list(app.state.leads.values())
+        eid = request.query_params.get("entity_id")
+        if eid:
+            rows = [r for r in rows if str(r.get("entity_id")) == eid]
+        status = request.query_params.get("status")
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        return {"items": rows, "next_cursor": None}
 
     @app.post("/v1/leads", status_code=201)
     async def create_lead(request: Request):

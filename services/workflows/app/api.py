@@ -21,9 +21,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from evam_backend_core.logging import configure_logging, get_logger
+from evam_backend_core.oidc import OidcError, OidcVerifier, bearer_token
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+import httpx
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.exceptions import TemporalError
 from temporalio.service import RPCError
@@ -33,6 +35,11 @@ from app.types import LeadConversionInput, VoxTouchpoint
 from app.workflows import LeadConversionWorkflow, VoxTouchpointWorkflow
 
 log = get_logger("orchestrator")
+
+# Who may decide which workflow. leadconv is a lead→deal conversion — a BD decision.
+_APPROVER_ROLES: dict[str, set[str]] = {
+    "leadconv": {"BD Head", "Management", "Admin"},
+}
 
 
 class VoxTouchpointIn(BaseModel):
@@ -60,6 +67,7 @@ class VoxTouchpointIn(BaseModel):
     contact_name: str | None = Field(default=None, max_length=200)
     performed_by: str | None = Field(default=None, max_length=120)
     assigned_rm: str | None = Field(default=None, max_length=120)
+    assigned_rm_id: str | None = None
     next_action: str | None = None
     next_action_date: str | None = None
     next_meeting_date: str | None = None
@@ -105,9 +113,15 @@ def create_app() -> FastAPI:
         # a bad TEMPORAL_ADDRESS until traffic arrives — fail loud at startup instead.
         app.state.temporal = await Client.connect(
             settings.temporal_address, namespace=settings.temporal_namespace)
+        app.state.http = httpx.AsyncClient(timeout=10.0)
+        app.state.oidc = (
+            OidcVerifier(settings.oidc_issuer, settings.oidc_audience or None,
+                         app.state.http, email_claim=settings.oidc_email_claim)
+            if settings.oidc_issuer else None)
         log.info("orchestrator_started", extra={"temporal": settings.temporal_address,
                                                 "task_queue": settings.task_queue})
         yield
+        await app.state.http.aclose()
 
     app = FastAPI(title="PRISM Orchestrator", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,
@@ -122,16 +136,38 @@ def create_app() -> FastAPI:
         return _problem(401, "Unauthorized", "Missing or invalid X-API-Key.")
 
     async def start(request: Request, workflow_cls: Any, arg: Any,
-                    workflow_id: str) -> WorkflowHandle:
-        """Idempotent start: if the business id is already running/ran, attach to it."""
+                    workflow_id: str, *, restart_if_closed: bool = False) -> WorkflowHandle:
+        """Idempotent start: if the business id is already RUNNING, attach to it. When
+        ``restart_if_closed`` and the prior run has CLOSED (rejected/timed-out/failed),
+        start a fresh attempt under ``{id}#{n}`` so a conversion can be retried cleanly
+        without colliding with the terminal history."""
         client: Client = request.app.state.temporal
         try:
             return await client.start_workflow(
                 workflow_cls.run, arg, id=workflow_id, task_queue=settings.task_queue)
         except TemporalError as exc:
-            if "already started" in str(exc).lower():
-                return client.get_workflow_handle(workflow_id)
-            raise
+            if "already started" not in str(exc).lower():
+                raise
+            handle = client.get_workflow_handle(workflow_id)
+            if not restart_if_closed:
+                return handle
+            desc = await handle.describe()
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                return handle
+            # Prior attempt is terminal → new attempt id.
+            n = 2
+            while True:
+                try:
+                    return await client.start_workflow(
+                        workflow_cls.run, arg, id=f"{workflow_id}#{n}",
+                        task_queue=settings.task_queue)
+                except TemporalError as exc2:
+                    if "already started" not in str(exc2).lower():
+                        raise
+                    h = client.get_workflow_handle(f"{workflow_id}#{n}")
+                    if (await h.describe()).status == WorkflowExecutionStatus.RUNNING:
+                        return h
+                    n += 1
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict:
@@ -178,23 +214,59 @@ def create_app() -> FastAPI:
         if (resp := denied(x_api_key)) is not None:
             return resp
         wf_id = f"leadconv-{payload.lead_id}"
-        await start(request, LeadConversionWorkflow,
-                    LeadConversionInput(**payload.model_dump()), wf_id)
+        handle = await start(request, LeadConversionWorkflow,
+                             LeadConversionInput(**payload.model_dump()), wf_id,
+                             restart_if_closed=True)
+        wf_id = handle.id  # may be the #n retry id if a prior attempt had closed
         return ORJSONResponse(status_code=202, content={
             "workflow_id": wf_id, "status": "pending approval",
             "approve_url": f"/v1/workflows/{wf_id}/approve",
             "reject_url": f"/v1/workflows/{wf_id}/reject",
             "status_url": f"/v1/workflows/{wf_id}"})
 
+    async def _decider(request: Request, workflow_id: str,
+                       payload: DecisionIn) -> tuple[str, ORJSONResponse | None]:
+        """The trustworthy decider identity + a role check. With OIDC configured the
+        e-mail comes from the verified token (never the caller-supplied 'by'), and the
+        Access service confirms an approver role for the workflow's vertical."""
+        verifier: OidcVerifier | None = request.app.state.oidc
+        decided_by = payload.by
+        if verifier is not None:
+            token = bearer_token(request.headers.get("Authorization"))
+            if not token:
+                return "", _problem(401, "Unauthorized", "Bearer token required.")
+            try:
+                ident = await verifier.verify(token)
+            except OidcError as exc:
+                return "", _problem(401, "Unauthorized", f"Invalid token: {exc}")
+            decided_by = ident.email
+        # Role check (needs the Access service): the decider must hold an approver role.
+        prefix = workflow_id.split("-", 1)[0]
+        needed = _APPROVER_ROLES.get(prefix)
+        if needed and settings.access_url:
+            try:
+                resp = await request.app.state.http.get(
+                    f"{settings.access_url.rstrip('/')}/v1/resolve",
+                    params={"email": decided_by},
+                    headers={"X-API-Key": settings.access_api_key})
+                roles = set(resp.json().get("roles", [])) if resp.status_code == 200 else set()
+            except httpx.HTTPError as exc:
+                return "", _problem(502, "Upstream unavailable", f"Access: {exc}")
+            if not (roles & needed):
+                return "", _problem(
+                    403, "Forbidden",
+                    f"'{decided_by}' lacks an approver role {sorted(needed)} for {prefix}.")
+        return decided_by, None
+
     async def _signal(request: Request, workflow_id: str, name: str,
-                      payload: DecisionIn) -> Any:
+                      payload: DecisionIn, decided_by: str) -> Any:
         client: Client = request.app.state.temporal
         handle = client.get_workflow_handle(workflow_id)
         try:
-            await handle.signal(name, args=[payload.by, payload.note])
+            await handle.signal(name, args=[decided_by, payload.note])
         except RPCError as exc:
             return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
-        return {"workflow_id": workflow_id, "signalled": name, "by": payload.by}
+        return {"workflow_id": workflow_id, "signalled": name, "by": decided_by}
 
     @app.post("/v1/workflows/{workflow_id}/approve", tags=["Workflows"],
               summary="Approve a pending human-in-the-loop workflow")
@@ -203,7 +275,10 @@ def create_app() -> FastAPI:
                       ) -> Any:
         if (resp := denied(x_api_key)) is not None:
             return resp
-        return await _signal(request, workflow_id, "approve", payload)
+        decided_by, err = await _decider(request, workflow_id, payload)
+        if err is not None:
+            return err
+        return await _signal(request, workflow_id, "approve", payload, decided_by)
 
     @app.post("/v1/workflows/{workflow_id}/reject", tags=["Workflows"],
               summary="Reject a pending human-in-the-loop workflow")
@@ -212,7 +287,10 @@ def create_app() -> FastAPI:
                      ) -> Any:
         if (resp := denied(x_api_key)) is not None:
             return resp
-        return await _signal(request, workflow_id, "reject", payload)
+        decided_by, err = await _decider(request, workflow_id, payload)
+        if err is not None:
+            return err
+        return await _signal(request, workflow_id, "reject", payload, decided_by)
 
     @app.get("/v1/workflows/{workflow_id}", tags=["Workflows"],
              summary="A run's live status (execution state + in-workflow stage)")

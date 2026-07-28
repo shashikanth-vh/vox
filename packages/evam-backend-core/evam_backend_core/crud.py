@@ -155,7 +155,12 @@ class CRUDRepository(Generic[M]):
             if value is None:
                 continue
             if key not in self.filterable:
-                continue
+                # NEVER drop a filter silently: a caller that asked for
+                # entity_id=X and gets the whole tenant back is a data-leak
+                # waiting to happen (the wrong-company VOX lead bug).
+                raise ValueError(
+                    f"'{key}' is not a filterable column for {self.model.__name__} "
+                    f"(allowed: {sorted(self.filterable)})")
             conds.append(self._col(key) == self._coerce_filter(key, value))
 
         if q and self.searchable:

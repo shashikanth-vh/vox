@@ -93,3 +93,36 @@ async def test_import_rejects_non_xlsx(client: AsyncClient):
     files = {"file": ("data.txt", b"not a workbook", "text/plain")}
     r = await client.post("/v1/import/atlas-xlsx", files=files)
     assert r.status_code == 422
+
+
+async def test_replace_import_is_tenant_scoped(client, tmp_path):
+    """A replace import for tenant B must NOT delete tenant A's rows (the TRUNCATE
+    data-loss fix). Seed a row on EVAM, run a replace import for a SECOND tenant, and
+    confirm the EVAM row survives."""
+    import uuid as _uuid
+
+    from openpyxl import Workbook
+
+    keep = (await client.post("/v1/entities", json={
+        "code": f"KEEP-{_uuid.uuid4().hex[:6]}", "legal_name": "Keep Me Co"})).json()
+
+    code = f"T2{_uuid.uuid4().hex[:4]}".upper()
+    r = await client.post("/v1/tenants", json={"code": code, "name": "Second Tenant"})
+    assert r.status_code in (201, 200), r.text
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Leads"
+    ws.append(["Company Name", "Sector", "RM Owner"])
+    ws.append(["Second Tenant Co", "Solar - EPC", "Chetan"])
+    path = tmp_path / "mis.xlsx"
+    wb.save(path)
+    with open(path, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx?mode=replace",
+                              files={"file": ("mis.xlsx", fh.read())},
+                              headers={"X-Tenant": code})
+    assert r.status_code == 200, r.text
+
+    # The EVAM row is untouched — a TRUNCATE would have wiped it.
+    still = await client.get(f"/v1/entities/{keep['id']}")
+    assert still.status_code == 200

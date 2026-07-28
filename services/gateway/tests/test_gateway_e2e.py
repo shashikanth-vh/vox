@@ -152,3 +152,32 @@ async def test_cf7_bypass_hits_the_registers_wall(register_direct: AsyncClient):
     assert r.status_code == 200
     # And a pure machine call (no identity) is unaffected.
     assert (await register_direct.get("/v1/entities")).status_code == 200
+
+
+async def test_cf8_injected_internal_headers_are_stripped(gw: AsyncClient, access_direct):
+    """A client cannot forge an authorization decision. On an UNMAPPED route the
+    gateway has no decision to add — but it must still strip any client-supplied
+    X-Authz-Decision / X-Gateway-Auth / X-User-Roles before forwarding, so the
+    Register never sees a forged FULL stamped with the gateway's valid secret."""
+    await _mk_user(access_direct, "syn.e2e@evamfinance.com", ["Syn RM"])
+    eid = (await gw.post("/v1/entities",
+                         json={"code": "GWE8", "legal_name": "GW E8"})).json()["id"]
+    syn = (await gw.post("/v1/syndication", json={"entity_id": eid})).json()
+
+    # Syn RM is unassigned to this line. They inject FULL + escalate their roles and
+    # even forge the gateway secret. All of it must be stripped at the gateway.
+    forged = {
+        "X-User-Email": "syn.e2e@evamfinance.com",
+        "X-Authz-Decision": "FULL",
+        "X-Gateway-Auth": "e2e-secret",
+        "X-User-Roles": "Admin",
+        "X-User-Report-Ids": str(__import__("uuid").uuid4()),
+    }
+    r = await gw.patch(f"/v1/syndication/{syn['id']}", json={"remarks": "hijack"},
+                       headers=forged)
+    assert r.status_code == 403, r.text  # server-derived SCOPED + no assignment → denied
+    assert "scope" in r.text.lower() or "assigned" in r.text.lower()
+
+    # And the delete guardrail cannot be reached by claiming Admin either.
+    r = await gw.delete(f"/v1/syndication/{syn['id']}", headers=forged)
+    assert r.status_code == 403, r.text

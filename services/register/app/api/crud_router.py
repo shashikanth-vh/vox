@@ -171,7 +171,20 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
 
                 op = CREATE_OPERATION_FOR_SUBJECT.get(spec.subject_type)
                 if op is not None:
-                    enforce_operation(ctx.user, op)
+                    granted = enforce_operation(ctx.user, op)
+                    entity_id = body.get("entity_id")
+                    if (granted.name == "SCOPED" and entity_id is not None
+                            and spec.subject_type != "Entity"):
+                        # A SCOPED creator may only open lines for companies in
+                        # their scope (their book / connected / team / vertical).
+                        from app.authz import scope as scope_mod
+                        from app.core.errors import ForbiddenError
+
+                        user_scope = await scope_mod.build_scope(ctx, ctx.user)
+                        if not await scope_mod.entity_in_scope(ctx, user_scope, entity_id):
+                            raise ForbiddenError(
+                                "Scoped access: this company is not in your scope "
+                                f"to open a {spec.subject_type} line for.")
             if idempotency_key:
                 existing = (
                     await ctx.session.execute(

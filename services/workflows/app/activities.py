@@ -175,6 +175,18 @@ async def update_lead_touch(lead_id: str, tp: VoxTouchpoint) -> dict[str, Any]:
 
 
 @activity.defn
+async def assign_lead_owner(lead_id: str, user_id: str) -> dict[str, Any]:
+    """Create the BDRM primary-owner assignment for a VOX-created lead, so the actual
+    RM owns it (scoped lists/reads/writes work) — not just the ``rm`` name string."""
+    async with _client() as reg:
+        return await reg.create("assignments", {
+            "user_id": user_id, "subject_type": "Lead", "subject_id": lead_id,
+            "assignment_role": "BDRM",
+            "note": "Auto-assigned from a VOX capture (primary owner).",
+        }, idempotency_key=f"vox-assign:{lead_id}:{user_id}")
+
+
+@activity.defn
 async def log_touchpoint(tp: VoxTouchpoint, entity_id: str, lead_id: str | None,
                          idempotency_key: str) -> dict[str, Any]:
     """The full-fidelity interaction: transcript, audio reference, GPS, attendees,
@@ -265,6 +277,17 @@ async def mark_lead_converted(lead_id: str, deal_id: str, decided_by: str) -> di
             "converted_deal_id": deal_id,
             "conv": f"Converted by {decided_by}",
         }, request_id=activity.info().workflow_id)
+
+
+@activity.defn
+async def soft_delete_row(resource: str, obj_id: str) -> None:
+    """Compensation: undo a row created earlier in a failed conversion. The Register's
+    delete is soft (restorable) and idempotent enough for a rollback path."""
+    async with _client() as reg:
+        try:
+            await reg.delete(resource, obj_id, request_id=activity.info().workflow_id)
+        except Exception:  # noqa: BLE001 - best-effort rollback; already-gone is fine
+            pass
 
 
 @activity.defn

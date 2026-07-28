@@ -6,6 +6,64 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Security & robustness pass — the RBAC/workflow review findings, fixed.**
+  - **Wrong-company VOX lead (data-integrity bug), fixed.** `Lead` now whitelists
+    `entity_id` as a filter, and the core CRUD repository **refuses an unknown filter
+    instead of silently dropping it** — a dropped `entity_id=` filter was how "the
+    company's active lead" degraded to "the newest active lead in the tenant". Two
+    regression tests (register + the VOX e2e) create a NEWER unrelated lead first, so
+    the old behaviour would fail them.
+  - **Gateway internal-header injection, fixed.** The gateway now strips every
+    internal identity/authz header (`X-Authz-Decision`, `X-Gateway-Auth`, `X-User-Id`,
+    `X-User-Roles`, the reporting-team headers) from the INCOMING request before adding
+    its server-derived values — a client can no longer inject `X-Authz-Decision: FULL`
+    on an unmapped route and have the gateway stamp its valid secret onto the forgery.
+    New e2e test CF8 proves the wall.
+  - **Scope evaluator applied to the remaining routes:** versioned financials
+    create/history, syndication-lender nested list/add, the lender matrix, the
+    Data-Register roll-up, intel acknowledge/dismiss, change-request creation
+    (a SCOPED requester must be on the line/company), scoped deal/product-line creation,
+    and `/v1/authz/check` — which now answers from the CENTRAL evaluator (own book /
+    connected company / team / vertical-Head default) instead of exact-assignment only,
+    so it can never disagree with actual enforcement.
+  - **Verified OIDC identity (opt-in), the impersonation fix.** New shared
+    `evam_backend_core.oidc` (JWKS fetch + RS256/ES256 validation of iss/aud/exp). With
+    an issuer configured, the **gateway** derives the caller's e-mail from the bearer
+    TOKEN (not the client-assertable `X-User-Email`), and the **orchestrator** derives
+    the approver from the token AND confirms an approver role via the Access service —
+    a caller can no longer claim to be the Credit/BD Head. Unit tests cover valid /
+    wrong-audience / unknown-key tokens.
+  - **ATLAS forwards verified identity.** ATLAS read paths now attach the caller's
+    identity + roles (+ the gateway secret) to their Register client, so the Register's
+    row-level scope applies to dashboards — a scoped user no longer receives tenant-wide
+    rows. (New SDK `extra_headers` supports this.)
+  - **MIS import made safe.** The replace import was a `TRUNCATE … CASCADE` that wiped
+    EVERY tenant; it is now a **tenant-scoped `DELETE … WHERE tenant_id`** (child→parent).
+    Merge is a **real upsert**: entities are matched canonically and reused (empty fields
+    enriched, curated data never clobbered) instead of re-inserted. Regression test
+    proves a replace import for tenant B leaves tenant A's rows intact.
+  - **Deploy hardening.** Access `enforceRbac: true` in the umbrella (an identity-less
+    Access-key holder can't mint users/roles); the Orchestrator ships a real API key
+    (`prism-workflows-key`) + optional OIDC/Access wiring; the Register ingress stays
+    off in favour of the gateway ingress.
+  - **Build correctness.** The workflows image installed shared packages `--no-deps`
+    but the service under-declared its transitive deps (`httpx`, `pydantic-settings`,
+    `pyjwt`) — now declared, so runtime imports resolve. New CI jobs **build every
+    service image and smoke-import its app**, and **`helm lint` + `helm template`** the
+    umbrella and every subchart — the class of failure editable installs hide.
+  - **Workflow robustness.** VOX-created leads now get a REAL `LineAssignment` for the
+    capturing BDRM (`assigned_rm_id`) via a narrow machine-caller carve-out (primary-
+    owner role only), so the actual RM owns the lead. Lead conversion is now
+    **compensating** — a failure mid-apply soft-deletes the deal + created lines so no
+    orphan survives — and **restartable**: re-requesting after a rejected/timed-out run
+    starts a fresh attempt (`leadconv-{lead}#{n}`) instead of colliding with terminal
+    history.
+  - Still open, stated plainly: real STT/Haiku understanding and an approval UI, actual
+    calendar event creation (today it records `meta.calendar.status=pending`), forced
+    RLS (`REGISTER_ENFORCE_RLS` is still advisory), a single public ingress fronting
+    ATLAS/VocX/PULSE/Orchestrator, the full field-policy engine, the remaining lifecycle
+    workflows, and production-grade (HA/mTLS) Temporal.
+
 - **RBAC 3.1 scope completion — ONE central scope evaluator, invoked everywhere**
   (closing the scope-scenario gaps in the RBAC review):
   - **`app/authz/scope.py`** — the single definition of "in my scope": direct

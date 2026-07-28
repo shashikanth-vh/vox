@@ -36,6 +36,11 @@ api:
   replicaCount: 1
   # Empty = open (dev). ALWAYS set in production (comma-separated keys).
   apiKeys: ""
+  # Verified approvals (opt-in): OIDC issuer + Access for approver role checks.
+  oidcIssuer: ""
+  oidcAudience: ""
+  accessUrl: ""
+  accessApiKey: ""
   service:
     type: ClusterIP
     port: 80

@@ -111,3 +111,49 @@ jobs:
 
       - name: Test (atlas — aggregations + composed views e2e)
         run: cd services/atlas && python -m pytest -q
+
+  images:
+    name: docker build (every service image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build every service image (build context = repo root)
+        run: |
+          set -e
+          # Catches the class of bug where a Dockerfile installs shared packages
+          # --no-deps and the service forgets to declare a transitive dependency:
+          # the image builds here even though editable installs in CI would hide it.
+          for svc in register access gateway vocx pulse atlas workflows; do
+            echo "::group::build prism-$svc"
+            docker build -f services/$svc/Dockerfile -t prism-$svc:ci .
+            echo "::endgroup::"
+          done
+      - name: Smoke-import each image's app (deps actually resolve at runtime)
+        run: |
+          set -e
+          docker run --rm prism-gateway:ci python -c "import app.main"
+          docker run --rm prism-atlas:ci python -c "import app.main"
+          docker run --rm prism-pulse:ci python -c "import app.main"
+          docker run --rm prism-vocx:ci python -c "import app.main"
+          docker run --rm prism-workflows:ci python -c "import app.api, app.worker"
+
+  helm:
+    name: helm template (umbrella + every subchart)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - name: Lint + render the umbrella and each vendored subchart
+        run: |
+          set -e
+          helm lint deploy/helm/prism
+          helm template prism deploy/helm/prism > /dev/null
+          helm template prism deploy/helm/prism \
+            -f deploy/helm/prism/values-local.yaml > /dev/null
+          for c in deploy/helm/prism/charts/*/; do
+            echo "::group::helm template $c"
+            helm template "$(basename "$c")" "$c" > /dev/null
+            echo "::endgroup::"
+          done

@@ -15,6 +15,13 @@ dependencies = [
     "fastapi==0.115.6",
     "uvicorn[standard]==0.34.0",
     "orjson==3.10.12",
+    # The shared packages are installed with --no-deps in the Dockerfile, so THIS
+    # service must declare every runtime dep it uses transitively through them:
+    "httpx==0.28.1",              # orchestrator → Access/Temporal; oidc JWKS fetch
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",   # app.config
+    "pyjwt[crypto]==2.10.1",      # evam_backend_core.oidc token verification
+    "python-json-logger==3.2.1",  # structured logs
 ]
 
 [project.optional-dependencies]

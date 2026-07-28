@@ -19,6 +19,7 @@ import httpx
 from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
+from evam_backend_core.oidc import OidcError, OidcVerifier, bearer_token
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import ORJSONResponse
 
@@ -28,9 +29,14 @@ from app.routes_map import operation_for
 
 log = get_logger("gateway")
 
-# Hop-by-hop / recomputed headers never forwarded in either direction.
+# Hop-by-hop / recomputed headers never forwarded in either direction — PLUS every
+# internal identity/authorization header. These are server-derived only: a client that
+# injects X-Authz-Decision / X-Gateway-Auth / X-User-Roles must never have them
+# survive the hop (with the gateway then stamping its valid secret on the forgery).
 _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
-                         "transfer-encoding", "upgrade", "expect"}
+                         "transfer-encoding", "upgrade", "expect",
+                         "x-authz-decision", "x-gateway-auth", "x-user-id",
+                         "x-user-roles", "x-user-report-ids", "x-user-reports"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 
@@ -52,6 +58,10 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):  # noqa: ANN202
         app.state.client = httpx.AsyncClient(timeout=settings.upstream_timeout_s)
         app.state.resolver = Resolver(app.state.client)
+        app.state.oidc = (
+            OidcVerifier(settings.oidc_issuer, settings.oidc_audience or None,
+                         app.state.client, email_claim=settings.oidc_email_claim)
+            if settings.oidc_issuer else None)
         log.info("gateway_started", extra={"register": settings.register_url,
                                            "access": settings.access_url})
         yield
@@ -81,10 +91,13 @@ def create_app() -> FastAPI:
     async def me(request: Request) -> Response:
         """The composition pattern in miniature: identity facts from the Access service +
         assignments from the Register, one response for the UI."""
-        email = request.headers.get("X-User-Email")
         tenant = request.headers.get("X-Tenant", settings.default_tenant_code)
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, f"Invalid bearer token: {exc}")
         if not email:
-            return _problem(403, "X-User-Email is required.")
+            return _problem(403, "Authentication required (bearer token or X-User-Email).")
         try:
             user = await request.app.state.resolver.resolve(tenant, email)
         except UserDeniedError:
@@ -103,6 +116,18 @@ def create_app() -> FastAPI:
             "views": user.views, "operations": user.operations,
             "matrix_version": user.version, "assignments": assignments,
         })
+
+    async def _trusted_email(request: Request) -> str | None:
+        """The caller's e-mail. With OIDC configured it comes from the VERIFIED bearer
+        token (client cannot assert it); otherwise from X-User-Email (dev/trusted mesh)."""
+        verifier: OidcVerifier | None = request.app.state.oidc
+        if verifier is None:
+            return request.headers.get("X-User-Email")
+        token = bearer_token(request.headers.get("Authorization"))
+        if not token:
+            return None
+        ident = await verifier.verify(token)
+        return ident.email
 
     def _forward_headers(request: Request, user, decision: str | None) -> dict[str, str]:  # noqa: ANN001
         headers = {k: v for k, v in request.headers.items()
@@ -126,8 +151,11 @@ def create_app() -> FastAPI:
     async def proxy(path: str, request: Request) -> Response:
         method = request.method
         full_path = "/" + path
-        email = request.headers.get("X-User-Email")
         tenant = request.headers.get("X-Tenant", settings.default_tenant_code)
+        try:
+            email = await _trusted_email(request)
+        except OidcError as exc:
+            return _problem(401, f"Invalid bearer token: {exc}")
 
         user = None
         decision: str | None = None

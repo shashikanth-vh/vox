@@ -47,12 +47,15 @@ from app.seed.refdata import REF_VALUES
 
 log = get_logger(__name__)
 
-# Business tables cleared on a replace import (tenant-scoped via TRUNCATE ... CASCADE).
-_BUSINESS_TABLES = (
-    "interactions, financials, contracts_assets, external_intelligence, monitoring_reporting, "
-    "syndication_lenders, syndication_tracker, lending_tracker, asset_monetisation, "
-    "deals, leads, counterparties, people, entities"
-)
+# Business tables cleared on a replace import — child → parent so FKs stay satisfied.
+# DELETE ... WHERE tenant_id (NOT TRUNCATE) so a replace import for one tenant can NEVER
+# wipe another tenant's rows. Documents are soft-deleted content; leave them alone.
+_BUSINESS_TABLES_ORDERED = [
+    "interactions", "financials", "contracts_assets", "external_intelligence",
+    "monitoring_reporting", "syndication_lenders", "syndication_tracker",
+    "lending_tracker", "asset_monetisation", "deals", "leads", "counterparties",
+    "people", "entities",
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +147,12 @@ async def import_workbook(
     counts: dict[str, int] = {}
 
     if truncate:
-        await session.execute(text(f"TRUNCATE {_BUSINESS_TABLES} RESTART IDENTITY CASCADE"))
+        # TENANT-SCOPED wipe (the reviewer's data-loss fix): delete only THIS tenant's
+        # rows, child tables first. A TRUNCATE would have cleared every tenant.
+        for table in _BUSINESS_TABLES_ORDERED:
+            await session.execute(
+                text(f"DELETE FROM {table} WHERE tenant_id = :tid"),  # noqa: S608 - table from a fixed allowlist
+                {"tid": tenant_id})
 
     # reference vocabularies
     existing_ref = set((await session.execute(text("SELECT category, value FROM ref_values"))).all())
@@ -189,18 +197,49 @@ async def import_workbook(
             if nm:
                 names.setdefault(_key(nm), nm)
 
+    # Existing entities for THIS tenant, keyed canonically → merge reuses them (a real
+    # upsert) instead of inserting a second EcoSoch every import.
+    existing_entities = (
+        await session.execute(
+            select(Entity).where(Entity.tenant_id == tenant_id,
+                                 Entity.deleted_at.is_(None)))
+    ).scalars().all()
+    existing_by_key: dict[str, Entity] = {}
+    for e in existing_entities:
+        existing_by_key.setdefault(_key(e.legal_name or ""), e)
+        if e.display_name:
+            existing_by_key.setdefault(_key(e.display_name), e)
+
     codegen = _CodeGen()
+    for e in existing_entities:  # reserve existing codes so new ones don't collide
+        if e.code:
+            codegen.used.add(e.code)
     entity_id_by: dict[str, uuid.UUID] = {}
+    n_new, n_updated = 0, 0
     for k, nm in names.items():
-        ent = Entity(
-            tenant_id=tenant_id, code=codegen.make(nm), legal_name=nm,
-            sector=sector_by.get(k), lens=lens_by.get(k), state=state_by.get(k),
-            register_status="Pipeline", created_by="xlsx-import", updated_by="xlsx-import",
-        )
-        session.add(ent)
-        await session.flush()
+        ent = existing_by_key.get(k)
+        if ent is None:
+            ent = Entity(
+                tenant_id=tenant_id, code=codegen.make(nm), legal_name=nm,
+                sector=sector_by.get(k), lens=lens_by.get(k), state=state_by.get(k),
+                register_status="Pipeline", created_by="xlsx-import",
+                updated_by="xlsx-import")
+            session.add(ent)
+            await session.flush()
+            n_new += 1
+        else:
+            # Enrich only empty fields — never clobber curated data on a merge.
+            if not ent.sector and sector_by.get(k):
+                ent.sector = sector_by[k]
+            if not ent.lens and lens_by.get(k):
+                ent.lens = lens_by[k]
+            if not ent.state and state_by.get(k):
+                ent.state = state_by[k]
+            ent.updated_by = "xlsx-import"
+            n_updated += 1
         entity_id_by[k] = ent.id
-    counts["entities"] = len(entity_id_by)
+    counts["entities"] = n_new
+    counts["entities_matched"] = n_updated
 
     def eid(name) -> uuid.UUID | None:
         return entity_id_by.get(_key(name or ""))

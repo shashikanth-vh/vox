@@ -112,8 +112,10 @@ async def stack(register_server, monkeypatch):
                 activities.resolve_entity, activities.create_entity,
                 activities.find_active_lead, activities.create_lead,
                 activities.update_lead_touch, activities.log_touchpoint,
+                activities.assign_lead_owner,
                 activities.get_lead, activities.create_deal, activities.create_line,
                 activities.mark_lead_converted, activities.mark_lead_note,
+                activities.soft_delete_row,
             ],
         ):
             api = create_app()
@@ -186,6 +188,14 @@ async def test_existing_company_links_active_lead(stack):
         "legal_name": f"{base} Private Limited"})).json()
     lead = (await reg.post("/v1/leads", json={
         "company": base, "entity_id": ent["id"], "status": "Active"})).json()
+    # Plant a NEWER active lead on an unrelated company: the wrong-company bug would
+    # have linked THIS one instead of the target company's lead.
+    decoy_ent = (await reg.post("/v1/entities", json={
+        "code": f"DECOY-{uuid.uuid4().hex[:6]}",
+        "legal_name": "Decoy Newer Co Pvt Ltd"})).json()
+    decoy = (await reg.post("/v1/leads", json={
+        "company": "Decoy Newer Co", "entity_id": decoy_ent["id"],
+        "status": "Active"})).json()
 
     resp = await orch.post("/v1/workflows/vox-touchpoints", params={"wait": "true"},
                            json={"capture_id": f"cap-{uuid.uuid4().hex[:10]}",
@@ -201,6 +211,11 @@ async def test_existing_company_links_active_lead(stack):
     assert result["entity_created"] is False
     assert result["lead_created"] is False
     assert result["lead_id"] == lead["id"]
+    assert result["lead_id"] != decoy["id"]
+
+    # The decoy lead must be untouched.
+    decoy_after = (await reg.get(f"/v1/leads/{decoy['id']}")).json()
+    assert decoy_after.get("next_action") is None
 
     updated = (await reg.get(f"/v1/leads/{lead['id']}")).json()
     assert updated["next_action"] == "Share term sheet"

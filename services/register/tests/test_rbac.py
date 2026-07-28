@@ -82,6 +82,11 @@ async def test_request_approve_applies_change_with_vertical_routing(client: Asyn
     eid = (await client.post("/v1/entities", json={"code": "R3S3", "legal_name": "R3"})).json()["id"]
     lend = (await client.post("/v1/lending",
                               json={"entity_id": eid, "stage": "Diligence"})).json()
+    # A SCOPED requester must be ON the line (the request-scope rule): assign first.
+    r = await client.post("/v1/assignments", json={
+        "user_id": str(ANALYST_ID), "subject_type": "Lending", "subject_id": lend["id"],
+        "assignment_role": "Deal Analyst"}, headers=CREDIT_HEAD)
+    assert r.status_code == 201, r.text
 
     r = await client.post("/v1/requests", json={
         "subject_type": "Lending", "subject_id": lend["id"], "field": "stage",

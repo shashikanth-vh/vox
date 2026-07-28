@@ -100,6 +100,7 @@ class AsyncRegisterClient:
             api_key=cfg.api_key, tenant=cfg.tenant, actor=cfg.actor,
             idempotency_key=plan.idempotency_key, if_match=plan.if_match,
             request_id=plan.request_id, content_type_json=plan.json is not None,
+            extra=cfg.extra_headers or None,
         )
         attempt = 0
         while True:

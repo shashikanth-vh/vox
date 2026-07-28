@@ -50,6 +50,14 @@ spec:
               value: {{ .Values.temporal.taskQueue | quote }}
             - name: WORKFLOWS_API_KEYS
               value: {{ .Values.api.apiKeys | quote }}
+            - name: WORKFLOWS_OIDC_ISSUER
+              value: {{ .Values.api.oidcIssuer | default "" | quote }}
+            - name: WORKFLOWS_OIDC_AUDIENCE
+              value: {{ .Values.api.oidcAudience | default "" | quote }}
+            - name: WORKFLOWS_ACCESS_URL
+              value: {{ .Values.api.accessUrl | default "" | quote }}
+            - name: WORKFLOWS_ACCESS_API_KEY
+              value: {{ .Values.api.accessApiKey | default "" | quote }}
           ports:
             - name: http
               containerPort: 8000

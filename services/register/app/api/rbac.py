@@ -87,7 +87,14 @@ async def create_assignment(payload: s.AssignmentCreate,
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} may not assign a {arole} to a {stype} line.")
     elif ctx.user is None:
-        authz.enforce_operation(None, "add_employee_assign_role")  # honours enforce_rbac
+        # A machine caller (vetted API key, e.g. the VOX workflow) may create ONLY the
+        # line's PRIMARY-OWNER assignment — a BDRM on their own new lead. That is the
+        # auto-own semantics, not arbitrary reassignment, so it does not need the
+        # add_employee_assign_role operation.
+        from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
+
+        if PRIMARY_ASSIGNMENT_ROLE.get(stype) != arole:
+            authz.enforce_operation(None, "add_employee_assign_role")  # honours enforce_rbac
 
     # Subject must exist (the assignee is an Access-service user — validated upstream).
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
@@ -163,6 +170,21 @@ async def create_change_request(payload: s.ChangeRequestCreate,
     subject = await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"])
     if subject is None:
         raise NotFoundError(f"{stype} '{data['subject_id']}' not found.")
+    # A SCOPED requester may only raise requests on lines/companies in their scope.
+    if ctx.user is not None:
+        granted = authz.engine.operation_access(ctx.user, "request_stage_change")
+        if granted is authz.Access.SCOPED:
+            from app.authz import scope as scope_mod
+
+            user_scope = await scope_mod.build_scope(ctx, ctx.user)
+            in_scope = await scope_mod.row_in_scope(ctx, user_scope, stype, subject)
+            if not in_scope:
+                entity_id = getattr(subject, "entity_id", None)
+                in_scope = entity_id is not None and await scope_mod.entity_in_scope(
+                    ctx, user_scope, entity_id)
+            if not in_scope:
+                raise ForbiddenError(
+                    f"Scoped access: this {stype} is not in your scope to request on.")
     data["from_value"] = getattr(subject, field, None)
     data["requested_by"] = ctx.user.email if ctx.user else ctx.actor
     data["status"] = "Pending"
@@ -258,8 +280,12 @@ async def authz_check(
     scope = granted.name
     on_line: bool | None = None
     if allowed and subject_type and subject_id and granted is authz.Access.SCOPED:
-        on_line = await authz.engine.is_assigned(
-            ctx.session, ctx.tenant_id, user.id, subject_type, subject_id)
+        # Answer from the CENTRAL evaluator — same scope as list/GET/write, so this
+        # endpoint can never disagree with actual enforcement.
+        from app.authz import scope as scope_mod
+
+        user_scope = await scope_mod.build_scope(ctx, user)
+        on_line = await scope_mod.can_write_row(ctx, user_scope, subject_type, subject_id)
         allowed = on_line
     return {"operation": operation, "allowed": allowed, "access": scope,
             "on_line": on_line,

@@ -155,6 +155,8 @@ async def create_financial_version(
     response: Response,
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    # Financials are company data: a SCOPED caller must be connected to the company.
+    await _ensure_subject_scope(ctx, "add_company_note", "Entity", payload.entity_id)
     obj = await create_version(ctx.session, ctx.tenant_id, ctx.actor,
                                payload.model_dump(exclude_unset=False))
     response.headers["ETag"] = f'"{obj.version}"'
@@ -169,6 +171,7 @@ async def financial_history(
     ctx: RequestContext = Depends(get_context),
     period_end: str | None = Query(default=None),
 ) -> Any:
+    await _ensure_company_read(ctx, entity_id)
     conds = [
         Financial.tenant_id == ctx.tenant_id,
         Financial.entity_id == entity_id,
@@ -197,6 +200,9 @@ async def list_syndication_lenders(
     syndication_id: uuid.UUID,
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    syn = await load_subject(ctx.session, ctx.tenant_id, "Syndication", syndication_id)
+    if syn is not None:
+        await _ensure_company_read(ctx, syn.entity_id)
     rows = (
         await ctx.session.execute(
             select(SyndicationLender)
@@ -219,6 +225,9 @@ async def add_syndication_lender(
     payload: s.SyndicationLenderCreate,
     ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    # A SCOPED Syn RM may only touch mandates on THEIR lines/companies.
+    await _ensure_subject_scope(ctx, "add_lender_to_mandate", "Syndication",
+                                syndication_id)
     data = payload.model_dump(exclude_unset=False)
     data["syndication_id"] = syndication_id
     obj = await _synlender_repo.create(ctx.session, ctx.tenant_id, ctx.actor, data)
@@ -480,6 +489,8 @@ async def entity_dossier(
 async def acknowledge_intel(
     intel_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    row = await _intel_repo.get(ctx.session, ctx.tenant_id, intel_id)
+    await _ensure_company_read(ctx, row.entity_id)
     obj = await _intel_repo.update(
         ctx.session, ctx.tenant_id, intel_id, ctx.actor,
         {"acknowledged_by": ctx.actor, "acknowledged_at": datetime.now(UTC), "is_dismissed": False},
@@ -493,6 +504,8 @@ async def acknowledge_intel(
 async def dismiss_intel(
     intel_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
 ) -> Any:
+    row = await _intel_repo.get(ctx.session, ctx.tenant_id, intel_id)
+    await _ensure_company_read(ctx, row.entity_id)
     obj = await _intel_repo.update(
         ctx.session, ctx.tenant_id, intel_id, ctx.actor,
         {"is_dismissed": True, "acknowledged_by": ctx.actor, "acknowledged_at": datetime.now(UTC)},
@@ -551,6 +564,7 @@ async def entity_lender_matrix(
     """Rolls up every lender's posture across this entity's syndications, grouped by
     lender. Derived live from ``syndication_lenders`` so it never drifts from the source
     (the ATLAS mock even carried matrix-vs-text conflicts — the reason not to store it)."""
+    await _ensure_company_read(ctx, entity_id)
     rows = (
         await ctx.session.execute(
             select(SyndicationLender, SyndicationTracker.tracker_no)
@@ -716,6 +730,10 @@ def _document_routes(path_prefix: str, subject_type: str) -> None:
                                          description="'auto'/'entity' = the company's whole "
                                                      "document set; 'subject' = only this record")
                       ) -> dict[str, Any]:
+        subj = await load_subject(ctx.session, ctx.tenant_id, subject_type, subject_id)
+        if subj is not None:
+            eid = subj.id if subject_type == "Entity" else getattr(subj, "entity_id", None)
+            await _ensure_company_read(ctx, eid)
         return await data_register(ctx.session, ctx.tenant_id, subject_type, subject_id,
                                    scope=scope)
 

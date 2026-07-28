@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # they came from the gateway. Empty = dev mode (Register trusts headers as sent).
     gateway_shared_secret: str = ""
 
+    # Verified identity (opt-in). Set the issuer to REQUIRE a valid bearer token and
+    # derive the caller's e-mail from it instead of trusting X-User-Email — the
+    # impersonation fix. Empty issuer = header-trust (dev / trusted mesh).
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_email_claim: str = "email"
+
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0
 

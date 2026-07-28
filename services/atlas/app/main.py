@@ -85,13 +85,47 @@ def create_app() -> FastAPI:
     def tenant_of(x_tenant: str | None = Header(default=None, alias="X-Tenant")) -> str:
         return x_tenant or settings.register_tenant
 
-    def _client(request: Request, tenant: str) -> AsyncRegisterClient:
-        clients: dict[str, AsyncRegisterClient] = request.app.state.register_clients
-        if tenant not in clients:
-            clients[tenant] = AsyncRegisterClient(
+    async def _identity_headers(request: Request, tenant: str,
+                                email: str | None) -> dict[str, str]:
+        """The CALLER's verified identity + roles, forwarded to the Register so its
+        row-level scope applies to ATLAS reads. Without this a scoped user would get
+        tenant-wide dashboards (the reviewer's ATLAS finding)."""
+        if not email:
+            return {}
+        gate: ViewGate = request.app.state.gate
+        headers: dict[str, str] = {"X-User-Email": email}
+        if gate.enabled:
+            try:
+                resolved = await gate.resolve(tenant, email)
+                headers["X-User-Id"] = str(resolved.get("id", ""))
+                headers["X-User-Roles"] = ",".join(resolved.get("roles", []))
+                if resolved.get("reports"):
+                    headers["X-User-Report-Ids"] = ",".join(
+                        str(r["id"]) for r in resolved["reports"])
+                    headers["X-User-Reports"] = ",".join(
+                        r["email"] for r in resolved["reports"])
+            except Exception as exc:  # noqa: BLE001 - identity is best-effort for reads
+                log.warning("atlas_identity_resolve_failed", extra={"error": str(exc)})
+        if settings.gateway_shared_secret:
+            headers["X-Gateway-Auth"] = settings.gateway_shared_secret
+        return headers
+
+    async def _client(request: Request, tenant: str,
+                      email: str | None) -> AsyncRegisterClient:
+        """A Register client that carries the CALLER's identity, so the Register scopes
+        every read to that user (a machine 'atlas' actor would see the whole tenant).
+        Cached per (tenant, identity) — identity is bounded (the tenant's users)."""
+        headers = await _identity_headers(request, tenant, email)
+        key = (tenant, email or "")
+        clients: dict = request.app.state.register_clients
+        if key not in clients:
+            from evam_register_client.config import RegisterClientConfig
+
+            cfg = RegisterClientConfig(
                 base_url=settings.register_base_url, api_key=settings.register_api_key,
-                tenant=tenant, actor="atlas")
-        return clients[tenant]
+                tenant=tenant, actor="atlas", extra_headers=headers)
+            clients[key] = AsyncRegisterClient(config=cfg)
+        return clients[key]
 
     async def _gate(request: Request, tenant: str, email: str | None,
                     view: str) -> ORJSONResponse | None:
@@ -147,7 +181,7 @@ def create_app() -> FastAPI:
                                                           alias="X-User-Email")) -> Any:
         if (denied := await _gate(request, tenant, x_user_email, "dashboard")) is not None:
             return denied
-        client = _client(request, tenant)
+        client = await _client(request, tenant, x_user_email)
         leads = await _rows(client, "leads")
         deals = await _rows(client, "deals")
         lending = await _rows(client, "lending")
@@ -173,7 +207,7 @@ def create_app() -> FastAPI:
                                                            alias="X-User-Email")) -> Any:
         if (denied := await _gate(request, tenant, x_user_email, "today")) is not None:
             return denied
-        client = _client(request, tenant)
+        client = await _client(request, tenant, x_user_email)
         today = datetime.now(UTC).date()
         leads = await _rows(client, "leads", status="Active")
         lenders = await _rows(client, "syndication-lenders")
@@ -198,7 +232,7 @@ def create_app() -> FastAPI:
         resource, view = VERTICALS[vertical]
         if (denied := await _gate(request, tenant, x_user_email, view)) is not None:
             return denied
-        client = _client(request, tenant)
+        client = await _client(request, tenant, x_user_email)
         rows = await _rows(client, resource)
         return {"tenant": tenant, "vertical": vertical, "total": len(rows), "rows": rows}
 
@@ -210,7 +244,7 @@ def create_app() -> FastAPI:
                                                                alias="X-User-Email")) -> Any:
         if (denied := await _gate(request, tenant, x_user_email, "clients")) is not None:
             return denied
-        client = _client(request, tenant)
+        client = await _client(request, tenant, x_user_email)
         return await client.dossier(str(entity_id))
 
     return app

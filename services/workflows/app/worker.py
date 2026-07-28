@@ -37,9 +37,11 @@ async def main() -> None:
             activities.resolve_entity, activities.create_entity,
             activities.find_active_lead, activities.create_lead,
             activities.update_lead_touch, activities.log_touchpoint,
+            activities.assign_lead_owner,
             # Lead-conversion set
             activities.get_lead, activities.create_deal, activities.create_line,
             activities.mark_lead_converted, activities.mark_lead_note,
+            activities.soft_delete_row,
         ],
     )
     log.info("worker_started",

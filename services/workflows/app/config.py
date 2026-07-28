@@ -29,6 +29,15 @@ class Settings(BaseServiceSettings):
     api_port: int = 8000
     api_keys: str = ""
 
+    # Verified identity for approvals. With an OIDC issuer set, approve/reject derive
+    # the decider from the bearer TOKEN (not a caller-supplied 'by' field), and the
+    # Access service confirms they hold an approver role for the subject's vertical.
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_email_claim: str = "email"
+    access_url: str = ""             # e.g. http://prism-access — for role checks
+    access_api_key: str = "dev-local-key"
+
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 

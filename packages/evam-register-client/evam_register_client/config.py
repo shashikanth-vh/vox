@@ -28,3 +28,8 @@ class RegisterClientConfig(BaseSettings):
 
     # Auto-attach an Idempotency-Key to create calls so a retried POST never duplicates.
     auto_idempotency: bool = True
+
+    # Extra headers merged into every request — e.g. a BFF (ATLAS) forwarding the
+    # CALLER's verified identity (X-User-Email / X-User-Roles / X-Gateway-Auth) so the
+    # Register's row-level scope applies to that user, not the service actor.
+    extra_headers: dict[str, str] = {}
