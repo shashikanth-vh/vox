@@ -179,6 +179,7 @@ services:
       VOCX_REGISTER_TENANT: "EVAM"
       # Company-name captures (no resolved subject id) run as durable workflows.
       VOCX_ORCHESTRATOR_URL: "http://orchestrator:8000"
+      VOCX_ORCHESTRATOR_API_KEY: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       VOCX_LOG_JSON: "true"
     ports:
       - "8003:8000"   # direct capture endpoint for dev
@@ -318,10 +319,21 @@ services:
     depends_on:
       - temporal
       - workflows
+      - access
     environment:
       WORKFLOWS_TEMPORAL_ADDRESS: temporal:7233
       WORKFLOWS_TASK_QUEUE: prism-workflows
       WORKFLOWS_LOG_JSON: "true"
+      # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
+      WORKFLOWS_API_KEYS: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
+      # Approver role checks resolve against the Access service.
+      WORKFLOWS_ACCESS_URL: "http://access:8000"
+      WORKFLOWS_ACCESS_API_KEY: "dev-local-key"
+      # Verified-identity approvals. Empty issuer = dev (trusts 'by'); set REQUIRE_AUTH
+      # true + an issuer (the `sso` profile provides Dex) to make identity mandatory.
+      WORKFLOWS_OIDC_ISSUER: "${GATEWAY_OIDC_ISSUER:-}"
+      WORKFLOWS_OIDC_AUDIENCE: "${GATEWAY_OIDC_AUDIENCE:-prism}"
+      WORKFLOWS_REQUIRE_AUTH: "${WORKFLOWS_REQUIRE_AUTH:-false}"
     ports:
       - "8006:8000"   # direct workflow-start endpoint for dev
     restart: unless-stopped

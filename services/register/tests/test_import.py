@@ -89,6 +89,67 @@ async def test_import_atlas_xlsx_replace(client: AsyncClient):
     assert {ln["lender_name"] for ln in r.json()} == {"Axis Finance", "Bajaj Finance"}
 
 
+async def test_merge_reimport_is_upsert_not_duplicate(client: AsyncClient):
+    """A second (merge) import of the same workbook must not duplicate anything or trip a
+    unique constraint — the reviewer's 'merge is not a real merge' finding. People,
+    counterparties, leads, deals and trackers are reused by their natural key."""
+    mis = _mini_mis()
+    files = {"file": ("mis.xlsx", mis,
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "replace"}, files=files)
+    assert r.status_code == 200, r.text
+
+    ents = (await client.get("/v1/entities", params={"with_total": True})).json()["total"]
+    leads = (await client.get("/v1/leads", params={"with_total": True})).json()["total"]
+    deals = (await client.get("/v1/deals", params={"with_total": True})).json()["total"]
+    syn = (await client.get("/v1/syndication", params={"with_total": True})).json()["items"]
+    lenders = await client.get(f"/v1/syndication/{syn[0]['id']}/lenders")
+    n_lenders = len(lenders.json())
+
+    # Re-import the SAME workbook in merge mode — must be a no-op on counts, not a
+    # constraint violation.
+    files = {"file": ("mis.xlsx", mis,
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "merge"}, files=files)
+    assert r.status_code == 200, r.text
+    c = r.json()["counts"]
+    assert c["entities"] == 0 and c["leads"] == 0 and c["deals"] == 0
+    assert c["counterparties"] == 0 and c["people"] == 0
+    assert c["syndication_tracker"] == 0 and c["syndication_lenders"] == 0
+
+    assert (await client.get("/v1/entities", params={"with_total": True})).json()["total"] == ents
+    assert (await client.get("/v1/leads", params={"with_total": True})).json()["total"] == leads
+    assert (await client.get("/v1/deals", params={"with_total": True})).json()["total"] == deals
+    syn2 = (await client.get("/v1/syndication", params={"with_total": True})).json()["items"]
+    assert len(syn2) == len(syn)
+    assert len((await client.get(f"/v1/syndication/{syn2[0]['id']}/lenders")).json()) == n_lenders
+
+
+async def test_company_suffix_variants_canonicalise_to_one_entity(client: AsyncClient):
+    """'Pvt Ltd', 'Private Limited' and 'Ltd' variants of the same name must resolve to a
+    single entity — the reviewer's canonicalization finding."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet("Leads")
+    ws.append(["Company Name", "RM Owner", "Sector"])
+    ws.append(["Helios Power Private Limited", "Shubh Dave", "Solar"])
+    ws = wb.create_sheet("Deals")
+    ws.append(["Company Name", "RM", "Lending?", "Syndication?", "Asset Mon?", "Stage"])
+    ws.append(["Helios Power Pvt Ltd", "Shubh Dave", "Yes", "No", "No", "Live"])
+    ws = wb.create_sheet("Lending Tracker")
+    ws.append(["Company Name", "Lending Amount (₹ Cr)", "RM"])
+    ws.append(["Helios Power Ltd", 5.0, "Shubh Dave"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    files = {"file": ("mis.xlsx", buf.getvalue(),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "replace"}, files=files)
+    assert r.status_code == 200, r.text
+    # All three suffix variants collapse to ONE entity.
+    assert r.json()["counts"]["entities"] == 1
+
+
 async def test_import_rejects_non_xlsx(client: AsyncClient):
     files = {"file": ("data.txt", b"not a workbook", "text/plain")}
     r = await client.post("/v1/import/atlas-xlsx", files=files)

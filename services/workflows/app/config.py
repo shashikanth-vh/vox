@@ -38,6 +38,11 @@ class Settings(BaseServiceSettings):
     access_url: str = ""             # e.g. http://prism-access — for role checks
     access_api_key: str = "dev-local-key"
 
+    # Production switch. When true, the requester of a conversion and the approver/rejecter
+    # MUST present a verified OIDC token — the orchestrator refuses to trust a
+    # caller-supplied identity string. Leave false only for local dev without an IdP.
+    require_auth: bool = False
+
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 

@@ -219,36 +219,18 @@ class LeadConversionWorkflow:
                                         status="Rejected", decided_by=self._decided_by,
                                         decision_note=self._note)
 
-        # Approved → apply. COMPENSATING: if any step fails after the deal exists, undo
-        # the partial work (soft-delete the deal + created lines) so no orphan survives.
+        # Approved → apply in ONE transactional Register call. All-or-nothing on the
+        # server: no orphan deal/lines can survive a mid-apply failure, so the workflow
+        # needs no compensation. Idempotent on the workflow id → a retry is safe.
         self._stage = "Applying"
-        deal = await workflow.execute_activity(
-            activities.create_deal, args=[inp, entity_id, f"wf:{wf_id}:deal"], **_IO)
-        line_ids: dict[str, str | None] = {"lending": None, "syndication": None,
-                                           "asset-monetisation": None}
-        created: list[tuple[str, str]] = [("deals", deal["id"])]
-        try:
-            for resource, wanted in (("lending", inp.is_lending),
-                                     ("syndication", inp.is_syndication),
-                                     ("asset-monetisation", inp.is_asset_mon)):
-                if wanted:
-                    row = await workflow.execute_activity(
-                        activities.create_line,
-                        args=[resource, entity_id, deal["id"], inp,
-                              f"wf:{wf_id}:{resource}"], **_IO)
-                    line_ids[resource] = row["id"]
-                    created.append((resource, row["id"]))
-            await workflow.execute_activity(
-                activities.mark_lead_converted,
-                args=[inp.lead_id, deal["id"], self._decided_by or inp.requested_by],
-                **_IO)
-        except Exception:
-            # Roll back everything we created — the lead stays Active, safe to retry.
-            for resource, obj_id in reversed(created):
-                await workflow.execute_activity(
-                    activities.soft_delete_row, args=[resource, obj_id], **_IO)
-            self._stage = "RolledBack"
-            raise
+        applied = await workflow.execute_activity(
+            activities.convert_lead_txn, args=[inp, f"wf:{wf_id}:convert"], **_IO)
+        line_ids = {
+            "lending": applied.get("lending_id"),
+            "syndication": applied.get("syndication_id"),
+            "asset-monetisation": applied.get("asset_mon_id"),
+        }
+        deal = {"id": applied["deal_id"]}
 
         self._stage = "Approved"
         return LeadConversionResult(

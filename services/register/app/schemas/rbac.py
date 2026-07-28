@@ -62,3 +62,24 @@ class ChangeRequestRead(ReadModel):
     decision_note: str | None
 
 
+# --------------------------------------------------------------------------- #
+# Lead → deal conversion (transactional; replaces workflow-side compensation)
+# --------------------------------------------------------------------------- #
+class LeadConvertRequest(CreateModel):
+    is_lending: bool = False
+    is_syndication: bool = False
+    is_asset_mon: bool = False
+    product_type: str | None = Field(default=None, max_length=60)
+    amount_cr: float | None = None
+    rm: str | None = Field(default=None, max_length=120)
+    analyst: str | None = Field(default=None, max_length=120)
+    note: str | None = None
+
+
+class LeadConvertResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lead_id: uuid.UUID
+    deal_id: uuid.UUID
+    lending_id: uuid.UUID | None = None
+    syndication_id: uuid.UUID | None = None
+    asset_mon_id: uuid.UUID | None = None

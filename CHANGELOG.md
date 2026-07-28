@@ -6,6 +6,32 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Round-3 review close-out — the remaining production-blocking findings, fixed.**
+  - **MIS import is now a true upsert, not a re-insert.** A second (merge) import of the
+    same workbook previously re-inserted people, counterparties, leads, deals and every
+    tracker — tripping the `*_tenant_*` unique constraints. Each is now reconciled by its
+    natural key: people by `full_name`, counterparties by `name`, and leads / deals /
+    lending / syndication / asset-monetisation by their entity (with a `lead_no`/`tracker_no`
+    generator that skips numbers already in use). Company **canonicalisation now peels
+    corporate suffixes** (`Private Limited`, `Pvt Ltd`, `Ltd`, `LLP`, …) so legal-form
+    variants of one name collapse to a single entity. New tests: a same-workbook merge is a
+    no-op on counts, and three suffix variants resolve to one entity.
+  - **Approval identity is mandatory and token-derived.** The orchestrator's requester
+    (`start_conversion`) and decider (`approve`/`reject`) identities now come from the
+    verified OIDC token, never a caller-supplied string. A new `WORKFLOWS_REQUIRE_AUTH`
+    switch makes this compulsory: with it on and no OIDC configured, the orchestrator
+    **refuses** the request rather than trusting `by`/`requested_by`. New unit tests prove
+    the refusal (and that the API-key gate fires first).
+  - **Orchestrator is no longer open in Compose, and its keys are Secret-backed in Helm.**
+    Compose now gives the orchestrator a machine API key (VocX forwards it) plus Access
+    wiring; the Helm chart renders the orchestrator API key and Access key into its
+    `Secret` and injects them via `secretKeyRef` — no plaintext key in pod env — with a
+    `requireAuth` value for production.
+  - **One public edge fronts every service.** NGINX now routes `/atlas`, `/vocx`,
+    `/pulse` and `/orchestrator` prefixes to their services (carrying the OIDC bearer
+    through) alongside `/` → gateway → Register, so the whole platform is reachable on a
+    single host instead of a spread of dev ports.
+
 - **Security & robustness pass — the RBAC/workflow review findings, fixed.**
   - **Wrong-company VOX lead (data-integrity bug), fixed.** `Lead` now whitelists
     `entity_id` as a filter, and the core CRUD repository **refuses an unknown filter

@@ -39,7 +39,8 @@ async def main() -> None:
             activities.update_lead_touch, activities.log_touchpoint,
             activities.assign_lead_owner,
             # Lead-conversion set
-            activities.get_lead, activities.create_deal, activities.create_line,
+            activities.get_lead, activities.convert_lead_txn,
+            activities.create_deal, activities.create_line,
             activities.mark_lead_converted, activities.mark_lead_note,
             activities.soft_delete_row,
         ],

@@ -69,6 +69,7 @@ class TouchpointIn(BaseModel):
     # Workflow-path extras: the recording's storage URI and the owning RM.
     audio_ref: str | None = Field(default=None, max_length=500)
     assigned_rm: str | None = Field(default=None, max_length=120)
+    assigned_rm_id: str | None = None
     # Hints used only when the workflow has to CREATE the company.
     sector: str | None = Field(default=None, max_length=60)
     lens: str | None = Field(default=None, max_length=20)

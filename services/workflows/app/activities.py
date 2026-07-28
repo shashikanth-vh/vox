@@ -177,13 +177,22 @@ async def update_lead_touch(lead_id: str, tp: VoxTouchpoint) -> dict[str, Any]:
 @activity.defn
 async def assign_lead_owner(lead_id: str, user_id: str) -> dict[str, Any]:
     """Create the BDRM primary-owner assignment for a VOX-created lead, so the actual
-    RM owns it (scoped lists/reads/writes work) — not just the ``rm`` name string."""
+    RM owns it (scoped lists/reads/writes work) — not just the ``rm`` name string.
+
+    Idempotent: the assignments endpoint doesn't honour the Idempotency-Key header, so a
+    Temporal retry after a lost response could otherwise hit the active-assignment unique
+    constraint. We first check for an existing active assignment and return it."""
     async with _client() as reg:
+        page = await reg.list("assignments", subject_type="Lead", subject_id=lead_id,
+                              request_id=activity.info().workflow_id)
+        for row in page.items:
+            if str(row.get("user_id")) == str(user_id) and row.get("ended_at") is None:
+                return row
         return await reg.create("assignments", {
             "user_id": user_id, "subject_type": "Lead", "subject_id": lead_id,
             "assignment_role": "BDRM",
             "note": "Auto-assigned from a VOX capture (primary owner).",
-        }, idempotency_key=f"vox-assign:{lead_id}:{user_id}")
+        })
 
 
 @activity.defn
@@ -227,6 +236,19 @@ async def log_touchpoint(tp: VoxTouchpoint, entity_id: str, lead_id: str | None,
 # --------------------------------------------------------------------------- #
 # Lead-conversion activities
 # --------------------------------------------------------------------------- #
+@activity.defn
+async def convert_lead_txn(inp: LeadConversionInput, idempotency_key: str) -> dict[str, Any]:
+    """Apply the whole conversion in ONE Register transaction (deal + product lines +
+    lead Converted). All-or-nothing on the server — the workflow no longer creates rows
+    step-by-step and compensate on failure."""
+    async with _client() as reg:
+        return await reg.convert_lead(
+            inp.lead_id, is_lending=inp.is_lending, is_syndication=inp.is_syndication,
+            is_asset_mon=inp.is_asset_mon, product_type=inp.product_type,
+            amount_cr=inp.amount_cr, rm=inp.rm, analyst=inp.analyst, note=inp.note,
+            idempotency_key=idempotency_key, request_id=activity.info().workflow_id)
+
+
 @activity.defn
 async def get_lead(lead_id: str) -> dict[str, Any]:
     async with _client() as reg:

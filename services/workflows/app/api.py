@@ -213,6 +213,12 @@ def create_app() -> FastAPI:
                                ) -> Any:
         if (resp := denied(x_api_key)) is not None:
             return resp
+        # The requester is bound to the VERIFIED identity when OIDC is on (and mandatory
+        # under require_auth) — a conversion can never be requested under a spoofed name.
+        requested_by, err = await _verified_email(request, payload.requested_by)
+        if err is not None:
+            return err
+        payload = payload.model_copy(update={"requested_by": requested_by})
         wf_id = f"leadconv-{payload.lead_id}"
         handle = await start(request, LeadConversionWorkflow,
                              LeadConversionInput(**payload.model_dump()), wf_id,
@@ -224,22 +230,37 @@ def create_app() -> FastAPI:
             "reject_url": f"/v1/workflows/{wf_id}/reject",
             "status_url": f"/v1/workflows/{wf_id}"})
 
+    async def _verified_email(request: Request,
+                              fallback: str) -> tuple[str, ORJSONResponse | None]:
+        """The caller's trustworthy identity. With OIDC configured it is the e-mail from
+        the VERIFIED bearer token — never a caller-supplied string. With no OIDC and
+        ``require_auth`` on, the request is REFUSED rather than trusting the fallback (so a
+        production orchestrator can never approve on an unauthenticated say-so). Only in
+        dev (require_auth off, no OIDC) does the supplied ``fallback`` stand in."""
+        verifier: OidcVerifier | None = request.app.state.oidc
+        if verifier is None:
+            if settings.require_auth:
+                return "", _problem(
+                    401, "Unauthorized",
+                    "This orchestrator requires a verified identity; set WORKFLOWS_OIDC_ISSUER.")
+            return fallback, None
+        token = bearer_token(request.headers.get("Authorization"))
+        if not token:
+            return "", _problem(401, "Unauthorized", "Bearer token required.")
+        try:
+            ident = await verifier.verify(token)
+        except OidcError as exc:
+            return "", _problem(401, "Unauthorized", f"Invalid token: {exc}")
+        return ident.email, None
+
     async def _decider(request: Request, workflow_id: str,
                        payload: DecisionIn) -> tuple[str, ORJSONResponse | None]:
         """The trustworthy decider identity + a role check. With OIDC configured the
         e-mail comes from the verified token (never the caller-supplied 'by'), and the
         Access service confirms an approver role for the workflow's vertical."""
-        verifier: OidcVerifier | None = request.app.state.oidc
-        decided_by = payload.by
-        if verifier is not None:
-            token = bearer_token(request.headers.get("Authorization"))
-            if not token:
-                return "", _problem(401, "Unauthorized", "Bearer token required.")
-            try:
-                ident = await verifier.verify(token)
-            except OidcError as exc:
-                return "", _problem(401, "Unauthorized", f"Invalid token: {exc}")
-            decided_by = ident.email
+        decided_by, err = await _verified_email(request, payload.by)
+        if err is not None:
+            return "", err
         # Role check (needs the Access service): the decider must hold an approver role.
         prefix = workflow_id.split("-", 1)[0]
         needed = _APPROVER_ROLES.get(prefix)

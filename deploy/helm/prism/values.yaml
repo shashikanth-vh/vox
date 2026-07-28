@@ -190,14 +190,24 @@ workflows:
   # business ids, delivers approve/reject signals, answers status queries.
   api:
     enabled: true
-    # A real key so the Orchestrator is not open by default. OVERRIDE per environment.
+    # Machine-caller key so the Orchestrator is not open by default. Rendered into the
+    # chart Secret (key: orchestrator-api-keys), injected via secretKeyRef — not plaintext
+    # env. OVERRIDE per environment, or supply your own via register.existingSecret.
     apiKeys: "prism-workflows-key"
+    # requireAuth makes approver/requester identity MANDATORY and token-derived: with it on
+    # the Orchestrator refuses any approve/reject/convert-request that is not backed by a
+    # verified OIDC token. Turn it on together with oidcIssuer for production.
+    requireAuth: false
     # Verified approvals: set an OIDC issuer to derive the approver from the bearer
     # token and confirm the role via the Access service. Empty = 'by' is trusted (dev).
     oidcIssuer: ""
     oidcAudience: ""
     accessUrl: http://prism-access
+    # Access key for approver role checks — rendered into the Secret (key: access-api-key).
     accessApiKey: "dev-local-key"
+    # When supplying register.existingSecret, the keys these fields default to inside it:
+    existingSecretApiKeysKey: "orchestrator-api-keys"
+    existingSecretAccessKeyKey: "access-api-key"
 
 # Future modules slot in here as they are built, e.g.:
 # cipher:

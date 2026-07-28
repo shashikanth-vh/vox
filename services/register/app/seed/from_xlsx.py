@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -95,8 +96,28 @@ def _yes(v) -> bool:
     return str(v).strip().lower() in {"yes", "y", "true", "1"}
 
 
+# Corporate suffix words peeled from the tail of a company name so that legal-form
+# variants collapse to ONE entity. Without this, "EcoSoch Solar Private Limited",
+# "EcoSoch Solar Pvt Ltd" and "EcoSoch Solar Ltd" seed three separate companies
+# (the reviewer's canonicalization finding).
+_SUFFIX_WORDS = {
+    "private", "pvt", "limited", "ltd", "llp", "inc", "incorporated",
+    "corporation", "corp", "co", "company", "plc", "and", "&",
+}
+
+
 def _key(name: str) -> str:
-    return re.sub(r"\s+", " ", str(name or "").strip()).lower()
+    """Canonical identity key for a company: lowercased, punctuation-flattened, with any
+    trailing corporate-suffix words peeled off. Interior words are always kept, so only the
+    legal form ("Pvt Ltd", "Private Limited", "LLP") is normalised away — two genuinely
+    different companies never collapse into one. Used everywhere a company is matched
+    (entities, enrichment, leads, deals, trackers) so a re-import is a true upsert."""
+    s = re.sub(r"[.,/]", " ", str(name or "").lower())
+    s = re.sub(r"\s+", " ", s).strip()
+    tokens = s.split()
+    while tokens and tokens[-1] in _SUFFIX_WORDS:
+        tokens.pop()
+    return " ".join(tokens) or s
 
 
 def _sheet(wb, title: str) -> list[dict]:
@@ -244,16 +265,27 @@ async def import_workbook(
     def eid(name) -> uuid.UUID | None:
         return entity_id_by.get(_key(name or ""))
 
-    # --- people: distinct RMs + analysts --------------------------------
-    people_seen: set[str] = set()
+    # --- people: distinct RMs + analysts (upsert by full_name) ----------
+    # Reuse people already in this tenant, keyed by full_name (their unique key), so a
+    # re-import never trips people_tenant_full_name. seen holds BOTH pre-existing and
+    # this-run names, keyed canonically, so a repeated name in the sheet is added once.
+    existing_people = (
+        await session.execute(
+            select(Person).where(Person.tenant_id == tenant_id,
+                                  Person.deleted_at.is_(None)))
+    ).scalars().all()
+    people_seen: set[str] = {_key(p.full_name or "") for p in existing_people if p.full_name}
     n_people = 0
 
     def add_person(nm, role):
         nonlocal n_people
         nm = _s(nm)
-        if not nm or nm.lower() in {"tbd"} or nm in people_seen:
+        if not nm or nm.lower() in {"tbd"}:
             return
-        people_seen.add(nm)
+        pk = _key(nm)
+        if pk in people_seen:
+            return
+        people_seen.add(pk)
         session.add(Person(tenant_id=tenant_id, name=nm.split()[0], full_name=nm, role=role,
                             created_by="xlsx-import", updated_by="xlsx-import"))
         n_people += 1
@@ -266,8 +298,16 @@ async def import_workbook(
     await session.flush()
     counts["people"] = n_people
 
-    # --- counterparties: distinct banks from Syndication ----------------
-    cp_id_by: dict[str, uuid.UUID] = {}
+    # --- counterparties: distinct banks (upsert by name) ----------------
+    # Seed the id map from counterparties already in this tenant so a re-import reuses
+    # them (counterparties_tenant_name is unique) instead of inserting duplicate banks.
+    existing_cps = (
+        await session.execute(
+            select(Counterparty).where(Counterparty.tenant_id == tenant_id,
+                                        Counterparty.deleted_at.is_(None)))
+    ).scalars().all()
+    cp_id_by: dict[str, uuid.UUID] = {c.name.lower(): c.id for c in existing_cps if c.name}
+    n_cp = 0
     for r in syn:
         bank = _s(r.get("Bank"))
         if bank and bank.lower() not in cp_id_by:
@@ -276,80 +316,206 @@ async def import_workbook(
             session.add(cp)
             await session.flush()
             cp_id_by[bank.lower()] = cp.id
-    counts["counterparties"] = len(cp_id_by)
+            n_cp += 1
+    counts["counterparties"] = n_cp
 
-    # --- leads ----------------------------------------------------------
-    n = 0
-    for i, r in enumerate(leads, 1):
+    # --- leads (upsert by entity) ---------------------------------------
+    # One lead per company in the MIS. On a re-import we UPDATE the existing lead for that
+    # entity rather than insert a second (which would also collide on leads_tenant_lead_no).
+    # New leads get a lead_no that skips every number already in use, so the sequence never
+    # clashes with a prior import.
+    existing_leads = (
+        await session.execute(
+            select(Lead).where(Lead.tenant_id == tenant_id, Lead.deleted_at.is_(None)))
+    ).scalars().all()
+    lead_by_entity: dict[uuid.UUID, Lead] = {}
+    used_lead_nos: set[str] = set()
+    for ld in existing_leads:
+        if ld.entity_id is not None:
+            lead_by_entity.setdefault(ld.entity_id, ld)
+        if ld.lead_no:
+            used_lead_nos.add(ld.lead_no)
+    _lead_seq = {"n": 0}
+
+    def _next_lead_no() -> str:
+        while True:
+            _lead_seq["n"] += 1
+            candidate = f"LD-{_lead_seq['n']:03d}"
+            if candidate not in used_lead_nos:
+                used_lead_nos.add(candidate)
+                return candidate
+
+    n_new = n_upd = 0
+    for r in leads:
         nm = company_of(r)
         if not nm:
             continue
-        session.add(Lead(
-            tenant_id=tenant_id, lead_no=f"LD-{i:03d}", entity_id=eid(nm), company=nm,
-            sector=_s(r.get("Sector")), lens=_s(r.get("Mitigation / Adaptation")),
-            source=_s(r.get("Source")), source_name=_s(r.get("Source Detail")),
-            rm=_s(r.get("RM Owner")), status="Active", temperature=_s(r.get("Status")),
-            contact=_s(r.get("Contact Person")), designation=_s(r.get("Designation")),
-            phone=_s(r.get("Contact Phone")), last_interaction_date=_date(r.get("Last Interaction Date")),
-            next_action=_s(r.get("Next Action")), next_action_date=_date(r.get("Next Action Date")),
-            notes=_s(r.get("Notes")), created_by="xlsx-import", updated_by="xlsx-import",
-        ))
-        n += 1
+        entity = eid(nm)
+        existing = lead_by_entity.get(entity) if entity is not None else None
+        fields = {
+            "company": nm, "sector": _s(r.get("Sector")),
+            "lens": _s(r.get("Mitigation / Adaptation")), "source": _s(r.get("Source")),
+            "source_name": _s(r.get("Source Detail")), "rm": _s(r.get("RM Owner")),
+            "temperature": _s(r.get("Status")), "contact": _s(r.get("Contact Person")),
+            "designation": _s(r.get("Designation")), "phone": _s(r.get("Contact Phone")),
+            "last_interaction_date": _date(r.get("Last Interaction Date")),
+            "next_action": _s(r.get("Next Action")),
+            "next_action_date": _date(r.get("Next Action Date")), "notes": _s(r.get("Notes")),
+        }
+        if existing is None:
+            lead = Lead(tenant_id=tenant_id, lead_no=_next_lead_no(), entity_id=entity,
+                        status="Active", created_by="xlsx-import", updated_by="xlsx-import",
+                        **fields)
+            session.add(lead)
+            if entity is not None:
+                lead_by_entity[entity] = lead
+            n_new += 1
+        else:
+            # Authoritative MIS re-import: overwrite with the sheet's value when present,
+            # keep the curated value when the sheet cell is blank.
+            for key, val in fields.items():
+                if val is not None:
+                    setattr(existing, key, val)
+            existing.updated_by = "xlsx-import"
+            n_upd += 1
     await session.flush()
-    counts["leads"] = n
+    counts["leads"] = n_new
+    counts["leads_updated"] = n_upd
 
-    # --- deals ----------------------------------------------------------
-    n = 0
+    # --- deals (upsert by entity) ---------------------------------------
+    # One deal per company in the MIS. Reuse the existing deal for an entity on re-import
+    # (updating its flags/stage) rather than inserting a duplicate.
+    existing_deals = (
+        await session.execute(
+            select(Deal).where(Deal.tenant_id == tenant_id, Deal.deleted_at.is_(None)))
+    ).scalars().all()
+    deal_obj_by_entity: dict[uuid.UUID, Deal] = {}
+    for d in existing_deals:
+        if d.entity_id is not None:
+            deal_obj_by_entity.setdefault(d.entity_id, d)
+    n_new = n_upd = 0
     for r in deals:
         nm = company_of(r)
         entity = eid(nm)
         if entity is None:
             continue
-        session.add(Deal(
-            tenant_id=tenant_id, deal_no=None, entity_id=entity, code=None,
-            is_lending=_yes(r.get("Lending?")), is_syndication=_yes(r.get("Syndication?")),
-            is_asset_mon=_yes(r.get("Asset Mon?")), rm=_s(r.get("RM")), stage=_s(r.get("Stage")),
-            temperature=_s(r.get("Status")), source=_s(r.get("Source")),
-            source_detail=_s(r.get("Source Detail")), date_received=_date(r.get("Date Received")),
-            remarks=_s(r.get("Remarks")), created_by="xlsx-import", updated_by="xlsx-import",
-        ))
-        n += 1
+        fields = {
+            "is_lending": _yes(r.get("Lending?")), "is_syndication": _yes(r.get("Syndication?")),
+            "is_asset_mon": _yes(r.get("Asset Mon?")), "rm": _s(r.get("RM")),
+            "stage": _s(r.get("Stage")), "temperature": _s(r.get("Status")),
+            "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),
+            "date_received": _date(r.get("Date Received")), "remarks": _s(r.get("Remarks")),
+        }
+        existing = deal_obj_by_entity.get(entity)
+        if existing is None:
+            deal = Deal(tenant_id=tenant_id, deal_no=None, entity_id=entity, code=None,
+                        created_by="xlsx-import", updated_by="xlsx-import", **fields)
+            session.add(deal)
+            deal_obj_by_entity[entity] = deal
+            n_new += 1
+        else:
+            for key, val in fields.items():
+                # flags are always meaningful; strings only overwrite when present.
+                if key.startswith("is_") or val is not None:
+                    setattr(existing, key, val)
+            existing.updated_by = "xlsx-import"
+            n_upd += 1
     await session.flush()
-    counts["deals"] = n
+    counts["deals"] = n_new
+    counts["deals_updated"] = n_upd
 
-    # One deal per company in the MIS → map entity id to its deal so trackers link back.
-    deal_rows = (
-        await session.execute(select(Deal.id, Deal.entity_id).where(Deal.tenant_id == tenant_id))
-    ).all()
-    deal_by_entity: dict = {}
-    for did, ent in deal_rows:
-        deal_by_entity.setdefault(ent, did)
+    # entity id → its deal id, so trackers link back (existing + just-created).
+    deal_by_entity: dict = {ent: d.id for ent, d in deal_obj_by_entity.items()}
 
-    # --- lending tracker ------------------------------------------------
-    n = 0
-    for i, r in enumerate(lending, 1):
+    async def _tracker_no_pool(model, prefix: str) -> tuple[set[str], Callable[[], str]]:
+        """Reserve every tracker_no already used by ``model`` in this tenant, and return a
+        generator that hands out the next free ``{prefix}NNN`` — so a re-import never
+        collides on the tracker's unique (tenant_id, tracker_no)."""
+        used = set(
+            (await session.execute(
+                select(model.tracker_no).where(
+                    model.tenant_id == tenant_id, model.tracker_no.is_not(None))
+            )).scalars().all())
+        counter = {"n": 0}
+
+        def _next() -> str:
+            while True:
+                counter["n"] += 1
+                candidate = f"{prefix}{counter['n']:03d}"
+                if candidate not in used:
+                    used.add(candidate)
+                    return candidate
+        return used, _next
+
+    # --- lending tracker (upsert by entity) -----------------------------
+    existing_lending = (
+        await session.execute(
+            select(LendingTracker).where(LendingTracker.tenant_id == tenant_id,
+                                         LendingTracker.deleted_at.is_(None)))
+    ).scalars().all()
+    lend_by_entity: dict[uuid.UUID, LendingTracker] = {}
+    for lt in existing_lending:
+        if lt.entity_id is not None:
+            lend_by_entity.setdefault(lt.entity_id, lt)
+    _, next_lending_no = await _tracker_no_pool(LendingTracker, "L")
+    n_new = n_upd = 0
+    for r in lending:
         nm = company_of(r)
         entity = eid(nm)
         if entity is None:
             continue
-        session.add(LendingTracker(
-            tenant_id=tenant_id, tracker_no=f"L{i:03d}", entity_id=entity,
-            deal_id=deal_by_entity.get(entity),
-            amount_cr=_float(r.get("Lending Amount (₹ Cr)")), rm=_s(r.get("RM")),
-            analyst=_s(r.get("Credit Analyst")), stage=_s(r.get("Stage")),
-            stage_updated_at=_date(r.get("Stage Updated")),
-            sanction_date=_date(r.get("Sanction Date")),
-            disbursed_amount=_float(r.get("Disbursed Amount (₹ Cr)")),
-            disbursement_date=_date(r.get("Disbursement Date")),
-            remarks=_s(r.get("Remarks")),
-            created_by="xlsx-import", updated_by="xlsx-import",
-        ))
-        n += 1
+        fields = {
+            "deal_id": deal_by_entity.get(entity),
+            "amount_cr": _float(r.get("Lending Amount (₹ Cr)")), "rm": _s(r.get("RM")),
+            "analyst": _s(r.get("Credit Analyst")), "stage": _s(r.get("Stage")),
+            "stage_updated_at": _date(r.get("Stage Updated")),
+            "sanction_date": _date(r.get("Sanction Date")),
+            "disbursed_amount": _float(r.get("Disbursed Amount (₹ Cr)")),
+            "disbursement_date": _date(r.get("Disbursement Date")),
+            "remarks": _s(r.get("Remarks")),
+        }
+        existing = lend_by_entity.get(entity)
+        if existing is None:
+            lt = LendingTracker(tenant_id=tenant_id, tracker_no=next_lending_no(),
+                                entity_id=entity, created_by="xlsx-import",
+                                updated_by="xlsx-import", **fields)
+            session.add(lt)
+            lend_by_entity[entity] = lt
+            n_new += 1
+        else:
+            for key, val in fields.items():
+                if val is not None:
+                    setattr(existing, key, val)
+            existing.updated_by = "xlsx-import"
+            n_upd += 1
     await session.flush()
-    counts["lending_tracker"] = n
+    counts["lending_tracker"] = n_new
+    counts["lending_tracker_updated"] = n_upd
 
     # --- syndication: one tracker per company + a lender row per bank ---
+    # Preload existing trackers (keyed by company) and lenders (keyed by tracker+bank) so
+    # a re-import reuses the tracker and never duplicates a bank on the same syndication
+    # (SyndicationLender has no unique key, so we dedupe here).
+    existing_syn = (
+        await session.execute(
+            select(SyndicationTracker).where(SyndicationTracker.tenant_id == tenant_id,
+                                             SyndicationTracker.deleted_at.is_(None)))
+    ).scalars().all()
+    syn_by_entity: dict[uuid.UUID, SyndicationTracker] = {}
     syn_tracker_by: dict[str, SyndicationTracker] = {}
+    for tr in existing_syn:
+        if tr.entity_id is not None:
+            syn_by_entity.setdefault(tr.entity_id, tr)
+    lender_seen: set[tuple[uuid.UUID, str]] = set()
+    if existing_syn:
+        for lender in (
+            await session.execute(
+                select(SyndicationLender.syndication_id, SyndicationLender.lender_name)
+                .where(SyndicationLender.tenant_id == tenant_id,
+                       SyndicationLender.deleted_at.is_(None)))
+        ).all():
+            lender_seen.add((lender[0], (lender[1] or "").lower()))
+    _, next_syn_no = await _tracker_no_pool(SyndicationTracker, "S")
     n_syn = n_lender = 0
     for r in syn:
         nm = company_of(r)
@@ -357,20 +523,22 @@ async def import_workbook(
         if entity is None:
             continue
         k = _key(nm)
-        tr = syn_tracker_by.get(k)
+        tr = syn_tracker_by.get(k) or syn_by_entity.get(entity)
         if tr is None:
             tr = SyndicationTracker(
-                tenant_id=tenant_id, tracker_no=f"S{n_syn + 1:03d}", entity_id=entity,
+                tenant_id=tenant_id, tracker_no=next_syn_no(), entity_id=entity,
                 deal_id=deal_by_entity.get(entity),
                 status=_s(r.get("Deal Status")), amount_cr=_float(r.get("Amount (₹ Cr)")),
                 created_by="xlsx-import", updated_by="xlsx-import",
             )
             session.add(tr)
             await session.flush()
-            syn_tracker_by[k] = tr
             n_syn += 1
+        syn_tracker_by[k] = tr
+        syn_by_entity[entity] = tr
         bank = _s(r.get("Bank"))
-        if bank:
+        if bank and (tr.id, bank.lower()) not in lender_seen:
+            lender_seen.add((tr.id, bank.lower()))
             accepted = _s(r.get("Accepted by Client"))
             note = _s(r.get("Remarks"))
             if accepted:
@@ -384,27 +552,49 @@ async def import_workbook(
     counts["syndication_tracker"] = n_syn
     counts["syndication_lenders"] = n_lender
 
-    # --- asset monetisation ---------------------------------------------
-    n = 0
-    for i, r in enumerate(am, 1):
+    # --- asset monetisation (upsert by entity) --------------------------
+    existing_am = (
+        await session.execute(
+            select(AssetMonetisation).where(AssetMonetisation.tenant_id == tenant_id,
+                                            AssetMonetisation.deleted_at.is_(None)))
+    ).scalars().all()
+    am_by_entity: dict[uuid.UUID, AssetMonetisation] = {}
+    for a in existing_am:
+        if a.entity_id is not None:
+            am_by_entity.setdefault(a.entity_id, a)
+    _, next_am_no = await _tracker_no_pool(AssetMonetisation, "A")
+    n_new = n_upd = 0
+    for r in am:
         nm = company_of(r)
         entity = eid(nm)
         if entity is None:
             continue
         notes = " | ".join(x for x in [_s(r.get("Notes")), _s(r.get("Updated Remarks 19 July 2026"))] if x)
-        session.add(AssetMonetisation(
-            tenant_id=tenant_id, tracker_no=f"A{i:03d}", entity_id=entity,
-            deal_id=deal_by_entity.get(entity), state=_s(r.get("State")),
-            indicative_value_cr=_float(r.get("Indicative Value (₹ Cr)")),
-            size_mw=_float(r.get("Size (MW)")), nature=_s(r.get("Nature")),
-            deal_type=_s(r.get("Deal Type")), investor=_s(r.get("Investor")),
-            investor_type=_s(r.get("Investor Type")), status=_s(r.get("Status")),
-            teaser_date=_date(r.get("Date Teaser Shared")), notes=notes or None,
-            created_by="xlsx-import", updated_by="xlsx-import",
-        ))
-        n += 1
+        fields = {
+            "deal_id": deal_by_entity.get(entity), "state": _s(r.get("State")),
+            "indicative_value_cr": _float(r.get("Indicative Value (₹ Cr)")),
+            "size_mw": _float(r.get("Size (MW)")), "nature": _s(r.get("Nature")),
+            "deal_type": _s(r.get("Deal Type")), "investor": _s(r.get("Investor")),
+            "investor_type": _s(r.get("Investor Type")), "status": _s(r.get("Status")),
+            "teaser_date": _date(r.get("Date Teaser Shared")), "notes": notes or None,
+        }
+        existing = am_by_entity.get(entity)
+        if existing is None:
+            a = AssetMonetisation(tenant_id=tenant_id, tracker_no=next_am_no(),
+                                  entity_id=entity, created_by="xlsx-import",
+                                  updated_by="xlsx-import", **fields)
+            session.add(a)
+            am_by_entity[entity] = a
+            n_new += 1
+        else:
+            for key, val in fields.items():
+                if val is not None:
+                    setattr(existing, key, val)
+            existing.updated_by = "xlsx-import"
+            n_upd += 1
     await session.flush()
-    counts["asset_monetisation"] = n
+    counts["asset_monetisation"] = n_new
+    counts["asset_monetisation_updated"] = n_upd
 
     # --- mandate tracker → syndication_tracker.mandate_status -----------
     n = 0
@@ -417,16 +607,17 @@ async def import_workbook(
         signed = _s(r.get("Signed/Pending"))
         mand = " - ".join(x for x in [sent, signed] if x)
         k = _key(nm or "")
-        tr = syn_tracker_by.get(k)
+        tr = syn_tracker_by.get(k) or syn_by_entity.get(entity)
         if tr is None:
             tr = SyndicationTracker(
-                tenant_id=tenant_id, tracker_no=f"S{len(syn_tracker_by) + 1:03d}",
+                tenant_id=tenant_id, tracker_no=next_syn_no(),
                 entity_id=entity, mandate_status=mand, rm=_s(r.get("RM")),
                 created_by="xlsx-import", updated_by="xlsx-import",
             )
             session.add(tr)
             await session.flush()
             syn_tracker_by[k] = tr
+            syn_by_entity[entity] = tr
             counts["syndication_tracker"] += 1
         else:
             tr.mandate_status = mand

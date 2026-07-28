@@ -307,3 +307,25 @@ async def test_company_scoped_resources_and_unknown_filter(client: AsyncClient):
     bad = await client.get("/v1/leads", params={"entity_idd": eco["id"]})
     assert bad.status_code == 422
     assert "Unknown query parameter" in bad.text
+
+
+async def test_transactional_lead_convert(client: AsyncClient):
+    """The atomic convert endpoint: deal + product lines + Converted lead in ONE
+    transaction. Replaces the workflow's compensation — nothing partial survives."""
+    ent = (await client.post("/v1/entities", json={
+        "code": f"CV-{uuid.uuid4().hex[:6]}", "legal_name": "Convert Co"})).json()
+    lead = (await client.post("/v1/leads", json={
+        "company": "Convert Co", "entity_id": ent["id"], "status": "Active"})).json()
+    r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
+        "is_lending": True, "is_syndication": True, "product_type": "Term Loan",
+        "amount_cr": 25, "rm": "Chetan"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deal_id"] and body["lending_id"] and body["syndication_id"]
+    assert body["asset_mon_id"] is None
+    after = (await client.get(f"/v1/leads/{lead['id']}")).json()
+    assert after["status"] == "Converted" and after["converted_deal_id"] == body["deal_id"]
+    deal = (await client.get(f"/v1/deals/{body['deal_id']}")).json()
+    assert deal["is_lending"] and deal["is_syndication"] and deal["stage"] == "Data Awaited"
+    again = await client.post(f"/v1/leads/{lead['id']}/convert", json={"is_lending": True})
+    assert again.status_code == 409

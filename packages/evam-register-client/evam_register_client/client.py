@@ -221,6 +221,22 @@ class AsyncRegisterClient:
                                       request_id=request_id))
 
     # -- PULSE: external intelligence ------------------------------------
+    async def convert_lead(self, lead_id: str, *, is_lending: bool = False,
+                           is_syndication: bool = False, is_asset_mon: bool = False,
+                           product_type: str | None = None, amount_cr: float | None = None,
+                           rm: str | None = None, analyst: str | None = None,
+                           note: str | None = None,
+                           idempotency_key: str | None = None,
+                           request_id: str | None = None) -> dict:
+        """Atomically convert a lead → deal (+ product lines) in ONE Register
+        transaction — no client-side compensation."""
+        payload = {"is_lending": is_lending, "is_syndication": is_syndication,
+                   "is_asset_mon": is_asset_mon, "product_type": product_type,
+                   "amount_cr": amount_cr, "rm": rm, "analyst": analyst, "note": note}
+        return await self._send(_Plan("POST", f"/v1/leads/{lead_id}/convert",
+                                      json={k: v for k, v in payload.items() if v is not None},
+                                      idempotency_key=idempotency_key, request_id=request_id))
+
     async def create_intelligence(self, entity_id: str, intel_type: str, *,
                                   signal: str | None = None, idempotency_key: str | None = None,
                                   request_id: str | None = None, **fields: Any) -> dict:

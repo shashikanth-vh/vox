@@ -48,16 +48,37 @@ spec:
               value: {{ .Values.temporal.namespace | quote }}
             - name: WORKFLOWS_TASK_QUEUE
               value: {{ .Values.temporal.taskQueue | quote }}
+            # Machine-caller key and Access key come from the Secret — never plaintext env.
             - name: WORKFLOWS_API_KEYS
-              value: {{ .Values.api.apiKeys | quote }}
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.api.existingSecretApiKeysKey | default "orchestrator-api-keys" }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: orchestrator-api-keys
+                  {{- end }}
+            - name: WORKFLOWS_ACCESS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.api.existingSecretAccessKeyKey | default "access-api-key" }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: access-api-key
+                  {{- end }}
+            # In production set requireAuth=true AND an oidcIssuer so the approver/requester
+            # identity is derived from a verified token — never a caller-supplied string.
+            - name: WORKFLOWS_REQUIRE_AUTH
+              value: {{ .Values.api.requireAuth | default false | quote }}
             - name: WORKFLOWS_OIDC_ISSUER
               value: {{ .Values.api.oidcIssuer | default "" | quote }}
             - name: WORKFLOWS_OIDC_AUDIENCE
               value: {{ .Values.api.oidcAudience | default "" | quote }}
             - name: WORKFLOWS_ACCESS_URL
               value: {{ .Values.api.accessUrl | default "" | quote }}
-            - name: WORKFLOWS_ACCESS_API_KEY
-              value: {{ .Values.api.accessApiKey | default "" | quote }}
           ports:
             - name: http
               containerPort: 8000

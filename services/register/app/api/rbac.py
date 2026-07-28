@@ -93,8 +93,11 @@ async def create_assignment(payload: s.AssignmentCreate,
         # add_employee_assign_role operation.
         from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
 
-        if PRIMARY_ASSIGNMENT_ROLE.get(stype) != arole:
-            authz.enforce_operation(None, "add_employee_assign_role")  # honours enforce_rbac
+        # ONLY the VOX case: a BDRM primary-owner assignment on a LEAD. Anything else
+        # from a machine caller still needs the operation (honours enforce_rbac).
+        vox_primary = (stype == "Lead" and arole == PRIMARY_ASSIGNMENT_ROLE.get("Lead"))
+        if not vox_primary:
+            authz.enforce_operation(None, "add_employee_assign_role")
 
     # Subject must exist (the assignee is an Access-service user — validated upstream).
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
@@ -290,3 +293,82 @@ async def authz_check(
     return {"operation": operation, "allowed": allowed, "access": scope,
             "on_line": on_line,
             "primary_owner_default": PRIMARY_ASSIGNMENT_ROLE.get(subject_type or "", None)}
+
+
+# --------------------------------------------------------------------------- #
+# Lead → deal conversion — ONE transaction (deal + product lines + lead Converted)
+# --------------------------------------------------------------------------- #
+@router.post("/v1/leads/{lead_id}/convert", response_model=s.LeadConvertResult,
+             tags=["Users & RBAC"],
+             summary="Convert a lead to a deal atomically (deal + lines + lead marked "
+                     "Converted, all-or-nothing)")
+async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
+                       ctx: RequestContext = Depends(get_context)) -> Any:
+    """The transactional alternative to workflow-side compensation: the whole conversion
+    happens in THIS request's transaction, so a failure anywhere rolls the entire thing
+    back — no orphan deal or half-created product lines can ever survive. The Orchestrator
+    calls this on approval instead of creating rows step-by-step and undoing on error.
+
+    Authorization: ``push_lead_to_deals`` (BDRM+ per the matrix). A SCOPED caller must be
+    in scope of the lead's company.
+    """
+    from app.models import AssetMonetisation, Deal, LendingTracker, SyndicationTracker
+    from app.repositories.crud import CRUDRepository as _Repo
+
+    # Human callers are gated on push_lead_to_deals + company scope. Machine callers
+    # (vetted API key: the workflow after the orchestrator verified the approver) are
+    # trusted — the atomic convert grants nothing a machine caller can't already do by
+    # creating the deal + lines + lead-update individually (the ingestion carve-out).
+    granted = authz.Access.FULL
+    if ctx.user is not None:
+        granted = authz.enforce_operation(ctx.user, "push_lead_to_deals")
+    lead = await load_subject(ctx.session, ctx.tenant_id, "Lead", lead_id)
+    if lead is None:
+        raise NotFoundError(f"Lead '{lead_id}' not found.")
+    entity_id = getattr(lead, "entity_id", None)
+    if entity_id is None:
+        raise ValidationAppError("Lead has no entity_id — link it to a company first.")
+    if lead.status == "Converted":
+        raise ConflictError("Lead is already Converted.")
+
+    # SCOPED caller: the lead's company must be in scope.
+    if ctx.user is not None and granted is authz.Access.SCOPED:
+        from app.authz import scope as scope_mod
+
+        user_scope = await scope_mod.build_scope(ctx, ctx.user)
+        if not await scope_mod.entity_in_scope(ctx, user_scope, entity_id):
+            raise ForbiddenError("Scoped access: this lead's company is not in your scope.")
+
+    deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
+        "entity_id": str(entity_id),
+        "product_type": payload.product_type,
+        "is_lending": payload.is_lending,
+        "is_syndication": payload.is_syndication,
+        "is_asset_mon": payload.is_asset_mon,
+        "rm": payload.rm, "analyst": payload.analyst,
+        "stage": "Data Awaited", "source": "RM",
+        "source_detail": f"Converted from lead {lead_id}", "remarks": payload.note,
+    })
+    line_ids: dict[str, Any] = {}
+    if payload.is_lending:
+        row = await _Repo(LendingTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
+            "entity_id": str(entity_id), "deal_id": str(deal.id),
+            "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
+            "stage": "Data Awaited"})
+        line_ids["lending_id"] = row.id
+    if payload.is_syndication:
+        row = await _Repo(SyndicationTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
+            "entity_id": str(entity_id), "deal_id": str(deal.id),
+            "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
+            "status": "Deal Sourced"})
+        line_ids["syndication_id"] = row.id
+    if payload.is_asset_mon:
+        row = await _Repo(AssetMonetisation).create(ctx.session, ctx.tenant_id, ctx.actor, {
+            "entity_id": str(entity_id), "deal_id": str(deal.id), "status": "Teaser Prepared"})
+        line_ids["asset_mon_id"] = row.id
+
+    await _Repo(SUBJECTS["Lead"]).update(ctx.session, ctx.tenant_id, lead_id, ctx.actor, {
+        "status": "Converted", "converted_deal_id": str(deal.id),
+        "conv": f"Converted by {ctx.actor}"})
+
+    return s.LeadConvertResult(lead_id=lead_id, deal_id=deal.id, **line_ids)
