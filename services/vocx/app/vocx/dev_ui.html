@@ -1,0 +1,246 @@
+<!doctype html>
+<!-- TEMPORARY DEV UI — for exercising the VocX pipeline end to end from a browser.
+     Served only when VOCX_DEV_UI=true (off by default; the prod-posture overlay keeps
+     it off). To remove permanently: delete this file + the dev-ui block in mount.py. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VocX · dev test console</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 15px/1.45 system-ui, sans-serif; background:#0b1512; color:#e6f2ec;
+         max-width: 880px; margin: 0 auto; padding: 16px 16px 80px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin: 18px 0 8px; color:#7fe0b2; }
+  .card { background:#101d18; border:1px solid #1d332a; border-radius:12px;
+          padding:14px; margin:12px 0; }
+  .banner { background:#3a2b12; border-color:#6b4d1d; color:#ffd48a; font-size:13px; }
+  button { background:#173a2c; color:#e6f2ec; border:1px solid #2c5a44;
+           border-radius:9px; padding:8px 14px; margin:4px 6px 4px 0; cursor:pointer; }
+  button.primary { background:#1f7a4f; border-color:#2aa76c; font-weight:600; }
+  button.danger { background:#4a1b1b; border-color:#7a2c2c; }
+  button:disabled { opacity:.45; cursor:default; }
+  input, textarea, select { width:100%; box-sizing:border-box; background:#0d1714;
+           color:#e6f2ec; border:1px solid #24453a; border-radius:8px; padding:8px; margin:4px 0 10px; }
+  textarea { min-height: 90px; }
+  label { font-size:12px; letter-spacing:.06em; color:#8fb3a4; text-transform:uppercase; }
+  pre { background:#0d1714; border:1px solid #24453a; border-radius:8px; padding:10px;
+        overflow-x:auto; font-size:12.5px; white-space:pre-wrap; }
+  .pill { display:inline-block; border:1px solid #2c5a44; border-radius:999px;
+          padding:2px 10px; margin:2px 4px 2px 0; font-size:12.5px; }
+  .ok { color:#7fe0b2; } .bad { color:#ff9d9d; } .muted { color:#8fb3a4; font-size:13px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; } .row > div { flex:1; min-width:220px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  td, th { border-bottom:1px solid #1d332a; padding:6px 8px; text-align:left; }
+</style>
+</head>
+<body>
+<h1>VocX · dev test console <span class="muted">(temporary — VOCX_DEV_UI)</span></h1>
+<div class="card banner">Throwaway testing page. Not the product UI. Disable with
+<code>VOCX_DEV_UI=false</code> when done.</div>
+
+<div class="card" id="caps">Loading capabilities…</div>
+
+<div class="card">
+  <h2>1 · Capture</h2>
+  <div class="row">
+    <div><label>RM (speaker)</label><input id="rm" value="Priya"></div>
+    <div><label>Recording</label><div>
+      <button id="recBtn" class="primary">● Record</button>
+      <button id="stopBtn" disabled>■ Stop &amp; transcribe</button>
+      <span id="recState" class="muted"></span>
+    </div></div>
+  </div>
+  <label>…or type / edit the transcript, then analyze</label>
+  <textarea id="transcript" placeholder="Met the EcoSoch Solar team about the 45 crore term loan. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi."></textarea>
+  <button id="analyzeBtn" class="primary">Analyze transcript</button>
+  <span id="capState" class="muted"></span>
+</div>
+
+<div class="card" id="previewCard" style="display:none">
+  <h2>2 · Preview <span id="captureId" class="muted"></span></h2>
+  <div id="entityBox"></div>
+  <div class="row">
+    <div><label>Summary</label><input id="sumEdit"></div>
+    <div><label>Next meeting (date · time)</label>
+      <div class="row"><div><input id="nmDate" placeholder="YYYY-MM-DD"></div>
+      <div><input id="nmTime" placeholder="HH:MM"></div></div></div>
+  </div>
+  <div class="row">
+    <div><label>Log to (optional — overrides auto routing)</label>
+      <select id="logType"><option value="">auto</option><option>Lead</option><option>Deal</option>
+      <option>Entity</option><option>Lending</option><option>Syndication</option>
+      <option>AssetMonetisation</option></select></div>
+    <div><label>Subject UUID (when Log-to set)</label><input id="logId" placeholder="row uuid"></div>
+  </div>
+  <div id="audioBox"></div>
+  <button id="commitBtn" class="primary">✓ Approve &amp; commit</button>
+  <span id="commitState" class="muted"></span>
+  <details><summary class="muted">full preview JSON</summary><pre id="previewJson"></pre></details>
+  <div id="commitBox"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Reports (server-side)</h2>
+  <button id="reloadReports">↻ Reload</button>
+  <div id="reports"></div>
+</div>
+
+<script>
+const base = new URL('.', location.href);           // …/vocx/v1/
+const api = p => new URL(p, base).toString();
+const j = r => r.json();
+let preview = null, chosen = null, mediaRec = null, chunks = [];
+
+async function caps() {
+  try {
+    const c = await fetch(api('capabilities'), {headers:{'X-Tenant':'EVAM'}}).then(j);
+    document.getElementById('caps').innerHTML =
+      `<span class="pill">stt: <b class="${c.stt?'ok':'bad'}">${c.stt?c.stt_backend:'off'}</b></span>` +
+      `<span class="pill">extraction: <b class="${c.extraction==='haiku'?'ok':'bad'}">${c.extraction}</b></span>` +
+      `<span class="pill">audio store: <b>${c.audio_store}</b></span>` +
+      `<span class="pill">google: <b class="${c.google_configured?'ok':'bad'}">${c.google_configured?'configured':'off'}</b></span>`;
+  } catch (e) { document.getElementById('caps').innerHTML = '<span class="bad">capabilities failed: '+e+'</span>'; }
+}
+
+function renderPreview(p) {
+  preview = p; chosen = null;
+  const ext = p.extraction || {}, em = ext.entity_match || {}, meta = ext._meta || {};
+  document.getElementById('previewCard').style.display = '';
+  document.getElementById('captureId').textContent = 'capture ' + (meta.capture_id||'');
+  document.getElementById('sumEdit').value = (ext.report&&ext.report.summary) || '';
+  document.getElementById('nmDate').value = (ext.next_meeting||{}).date || '';
+  document.getElementById('nmTime').value = (ext.next_meeting||{}).time || '';
+  document.getElementById('previewJson').textContent = JSON.stringify(p, null, 2);
+  let html = `<label>Entity</label><div>heard <b>${ext.company_mentioned||'?'}</b> → ` +
+    (em.code ? `<b class="ok">${em.canonical_name||em.code}</b> (score ${em.match_score})`
+             : `<b class="bad">no confident match</b>`) +
+    (p.decision && p.decision.needs_approval ? ' · <span class="bad">needs approval</span>'
+                                             : ' · <span class="ok">auto-write ok</span>') + '</div>';
+  const alts = em.alternatives || [];
+  if (alts.length) {
+    html += '<div class="muted">pick a different match:</div>';
+    for (const a of alts) html +=
+      `<button onclick="chosen='${a.code||a.ref_id}';this.classList.add('primary')">${a.name||a.code} (${(a.score??'')})</button>`;
+  }
+  html += `<button onclick="chosen='__new__'" title="create a new lead">＋ New lead instead</button>`;
+  document.getElementById('entityBox').innerHTML = html;
+  const ref = meta.transcript_ref;
+  document.getElementById('audioBox').innerHTML = ref
+    ? `<label>Recording</label><div class="muted">${ref}</div><span id="playerSlot"></span>
+       <button onclick="playAudio('${encodeURIComponent(ref)}')">▶ Play stored audio</button>` : '';
+  document.getElementById('commitBox').innerHTML = '';
+}
+
+async function playAudio(ref) {
+  const r = await fetch(api('audio?ref=') + ref, {headers:{'X-Tenant':'EVAM'}});
+  const slot = document.getElementById('playerSlot');
+  if (r.headers.get('content-type')?.startsWith('audio/')) {
+    const url = URL.createObjectURL(await r.blob());
+    slot.innerHTML = `<audio controls src="${url}"></audio>`;
+  } else {
+    const b = await r.json();
+    slot.innerHTML = b.url ? `<audio controls src="${b.url}"></audio>`
+                           : `<span class="bad">${b.error||'no audio'}</span>`;
+  }
+}
+
+async function analyze() {
+  const rm = document.getElementById('rm').value.trim();
+  const tx = document.getElementById('transcript').value.trim();
+  if (!rm || !tx) return alert('rm and transcript required');
+  setState('capState', 'analyzing…');
+  const r = await fetch(api('capture'), {method:'POST',
+    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
+    body: JSON.stringify({rm, transcript: tx})}).then(j);
+  setState('capState', r.ok ? 'ok' : ('failed: ' + r.error));
+  if (r.ok) renderPreview(r);
+  loadReports();
+}
+
+async function record(start) {
+  if (start) {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    chunks = []; mediaRec = new MediaRecorder(stream);
+    mediaRec.ondataavailable = e => chunks.push(e.data);
+    mediaRec.start();
+    document.getElementById('recBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+    setState('recState', 'recording…');
+  } else {
+    mediaRec.onstop = async () => {
+      mediaRec.stream.getTracks().forEach(t=>t.stop());
+      setState('recState', 'transcribing (first run downloads the model — be patient)…');
+      const blob = new Blob(chunks);
+      const rm = encodeURIComponent(document.getElementById('rm').value.trim());
+      const r = await fetch(api('capture_audio?rm=') + rm, {method:'POST',
+        headers:{'X-Tenant':'EVAM'}, body: blob}).then(j);
+      if (r.ok) {
+        document.getElementById('transcript').value = (r.transcription||{}).text || '';
+        setState('recState', `done (${((r.transcription||{}).duration||0).toFixed?.(1)??''}s)`);
+        renderPreview(r);
+        loadReports();
+      } else setState('recState', 'failed: ' + r.error);
+      document.getElementById('recBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    };
+    mediaRec.stop();
+  }
+}
+
+async function commit() {
+  if (!preview) return;
+  const ext = preview.extraction, meta = ext._meta || {};
+  const body = {rm: document.getElementById('rm').value.trim(), extraction: ext,
+                capture_id: meta.capture_id,
+                summary: document.getElementById('sumEdit').value,
+                edits: {next_meeting: {date: document.getElementById('nmDate').value || null,
+                                       time: document.getElementById('nmTime').value || null}}};
+  if (chosen === '__new__') { body.new_lead = true; body.company = ext.company_mentioned; }
+  else if (chosen) body.chosen_code = chosen;
+  const lt = document.getElementById('logType').value, li = document.getElementById('logId').value.trim();
+  if (lt && li) body.log_to = {subject_type: lt, subject_id: li};
+  setState('commitState', 'committing…');
+  const r = await fetch(api('commit'), {method:'POST',
+    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
+    body: JSON.stringify(body)}).then(j);
+  setState('commitState', r.committed ? 'committed ✓' : ('failed: ' + (r.error||r.writer_error||'')));
+  let rows = (r.writes && r.writes.results || []).map(x =>
+    `<tr><td>${x.op}</td><td class="${x.status==='ok'?'ok':(x.status==='error'?'bad':'muted')}">${x.status}</td>` +
+    `<td class="muted">${x.reason||x.error||JSON.stringify(x.result||'')}</td></tr>`).join('');
+  document.getElementById('commitBox').innerHTML =
+    `<h2>Write results</h2><table><tr><th>op</th><th>status</th><th>detail</th></tr>${rows}</table>`;
+  loadReports();
+}
+
+async function loadReports() {
+  const rm = encodeURIComponent(document.getElementById('rm').value.trim() || 'Priya');
+  try {
+    const r = await fetch(api('reports?rm=') + rm, {headers:{'X-Tenant':'EVAM'}}).then(j);
+    const rows = (r.reports||[]).map(x =>
+      `<tr><td>${(x.updated_at||'').replace('T',' ').replace('Z','')}</td>` +
+      `<td>${x.company||''}</td><td>${x.status}</td><td>${x.summary||''}</td>` +
+      `<td><button class="danger" onclick="delReport('${x.capture_id}')">🗑</button></td></tr>`).join('');
+    document.getElementById('reports').innerHTML = rows
+      ? `<table><tr><th>updated</th><th>company</th><th>status</th><th>summary</th><th></th></tr>${rows}</table>`
+      : '<span class="muted">no reports yet</span>';
+  } catch (e) { document.getElementById('reports').innerHTML = '<span class="bad">'+e+'</span>'; }
+}
+
+async function delReport(cid) {
+  await fetch(api('reports/delete'), {method:'POST',
+    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
+    body: JSON.stringify({rm: document.getElementById('rm').value.trim(), capture_id: cid})});
+  loadReports();
+}
+
+function setState(id, msg) { document.getElementById(id).textContent = msg; }
+document.getElementById('analyzeBtn').onclick = analyze;
+document.getElementById('commitBtn').onclick = commit;
+document.getElementById('recBtn').onclick = () => record(true);
+document.getElementById('stopBtn').onclick = () => record(false);
+document.getElementById('reloadReports').onclick = loadReports;
+caps(); loadReports();
+</script>
+</body>
+</html>

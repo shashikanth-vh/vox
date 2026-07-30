@@ -6,6 +6,19 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **TEMPORARY VocX dev test console** at `https://<host>:8443/vocx/v1/dev-ui` — a single
+  self-contained page served by VocX itself for real end-to-end testing from a browser:
+  record (MediaRecorder) or type a transcript → preview with entity match/alternatives/
+  new-lead choice, summary + next-meeting edits, Log-To targeting → commit with the
+  per-op write results → server-side reports list (open/delete) and audio playback.
+  Gated by `VOCX_DEV_UI` (dev compose defaults it ON; the prod-posture overlay pins it
+  OFF; the code default is OFF), hidden from OpenAPI so it never enters generated
+  collections, and behind the same front-door key as every pipeline route. **To remove
+  permanently:** delete `services/vocx/app/vocx/dev_ui.html` + the dev-ui block at the
+  bottom of `app/vocx/mount.py` (and the `VOCX_DEV_UI` lines in the compose files).
+  Test: hidden-unless-enabled + out-of-schema. Also: vendored-file ruff exemption
+  extended (`UP038`, `N802`) so the suite stays green across ruff versions.
+
 - **VocX pipeline API versioned + the three UI-parity features.** The pipeline moved from
   `/api/vocx/*` to **`/v1/*`** (`/vocx/v1/…` through the edge — consistent with every other
   PRISM API), and the catch-all adapter route was replaced by an **explicit route table**, so all

@@ -56,9 +56,9 @@ ignore = ["S101", "B008", "S105"]
 # pipeline (see app/vocx/__init__.py). Style rules are relaxed there so upstream diffs
 # stay reviewable; correctness rules still apply. The PRISM-written modules (mount,
 # loader, registry/*, speech/audio_store.py) get no exemption.
-"app/vocx/core/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
-"app/vocx/google/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
-"app/vocx/speech/stt.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
+"app/vocx/core/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105", "UP038", "N802"]
+"app/vocx/google/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105", "UP038", "N802"]
+"app/vocx/speech/stt.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105", "UP038", "N802"]
 
 [tool.mypy]
 python_version = "3.12"

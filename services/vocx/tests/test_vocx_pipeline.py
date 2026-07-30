@@ -399,3 +399,24 @@ async def test_commit_log_to_targets_the_chosen_line(stub_register):
     inter = stub_register["interactions"][-1]
     assert inter["subject_type"] == "Lending"
     assert inter["subject_id"] == lending_id
+
+
+async def test_dev_ui_hidden_unless_enabled(stub_register, monkeypatch):
+    # Default posture: the flag is off and the route does not exist at all.
+    app = create_app()
+    async with await _client(app) as c:
+        r = await c.get("/v1/dev-ui")
+    assert r.status_code == 404
+
+    monkeypatch.setenv("VOCX_DEV_UI", "true")
+    get_settings.cache_clear()
+    app = create_app()
+    async with await _client(app) as c:
+        r = await c.get("/v1/dev-ui")
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"].startswith("text/html")
+        assert "dev test console" in r.text
+        # Dev tool, never a documented API: it must stay out of the OpenAPI schema
+        # (and therefore out of every generated Postman collection).
+        spec = (await c.get("/openapi.json")).json()
+        assert "/v1/dev-ui" not in spec["paths"]

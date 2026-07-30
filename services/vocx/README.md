@@ -167,3 +167,15 @@ lint relaxed); everything else is PRISM-owned and fully linted/typed.
 
 Report documents live in MinIO under reports/<rm>/<capture_id>.json (same bucket as the
 audio), volume fallback, last-write-wins (single-writer by nature).
+
+### TEMPORARY dev test console (`/v1/dev-ui`)
+
+A single self-contained page for exercising the whole pipeline from a browser —
+record/type → preview → edit/choose entity → commit → reports + playback. Gated by
+`VOCX_DEV_UI` (code default **off**; the dev compose file turns it on; the prod-posture
+overlay pins it off) and hidden from OpenAPI. Open it through the edge:
+
+    https://<host>:8443/vocx/v1/dev-ui        (HTTPS is required for the microphone)
+
+**To remove permanently:** delete `app/vocx/dev_ui.html`, the dev-ui block at the bottom
+of `app/vocx/mount.py`, and the `VOCX_DEV_UI` lines in the compose files.

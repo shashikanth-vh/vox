@@ -140,4 +140,22 @@ def build_vocx_router(settings: Any) -> APIRouter:
         router.add_api_route(path, _make_handler(path), methods=methods,
                              summary=summary, tags=["VocX pipeline"])
 
+    # --- TEMPORARY dev test console (delete this block + dev_ui.html to remove) -----
+    # A single self-contained page to exercise the pipeline from a browser:
+    # record → preview → edit → commit → reports, through the edge at /vocx/v1/dev-ui.
+    # Served ONLY when VOCX_DEV_UI=true; hidden from OpenAPI so it never lands in
+    # generated Postman collections. The front-door key check applies like every route.
+    if getattr(settings, "dev_ui", False):
+        from pathlib import Path as _Path
+
+        async def _dev_ui(request: Request) -> Response:
+            if (denied := _denied(request)) is not None:
+                return denied
+            page = (_Path(__file__).parent / "dev_ui.html").read_bytes()
+            return Response(content=page, media_type="text/html",
+                            headers={"Cache-Control": "no-store"})
+
+        router.add_api_route("/v1/dev-ui", _dev_ui, methods=["GET"],
+                             include_in_schema=False)
+
     return router

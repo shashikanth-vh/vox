@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     # Days to keep recordings. 0 = forever. With S3 this becomes a bucket LIFECYCLE rule
     # (enforced by the store, not an app cron); locally an opportunistic sweep.
     audio_retention_days: int = 0
+    # TEMPORARY browser test console at /v1/dev-ui (edge: /vocx/v1/dev-ui) — record,
+    # preview, commit, reports against the live pipeline. Dev only: OFF by default,
+    # and the prod-posture overlay pins it off. Delete app/vocx/dev_ui.html + the
+    # dev-ui block in mount.py to remove it permanently.
+    dev_ui: bool = False
 
 
 @lru_cache

@@ -241,6 +241,10 @@ services:
       VOCX_S3_ACCESS_KEY_ID: "prism"
       VOCX_S3_SECRET_ACCESS_KEY: "prism-secret"
       VOCX_AUDIO_RETENTION_DAYS: "${VOCX_AUDIO_RETENTION_DAYS:-0}"
+      # TEMPORARY dev test console at https://<host>:8443/vocx/v1/dev-ui (record →
+      # preview → commit → reports in a browser). Dev default ON; the prod-posture
+      # overlay pins it OFF. VOCX_DEV_UI=false here turns it off in dev too.
+      VOCX_DEV_UI: "${VOCX_DEV_UI:-true}"
       VOCX_LOG_JSON: "true"
     volumes:
       - vocx_state:/data/vocx

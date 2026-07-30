@@ -48,6 +48,12 @@ services:
       # When set it takes precedence over the single ISSUER/AUDIENCE pair above.
       GATEWAY_OIDC_ISSUERS: ""
 
+  # The TEMPORARY VocX browser test console is a dev tool — pinned OFF in this posture
+  # regardless of the host's VOCX_DEV_UI value.
+  vocx:
+    environment:
+      VOCX_DEV_UI: "false"
+
   orchestrator:
     environment:
       WORKFLOWS_REQUIRE_AUTH: "true"
