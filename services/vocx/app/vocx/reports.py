@@ -1,0 +1,241 @@
+"""reports.py — server-side persistence for pending captures (the RM's report list).
+
+The PoC kept every pending report in browser localStorage: per device, gone with the
+tab. This store makes the report list a BACKEND fact, so an RM can record on the phone,
+edit on the laptop, and nothing is lost when a device dies:
+
+    draft      auto-saved at preview time (every capture is recoverable immediately)
+    ready      the RM saved edits / marked it ready to approve
+    committed  the commit succeeded — the record carries the write results and turns
+               read-only in spirit (kept for the audit trail until deleted)
+
+Storage follows the platform rule — small JSON documents in MinIO/S3 under
+``reports/<rm>/<capture_id>.json`` (same bucket as the audio captures), with the vocx
+volume as the no-S3 fallback. Reports are single-writer by nature (an RM edits their own
+capture), so last-write-wins is the intended concurrency model. Every failure path logs
+and degrades — losing an EDIT is acceptable, wedging a capture flow is not — except
+``save`` itself, which reports failure honestly so the UI can retry.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import threading
+import time
+from typing import Any
+
+log = logging.getLogger("vocx")
+
+MAX_REPORT_BYTES = 512 * 1024          # an extraction is a few KB; half a MB is generous
+_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+_STATUSES = ("draft", "ready", "committed")
+
+
+def _safe_rm(rm: str) -> str:
+    return "".join(c for c in (rm or "") if c.isalnum() or c in "._-")[:80] or "rm"
+
+
+def valid_id(capture_id: str) -> bool:
+    return bool(capture_id) and bool(_ID_RE.match(capture_id))
+
+
+def _summary_of(doc: dict[str, Any]) -> dict[str, Any]:
+    """The list-view projection — enough for the report list without the full payload."""
+    ext = (doc.get("report") or {}).get("extraction") or {}
+    em = ext.get("entity_match") or {}
+    return {
+        "capture_id": doc.get("capture_id"),
+        "rm": doc.get("rm"),
+        "status": doc.get("status"),
+        "updated_at": doc.get("updated_at"),
+        "company": ext.get("company_mentioned") or em.get("proposed_company"),
+        "entity_code": em.get("code"),
+        "needs_approval": ((doc.get("report") or {}).get("decision") or {}).get("needs_approval"),
+        "summary": (doc.get("report") or {}).get("summary") or "",
+    }
+
+
+class LocalReportStore:
+    """Volume-backed JSON documents — the no-S3 fallback tier."""
+
+    kind = "local"
+
+    def __init__(self, directory: str) -> None:
+        self.directory = directory
+        self._lock = threading.Lock()
+
+    def _path(self, rm: str, capture_id: str) -> str:
+        return os.path.join(self.directory, _safe_rm(rm), f"{capture_id}.json")
+
+    def save(self, rm: str, capture_id: str, doc: dict[str, Any]) -> bool:
+        try:
+            path = self._path(rm, capture_id)
+            with self._lock:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh, ensure_ascii=False)
+                os.replace(tmp, path)          # atomic on POSIX — no torn reads
+            return True
+        except OSError as e:
+            log.error("vocx reports: local save failed for %s/%s: %s", rm, capture_id, e)
+            return False
+
+    def get(self, rm: str, capture_id: str) -> dict[str, Any] | None:
+        try:
+            with open(self._path(rm, capture_id), encoding="utf-8") as fh:
+                return json.load(fh)
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError) as e:
+            log.error("vocx reports: local read failed for %s/%s: %s", rm, capture_id, e)
+            return None
+
+    def list(self, rm: str) -> list[dict[str, Any]]:
+        d = os.path.join(self.directory, _safe_rm(rm))
+        out = []
+        try:
+            names = sorted(os.listdir(d))
+        except FileNotFoundError:
+            return []
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            doc = self.get(rm, name[:-5])
+            if doc:
+                out.append(_summary_of(doc))
+        out.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+        return out
+
+    def delete(self, rm: str, capture_id: str) -> bool:
+        try:
+            os.remove(self._path(rm, capture_id))
+            return True
+        except FileNotFoundError:
+            return True                        # deleting the absent is success
+        except OSError as e:
+            log.error("vocx reports: local delete failed for %s/%s: %s", rm, capture_id, e)
+            return False
+
+
+class S3ReportStore:
+    """MinIO/S3 JSON documents under reports/<rm>/ — shares the captures bucket."""
+
+    kind = "s3"
+
+    def __init__(self, *, bucket: str, endpoint_url: str, access_key_id: str,
+                 secret_access_key: str, auto_create_bucket: bool = True,
+                 prefix: str = "reports",
+                 fallback: LocalReportStore | None = None) -> None:
+        self.bucket = bucket
+        self.endpoint_url = endpoint_url
+        self.access_key_id = access_key_id
+        self.secret_access_key = secret_access_key
+        self.auto_create_bucket = auto_create_bucket
+        self.prefix = prefix.strip("/")
+        self.fallback = fallback
+        self._client: Any = None
+        self._lock = threading.Lock()
+
+    def _s3(self) -> Any:
+        with self._lock:
+            if self._client is None:
+                import boto3
+                from botocore.config import Config
+                self._client = boto3.client(
+                    "s3", endpoint_url=self.endpoint_url,
+                    aws_access_key_id=self.access_key_id,
+                    aws_secret_access_key=self.secret_access_key,
+                    config=Config(s3={"addressing_style": "path"},
+                                  retries={"max_attempts": 3, "mode": "standard"},
+                                  connect_timeout=5, read_timeout=15))
+                from botocore.exceptions import ClientError
+                try:
+                    self._client.head_bucket(Bucket=self.bucket)
+                except ClientError:
+                    if self.auto_create_bucket:
+                        self._client.create_bucket(Bucket=self.bucket)
+            return self._client
+
+    def _key(self, rm: str, capture_id: str) -> str:
+        return f"{self.prefix}/{_safe_rm(rm)}/{capture_id}.json"
+
+    def save(self, rm: str, capture_id: str, doc: dict[str, Any]) -> bool:
+        body = json.dumps(doc, ensure_ascii=False).encode()
+        try:
+            self._s3().put_object(Bucket=self.bucket, Key=self._key(rm, capture_id),
+                                  Body=body, ContentType="application/json")
+            return True
+        except Exception as e:  # noqa: BLE001 — degrade to the volume, report honestly
+            log.error("vocx reports: S3 save failed (%s) — falling back to local", e)
+            return self.fallback.save(rm, capture_id, doc) if self.fallback else False
+
+    def get(self, rm: str, capture_id: str) -> dict[str, Any] | None:
+        try:
+            r = self._s3().get_object(Bucket=self.bucket, Key=self._key(rm, capture_id))
+            return json.loads(r["Body"].read())
+        except Exception:  # noqa: BLE001 — missing or unreachable → try the fallback
+            return self.fallback.get(rm, capture_id) if self.fallback else None
+
+    def list(self, rm: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        try:
+            s3 = self._s3()
+            token: str | None = None
+            while True:
+                kw = {"Bucket": self.bucket, "Prefix": f"{self.prefix}/{_safe_rm(rm)}/",
+                      "MaxKeys": 200}
+                if token:
+                    kw["ContinuationToken"] = token
+                page = s3.list_objects_v2(**kw)
+                for obj in page.get("Contents", []):
+                    cid = obj["Key"].rsplit("/", 1)[-1].removesuffix(".json")
+                    doc = self.get(rm, cid)
+                    if doc:
+                        out.append(_summary_of(doc))
+                if not page.get("IsTruncated"):
+                    break
+                token = page.get("NextContinuationToken")
+        except Exception as e:  # noqa: BLE001
+            log.error("vocx reports: S3 list failed (%s) — falling back to local", e)
+            return self.fallback.list(rm) if self.fallback else []
+        out.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
+        return out
+
+    def delete(self, rm: str, capture_id: str) -> bool:
+        try:
+            self._s3().delete_object(Bucket=self.bucket, Key=self._key(rm, capture_id))
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.error("vocx reports: S3 delete failed (%s)", e)
+            return self.fallback.delete(rm, capture_id) if self.fallback else False
+
+
+def make_doc(rm: str, capture_id: str, status: str, report: dict[str, Any],
+             writes: dict[str, Any] | None = None) -> dict[str, Any]:
+    if status not in _STATUSES:
+        status = "draft"
+    doc = {"capture_id": capture_id, "rm": rm, "status": status,
+           "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "report": report}
+    if writes is not None:
+        doc["writes"] = writes
+    return doc
+
+
+def build_report_store(settings: Any) -> S3ReportStore | LocalReportStore | None:
+    tokens_dir = getattr(settings, "tokens_dir", "") or ""
+    local = LocalReportStore(os.path.join(tokens_dir, "reports")) if tokens_dir else None
+    endpoint = getattr(settings, "s3_endpoint_url", "") or ""
+    bucket = getattr(settings, "s3_bucket", "") or ""
+    if endpoint and bucket:
+        return S3ReportStore(
+            bucket=bucket, endpoint_url=endpoint,
+            access_key_id=getattr(settings, "s3_access_key_id", "") or "",
+            secret_access_key=getattr(settings, "s3_secret_access_key", "") or "",
+            auto_create_bucket=bool(getattr(settings, "s3_auto_create_bucket", True)),
+            fallback=local)
+    return local

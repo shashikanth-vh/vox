@@ -1,0 +1,16 @@
+{{- if and .Values.pipeline.enabled .Values.pipeline.state.enabled (not .Values.pipeline.state.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vocx.fullname" . }}-state
+  labels:
+    {{- include "vocx.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.pipeline.state.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.pipeline.state.size }}
+{{- end }}

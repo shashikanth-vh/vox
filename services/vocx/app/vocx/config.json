@@ -1,0 +1,294 @@
+{
+  "_comment": "VOX configuration. Confidence is gated PER CRITICAL FIELD (entity match, next_meeting date, register writes). Non-critical fields (discussion points, commitments, attendees, note prose) never block an auto-write.",
+  "model": "claude-haiku-4-5-20251001",
+  "anthropic_api_key_env": "ANTHROPIC_API_KEY",
+  "thresholds": {
+    "VOX_ENTITY_MATCH_MIN": 0.75,
+    "VOX_DATE_CONF_MIN": 0.7,
+    "VOX_REGISTER_CONF_MIN": 0.7,
+    "VOX_ENTITY_AMBIGUITY_GAP": 0.1,
+    "VOX_NEW_LEAD_MAX": 0.55,
+    "VOX_OWN_CLIENT_BOOST": 0.1,
+    "VOX_FUZZY_MIN": 0.8
+  },
+  "scores": {
+    "exact": 1.0,
+    "containment": 0.85,
+    "fuzzy": 0.75
+  },
+  "ids": {
+    "new_lead_prefix": "LD-V",
+    "new_lead_pad": 2
+  },
+  "drive": {
+    "personal_root": "ATLAS_VOX",
+    "team_root": "ATLAS_TEAM/VOX",
+    "note_filename": "{ts}_meeting.md",
+    "company_summary_filename": "_company_summary.md",
+    "rolling_summary_last_n": 8
+  },
+  "google": {
+    "_comment": "Per-user OAuth. Each RM signs in with their own Google account; writes land in their own Drive+Calendar. Refresh tokens are stored server-side keyed to the ATLAS rm id (see vocx_oauth.TokenStore).",
+    "client_secret_file": "",
+    "redirect_uri": "",
+    "timezone": "Asia/Kolkata",
+    "_note": "drive_enabled off by default — the ATLAS log already carries the interaction; Drive only adds a note document + team folder + transcript archive. Turn it on (and add the drive scope below) if you want those.",
+    "calendar_enabled": true,
+    "drive_enabled": false,
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events",
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ],
+    "scopes_with_drive": [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/drive.file",
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ],
+    "tokens_dir": "vocx_tokens"
+  },
+  "stt": {
+    "_comment": "Speech-to-text. backend: faster_whisper (baked into the image; model downloads once to the vocx volume) | api (Whisper-compatible remote) | stub (tests). model_size small=fast CPU default; medium/large-v3 for accuracy — set via this file, cache persists per size.",
+    "backend": "faster_whisper",
+    "model_size": "small",
+    "device": "cpu",
+    "compute_type": "int8",
+    "language": null,
+    "beam_size": 5,
+    "vad_filter": true,
+    "archive_dir": "captures",
+    "api": {
+      "endpoint_env": "VOX_STT_API_URL",
+      "key_env": "VOX_STT_API_KEY",
+      "model": "whisper-1"
+    }
+  },
+  "_report_templates_note": "Extra Additional-details fields, composed from the matched business-line template + the matched sector template. axis=business_line matches report.business_line exactly; axis=sector matches if any 'match' token is a substring of report.sector (lowercased). Add/edit freely — the app renders these dynamically. field.type: text (default) | number | date | select(+options).",
+  "report_templates": [
+    {
+      "id": "lending",
+      "axis": "business_line",
+      "match": "lending",
+      "label": "Lending",
+      "fields": [
+        {
+          "key": "tenor",
+          "label": "Tenor"
+        },
+        {
+          "key": "pricing",
+          "label": "Pricing / ROI"
+        },
+        {
+          "key": "security",
+          "label": "Security / collateral type"
+        },
+        {
+          "key": "moratorium",
+          "label": "Moratorium"
+        },
+        {
+          "key": "sanction_stage",
+          "label": "Sanction stage",
+          "type": "select",
+          "options": [
+            "",
+            "Enquiry",
+            "Under appraisal",
+            "Sanctioned",
+            "Documented",
+            "Disbursed"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "syndication",
+      "axis": "business_line",
+      "match": "syndication",
+      "label": "Syndication",
+      "fields": [
+        {
+          "key": "lenders_approached",
+          "label": "Lenders approached"
+        },
+        {
+          "key": "tranche_split",
+          "label": "Tranche split"
+        },
+        {
+          "key": "arranger_role",
+          "label": "Arranger role"
+        },
+        {
+          "key": "target_close",
+          "label": "Target close",
+          "type": "date"
+        },
+        {
+          "key": "docs_stage",
+          "label": "Documentation stage"
+        }
+      ]
+    },
+    {
+      "id": "asset_mgmt",
+      "axis": "business_line",
+      "match": "asset_mgmt",
+      "label": "Asset Monetisation",
+      "fields": [
+        {
+          "key": "asset_type",
+          "label": "Asset type"
+        },
+        {
+          "key": "valuation",
+          "label": "Valuation"
+        },
+        {
+          "key": "stake_offer",
+          "label": "Stake on offer"
+        },
+        {
+          "key": "buyer",
+          "label": "Buyer / investor"
+        },
+        {
+          "key": "structure",
+          "label": "Structure (InvIT / direct)"
+        }
+      ]
+    },
+    {
+      "id": "solar",
+      "axis": "sector",
+      "match": [
+        "solar"
+      ],
+      "label": "Solar EPC / Project",
+      "fields": [
+        {
+          "key": "capacity_mw",
+          "label": "Capacity (MW)",
+          "type": "number"
+        },
+        {
+          "key": "ppa_tariff",
+          "label": "PPA tariff"
+        },
+        {
+          "key": "offtaker",
+          "label": "Offtaker"
+        },
+        {
+          "key": "cod",
+          "label": "COD (commissioning)",
+          "type": "date"
+        },
+        {
+          "key": "land_status",
+          "label": "Land status"
+        }
+      ]
+    },
+    {
+      "id": "water",
+      "axis": "sector",
+      "match": [
+        "water",
+        "wash"
+      ],
+      "label": "Water / WASH",
+      "fields": [
+        {
+          "key": "plant_type",
+          "label": "Plant type (STP/ETP/WTP)"
+        },
+        {
+          "key": "capacity_mld",
+          "label": "Capacity (MLD)",
+          "type": "number"
+        },
+        {
+          "key": "om_scope",
+          "label": "O&M scope"
+        }
+      ]
+    },
+    {
+      "id": "ev",
+      "axis": "sector",
+      "match": [
+        "ev",
+        "mobility"
+      ],
+      "label": "EV Mobility",
+      "fields": [
+        {
+          "key": "asset_type_ev",
+          "label": "Vehicle / asset type"
+        },
+        {
+          "key": "fleet_size",
+          "label": "Fleet size",
+          "type": "number"
+        },
+        {
+          "key": "charging",
+          "label": "Charging infrastructure"
+        }
+      ]
+    },
+    {
+      "id": "biogas",
+      "axis": "sector",
+      "match": [
+        "biogas",
+        "cbg",
+        "biofuel"
+      ],
+      "label": "Biogas / CBG",
+      "fields": [
+        {
+          "key": "feedstock",
+          "label": "Feedstock"
+        },
+        {
+          "key": "capacity_tpd",
+          "label": "Capacity (TPD)",
+          "type": "number"
+        },
+        {
+          "key": "offtake",
+          "label": "Offtake arrangement"
+        }
+      ]
+    }
+  ],
+  "defaults": {
+    "interaction_type_by_mode": {
+      "in-person": "In-Person Meeting",
+      "in_person": "In-Person Meeting",
+      "video": "Virtual Meeting / Video Call",
+      "virtual": "Virtual Meeting / Video Call",
+      "call": "Phone Call",
+      "phone": "Phone Call",
+      "site": "Site Visit / Due Diligence",
+      "whatsapp": "WhatsApp / Text message",
+      "email": "Email / Written Correspondence"
+    },
+    "fallback_interaction_type": "In-Person Meeting",
+    "new_lead_source": "BDRM",
+    "new_lead_source_detail": "VOX voice capture",
+    "new_lead_status": "Active",
+    "new_lead_temp": "Warm",
+    "adapt_sectors": [
+      "Industrial Water",
+      "Water Treatment / WASH",
+      "Climate Data & IoT",
+      "Agri / Drone"
+    ]
+  },
+  "_integration_note": "PRISM VocX defaults. Deployment concerns (Google client secret path, redirect URI, tokens dir, STT backend, Anthropic key) come from VOCX_* / ANTHROPIC_API_KEY env vars via app.vocx.loader — never from this file. Thresholds/templates are tuning, edit freely."
+}

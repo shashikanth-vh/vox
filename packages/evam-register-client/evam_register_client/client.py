@@ -38,10 +38,11 @@ class _Plan:
     """A prepared request — pure data, shared by the async client and sync facade."""
 
     __slots__ = ("method", "path", "params", "json", "idempotency_key", "if_match",
-                 "request_id", "idempotent_write")
+                 "request_id", "idempotent_write", "extra_headers")
 
     def __init__(self, method: str, path: str, *, params=None, json=None,
-                 idempotency_key=None, if_match=None, request_id=None) -> None:
+                 idempotency_key=None, if_match=None, request_id=None,
+                 extra_headers=None) -> None:
         self.method = method.upper()
         self.path = path
         self.params = params
@@ -50,6 +51,9 @@ class _Plan:
         self.if_match = if_match
         self.request_id = prepare_request_id(request_id)
         self.idempotent_write = bool(idempotency_key or if_match)
+        # Per-call header overrides (e.g. attributing a conversion to the human approver
+        # via X-Actor) — merged AFTER the config defaults so they win.
+        self.extra_headers = extra_headers
 
 
 class AsyncRegisterClient:
@@ -100,7 +104,7 @@ class AsyncRegisterClient:
             api_key=cfg.api_key, tenant=cfg.tenant, actor=cfg.actor,
             idempotency_key=plan.idempotency_key, if_match=plan.if_match,
             request_id=plan.request_id, content_type_json=plan.json is not None,
-            extra=cfg.extra_headers or None,
+            extra={**(cfg.extra_headers or {}), **(plan.extra_headers or {})} or None,
         )
         attempt = 0
         while True:
@@ -225,17 +229,27 @@ class AsyncRegisterClient:
                            is_syndication: bool = False, is_asset_mon: bool = False,
                            product_type: str | None = None, amount_cr: float | None = None,
                            rm: str | None = None, analyst: str | None = None,
+                           rm_id: str | None = None, analyst_id: str | None = None,
                            note: str | None = None,
+                           approved_by: str | None = None,
                            idempotency_key: str | None = None,
                            request_id: str | None = None) -> dict:
         """Atomically convert a lead → deal (+ product lines) in ONE Register
-        transaction — no client-side compensation."""
+        transaction — no client-side compensation.
+
+        ``rm_id`` / ``analyst_id`` (Access user ids) auto-create the line assignments on the
+        server. ``approved_by`` records the human approver as conversion provenance in the
+        body (a service key can never masquerade as a person via X-Actor, so it is data, not
+        the audit actor)."""
         payload = {"is_lending": is_lending, "is_syndication": is_syndication,
                    "is_asset_mon": is_asset_mon, "product_type": product_type,
-                   "amount_cr": amount_cr, "rm": rm, "analyst": analyst, "note": note}
-        return await self._send(_Plan("POST", f"/v1/leads/{lead_id}/convert",
-                                      json={k: v for k, v in payload.items() if v is not None},
-                                      idempotency_key=idempotency_key, request_id=request_id))
+                   "amount_cr": amount_cr, "rm": rm, "analyst": analyst,
+                   "rm_id": rm_id, "analyst_id": analyst_id, "note": note,
+                   "approved_by": approved_by}
+        return await self._send(_Plan(
+            "POST", f"/v1/leads/{lead_id}/convert",
+            json={k: v for k, v in payload.items() if v is not None},
+            idempotency_key=idempotency_key, request_id=request_id))
 
     async def create_intelligence(self, entity_id: str, intel_type: str, *,
                                   signal: str | None = None, idempotency_key: str | None = None,
@@ -280,6 +294,84 @@ class AsyncRegisterClient:
                             request_id: str | None = None) -> dict:
         return await self._send(_Plan("POST", "/v1/tenants", json={"code": code, "name": name},
                                       idempotency_key=None, request_id=request_id))
+
+    async def record_decision(self, workflow_id: str, decision: str, *,
+                              lead_id: str | None = None, note: str | None = None,
+                              extra_headers: dict[str, str] | None = None,
+                              request_id: str | None = None) -> dict:
+        """Record a lead-conversion decision on the dedicated single-winner resource. The
+        server enforces one decision per (tenant, workflow): a replay of the same decision
+        returns the original, the opposite decision raises ``ConflictError`` (409). Provenance
+        is taken from the delegated approver context in ``extra_headers`` (X-Internal-Context),
+        not any field here."""
+        body = {"workflow_id": workflow_id, "decision": decision}
+        if lead_id is not None:
+            body["lead_id"] = lead_id
+        if note is not None:
+            body["note"] = note
+        return await self._send(_Plan("POST", "/v1/internal/decisions", json=body,
+                                      extra_headers=extra_headers, request_id=request_id))
+
+    async def get_decision(self, workflow_id: str, *, request_id: str | None = None) -> dict:
+        """Read the recorded decision for a workflow. Raises ``NotFoundError`` (404) when no
+        decision has been recorded; transport/5xx errors propagate so the caller can retry.
+
+        The workflow id is percent-encoded so retry ids (and any future id shape) address the
+        right row instead of being truncated at an unsafe character."""
+        from urllib.parse import quote
+
+        return await self._send(_Plan(
+            "GET", f"/v1/internal/decisions/{quote(workflow_id, safe='')}",
+            request_id=request_id))
+
+    async def claim_deliveries(self, *, limit: int = 20, lease_seconds: int = 60,
+                               request_id: str | None = None) -> builtins.list[dict]:
+        """Reconciler: atomically claim a batch of due, pending decision deliveries (leased for
+        ``lease_seconds``). Returns ``[{workflow_id, decision, attempts}, ...]``."""
+        resp = await self._send(_Plan(
+            "POST", "/v1/internal/decisions/deliveries/claim",
+            json={"limit": limit, "lease_seconds": lease_seconds}, request_id=request_id))
+        return list(resp.get("claimed", []))
+
+    async def update_delivery(self, workflow_id: str, status: str, *, claim_token: str,
+                              error: str | None = None, backoff_seconds: int = 60,
+                              request_id: str | None = None) -> dict:
+        """Reconciler: mark a delivery ``applied`` / ``retry`` (with backoff) / ``dead``. The
+        ``claim_token`` from the claim must still be current, else the update is a no-op (a
+        stalled claimant can't overwrite a re-claimed or terminal row)."""
+        body: dict[str, Any] = {"status": status, "claim_token": claim_token,
+                                "backoff_seconds": backoff_seconds}
+        if error is not None:
+            body["error"] = error
+        return await self._send(_Plan(
+            "POST", f"/v1/internal/decisions/{workflow_id}/delivery", json=body,
+            request_id=request_id))
+
+    async def redrive_delivery(self, workflow_id: str, *, reason: str,
+                               ticket: str | None = None,
+                               extra_headers: dict[str, str] | None = None,
+                               request_id: str | None = None) -> dict:
+        """Recover a dead-lettered delivery back to pending. An ADMIN action — pass the verified
+        Admin's delegated context in ``extra_headers`` (X-Internal-Context); the Register refuses
+        it otherwise. A non-empty ``reason`` is MANDATORY and an optional ``ticket`` reference may
+        be given; both are preserved (with the previous dead-letter cause) in the immutable audit
+        event that names the admin."""
+        body: dict[str, Any] = {"reason": reason}
+        if ticket is not None:
+            body["ticket"] = ticket
+        return await self._send(_Plan(
+            "POST", f"/v1/internal/decisions/{workflow_id}/redrive", json=body,
+            extra_headers=extra_headers, request_id=request_id))
+
+    async def delivery_stats(self, *, request_id: str | None = None) -> dict:
+        """Reconciler metrics: ``{pending, applied, dead, aged_pending}`` for the tenant."""
+        return await self._send(_Plan("GET", "/v1/internal/decisions/deliveries/stats",
+                                      request_id=request_id))
+
+    async def internal_tenants(self, *, request_id: str | None = None) -> builtins.list[str]:
+        """Reconciler: the active tenant codes to scan for pending deliveries."""
+        resp = await self._send(_Plan("GET", "/v1/internal/tenants", request_id=request_id))
+        return list(resp.get("tenants", []))
 
     async def audit(self, *, resource_type: str | None = None, resource_id: str | None = None,
                     limit: int = 100, request_id: str | None = None) -> builtins.list[dict]:

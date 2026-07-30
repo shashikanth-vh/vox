@@ -1,6 +1,13 @@
 # PRISM umbrella values. Subchart values are nested under the subchart name.
 # The shared PostgreSQL is deployed once; every module points at `prism-postgresql`.
 
+# ---- global toggles -----------------------------------------------------------
+global:
+  # When true, the render FAILS if any production credential is left as a REPLACE-*/dev
+  # placeholder (unless an existingSecret is supplied for it). OFF here so dev/CI renders
+  # work with defaults; the production overlay (values-prod.yaml) turns it ON.
+  requireRealSecrets: false
+
 # ---- shared platform database -------------------------------------------------
 postgresql:
   enabled: true

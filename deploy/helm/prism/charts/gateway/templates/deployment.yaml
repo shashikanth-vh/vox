@@ -47,6 +47,55 @@ spec:
               value: {{ .Values.upstreams.registerUrl | quote }}
             - name: GATEWAY_ACCESS_URL
               value: {{ .Values.upstreams.accessUrl | quote }}
+            - name: GATEWAY_ATLAS_URL
+              value: {{ .Values.upstreams.atlasUrl | default "" | quote }}
+            - name: GATEWAY_VOCX_URL
+              value: {{ .Values.upstreams.vocxUrl | default "" | quote }}
+            - name: GATEWAY_PULSE_URL
+              value: {{ .Values.upstreams.pulseUrl | default "" | quote }}
+            - name: GATEWAY_ORCHESTRATOR_URL
+              value: {{ .Values.upstreams.orchestratorUrl | default "" | quote }}
+            # Scoped per-upstream service credential (client key stripped at the edge).
+            - name: GATEWAY_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: register-api-key
+            {{- if .Values.serviceCredentials.atlasApiKey }}
+            - name: GATEWAY_ATLAS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: atlas-api-key
+            {{- end }}
+            {{- if .Values.serviceCredentials.vocxApiKey }}
+            - name: GATEWAY_VOCX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: vocx-api-key
+            {{- end }}
+            {{- if .Values.serviceCredentials.pulseApiKey }}
+            - name: GATEWAY_PULSE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: pulse-api-key
+            {{- end }}
+            {{- if .Values.serviceCredentials.orchestratorApiKey }}
+            - name: GATEWAY_ORCHESTRATOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: orchestrator-api-key
+            {{- end }}
+            {{- if .Values.serviceCredentials.registerAdminApiKey }}
+            - name: GATEWAY_REGISTER_ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gateway.secretName" . }}
+                  key: register-admin-api-key
+            {{- end }}
             - name: GATEWAY_ACCESS_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -57,10 +106,30 @@ spec:
                   name: {{ include "gateway.secretName" . }}
                   key: access-api-key
                   {{- end }}
+            {{- if and .Values.oidc.requireAuth (not .Values.oidc.issuer) (not .Values.oidc.issuers) }}
+            {{- fail "gateway.oidc.requireAuth is true but neither gateway.oidc.issuer nor gateway.oidc.issuers is set — set one (e.g. --set gateway.oidc.issuer=https://idp.example.com) so the edge verifies tokens." }}
+            {{- end }}
+            {{- /* A PUBLIC issuer mints a valid token for ANY account it hosts, so accepting
+                   one without a domain allowlist would let any consumer identity past
+                   authentication. Refuse to render rather than ship that gap. */}}
+            {{- $pub := regexMatch "accounts\\.google\\.com|login\\.microsoftonline\\.com" (printf "%s %s" (.Values.oidc.issuer | default "") (.Values.oidc.issuers | default "")) }}
+            {{- if and $pub (not .Values.oidc.allowedDomains) }}
+            {{- fail "gateway.oidc accepts a public issuer (Google/Microsoft) but gateway.oidc.allowedDomains is empty — set it (e.g. --set gateway.oidc.allowedDomains=evamfinance.com) or any personal account could authenticate." }}
+            {{- end }}
             - name: GATEWAY_OIDC_ISSUER
               value: {{ .Values.oidc.issuer | default "" | quote }}
             - name: GATEWAY_OIDC_AUDIENCE
               value: {{ .Values.oidc.audience | default "" | quote }}
+            # Several IdPs at once — "issuer|audience,issuer2|audience2". Takes precedence
+            # over the single pair above; selection is by the token's own `iss`.
+            - name: GATEWAY_OIDC_ISSUERS
+              value: {{ .Values.oidc.issuers | default "" | quote }}
+            - name: GATEWAY_OIDC_EMAIL_CLAIM
+              value: {{ .Values.oidc.emailClaim | default "email" | quote }}
+            # Organisation e-mail domains an identity may come from. MANDATORY whenever a
+            # public issuer is accepted (guard above).
+            - name: GATEWAY_OIDC_ALLOWED_DOMAINS
+              value: {{ .Values.oidc.allowedDomains | default "" | quote }}
             - name: GATEWAY_REQUIRE_AUTH
               value: {{ .Values.oidc.requireAuth | default false | quote }}
             - name: GATEWAY_GATEWAY_SHARED_SECRET

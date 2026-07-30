@@ -19,6 +19,7 @@ provisions the default tenant + reference dropdowns (**no business data**), and 
 The API is usable immediately; the database has no leads/deals/entities.
 
 ```bash
+scripts/gen_dev_certs.sh    # once — the NGINX edge terminates HTTPS and won't start without a cert
 docker compose -f deploy/compose/docker-compose.yml up --build
 ```
 

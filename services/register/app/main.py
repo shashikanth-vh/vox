@@ -10,10 +10,16 @@ from __future__ import annotations
 from evam_backend_core.app import create_service_app
 from fastapi import FastAPI
 
+from app.api.advaya import router as advaya_router
+from app.api.cpcs import router as cpcs_router
 from app.api.custom import router as custom_router
+from app.api.decisions import router as decisions_router
+from app.api.evidence import router as evidence_router
 from app.api.export import router as export_router
+from app.api.handover import router as handover_router
 from app.api.imports import router as import_router
 from app.api.rbac import router as rbac_router
+from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
 from app.api.tenants import router as tenants_router
 from app.core.config import get_settings
@@ -34,16 +40,30 @@ Idempotent creates: pass an `Idempotency-Key` header.
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Fail closed on an incomplete future-integration configuration (e.g. Advaya enabled with no
+    # endpoint) — the acknowledgement path can never be half-enabled.
+    settings.validate_startup()
+    routers = [
+        tenants_router,
+        rbac_router,
+        export_router,
+        import_router,
+        custom_router,
+        decisions_router,
+        cpcs_router,
+        handover_router,
+        reconciliation_router,
+        evidence_router,
+        build_resource_router(),
+    ]
+    # The DORMANT Advaya acknowledgement path (internal handoff record) is registered ONLY under an
+    # enabled Advaya integration (default off). Without it, the acknowledgement endpoint does not
+    # exist and 'Disbursement Pending' is unreachable — PRISM stops at 'Handed Over to Advaya'.
+    if settings.advaya_integration_enabled:
+        routers.insert(6, advaya_router)
     app = create_service_app(
         settings=settings,
-        routers=[
-            tenants_router,
-            rbac_router,
-            export_router,
-            import_router,
-            custom_router,
-            build_resource_router(),
-        ],
+        routers=routers,
         title="PRISM Register",
         version="0.1.0",
         description=DESCRIPTION,

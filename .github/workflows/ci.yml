@@ -47,6 +47,33 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Postman E2E collection must pass the run-order audit
+        run: |
+          # Statically simulates a top-to-bottom run: every {{var}} consumed must have a writer
+          # before it. Catches the 'literal {{makerUserId}} sent to the API' class without a stack.
+          ALLOW=adminToken,makerToken,checkerToken,bearerToken,dexUrl,ssoPassword,googleClientId,googleClientSecret,adminRefreshToken,makerRefreshToken,checkerRefreshToken
+          for env in postman/PRISM_Full.postman_environment.json postman/PRISM_Full_Dex.postman_environment.json; do
+            python3 scripts/audit_postman.py postman/PRISM_E2E_Full.postman_collection.json "$env" --allow-empty "$ALLOW"
+          done
+
+      - name: Dex static passwords must verify against the documented password
+        run: |
+          # Every doc and both Postman environments say the dev password is "prism". A hash
+          # that doesn't verify (e.g. the Dex docs' example hash, which encodes "password")
+          # makes every sign-in fail with an unexplained 401 — caught live, never again.
+          pip install --quiet bcrypt pyyaml
+          python3 - <<'PY'
+          import bcrypt, yaml
+          cfg = yaml.safe_load(open("deploy/compose/dex/config.yaml"))
+          users = cfg.get("staticPasswords", [])
+          assert users, "no staticPasswords found in dex config"
+          for u in users:
+              ok = bcrypt.checkpw(b"prism", u["hash"].encode())
+              print(f"{u['email']:35} verifies against 'prism': {ok}")
+              assert ok, f"{u['email']}: hash does not verify against the documented password"
+          print(f"OK — all {len(users)} Dex identities accept the documented password")
+          PY
+
       - name: Install (shared packages first, then the services)
         run: |
           python -m pip install --upgrade pip
@@ -152,13 +179,85 @@ jobs:
           helm template prism deploy/helm/prism > /dev/null
           helm template prism deploy/helm/prism \
             -f deploy/helm/prism/values-local.yaml > /dev/null
-          # The production overlay must render cleanly too (with a placeholder OIDC issuer).
+          # POSITIVE: the production overlay renders cleanly when the secret guard is off
+          # (proves the templates + prod structure are valid with real issuers supplied).
           helm template prism deploy/helm/prism \
             -f deploy/helm/prism/values.yaml \
             -f deploy/helm/prism/values-prod.yaml \
+            --set global.requireRealSecrets=false \
             --set gateway.oidc.issuer=https://idp.example.com \
             --set atlas.oidc.issuer=https://idp.example.com \
             --set workflows.api.oidcIssuer=https://idp.example.com > /dev/null
+          # NEGATIVE: with the guard ON (the overlay default), the shipped REPLACE-*
+          # placeholders MUST fail the render — a prod deploy can't ship placeholder creds.
+          if helm template prism deploy/helm/prism \
+              -f deploy/helm/prism/values.yaml \
+              -f deploy/helm/prism/values-prod.yaml \
+              --set gateway.oidc.issuer=https://idp.example.com \
+              --set atlas.oidc.issuer=https://idp.example.com \
+              --set workflows.api.oidcIssuer=https://idp.example.com > /dev/null 2>render.err; then
+            echo "ERROR: prod render with placeholder credentials should have FAILED"; exit 1
+          fi
+          grep -qi "placeholder" render.err || { echo "expected a placeholder error:"; cat render.err; exit 1; }
+          echo "OK: placeholder credentials correctly rejected"
+          # POSITIVE: guard ON + EVERY credential replaced with a real value → renders.
+          helm template prism deploy/helm/prism \
+            -f deploy/helm/prism/values.yaml \
+            -f deploy/helm/prism/values-prod.yaml \
+            -f deploy/helm/prism/ci/real-secrets.yaml \
+            --set gateway.oidc.issuer=https://idp.example.com \
+            --set atlas.oidc.issuer=https://idp.example.com \
+            --set workflows.api.oidcIssuer=https://idp.example.com > /dev/null
+          echo "OK: all-real-credential prod render succeeds"
+          # NEGATIVE: all creds real EXCEPT an EMBEDDED service-key placeholder → must fail
+          # (guards the hasPrefix-vs-contains bypass; the string starts with 'svc_...').
+          if helm template prism deploy/helm/prism \
+              -f deploy/helm/prism/values.yaml \
+              -f deploy/helm/prism/values-prod.yaml \
+              -f deploy/helm/prism/ci/real-secrets.yaml \
+              --set register.serviceApiKeys="svc_workflows:REPLACE-svc-workflows-key" \
+              --set gateway.oidc.issuer=https://idp.example.com \
+              --set atlas.oidc.issuer=https://idp.example.com \
+              --set workflows.api.oidcIssuer=https://idp.example.com > /dev/null 2>embed.err; then
+            echo "ERROR: an embedded REPLACE- placeholder in serviceApiKeys should have FAILED"; exit 1
+          fi
+          grep -qi "placeholder" embed.err || { echo "expected a placeholder error:"; cat embed.err; exit 1; }
+          echo "OK: embedded service-key placeholder correctly rejected"
+          # NEGATIVE: an auth-enabled render with a blank OIDC issuer must also fail.
+          if helm template prism deploy/helm/prism \
+              -f deploy/helm/prism/values.yaml \
+              -f deploy/helm/prism/values-prod.yaml \
+              --set global.requireRealSecrets=false > /dev/null 2>issuer.err; then
+            echo "ERROR: auth-enabled render with blank OIDC issuer should have FAILED"; exit 1
+          fi
+          grep -qi "issuer" issuer.err || { echo "expected an issuer error:"; cat issuer.err; exit 1; }
+          echo "OK: blank OIDC issuer correctly rejected"
+          # NEGATIVE: a PUBLIC issuer (Google/Microsoft) with no domain allowlist must fail.
+          # Google mints a valid token for ANY consumer account, so accepting it without the
+          # allowlist would let a personal @gmail.com authenticate. One check per service.
+          # (No requireAuth here on purpose: accepting a public issuer is unsafe whether or not
+          # auth is mandatory, so the guard must fire on the issuer setting alone.)
+          for arg in "gateway.oidc.issuer" "atlas.oidc.issuer" "workflows.api.oidcIssuer"; do
+            if helm template prism deploy/helm/prism \
+                -f deploy/helm/prism/values.yaml \
+                --set "$arg=https://accounts.google.com" > /dev/null 2>pub.err; then
+              echo "ERROR: $arg=<google> with no allowedDomains should have FAILED"; exit 1
+            fi
+            grep -qi "public issuer" pub.err || { echo "expected a public-issuer error:"; cat pub.err; exit 1; }
+            echo "OK: public issuer without a domain allowlist rejected ($arg)"
+          done
+          # POSITIVE: the multi-issuer form alone satisfies requireAuth (no single issuer set),
+          # and renders once the allowlist is supplied — the dev-Dex + prod-Google posture.
+          helm template prism deploy/helm/prism \
+            -f deploy/helm/prism/values.yaml \
+            --set gateway.oidc.requireAuth=true \
+            --set gateway.oidc.allowedDomains=evamfinance.com \
+            --set 'gateway.oidc.issuers=https://accounts.google.com|cid.apps.googleusercontent.com\,http://dex:5556/dex|prism' \
+            > multi.yaml
+          grep -q 'GATEWAY_OIDC_ISSUERS' multi.yaml || { echo "GATEWAY_OIDC_ISSUERS not rendered"; exit 1; }
+          grep -q 'GATEWAY_OIDC_ALLOWED_DOMAINS' multi.yaml || { echo "GATEWAY_OIDC_ALLOWED_DOMAINS not rendered"; exit 1; }
+          rm -f multi.yaml render.err embed.err issuer.err pub.err
+          echo "OK: multi-issuer + allowlist render, and both env vars reach the container"
           for c in deploy/helm/prism/charts/*/; do
             echo "::group::helm template $c"
             helm template "$(basename "$c")" "$c" > /dev/null

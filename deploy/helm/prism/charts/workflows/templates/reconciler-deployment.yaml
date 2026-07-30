@@ -1,0 +1,91 @@
+{{- if .Values.reconciler.enabled }}
+# The decision-delivery reconciler (`python -m app.reconciler`): a small daemon that re-drives
+# accepted-but-undelivered conversion decisions until the workflow applies them (or they are
+# dead-lettered). Needs Temporal (to signal/describe) AND the Register (the outbox), so it
+# carries the same env as the worker. Multiple replicas are safe (claims use SKIP LOCKED
+# leasing); one is plenty.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflows.fullname" . }}-reconciler
+  labels:
+    {{- include "workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: decision-reconciler
+spec:
+  replicas: {{ .Values.reconciler.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "workflows.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: decision-reconciler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "workflows.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: decision-reconciler
+        prism.evam/temporal-client: "true"   # allowed by the Temporal NetworkPolicy
+    spec:
+      serviceAccountName: {{ include "workflows.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: reconciler
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "app.reconciler"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: WORKFLOWS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: WORKFLOWS_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: WORKFLOWS_TEMPORAL_ADDRESS
+              value: {{ .Values.temporal.address | quote }}
+            - name: WORKFLOWS_TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: WORKFLOWS_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: WORKFLOWS_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: WORKFLOWS_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.register.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: api-key
+                  {{- end }}
+            - name: WORKFLOWS_RECONCILER_INTERVAL_SECONDS
+              value: {{ .Values.reconciler.intervalSeconds | default 30 | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

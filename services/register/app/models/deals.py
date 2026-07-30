@@ -11,6 +11,7 @@ import uuid
 from datetime import date
 
 from sqlalchemy import Boolean, Date, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -80,6 +81,12 @@ class Deal(RegisterBase):
     rm: Mapped[str | None] = mapped_column(String(120))
     analyst: Mapped[str | None] = mapped_column(String(120))
     stage: Mapped[str | None] = mapped_column(String(60))
+    # Append-only stage history (parity with the other trackers), so import-driven Deal stage
+    # changes are recorded, not silently overwritten.
+    stage_history: Mapped[list | None] = mapped_column(JSONB)
+    # Set to 'Required' when a governed import RETAINED this row despite missing mandatory data —
+    # operational reads exclude it (reconciliation_status IS NULL) until an Admin resolves it.
+    reconciliation_status: Mapped[str | None] = mapped_column(String(20))
     temperature: Mapped[str | None] = mapped_column(String(10))
     source: Mapped[str | None] = mapped_column(String(40))
     source_detail: Mapped[str | None] = mapped_column(String(200))

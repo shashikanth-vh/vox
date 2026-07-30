@@ -51,3 +51,14 @@ def test_expired_token_is_rejected():
     old = _mint(now=int(time.time()) - 10_000, ttl_seconds=60)
     with pytest.raises(InternalTokenError):
         verify_internal_context(old, verify_key=SECRET)
+
+
+def test_verify_exp_false_accepts_expired_but_still_checks_signature():
+    """The durable-approval path opts out of expiry (the decision's durability comes from
+    elsewhere), but signature/issuer/audience stay enforced."""
+    old = _mint(now=int(time.time()) - 10_000, ttl_seconds=60)
+    ctx = verify_internal_context(old, verify_key=SECRET, verify_exp=False)
+    assert ctx.email  # decoded fine despite being long expired
+    # A wrong key is still rejected even with expiry off.
+    with pytest.raises(InternalTokenError):
+        verify_internal_context(old, verify_key="the-wrong-key", verify_exp=False)

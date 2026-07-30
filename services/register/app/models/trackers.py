@@ -52,13 +52,18 @@ class LendingTracker(RegisterBase):
     stage: Mapped[str | None] = mapped_column(String(40))
     stage_updated_at: Mapped[date | None] = mapped_column(Date)
     sanction_date: Mapped[date | None] = mapped_column(Date)
-    # Sanctioned-vs-drawn: a lending line is often sanctioned then disbursed in tranches,
-    # so the UI needs both the drawn amount and its date alongside the sanctioned amount.
+    # PROPOSED drawdown — fixed at 'Ready for Disbursement' and carried into the Advaya handover
+    # package. These are what PRISM proposes; they are NOT proof that money moved.
+    proposed_disbursement_amount: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    proposed_disbursement_date: Mapped[date | None] = mapped_column(Date)
+    # ACTUAL disbursement — reserved for a real disbursement confirmation from the downstream
+    # system (a future Advaya integration); PRISM never sets these on its own authority.
     disbursed_amount: Mapped[float | None] = mapped_column(Numeric(14, 2))
     disbursement_date: Mapped[date | None] = mapped_column(Date)
     pending_with: Mapped[str | None] = mapped_column(String(20))
     remarks: Mapped[str | None] = mapped_column(Text)
     stage_history: Mapped[list | None] = mapped_column(JSONB)
+    reconciliation_status: Mapped[str | None] = mapped_column(String(20))
 
 
 class SyndicationTracker(RegisterBase):
@@ -101,6 +106,7 @@ class SyndicationTracker(RegisterBase):
     pending_with: Mapped[str | None] = mapped_column(String(20))
     remarks: Mapped[str | None] = mapped_column(Text)
     status_history: Mapped[list | None] = mapped_column(JSONB)
+    reconciliation_status: Mapped[str | None] = mapped_column(String(20))
 
     # Nested lenders, embedded inline in the read model so the ATLAS syndication row is
     # shape-compatible (lenders[] alongside the tracker). Excludes soft-deleted rows;
@@ -168,5 +174,7 @@ class AssetMonetisation(RegisterBase):
     investor: Mapped[str | None] = mapped_column(Text)
     investor_type: Mapped[str | None] = mapped_column(String(60))
     status: Mapped[str | None] = mapped_column(String(40))
+    status_history: Mapped[list | None] = mapped_column(JSONB)
+    reconciliation_status: Mapped[str | None] = mapped_column(String(20))
     teaser_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)

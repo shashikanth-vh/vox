@@ -29,7 +29,8 @@ REF_VALUES: dict[str, list[str]] = {
     "Person Role": ["Admin", "Management", "RM", "Analyst", "Ops"],
     "Lending Stage": [
         "Data Awaited", "Diligence", "Note Circulated", "Sanctioned",
-        "Documentation", "Disbursed", "Rejected", "On Hold",
+        "CP/CS Completed", "Ready for Disbursement", "Handed Over to Advaya",
+        "Rejected", "On Hold",
     ],
     "Status of Proposal": [
         "Deal Sourced", "Docs Pending", "IM in Prep", "IM Circulated",
@@ -79,7 +80,7 @@ REF_VALUES: dict[str, list[str]] = {
     # Generic + role pickers the ATLAS UI expects from /v1/ref (RM/Analyst can also be
     # served live from /v1/people?role=…; both are supported).
     "Yes/No": ["Yes", "No"],
-    "Terminal (Lending)": ["Disbursed", "Rejected", "On Hold"],
+    "Terminal (Lending)": ["Handed Over to Advaya", "Rejected", "On Hold"],
     "RM": ["Chetan", "Shubh"],
     "Analyst": ["Archana", "Prateek", "Bhavana", "Nirmala", "Grishma"],
     # Backing for the new financials / covenant fields.

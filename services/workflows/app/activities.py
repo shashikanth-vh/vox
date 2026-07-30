@@ -19,18 +19,70 @@ import re
 from typing import Any
 
 from evam_register_client import AsyncRegisterClient
+from evam_register_client.config import RegisterClientConfig
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from app.config import get_settings
-from app.types import InteractionInput, LeadConversionInput, VoxTouchpoint
+from app.types import (
+    CallerContext,
+    InteractionInput,
+    LeadConversionInput,
+    VoxTouchpoint,
+)
 
 
-def _client() -> AsyncRegisterClient:
+def _as_caller(caller: Any) -> CallerContext | None:
+    """Normalise an activity's ``caller`` argument to a ``CallerContext``.
+
+    Temporal's payload converter cannot always resolve the ``CallerContext`` annotation (with
+    ``from __future__ import annotations`` every hint is a string), and then it hands the activity
+    a plain ``dict`` instead — which used to blow up with
+    ``AttributeError: 'dict' object has no attribute 'tenant'`` on the FIRST delegated call and
+    stall the whole run in retries. Accept either shape, and ignore unknown keys so an older or
+    newer payload can never break a running worker.
+    """
+    if caller is None or isinstance(caller, CallerContext):
+        return caller
+    if isinstance(caller, dict):
+        allowed = CallerContext.__dataclass_fields__
+        return CallerContext(**{k: v for k, v in caller.items() if k in allowed})
+    return None
+
+
+def _client(caller: CallerContext | None = None) -> AsyncRegisterClient:
+    """A Register client for THIS activity.
+
+    * **tenant** — always the CALLER's tenant when present (never the fixed default), so a
+      tenant-B workflow can never operate against tenant A's data.
+    * **delegation** — when the signed-context channel is configured and the workflow carries
+      a known human, the worker re-mints a short-lived signed context (identity + the live
+      grant) so the Register authorizes the activity's reads/writes as the HUMAN, with their
+      scope, instead of the worker's full service grant. The token is minted fresh per
+      activity and used immediately over the internal worker→Register hop; it is left route-
+      UNBOUND (an activity legitimately does a read then a write in the same client), which
+      is the deliberate difference from the gateway hop where a token is route-bound in
+      transit. No signing configured (dev) → the service key, still tenant-scoped.
+    """
+    caller = _as_caller(caller)
     s = get_settings()
-    return AsyncRegisterClient(
-        s.register_base_url, s.register_api_key,
-        tenant=s.register_tenant, actor=s.register_actor,
-    )
+    tenant = (caller.tenant if caller and caller.tenant else s.register_tenant)
+    extra: dict[str, str] | None = None
+    if s.internal_signing_secret and caller and caller.email:
+        from evam_backend_core.internal_token import mint_internal_context
+        extra = {"X-Internal-Context": mint_internal_context(
+            signing_key=s.internal_signing_secret,
+            algorithm=s.internal_signing_algorithm,
+            ttl_seconds=s.internal_token_ttl_seconds, tenant=tenant,
+            email=caller.email, user_id=caller.user_id or caller.email,
+            roles=list(caller.roles), report_ids=list(caller.report_ids),
+            report_emails=list(caller.report_emails),
+            effective_views=caller.effective_views,
+            effective_operations=caller.effective_operations,
+            matrix_version=0, decision=caller.decision)}
+    return AsyncRegisterClient(config=RegisterClientConfig(
+        base_url=s.register_base_url, api_key=s.register_api_key,
+        tenant=tenant, actor=s.register_actor, extra_headers=extra or {}))
 
 
 # --------------------------------------------------------------------------- #
@@ -58,7 +110,7 @@ def _entity_code(name: str) -> str:
 @activity.defn
 async def write_interaction(inp: InteractionInput, idempotency_key: str) -> dict[str, Any]:
     """Record the interaction against its entity. Idempotent on ``idempotency_key``."""
-    async with _client() as reg:
+    async with _client(inp.caller) as reg:
         return await reg.log_interaction(
             "Entity", inp.entity_id, inp.interaction_type,
             source=inp.source, summary=inp.summary, notes=inp.notes,
@@ -69,9 +121,10 @@ async def write_interaction(inp: InteractionInput, idempotency_key: str) -> dict
 
 
 @activity.defn
-async def fetch_dossier(entity_id: str) -> dict[str, Any]:
+async def fetch_dossier(entity_id: str,
+                        caller: CallerContext | None = None) -> dict[str, Any]:
     """Read the entity's 360° dossier (deals, financials, interactions, open intel)."""
-    async with _client() as reg:
+    async with _client(caller) as reg:
         return await reg.dossier(entity_id, request_id=activity.info().workflow_id)
 
 
@@ -79,12 +132,13 @@ async def fetch_dossier(entity_id: str) -> dict[str, Any]:
 # VOX touchpoint activities
 # --------------------------------------------------------------------------- #
 @activity.defn
-async def resolve_entity(company_name: str) -> dict[str, Any] | None:
+async def resolve_entity(company_name: str,
+                         caller: CallerContext | None = None) -> dict[str, Any] | None:
     """Find the company by CANONICAL name: search the Register, then compare
     suffix-stripped lowercase names so 'EcoSoch Solar' matches 'EcoSoch Solar Pvt Ltd'.
     Returns the entity row, or None when the company is genuinely new."""
     wanted = _canonical(company_name)
-    async with _client() as reg:
+    async with _client(caller) as reg:
         page = await reg.list("entities", q=company_name.strip()[:60], limit=50,
                               request_id=activity.info().workflow_id)
         for row in page.items:
@@ -107,7 +161,7 @@ async def resolve_entity(company_name: str) -> dict[str, Any] | None:
 async def create_entity(tp: VoxTouchpoint, idempotency_key: str) -> dict[str, Any]:
     """The 'new company' scenario: register the company from the capture's hints."""
     name = (tp.company_name or "").strip()
-    async with _client() as reg:
+    async with _client(tp.caller) as reg:
         return await reg.create("entities", {
             "code": _entity_code(name),
             "legal_name": name,
@@ -122,9 +176,10 @@ async def create_entity(tp: VoxTouchpoint, idempotency_key: str) -> dict[str, An
 
 
 @activity.defn
-async def find_active_lead(entity_id: str) -> dict[str, Any] | None:
+async def find_active_lead(entity_id: str,
+                           caller: CallerContext | None = None) -> dict[str, Any] | None:
     """The company's active lead, newest first, or None."""
-    async with _client() as reg:
+    async with _client(caller) as reg:
         page = await reg.list("leads", entity_id=entity_id, status="Active", limit=1,
                               request_id=activity.info().workflow_id)
         return page.items[0] if page.items else None
@@ -135,7 +190,7 @@ async def create_lead(tp: VoxTouchpoint, entity_id: str,
                       idempotency_key: str) -> dict[str, Any]:
     """Open a lead for the company (new-company scenario, or existing company with no
     active lead). The assigned RM defaults to the acting RM who captured it."""
-    async with _client() as reg:
+    async with _client(tp.caller) as reg:
         return await reg.create("leads", {
             "entity_id": entity_id,
             "company": (tp.company_name or "").strip() or "(unknown)",
@@ -164,7 +219,7 @@ async def update_lead_touch(lead_id: str, tp: VoxTouchpoint) -> dict[str, Any]:
         fields["next_action"] = tp.next_action
     if tp.next_action_date:
         fields["next_action_date"] = tp.next_action_date
-    async with _client() as reg:
+    async with _client(tp.caller) as reg:
         lead = await reg.get("leads", lead_id, request_id=activity.info().workflow_id)
         if not lead.get("rm") and (tp.assigned_rm or tp.performed_by):
             fields["rm"] = tp.assigned_rm or tp.performed_by
@@ -175,14 +230,15 @@ async def update_lead_touch(lead_id: str, tp: VoxTouchpoint) -> dict[str, Any]:
 
 
 @activity.defn
-async def assign_lead_owner(lead_id: str, user_id: str) -> dict[str, Any]:
+async def assign_lead_owner(lead_id: str, user_id: str,
+                            caller: CallerContext | None = None) -> dict[str, Any]:
     """Create the BDRM primary-owner assignment for a VOX-created lead, so the actual
     RM owns it (scoped lists/reads/writes work) — not just the ``rm`` name string.
 
     Idempotent: the assignments endpoint doesn't honour the Idempotency-Key header, so a
     Temporal retry after a lost response could otherwise hit the active-assignment unique
     constraint. We first check for an existing active assignment and return it."""
-    async with _client() as reg:
+    async with _client(caller) as reg:
         page = await reg.list("assignments", subject_type="Lead", subject_id=lead_id,
                               request_id=activity.info().workflow_id)
         for row in page.items:
@@ -210,7 +266,7 @@ async def log_touchpoint(tp: VoxTouchpoint, entity_id: str, lead_id: str | None,
         # interactions with meta.calendar.status == "pending" and writes back the event id.
         meta["calendar"] = {"status": "pending", "date": tp.next_meeting_date,
                             "title": tp.next_action or "Follow-up meeting"}
-    async with _client() as reg:
+    async with _client(tp.caller) as reg:
         return await reg.log_interaction(
             "Entity", entity_id, tp.interaction_type,
             source="VOX",
@@ -236,29 +292,111 @@ async def log_touchpoint(tp: VoxTouchpoint, entity_id: str, lead_id: str | None,
 # --------------------------------------------------------------------------- #
 # Lead-conversion activities
 # --------------------------------------------------------------------------- #
+async def _read_decision_record(workflow_id: str, kind: str,
+                                tenant: str) -> dict[str, Any] | None:
+    """Fetch the IMMUTABLE decision from the dedicated single-winner decision resource and
+    confirm it is genuinely for THIS decision. Read as the workflow service principal, scoped
+    to the run's tenant (RLS enforces isolation).
+
+    CRITICAL failure semantics (P0): a genuine ``NotFoundError`` means no decision was ever
+    recorded — return None (invalid reference). Any OTHER error — a transport failure, 429 or
+    5xx while the Register is briefly unavailable — is RE-RAISED, so Temporal retries the
+    activity WITHOUT consuming the decision. Swallowing those would silently discard a
+    legitimate, already-acknowledged decision."""
+    from evam_register_client.errors import NotFoundError
+
+    async with _client(CallerContext(tenant=tenant)) as reg:
+        try:
+            rec = await reg.get_decision(workflow_id, request_id=workflow_id)
+        except NotFoundError:
+            return None   # no decision recorded → invalid reference
+        # Every other error (transport / 429 / 5xx / conflict) propagates → Temporal retries.
+    if rec.get("workflow_id") == workflow_id and rec.get("decision") == kind:
+        return rec
+    return None
+
+
 @activity.defn
-async def convert_lead_txn(inp: LeadConversionInput, idempotency_key: str) -> dict[str, Any]:
+async def verify_decision(kind: str, by: str, approval_token: str, workflow_id: str,
+                          lead_id: str = "", tenant: str = "",
+                          decision_ref: str = "") -> dict[str, Any]:
+    """Validate a lead-conversion approve/reject signal BEFORE the workflow lets it count, and
+    return the AUTHORITATIVE decision. Fail-closed against a DIRECT Temporal signal — for BOTH
+    approve and reject.
+
+    The single-winner decision resource is the SOLE authority. The worker always derives the
+    outcome, the approver identity AND the note from the persisted record — NEVER from the
+    signal's (latest-caller) token or note. This means that when two approvers submit the same
+    outcome, the run and the database always name the SAME (first) approver and note, and there
+    is no dependence on a short-lived bearer token at all.
+
+    Failure semantics (P0): the record read distinguishes a genuine ``NotFound`` (no decision
+    → ``valid: false``, discard the spoofed/premature signal) from a transient transport / 429
+    / 5xx error, which RAISES so Temporal retries WITHOUT consuming the decision. In dev (no
+    signing) the signal is trusted, as elsewhere."""
+    s = get_settings()
+    if not s.internal_signing_secret:
+        return {"valid": True, "email": by, "tenant": tenant, "user_id": by,
+                "roles": [], "operations": {}, "views": {}, "note": None, "decision": kind}
+
+    # The persisted single-winner record is the authority for identity, note AND outcome. A
+    # transient Register failure RAISES from here (Temporal retries; decision not consumed).
+    rec = await _read_decision_record(workflow_id, kind, tenant or s.register_tenant)
+    if rec is None:
+        return {"valid": False, "reason": "no durable decision record for this decision"}
+    return {"valid": True, "email": rec.get("decided_by") or by,
+            "tenant": tenant, "user_id": rec.get("decided_by_id") or by,
+            "roles": list(rec.get("roles", [])), "operations": rec.get("operations", {}),
+            "views": rec.get("views", {}), "note": rec.get("note"), "decision": kind}
+
+
+@activity.defn
+async def convert_lead_txn(inp: LeadConversionInput, idempotency_key: str,
+                           approver: CallerContext | None = None,
+                           approved_by: str | None = None) -> dict[str, Any]:
     """Apply the whole conversion in ONE Register transaction (deal + product lines +
-    lead Converted). All-or-nothing on the server — the workflow no longer creates rows
-    step-by-step and compensate on failure."""
-    async with _client() as reg:
+    lead Converted, PLUS the RM/analyst line assignments). All-or-nothing on the server.
+
+    AUTHORIZATION: the workflow passes the VERIFIED APPROVER context (already validated by
+    ``verify_decision`` at decision time and recorded durably in history — so this does NOT
+    depend on a short-lived JWT surviving a worker outage). It is authorized as the approver,
+    NEVER the requester.
+
+    FAIL CLOSED: in production (signing configured) a conversion with no verified approver is
+    REFUSED — there is no fallback to ``inp.caller`` (the original requester), which would let
+    a run convert on the requester's own authority and defeat the human-in-the-loop control.
+    Only in dev (no signing) does the requester context stand in."""
+    s = get_settings()
+    approver_ok = approver is not None and bool(approver.email)
+    if s.internal_signing_secret and not approver_ok:
+        raise ApplicationError(
+            "Refusing to convert without a verified approver identity.",
+            non_retryable=True)
+    caller = approver if approver_ok else inp.caller
+    # Provenance = the VERIFIED approver identity (from the token). approved_by is a dev-only
+    # fallback; it is never used to authorize, only to label.
+    provenance = (approver.email if approver_ok and approver else approved_by)
+    async with _client(caller) as reg:
         return await reg.convert_lead(
             inp.lead_id, is_lending=inp.is_lending, is_syndication=inp.is_syndication,
             is_asset_mon=inp.is_asset_mon, product_type=inp.product_type,
-            amount_cr=inp.amount_cr, rm=inp.rm, analyst=inp.analyst, note=inp.note,
+            amount_cr=inp.amount_cr, rm=inp.rm, analyst=inp.analyst,
+            rm_id=inp.rm_id, analyst_id=inp.analyst_id, note=inp.note,
+            approved_by=provenance,
             idempotency_key=idempotency_key, request_id=activity.info().workflow_id)
 
 
 @activity.defn
-async def get_lead(lead_id: str) -> dict[str, Any]:
-    async with _client() as reg:
+async def get_lead(lead_id: str,
+                   caller: CallerContext | None = None) -> dict[str, Any]:
+    async with _client(caller) as reg:
         return await reg.get("leads", lead_id, request_id=activity.info().workflow_id)
 
 
 @activity.defn
 async def create_deal(inp: LeadConversionInput, entity_id: str,
                       idempotency_key: str) -> dict[str, Any]:
-    async with _client() as reg:
+    async with _client(inp.caller) as reg:
         return await reg.create("deals", {
             "entity_id": entity_id,
             "product_type": inp.product_type,
@@ -286,14 +424,15 @@ async def create_line(resource: str, entity_id: str, deal_id: str,
         body |= {"amount_cr": inp.amount_cr, "status": "Deal Sourced"}
     elif resource == "asset-monetisation":
         body |= {"status": "Teaser Prepared"}
-    async with _client() as reg:
+    async with _client(inp.caller) as reg:
         return await reg.create(resource, body, idempotency_key=idempotency_key,
                                 request_id=activity.info().workflow_id)
 
 
 @activity.defn
-async def mark_lead_converted(lead_id: str, deal_id: str, decided_by: str) -> dict[str, Any]:
-    async with _client() as reg:
+async def mark_lead_converted(lead_id: str, deal_id: str, decided_by: str,
+                              caller: CallerContext | None = None) -> dict[str, Any]:
+    async with _client(caller) as reg:
         return await reg.update("leads", lead_id, {
             "status": "Converted",
             "converted_deal_id": deal_id,
@@ -302,22 +441,186 @@ async def mark_lead_converted(lead_id: str, deal_id: str, decided_by: str) -> di
 
 
 @activity.defn
-async def soft_delete_row(resource: str, obj_id: str) -> None:
+async def soft_delete_row(resource: str, obj_id: str,
+                          caller: CallerContext | None = None) -> None:
     """Compensation: undo a row created earlier in a failed conversion. The Register's
     delete is soft (restorable) and idempotent enough for a rollback path."""
-    async with _client() as reg:
+    async with _client(caller) as reg:
         try:
             await reg.delete(resource, obj_id, request_id=activity.info().workflow_id)
         except Exception:  # noqa: BLE001 - best-effort rollback; already-gone is fine
             pass
 
 
+# --------------------------------------------------------------------------- #
+# Business-lifecycle activities — evidence, stage advance, qualification, documents
+# --------------------------------------------------------------------------- #
 @activity.defn
-async def mark_lead_note(lead_id: str, note: str) -> dict[str, Any]:
-    """Record a rejection/timeout outcome on the lead without changing its status."""
-    async with _client() as reg:
+async def attach_evidence(subject_type: str, subject_id: str, evidence_kind: str,
+                          reference: str, sha256: str | None = None, note: str | None = None,
+                          caller: CallerContext | None = None,
+                          decision_ref: str | None = None) -> dict[str, Any]:
+    """File an IMMUTABLE governance-evidence record for a subject (a committee approval, a sanction
+    letter, an executed agreement, a qualification memo). This is the artefact the Register's
+    evidence gate checks before it will accept a sensitive transition.
+
+    The Register AUTHORISES this per kind (the workflow service holds the attach operations), so a
+    governance kind carries the provenance the Register demands: this run's ``workflow_id`` +
+    ``run_id`` and a ``decision_ref`` (the committee-decision reference), plus an integrity digest
+    (derived from the reference when the caller didn't supply one).
+
+    IDEMPOTENT: evidence is append-only (a retry must not file a second copy). We first list the
+    subject's evidence and return the existing record if this exact (kind, reference) is already on
+    file, so a Temporal retry after a lost response never duplicates it."""
+    info = activity.info()
+    digest = sha256 or hashlib.sha256((reference or "").encode()).hexdigest()
+    async with _client(caller) as reg:
+        page = await reg.list("evidence", subject_type=subject_type, subject_id=subject_id,
+                              request_id=info.workflow_id)
+        for row in page.items:
+            if row.get("evidence_kind") == evidence_kind and row.get("reference") == reference:
+                return row
+        return await reg.create("evidence", {
+            "subject_type": subject_type, "subject_id": subject_id,
+            "evidence_kind": evidence_kind, "reference": reference,
+            "sha256": digest, "note": note,
+            "workflow_id": info.workflow_id, "run_id": info.workflow_run_id,
+            "decision_ref": decision_ref or info.workflow_id,
+        }, request_id=info.workflow_id)
+
+
+@activity.defn
+async def verify_committee_decision(deal_id: str,
+                                    caller: CallerContext | None = None) -> dict[str, Any]:
+    """Read the AUTHORITATIVE Credit Committee decision the orchestrator persisted for THIS run
+    (single-winner, fresh-authorized, provenance server-set) and derive the outcome, approver, note
+    AND references from it — NEVER from the untrusted Temporal signal.
+
+    FAIL CLOSED: a missing record (a spoofed / direct Temporal signal, or one arriving before the
+    orchestrator persisted the decision) returns ``valid=False`` so the workflow ignores the wake-up
+    and keeps waiting; a record for a DIFFERENT subject, or with no terminal outcome, is likewise
+    rejected. A genuine ``NotFound`` distinguishes "no decision" from a transient Register outage:
+    only the former returns invalid; any other error propagates so Temporal retries."""
+    from evam_register_client.errors import NotFoundError
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        try:
+            rec = await reg.get_decision(wf_id, request_id=wf_id)
+        except NotFoundError:
+            return {"valid": False, "reason": "no committee decision recorded for this run"}
+        # Any other error (transport / 5xx / 429) propagates → Temporal retries, decision intact.
+    if rec.get("subject_type") != "Deal" or str(rec.get("subject_id")) != str(deal_id):
+        return {"valid": False, "reason": "committee decision is for a different subject"}
+    if rec.get("decision") not in ("Approved", "Rejected"):
+        return {"valid": False, "reason": "committee decision has no terminal outcome"}
+    return {"valid": True, "outcome": rec.get("decision"), "decided_by": rec.get("decided_by"),
+            "note": rec.get("note"),
+            "committee_reference": rec.get("committee_reference"),
+            "sanction_letter_reference": rec.get("sanction_letter_reference")}
+
+
+@activity.defn
+async def advance_stage(resource: str, obj_id: str, stage_field: str, stage_value: str,
+                        extra: dict[str, Any] | None = None,
+                        caller: CallerContext | None = None) -> dict[str, Any]:
+    """Advance a line's lifecycle stage through the Register's normal, policy-enforcing update API
+    (never a side-door write) — so ordered-transition, mandatory-field, field-lock and EVIDENCE
+    gates all apply. ``extra`` carries the mandatory fields a target stage needs (e.g. product_type
+    + rm for Sanctioned). Idempotent: re-applying the same target stage is a no-op the Register
+    accepts."""
+    body: dict[str, Any] = {stage_field: stage_value, **(extra or {})}
+    async with _client(caller) as reg:
+        lead = await reg.get(resource, obj_id, request_id=activity.info().workflow_id)
+        if lead.get(stage_field) == stage_value and not extra:
+            return lead   # already there — nothing to do
+        return await reg.update(resource, obj_id, body,
+                                request_id=activity.info().workflow_id)
+
+
+@activity.defn
+async def find_lines_for_deal(resource: str, deal_id: str,
+                              caller: CallerContext | None = None) -> list[dict[str, Any]]:
+    """The product lines of ``resource`` (lending / syndication / asset-monetisation) that belong
+    to ``deal_id``. ``deal_id`` is a whitelisted filter on each line resource."""
+    async with _client(caller) as reg:
+        page = await reg.list(resource, deal_id=str(deal_id), limit=50,
+                              request_id=activity.info().workflow_id)
+        return list(page.items)
+
+
+@activity.defn
+async def get_resource(resource: str, obj_id: str,
+                       caller: CallerContext | None = None) -> dict[str, Any]:
+    async with _client(caller) as reg:
+        return await reg.get(resource, obj_id, request_id=activity.info().workflow_id)
+
+
+@activity.defn
+async def prepare_cpcs_checklist(lending_id: str, payload: dict[str, Any],
+                                 caller: CallerContext | None = None) -> dict[str, Any]:
+    """Prepare (as the MAKER) the authoritative CP/CS checklist in the Register. The Register
+    validates CP/CS structure + waiver / CS-deferment controls; a DIFFERENT checker approves it
+    afterwards, and only then can cp_cs_completion be minted from it."""
+    async with _client(caller) as reg:
+        return await reg.create("internal/cpcs-checklists", {"lending_id": lending_id, **payload},
+                                request_id=activity.info().workflow_id)
+
+
+@activity.defn
+async def create_handover_package(lending_id: str, package: dict[str, Any],
+                                  caller: CallerContext | None = None) -> dict[str, Any]:
+    """Create the durable, immutable Advaya handover PACKAGE in the Register and advance the line to
+    'Handed Over to Advaya' — TRANSACTIONALLY, so the stage moves only after the snapshot is durably
+    written. Authoritative amounts (facility, proposed drawdown) are read from the Lending row
+    server-side; ``package`` carries only the handover metadata (executed-doc refs, package
+    ref/digest, CP/CS checklist version, delivery method/recipient, initiator/approver, note).
+    Idempotent per Lending line — a retry returns the existing package."""
+    info = activity.info()
+    async with _client(caller) as reg:
+        return await reg.create("internal/handover-packages",
+                                {"lending_id": lending_id, **package},
+                                request_id=info.workflow_id)
+
+
+@activity.defn
+async def record_advaya_handoff(handoff_key: str, lending_id: str, payload_sha256: str,
+                                status: str, acknowledgement_id: str | None = None,
+                                caller: CallerContext | None = None) -> dict[str, Any]:
+    """Record the authoritative, immutable, single-winner Advaya-handoff OUTCOME in the Register.
+
+    This is the FUTURE-Advaya-integration hook: when a real Advaya round-trip exists, its accepted
+    response is recorded here and the ``advaya_acknowledgement`` evidence is VERIFIED against it
+    before a line may reach 'Disbursement Pending'. It is NOT called on the current handover path
+    (PRISM stops at 'Handed Over to Advaya' — no Advaya call, no fabricated acceptance). Idempotent:
+    a replay of the same outcome returns the original; a contradictory one is refused (409)."""
+    info = activity.info()
+    async with _client(caller) as reg:
+        return await reg.create("internal/advaya-handoffs", {
+            "handoff_key": handoff_key, "lending_id": lending_id,
+            "payload_sha256": payload_sha256, "status": status,
+            "acknowledgement_id": acknowledgement_id,
+            "workflow_id": info.workflow_id, "run_id": info.workflow_run_id,
+        }, request_id=info.workflow_id)
+
+
+@activity.defn
+async def mark_lead_note(lead_id: str, note: str,
+                         caller: CallerContext | None = None) -> dict[str, Any]:
+    """Record a rejection/timeout outcome on the lead without changing its status.
+
+    IDEMPOTENT: this runs under the durable (unlimited-retry) policy, so it may execute more
+    than once. It appends the note only if that exact line is not already present, so a retry
+    (or a re-signalled outcome) never double-appends.
+
+    CONCURRENCY-SAFE: the update carries the row's ``version`` as an If-Match precondition, so
+    a concurrent edit to the lead's notes cannot be silently overwritten (last-writer-wins) —
+    a version conflict raises and Temporal retries against the fresh row."""
+    async with _client(caller) as reg:
         lead = await reg.get("leads", lead_id, request_id=activity.info().workflow_id)
         existing = (lead.get("notes") or "").strip()
+        if note.strip() in existing:
+            return lead   # already recorded — nothing to do (idempotent)
         merged = f"{existing}\n{note}".strip() if existing else note
         return await reg.update("leads", lead_id, {"notes": merged},
+                                expected_version=lead.get("version"),
                                 request_id=activity.info().workflow_id)

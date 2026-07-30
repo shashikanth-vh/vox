@@ -28,7 +28,7 @@ flowchart TB
   end
   IDP["OIDC IdP<br/>Dex · Auth0 · Entra"]
   subgraph EDGE["Public edge"]
-    NG["NGINX<br/>/ · /atlas · /vocx · /pulse · /orchestrator"]
+    NG["NGINX · HTTPS :8443<br/>terminates TLS · rate-limit<br/>301 from :8080 · forwards ALL to gateway"]
   end
   subgraph MESH["Internal service mesh"]
     GW["Gateway<br/>verify OIDC · resolve+cache<br/>operation gate · mint signed context<br/>strip forged headers"]
@@ -48,9 +48,9 @@ flowchart TB
   API --> NG
   FLD --> NG
   UI -. login .-> IDP
-  NG --> GW
-  NG -. /atlas .-> AT
-  NG -. /orchestrator .-> OR
+  NG -->|EVERYTHING| GW
+  GW -. /atlas · injects scoped key .-> AT
+  GW -. /orchestrator · injects scoped key .-> OR
   GW -. verify token .-> IDP
   GW -->|resolve · cached| AC
   GW -->|signed X-Internal-Context| RG
@@ -252,9 +252,9 @@ flowchart TB
     PG[("postgres · :5432")]
     MO[("minio · :9000 / :9001")]
   end
-  NG --> GW
-  NG -. /atlas .-> AT
-  NG -. /orchestrator .-> OR
+  NG -->|EVERYTHING| GW
+  GW -. /atlas · injects scoped key .-> AT
+  GW -. /orchestrator · injects scoped key .-> OR
   GW --> AC
   GW -->|signed context| RG
   AT --> RG
@@ -317,3 +317,87 @@ Postgres + S3; the bundled charts are for a self-contained install.
 > Rendered, theme-aware version of these diagrams: publish `docs/ARCHITECTURE.md` locally, or
 > see the shared artifact deck. Green rungs of the ladder are enforced at the gateway and
 > re-verified at the Register; data-adjacent rungs live next to the data.
+
+---
+
+## 6. VocX identity — capture runs as the USER, never as a service
+
+VocX is **a capture surface, not an authority**. It is reached one of two ways, and the
+authorization story must be identical in both:
+
+- **Shape A — a button inside the PRISM UI.** The user is already signed in, so the browser
+  session already holds the verified token and the resolved roles. Nothing new has to be
+  invented: the call carries the user's bearer exactly like any other PRISM action.
+- **Shape B — a standalone field app.** The user signs in to that app against the **same OIDC
+  issuer / audience**, and VocX verifies the incoming token and forwards the verified identity.
+
+```mermaid
+flowchart TB
+  subgraph A["Shape A — VocX button in the PRISM UI"]
+    U1["RM in PRISM UI<br/>already signed in · roles resolved"]
+    V1["VocX capture<br/>transcribe · extract · PROPOSE"]
+    RV1["RM reviews + APPROVES the proposal"]
+  end
+  subgraph B["Shape B — standalone VocX app"]
+    U2["RM in field app"]
+    V2["VocX capture<br/>verifies token · same issuer"]
+  end
+  ED["NGINX edge :8080"]
+  GW["Gateway<br/>verify token · resolve roles<br/>operation gate · mint signed context"]
+  OR["Orchestrator / Temporal<br/>governed transitions only<br/>acts AS the approving user"]
+  RG["Register<br/>tenant + role + RECORD SCOPE<br/>+ lifecycle policy"]
+  PG[("PostgreSQL · RLS<br/>one transaction")]
+
+  U1 --> V1 --> RV1
+  U2 --> V2
+  RV1 -->|"user's bearer"| ED
+  V2 -->|"user's bearer"| ED
+  ED --> GW
+  GW -->|"direct field update<br/>+ log interaction"| RG
+  GW -->|"qualification · conversion<br/>governed status change"| OR
+  OR -->|"signed context AS the user"| RG
+  RG --> PG
+```
+
+### The decision is the USER's role — per action, per record
+
+| VocX outcome | Operation checked | Register behaviour |
+|---|---|---|
+| New company + new lead | `create_client` + `add_lead` | Create both, then log the interaction — one transaction |
+| Existing company, new lead | `add_lead` | Allowed within the caller's tenant + scope |
+| Update an existing lead | `edit_lead` (**S** for BDRM) | Allowed only for a lead **in that RM's scope**; another RM's lead → **403** |
+| Log interaction only | `log_interaction` (**S** for BDRM) | Requires access to the linked company/lead |
+| Qualification / conversion / governed status change | transition-specific roles | **Must** go through the Orchestrator/Temporal workflow; a direct `PATCH` is refused |
+
+Because Shape A already has the signed-in user, the RM-scope example works naturally:
+VocX matches a lead **assigned to that RM** → update proceeds; it matches **another RM's**
+lead → the Register returns 403 and the workflow must request reassignment or an authorized
+approval; it matches **no lead** → creation proceeds only if the caller holds `add_lead`.
+
+### The rule
+
+> **VocX proposes. The user approves. The Register decides and writes.**
+
+Neither VocX nor Temporal may write user-originated data under an unrestricted service
+identity. They propagate the **original user identity, tenant, roles, correlation id and
+idempotency key**; the Register makes the final authorization decision and owns the
+transaction. A named service principal (`SERVICE_GRANTS`) is legitimate **only for unattended
+work** — PULSE news scans, system reconciliation — never as a stand-in for a person.
+
+### Implementation status (be precise about this)
+
+| Requirement | State |
+|---|---|
+| Human calls: tenant + role + record scope + lifecycle enforced at the Register | **Done** — signed internal context, `_ensure_subject_scope`, RLS, policy engine |
+| Governed transitions confined to workflows (direct status `PATCH` fail-closed) | **Done** — `ALLOWED_TRANSITIONS`; conversion only via `/convert` |
+| Correlation id + idempotency key propagated on every Register call | **Done** — `evam-register-client` sends `X-Request-ID` + `Idempotency-Key` |
+| Orchestrator acts **as the approving user** for governed operations | **Done for CP/CS + handover** (`_register_post_as` mints the user's signed context) |
+| VocX forwards the verified user identity to the Register | **GAP** — VocX writes as `svc_vox`; the user is not propagated, so record scope cannot bind |
+| VocX touchpoint has an explicit user review/approve step before the write | **GAP** — only conversion has an approval gate today |
+
+Closing the two gaps is a contained change, because Shape A means the identity is already in
+hand at the moment of the call: carry the caller's verified identity into the workflow input,
+have the activity mint the signed context **for that user** (the same
+`mint_internal_context` the gateway and orchestrator already use) instead of using the bare
+service key, and add the review/approve signal to the touchpoint workflow. `svc_vox` then
+keeps only genuinely unattended grants.

@@ -52,6 +52,24 @@ class Settings(BaseServiceSettings):
     # ---- Behaviour -------------------------------------------------------
     idempotency_ttl_hours: int = 48
 
+    # ---- Advaya integration (DEFAULT OFF) --------------------------------
+    # PRISM's terminal for the current product scope is 'Handed Over to Advaya'; there is no Advaya
+    # integration. When (and only when) a real acknowledgement channel exists, set this on to
+    # re-enable the dormant path: the internal advaya-handoffs router is registered, the workflow
+    # service is granted attach_advaya_evidence, and the onward disbursement states/gate become
+    # reachable. Enabling it WITHOUT a configured endpoint is a misconfiguration and is refused at
+    # startup (see ``validate_startup``), so the path can never be half-enabled.
+    advaya_integration_enabled: bool = False
+    advaya_integration_url: str = ""
+
+    def validate_startup(self) -> None:
+        """Fail closed on an incomplete future-integration configuration. Called at app startup."""
+        if self.advaya_integration_enabled and not self.advaya_integration_url.strip():
+            raise ValueError(
+                "REGISTER_ADVAYA_INTEGRATION_ENABLED is on but REGISTER_ADVAYA_INTEGRATION_URL is "
+                "empty — the Advaya acknowledgement path may not be enabled without a configured "
+                "endpoint.")
+
     # ---- User management / RBAC (ATLAS RBAC spec) -------------------------
     # Users' e-mail addresses must belong to this domain (spec: SSO integrity).
     user_email_domain: str = "evamfinance.com"
@@ -72,6 +90,15 @@ class Settings(BaseServiceSettings):
     # this value as the shared secret; RS256 uses it as the PEM PUBLIC key.
     internal_signing_secret: str = ""
     internal_signing_algorithm: str = "HS256"
+
+    # ---- Access service (assignee verification) -------------------------
+    # When set, the Register VERIFIES an assignee's identity + role against the Access
+    # service before placing an assignment (so a service can't assign an arbitrary UUID,
+    # nor a role the assignee doesn't hold). Empty (dev) falls back to the local Person
+    # roster. The api key is presented to Access; the tenant code scopes the lookup.
+    access_url: str = ""
+    access_api_key: str = "dev-local-key"
+    access_verify_ttl_s: float = 30.0
 
     # ---- Documents (Data Register) --------------------------------------
     # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.

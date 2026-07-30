@@ -20,7 +20,12 @@ from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.internal_token import mint_internal_context
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
-from evam_backend_core.oidc import OidcError, OidcVerifier, bearer_token
+from evam_backend_core.oidc import (
+    OidcError,
+    TokenVerifier,
+    bearer_token,
+    build_verifier,
+)
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import ORJSONResponse
 
@@ -38,9 +43,49 @@ _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
                          "transfer-encoding", "upgrade", "expect",
                          "x-authz-decision", "x-gateway-auth", "x-user-email",
                          "x-user-id", "x-user-roles", "x-user-report-ids",
-                         "x-user-reports", "x-internal-context"}
+                         "x-user-reports", "x-internal-context",
+                         # The client never presents a backend data-plane key. Strip whatever
+                         # X-API-Key it sent so the gateway injects the correct scoped upstream
+                         # credential itself. (The OIDC bearer in Authorization is preserved —
+                         # ATLAS / orchestrator verify it themselves for defence in depth.)
+                         "x-api-key",
+                         # The tenant-admin credential is injected by the gateway for a
+                         # verified Admin only — a client can never present its own.
+                         "x-admin-key"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
+
+
+def _is_tenant_admin_route(method: str, path: str) -> bool:
+    """A tenant-administration route. The Register gates ALL of these — reads (GET/list)
+    AND writes — on the admin credential, so the gateway injects it for a verified Admin on
+    every method (a missing key on GET /v1/tenants was breaking production tenant reads)."""
+    return method in ("GET", "POST", "PATCH", "DELETE") and (
+        path == "/v1/tenants" or path.startswith("/v1/tenants/"))
+
+
+def _route(settings, full_path: str) -> tuple[str, str, str]:  # noqa: ANN001
+    """Map an inbound path to ``(upstream_base_url, injected_api_key, downstream_path)``.
+
+    The gateway is the single trust boundary: it fronts EVERY service and routes by path
+    prefix, stripping the prefix so each sub-service sees its own paths. A prefix whose URL
+    is unconfigured (empty) falls through to the Register, so a partial deployment still
+    works and nothing is reachable around the gateway."""
+    prefixes = (
+        # Access is the identity/RBAC service. Routing it here makes the WHOLE platform reachable
+        # through the one public door (the ATLAS UI must manage users), while keeping the rule that
+        # a client never presents a backend key — the gateway injects Access's own. Access still
+        # enforces its Admin-only governance writes against the forwarded identity.
+        ("/access", settings.access_url, settings.access_api_key),
+        ("/atlas", settings.atlas_url, settings.atlas_api_key),
+        ("/vocx", settings.vocx_url, settings.vocx_api_key),
+        ("/pulse", settings.pulse_url, settings.pulse_api_key),
+        ("/orchestrator", settings.orchestrator_url, settings.orchestrator_api_key),
+    )
+    for prefix, url, key in prefixes:
+        if url and (full_path == prefix or full_path.startswith(prefix + "/")):
+            return url, key, full_path[len(prefix):] or "/"
+    return settings.register_url, settings.register_api_key, full_path
 
 
 def _problem(status: int, detail: str) -> ORJSONResponse:
@@ -61,9 +106,12 @@ def create_app() -> FastAPI:
         app.state.client = httpx.AsyncClient(timeout=settings.upstream_timeout_s)
         app.state.resolver = Resolver(app.state.client)
         app.state.oidc = (
-            OidcVerifier(settings.oidc_issuer, settings.oidc_audience or None,
-                         app.state.client, email_claim=settings.oidc_email_claim)
-            if settings.oidc_issuer else None)
+            build_verifier(
+                app.state.client, issuer=settings.oidc_issuer,
+                audience=settings.oidc_audience or None,
+                issuers_spec=settings.oidc_issuers,
+                email_claim=settings.oidc_email_claim,
+                allowed_domains=settings.oidc_allowed_domains.split(",")))
         log.info("gateway_started", extra={"register": settings.register_url,
                                            "access": settings.access_url})
         yield
@@ -107,7 +155,8 @@ def create_app() -> FastAPI:
         except AccessUnavailableError as exc:
             return _problem(502, f"Access service unavailable: {exc}")
         fwd_headers = _forward_headers(request, user, decision=None,
-                                       method="GET", path="/v1/assignments")
+                                       method="GET", path="/v1/assignments",
+                                       api_key=settings.register_api_key)
         resp = await request.app.state.client.get(
             f"{settings.register_url}/v1/assignments",
             params={"user_id": user.id},
@@ -125,7 +174,7 @@ def create_app() -> FastAPI:
         comes ONLY from the VERIFIED bearer token — X-User-Email is never trusted, so a
         client cannot assert an identity. Header-trust applies ONLY in pure dev mode
         (no OIDC, no require_auth: a trusted mesh)."""
-        verifier: OidcVerifier | None = request.app.state.oidc
+        verifier: TokenVerifier | None = request.app.state.oidc
         if verifier is None:
             if settings.require_auth:
                 return None  # no token source configured but anonymous is refused
@@ -138,9 +187,20 @@ def create_app() -> FastAPI:
 
     def _forward_headers(request: Request, user, decision: str | None,  # noqa: ANN001
                          *, method: str | None = None, path: str | None = None,
-                         operation: str | None = None) -> dict[str, str]:
+                         operation: str | None = None,
+                         api_key: str | None = None,
+                         admin_key: str | None = None) -> dict[str, str]:
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() not in _SKIP_REQUEST_HEADERS}
+        # Inject the SCOPED service credential for the chosen upstream. The client's own
+        # key was stripped above (_SKIP_REQUEST_HEADERS); each backend accepts only its own
+        # key, so a leaked edge token can never be replayed against the data plane.
+        if api_key:
+            headers["X-API-Key"] = api_key
+        # Inject the tenant-admin credential ONLY for a verified Admin on an admin route —
+        # the browser never holds it (the client's own X-Admin-Key was stripped above).
+        if admin_key:
+            headers["X-Admin-Key"] = admin_key
         if user is not None:
             # Production channel: a SIGNED internal context carrying identity + the LIVE
             # effective matrix, BOUND to the downstream method + path so it cannot be
@@ -180,14 +240,17 @@ def create_app() -> FastAPI:
         method = request.method
         full_path = "/" + path
         tenant = request.headers.get("X-Tenant", settings.default_tenant_code)
-        verifier: OidcVerifier | None = request.app.state.oidc
+        verifier: TokenVerifier | None = request.app.state.oidc
         try:
             email = await _trusted_email(request)
         except OidcError as exc:
             return _problem(401, f"Invalid bearer token: {exc}")
         # OIDC on (or require_auth) → no verified identity means 401, NOT a silent
         # machine-caller passthrough that would let an anonymous request reach the data.
-        if (verifier is not None or settings.require_auth) and not email:
+        # Exception: the explicit exempt list (OAuth redirects arrive bearer-less).
+        exempt = full_path in {p.strip() for p in settings.auth_exempt_paths.split(",")
+                               if p.strip()}
+        if (verifier is not None or settings.require_auth) and not email and not exempt:
             return _problem(401, "Authentication required (Bearer token).")
 
         user = None
@@ -211,16 +274,29 @@ def create_app() -> FastAPI:
                     )
                 decision = "FULL" if granted in ("FULL", "APPROVE") else "SCOPED"
 
-        upstream = f"{settings.register_url}{full_path}"
+        # Route by prefix to the fronted service, strip the prefix, and inject that
+        # upstream's scoped credential. The signed internal context is bound to the
+        # DOWNSTREAM (stripped) method + path so it can't be replayed on another route.
+        base_url, api_key, downstream_path = _route(settings, full_path)
+        upstream = f"{base_url}{downstream_path}"
+        # Inject the tenant-admin credential only for a verified Admin on an admin route,
+        # so the browser never possesses it (the internal trust boundary stays internal).
+        admin_key = None
+        if (settings.register_admin_api_key
+                and _is_tenant_admin_route(method, downstream_path)
+                and user is not None and "Admin" in set(user.roles)):
+            admin_key = settings.register_admin_api_key
         body = await request.body()
         try:
             resp = await request.app.state.client.request(
                 method, upstream, content=body,
                 params=request.query_params,
-                headers=_forward_headers(request, user, decision),
+                headers=_forward_headers(request, user, decision,
+                                         method=method, path=downstream_path,
+                                         api_key=api_key, admin_key=admin_key),
             )
         except httpx.HTTPError as exc:
-            return _problem(502, f"Register unreachable: {exc}")
+            return _problem(502, f"Upstream unreachable: {exc}")
         out_headers = {k: v for k, v in resp.headers.items()
                        if k.lower() not in _SKIP_RESPONSE_HEADERS}
         return Response(content=resp.content, status_code=resp.status_code,

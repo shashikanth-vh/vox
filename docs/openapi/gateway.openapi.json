@@ -1,0 +1,29 @@
+{
+  "info": {
+    "title": "PRISM Gateway",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "description": "The composition pattern in miniature: identity facts from the Access service +\nassignments from the Register, one response for the UI.",
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Identity + effective permissions + active assignments (composed)",
+        "tags": [
+          "Composition"
+        ]
+      }
+    }
+  }
+}

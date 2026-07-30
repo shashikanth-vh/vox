@@ -119,17 +119,18 @@ async def test_stage_history_auto_append(client: AsyncClient):
     lid, ver = r.json()["id"], r.json()["version"]
     assert r.json()["stage_history"] in (None, [])
 
+    # Diligence → Note Circulated is the next ORDERED step in the credit pipeline.
     upd = await client.patch(f"/v1/lending/{lid}", headers={"If-Match": f'"{ver}"'},
-                             json={"stage": "Sanctioned"})
+                             json={"stage": "Note Circulated"})
     assert upd.status_code == 200, upd.text
     hist = upd.json()["stage_history"]
-    assert hist and hist[-1]["from"] == "Diligence" and hist[-1]["to"] == "Sanctioned"
+    assert hist and hist[-1]["from"] == "Diligence" and hist[-1]["to"] == "Note Circulated"
     assert hist[-1]["by"] == "pytest" and "at" in hist[-1]
 
 
 async def test_syndication_embeds_lenders(client: AsyncClient):
     eid = await _entity(client, "SYN1")
-    r = await client.post("/v1/syndication", json={"entity_id": eid, "status": "IM Circulated"})
+    r = await client.post("/v1/syndication", json={"entity_id": eid, "status": "IM in Prep"})
     sid = r.json()["id"]
     # freshly created: empty list embedded
     assert (await client.get(f"/v1/syndication/{sid}")).json()["lenders"] == []

@@ -95,9 +95,24 @@ async def create_assignment(payload: s.AssignmentCreate,
         # carve-out — only the vetted capture/workflow services can.
         authz.enforce_operation(None, "add_employee_assign_role")
 
-    # Subject must exist (the assignee is an Access-service user — validated upstream).
+    # Subject (the line) must exist.
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
         raise NotFoundError(f"{stype} '{data['subject_id']}' not found.")
+
+    # The ASSIGNEE must be a real, active user who may hold this assignment role. When the
+    # Access service is configured (production), the Register VERIFIES identity + role there
+    # — so a service can't assign an arbitrary UUID, nor a role the user doesn't hold. With
+    # Access unconfigured (dev/local) this is a no-op and the check is deferred to the
+    # authoritative gateway path, matching the rest of the optional-Access posture.
+    from app.core.access_client import AccessUnavailableError, verify_assignee
+
+    try:
+        problem = await verify_assignee(ctx.tenant_code, str(data["user_id"]), arole)
+    except AccessUnavailableError as exc:
+        raise ValidationAppError(
+            f"Cannot verify assignee against the Access service: {exc}") from exc
+    if problem is not None:
+        raise ValidationAppError(problem)
 
     data["assigned_by"] = ctx.actor
     obj = await _assign_repo.create(ctx.session, ctx.tenant_id, ctx.actor, data)
@@ -128,6 +143,17 @@ async def list_assignments(ctx: RequestContext = Depends(get_context),
 
         if view_access(ctx.user, "employees") is not authz.Access.FULL:
             conds.append(LineAssignment.user_id.in_([ctx.user.id, *ctx.user.report_ids]))
+    else:
+        # A MACHINE caller (no user context) may not enumerate the tenant-wide assignment
+        # directory. It must narrow to a specific user or line (e.g. the gateway's /v1/me
+        # composition passes user_id). An unfiltered machine list is refused.
+        from app.authz.engine import enforce_service_read
+
+        enforce_service_read("/v1/assignments", ctx.user)
+        if user_id is None and subject_id is None:
+            raise ForbiddenError(
+                "A service must filter assignments by user_id or subject_id — "
+                "tenant-wide listing requires a user context.")
     rows = (
         await ctx.session.execute(
             select(LineAssignment).where(*conds).order_by(LineAssignment.created_at.desc())
@@ -218,13 +244,23 @@ async def list_change_requests(ctx: RequestContext = Depends(get_context),
         conds.append(ChangeRequest.status == status)
     if subject_id:
         conds.append(ChangeRequest.subject_id == subject_id)
-    # Scope: Admin / Management / a vertical Head (the approvers) see the whole queue.
-    # An IC sees only the requests they raised — not the tenant-wide request log.
+    # Scope by VERTICAL, from the same approver map enforcement uses: a user sees a request
+    # only for a subject_type they may approve — Admin/Management approve every vertical (so
+    # they see all), a BD Head sees only Lead/Deal, a Credit Head only Lending, etc. — OR a
+    # request they raised themselves. A Head no longer sees other verticals' queues.
     if ctx.user is not None:
-        approver_roles = {"Admin", "Management", "BD Head", "Credit Head",
-                          "Syn Head", "AM Head"}
-        if not (ctx.user.roles & approver_roles):
-            conds.append(ChangeRequest.requested_by == ctx.user.email)
+        from sqlalchemy import or_
+
+        from app.authz.matrix import APPROVER_FOR_SUBJECT
+
+        approvable = {st for st, roles in APPROVER_FOR_SUBJECT.items()
+                      if ctx.user.roles & roles}
+        conds.append(or_(ChangeRequest.subject_type.in_(approvable or {"__none__"}),
+                         ChangeRequest.requested_by == ctx.user.email))
+    else:
+        from app.authz.engine import enforce_service_read
+
+        enforce_service_read("/v1/requests", ctx.user)
     rows = (
         await ctx.session.execute(
             select(ChangeRequest).where(*conds).order_by(ChangeRequest.created_at.desc())
@@ -235,7 +271,18 @@ async def list_change_requests(ctx: RequestContext = Depends(get_context),
 
 async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
                   note: str | None) -> ChangeRequest:
-    req = await _request_repo.get(ctx.session, ctx.tenant_id, request_id)
+    # Lock the change-request row FOR UPDATE so two concurrent approve/reject calls
+    # serialise: the second waits, then sees status != Pending and 409s. Without the lock
+    # both could read "Pending" and apply the change twice.
+    req = (
+        await ctx.session.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.id == request_id,
+                ChangeRequest.tenant_id == ctx.tenant_id,
+                ChangeRequest.deleted_at.is_(None)).with_for_update())
+    ).scalar_one_or_none()
+    if req is None:
+        raise NotFoundError(f"Request '{request_id}' not found.")
     if req.status != "Pending":
         raise ConflictError(f"Request is already {req.status.lower()}.")
     # Approval routing: Admin / Management / the relevant vertical Head.
@@ -263,24 +310,35 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
                                      req.subject_id)
         if subject is None:
             raise NotFoundError(f"{req.subject_type} '{req.subject_id}' no longer exists.")
-        current = getattr(subject, req.field, None)
-        if current != req.from_value:
+        current_value = getattr(subject, req.field, None)
+        if current_value != req.from_value:
             raise ConflictError(
-                f"{req.subject_type}.{req.field} is now {current!r}, not {req.from_value!r} "
-                "as requested — the request is stale; raise a new one.")
-        # Transition/row-lock policy: if the requested target value is a LOCKED state
-        # (a Converted lead, a Disbursed lending line), only a role the lock names may put
-        # it there — the approval path must not bypass the same lock a direct edit obeys.
-        from app.authz.matrix import ROW_LOCKS
+                f"{req.subject_type}.{req.field} is now {current_value!r}, not "
+                f"{req.from_value!r} as requested — the request is stale; raise a new one.")
+        # SHARED POLICY AUTHORITY: the approval path applies the SAME full policy a direct edit
+        # does, so an approval can never bypass a rule a PATCH obeys. Merge the current row with
+        # the single proposed field change and run transition + mandatory-field + field-lock +
+        # row-lock enforcement. A change request carries only one field, so a mandatory field a
+        # target stage needs must ALREADY be on the row — e.g. a Lending line cannot be approved
+        # into Ready for Disbursement unless disbursed_amount/date are present, and a Deal cannot be approved
+        # into Sanctioned without product_type/rm.
+        from evam_backend_core import policy
 
-        lock = ROW_LOCKS.get(req.subject_type)
-        if lock is not None:
-            field_name, locking_values, allowed_roles = lock
-            if (req.field == field_name and req.to_value in locking_values
-                    and ctx.user is not None and not (ctx.user.roles & allowed_roles)):
+        from app.core import evidence as ev
+
+        current_row = {c.name: getattr(subject, c.name) for c in subject.__table__.columns}
+        approver_roles = ctx.user.roles if ctx.user is not None else None
+        # Evidence gate applies through the approval path too — approving a change request into a
+        # sensitive stage (e.g. Sanctioned) must not bypass the required governance evidence.
+        evidence = await ev.load_evidence_kinds(ctx, req.subject_type, req.subject_id)
+        violation = policy.check_write(req.subject_type, current=current_row,
+                                       changes={req.field: req.to_value}, roles=approver_roles,
+                                       evidence=evidence)
+        if violation is not None:
+            if violation.kind == "forbidden":
                 raise ForbiddenError(
-                    f"Approving this would move {req.subject_type}.{field_name} to "
-                    f"{req.to_value!r}, a locked state only {sorted(allowed_roles)} may set.")
+                    f"Approving this change is refused: {violation.message}")
+            raise ConflictError(violation.message)
         # Apply the change through the standard repository so history auto-appends and
         # the audit trail records it (stage auto-stamping = the existing history hook).
         model = SUBJECTS[req.subject_type]
@@ -371,8 +429,11 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     from app.models.users import LineAssignment
     from app.repositories.crud import CRUDRepository as _Repo
 
+    # Bind the request hash to the LEAD too — otherwise the same Idempotency-Key reused for
+    # a DIFFERENT lead with an identical body would silently replay the first lead's result.
     body_hash = hashlib.sha256(
-        orjson.dumps(payload.model_dump(mode="json"), option=orjson.OPT_SORT_KEYS)).hexdigest()
+        orjson.dumps({"lead_id": str(lead_id), "body": payload.model_dump(mode="json")},
+                     option=orjson.OPT_SORT_KEYS)).hexdigest()
 
     # AUTHORIZE FIRST — an unauthenticated/unauthorized caller must never get a replayed
     # result. Human callers are gated on push_lead_to_deals; a machine caller is bound to
@@ -430,6 +491,29 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             if known is None:
                 raise ValidationAppError(f"Unknown {label} '{name}' — not a person on record.")
 
+    # The assignee IDs that will receive an auto-assignment must be real, active Access
+    # users holding the right role — verified through Access when configured (a no-op in
+    # dev). Prevents a caller minting an assignment to an arbitrary UUID via /convert.
+    from app.core.access_client import AccessUnavailableError, verify_assignee
+
+    # (id, assignment role, the display name that MUST denote that same identity)
+    to_verify: list[tuple[Any, str, str | None]] = []
+    if payload.is_lending and payload.analyst_id:
+        to_verify.append((payload.analyst_id, "Deal Analyst", payload.analyst))
+    if payload.is_syndication and payload.rm_id:
+        to_verify.append((payload.rm_id, "Syn RM", payload.rm))
+    if payload.is_asset_mon and payload.rm_id:
+        to_verify.append((payload.rm_id, "AM RM", payload.rm))
+    for uid, role, name in to_verify:
+        try:
+            problem = await verify_assignee(ctx.tenant_code, str(uid), role,
+                                            expected_name=name)
+        except AccessUnavailableError as exc:
+            raise ValidationAppError(
+                f"Cannot verify assignee against the Access service: {exc}") from exc
+        if problem is not None:
+            raise ValidationAppError(problem)
+
     def _assign(subject_type: str, subject_id, role: str, user_id) -> None:
         if user_id is None:
             return
@@ -439,6 +523,10 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             note="Auto-assigned on lead conversion.", created_by=ctx.actor,
             updated_by=ctx.actor))
 
+    approver = (payload.approved_by or "").strip() or None
+    source_detail = f"Converted from lead {lead_id}"
+    if approver:
+        source_detail += f" (approved by {approver})"
     deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
         "entity_id": str(entity_id),
         "product_type": payload.product_type,
@@ -447,7 +535,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "is_asset_mon": payload.is_asset_mon,
         "rm": payload.rm, "analyst": payload.analyst,
         "stage": "Data Awaited", "source": "RM",
-        "source_detail": f"Converted from lead {lead_id}", "remarks": payload.note,
+        "source_detail": source_detail, "remarks": payload.note,
     })
     line_ids: dict[str, Any] = {}
     row: Any
@@ -473,7 +561,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
 
     await _Repo(SUBJECTS["Lead"]).update(ctx.session, ctx.tenant_id, lead_id, ctx.actor, {
         "status": "Converted", "converted_deal_id": str(deal.id),
-        "conv": f"Converted by {ctx.actor}"})
+        "conv": f"Converted by {ctx.actor}" + (f" (approved by {approver})" if approver else "")})
 
     result = s.LeadConvertResult(lead_id=lead_id, deal_id=deal.id, **line_ids)
     if idempotency_key:

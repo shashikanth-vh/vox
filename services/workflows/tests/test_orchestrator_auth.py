@@ -64,3 +64,47 @@ async def test_bad_api_key_blocks_before_anything(monkeypatch):
                          json={"by": "x"}, headers={"X-API-Key": "wrong"})
     assert r.status_code == 401
     get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# The three business-lifecycle workflow endpoints are equally auth-gated.
+# --------------------------------------------------------------------------- #
+async def test_business_workflow_starts_require_verified_identity(monkeypatch):
+    """Starting qualification / structuring / document collection under require_auth (no OIDC)
+    is refused — never started under a caller-supplied name."""
+    app = _app(monkeypatch, WORKFLOWS_REQUIRE_AUTH="true", WORKFLOWS_API_KEYS="k")
+    cases = [
+        ("/v1/workflows/lead-qualifications", {"lead_id": "l1", "qualified_by": "a@x.com"}),
+        ("/v1/workflows/deal-structurings", {"deal_id": "d1", "requested_by": "a@x.com"}),
+        ("/v1/workflows/document-collections",
+         {"subject_type": "Deal", "subject_id": "d1", "requested_by": "a@x.com"}),
+    ]
+    for path, body in cases:
+        r = await _post(app, path, body)
+        assert r.status_code == 401, f"{path}: {r.text}"
+    get_settings.cache_clear()
+
+
+async def test_committee_decision_requires_verified_identity(monkeypatch):
+    """The Credit Committee decision is refused without a verified identity — a caller-supplied
+    'by' can never manufacture a committee outcome at the door."""
+    app = _app(monkeypatch, WORKFLOWS_REQUIRE_AUTH="true", WORKFLOWS_API_KEYS="k")
+    r = await _post(app, "/v1/workflows/struct-x/committee-decision",
+                    {"by": "attacker@x.com", "approved": True})
+    assert r.status_code == 401, r.text
+    get_settings.cache_clear()
+
+
+async def test_business_endpoints_reject_bad_api_key(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_REQUIRE_AUTH="true", WORKFLOWS_API_KEYS="secret")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://orch"
+    ) as c:
+        for path, body in (
+            ("/v1/workflows/deal-structurings", {"deal_id": "d1", "requested_by": "x"}),
+            ("/v1/workflows/struct-x/committee-decision", {"by": "x", "approved": True}),
+            ("/v1/workflows/docs-x/document-received", {"name": "kyc"}),
+        ):
+            r = await c.post(path, json=body, headers={"X-API-Key": "wrong"})
+            assert r.status_code == 401, f"{path}: {r.text}"
+    get_settings.cache_clear()

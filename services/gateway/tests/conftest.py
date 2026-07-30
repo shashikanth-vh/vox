@@ -34,6 +34,9 @@ DB_ENV = {
 os.environ["GATEWAY_REGISTER_URL"] = f"http://127.0.0.1:{REGISTER_PORT}"
 os.environ["GATEWAY_ACCESS_URL"] = f"http://127.0.0.1:{ACCESS_PORT}"
 os.environ["GATEWAY_ACCESS_API_KEY"] = "test-key"
+# The gateway strips the client's X-API-Key and injects the upstream's own scoped key;
+# the Register in this stack accepts "test-key", so that's what the gateway must present.
+os.environ["GATEWAY_REGISTER_API_KEY"] = "test-key"
 os.environ["GATEWAY_CACHE_TTL_S"] = "0"          # always re-resolve → matrix edits are live
 os.environ["GATEWAY_GATEWAY_SHARED_SECRET"] = "e2e-secret"
 os.environ["GATEWAY_LOG_LEVEL"] = "WARNING"
@@ -74,6 +77,11 @@ def _wait_healthy(port: int, timeout: float = 30.0) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def stack() -> Iterator[None]:
+    # Pure-ASGI tests (auth gate short-circuits before any upstream) can run without
+    # the 3-service stack or a database. CI leaves this unset and keeps the real stack.
+    if os.environ.get("GATEWAY_TESTS_NO_STACK"):
+        yield
+        return
     reg_env = _svc_env("REGISTER", "register_test")
     acc_env = _svc_env("ACCESS", "access_test")
 

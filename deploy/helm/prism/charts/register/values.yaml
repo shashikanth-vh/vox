@@ -152,6 +152,13 @@ internalSigningSecret: ""
 # its Register API key.
 serviceApiKeys: ""
 
+# Access service — when a url is set, the Register VERIFIES an assignee's identity + role
+# there before placing an assignment (closes "services can assign arbitrary UUIDs"). Empty
+# url = verification off (dev). The apiKey is rendered into the chart Secret.
+access:
+  url: ""
+  apiKey: "change-me-in-prod"
+
 # Object storage for document bytes (the Data Register). "inline" keeps small files in
 # Postgres (no object store needed); "s3" puts bytes in an S3-compatible store (the bundled
 # MinIO, or a managed S3). The catalog rows are identical either way.

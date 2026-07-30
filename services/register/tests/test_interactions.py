@@ -60,7 +60,7 @@ async def test_deal_and_tracker_rollup_to_entity(client: AsyncClient):
 async def test_syndication_lender_response_and_chased(client: AsyncClient):
     eid = await _entity(client, "SYNCO")
     syn_id = (await client.post("/v1/syndication",
-                                json={"entity_id": eid, "status": "IM Circulated"})).json()["id"]
+                                json={"entity_id": eid, "status": "IM in Prep"})).json()["id"]
     await client.post(f"/v1/syndication/{syn_id}/lenders",
                       json={"lender_name": "Kotak Mahindra", "status": "IM Circulated"})
 

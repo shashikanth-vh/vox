@@ -15,10 +15,19 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "python-json-logger==3.2.1",
     "orjson==3.10.12",
+    # Voice pipeline (app/vocx): Claude extraction + per-RM Google Calendar/Drive.
+    "anthropic>=0.40",
+    "google-api-python-client>=2.140",
+    "google-auth-oauthlib>=1.2",
+    "boto3==1.35.99",            # MinIO/S3 — recorded-audio bytes (same pin as the Register)
 ]
 
 [project.optional-dependencies]
 dev = ["pytest==8.3.4", "pytest-asyncio==0.25.0", "ruff==0.8.4", "mypy==1.14.0"]
+# Self-hosted speech-to-text for /api/vocx/capture_audio. Heavy (downloads a Whisper
+# model on first use) — install deliberately: pip install .[stt]. Without it, typed
+# transcripts and the `api`/`stub` STT backends still work.
+stt = ["faster-whisper>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -43,9 +52,28 @@ ignore = ["S101", "B008", "S105"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S603", "S607", "S105", "S106"]
+# app/vocx/core, app/vocx/google and app/vocx/speech/stt.py carry the PoC-lineage
+# pipeline (see app/vocx/__init__.py). Style rules are relaxed there so upstream diffs
+# stay reviewable; correctness rules still apply. The PRISM-written modules (mount,
+# loader, registry/*, speech/audio_store.py) get no exemption.
+"app/vocx/core/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
+"app/vocx/google/*.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
+"app/vocx/speech/stt.py" = ["E501", "E701", "E702", "E741", "C416", "F841", "S110", "UP007", "BLE001", "SIM105"]
 
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 warn_unused_ignores = true
 disallow_untyped_defs = false
+
+# app/vocx/vocx_*.py is vendored PoC code (see app/vox/__init__.py) — typed loosely by
+# design; the PRISM-written adapters remain fully checked.
+# (mypy wildcards match whole dotted components, so the vendored modules are listed
+# explicitly — a bare app.vocx.* would also exempt the PRISM-written adapters.)
+[[tool.mypy.overrides]]
+module = ["app.vocx.core.*", "app.vocx.google.*", "app.vocx.speech.stt"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["anthropic", "googleapiclient.*", "google_auth_oauthlib.*", "google.*", "boto3.*", "botocore.*"]
+ignore_missing_imports = true

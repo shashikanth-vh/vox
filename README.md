@@ -100,17 +100,113 @@ talk to the Register over HTTP). Managed vs local is a
 per-environment choice: use the bundled DB, or point modules at a managed India-resident
 Postgres.
 
-Two deployment paths, both under `deploy/`:
-- **Docker Compose** — `docker compose -f deploy/compose/docker-compose.yml up --build`
-  (a shared `postgres` service + the Register).
-- **Helm** — the umbrella brings up the shared DB + modules together (subcharts are
-  vendored, no `helm dependency build` needed):
-  ```bash
-  helm upgrade --install prism deploy/helm/prism -f deploy/helm/prism/values-local.yaml \
-    --namespace prism --create-namespace
-  ```
-  See [`deploy/helm/prism/README.md`](deploy/helm/prism/README.md) for managed-DB and
-  single-module variants.
+## Deploying PRISM
+
+Two deployment paths (Docker Compose and Helm), each with a choice of identity provider.
+The IdP is **pure configuration** — `*_OIDC_ISSUER` / `*_OIDC_ISSUERS` /
+`*_OIDC_ALLOWED_DOMAINS` — so the image you test against Dex is byte-for-byte the image
+you ship against Google.
+
+| | **Dex** (bundled dev IdP) | **Google** (Workspace) |
+| --- | --- | --- |
+| best for | local, CI, unattended tests (password grant) | production (no passwords to hold) |
+| membership check | Dex only holds your own accounts | **`ALLOWED_DOMAINS` is mandatory** — a valid Google token proves the account is *real*, not that it is Evam's |
+| Postman sign-in | folder 00b (password grant) | folder 00c (refresh-token grant, one-time consent) |
+
+**Once, before any compose path:** generate the edge's TLS cert — NGINX terminates HTTPS
+on `:8443` and refuses to start without one.
+
+```bash
+scripts/gen_dev_certs.sh
+# reaching the stack from another machine (Postman on the host, PRISM in a VM)?
+#   EXTRA_SANS="IP:<vm-ip>" scripts/gen_dev_certs.sh --force
+```
+
+### 1 · Docker Compose — dev default (no IdP at all)
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+```
+
+No issuer configured ⇒ identity is header trust (`X-User-Email`), enforcement flags off.
+This is the posture the E2E Postman journey runs in out of the box. The front door is
+`https://localhost:8443` (self-signed in dev — in Postman turn SSL verification off, or
+trust `deploy/nginx/certs/tls.crt`); `:8080` only 301-redirects to it.
+
+### 2 · Docker Compose + Dex (the production POSTURE, locally)
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/docker-compose.prod-posture.yml --profile sso up -d --build
+```
+
+Turns on `REQUIRE_AUTH` + OIDC (issuer = the bundled `dex` container), `ENFORCE_RBAC`,
+`ENFORCE_RLS`. **`--profile sso` is required** — it is what starts Dex; an override file
+cannot un-gate a profiled service. Sign in with the fixed identities from
+`deploy/compose/dex/config.yaml` (`e2e.rm@` / `e2e.maker@` / `e2e.checker@evamfinance.com`,
+password `prism`), or in Postman set `dexUrl=http://localhost:5556` so folder 00b does it.
+
+### 3 · Docker Compose + Google
+
+Same overlay, but point the gateway/orchestrator at Google instead of Dex — edit the
+overlay (or a copy of it) to:
+
+```yaml
+GATEWAY_OIDC_ISSUER: "https://accounts.google.com"
+GATEWAY_OIDC_AUDIENCE: "<client-id>.apps.googleusercontent.com"
+GATEWAY_OIDC_ALLOWED_DOMAINS: "evamfinance.com"     # NEVER empty with Google
+# and the WORKFLOWS_* trio on the orchestrator, same values
+```
+
+then bring it up **without** `--profile sso` (Dex is not needed). Prerequisite: an OAuth
+client in Google Cloud Console. To keep Dex available *alongside* Google (e.g. staging —
+humans on Google, CI on Dex), use the registry form and keep the profile:
+
+```yaml
+GATEWAY_OIDC_ISSUERS: "https://accounts.google.com|<client-id>.apps.googleusercontent.com,http://dex:5556/dex|prism"
+```
+
+A token is verified only by the issuer matching its own `iss` claim, so adding Dex never
+weakens Google.
+
+### 4 · Helm — local/dev with Dex
+
+```bash
+helm upgrade --install prism deploy/helm/prism -f deploy/helm/prism/values-local.yaml \
+  --namespace prism --create-namespace
+```
+
+Subcharts are vendored (no `helm dependency build`). `values-local.yaml` is the open dev
+posture; to exercise auth in-cluster, deploy a Dex (or any OIDC IdP) and set
+`gateway.oidc.issuer` / `workflows.api.oidcIssuer` to it the same way as below.
+
+### 5 · Helm — production with Google
+
+```bash
+helm upgrade --install prism deploy/helm/prism \
+  -f deploy/helm/prism/values.yaml -f deploy/helm/prism/values-prod.yaml \
+  --set gateway.oidc.issuer=https://accounts.google.com \
+  --set gateway.oidc.audience=<client-id>.apps.googleusercontent.com \
+  --set atlas.oidc.issuer=https://accounts.google.com \
+  --set atlas.oidc.audience=<client-id>.apps.googleusercontent.com \
+  --set workflows.api.oidcIssuer=https://accounts.google.com \
+  --set workflows.api.oidcAudience=<client-id>.apps.googleusercontent.com \
+  --namespace prism --create-namespace
+  # + your real secrets via --set / existingSecret (the overlay REFUSES to render
+  #   its REPLACE-* placeholders — that guard is on by default)
+```
+
+`values-prod.yaml` already sets `allowedDomains: "evamfinance.com"` for all three
+services and turns on every enforcement (`requireAuth`, `enforceRbac`, `enforceRls`).
+Two guards fail the render rather than deploy a hole: placeholder credentials, and a
+public issuer (Google/Microsoft) with an empty domain allowlist. Multi-issuer works here
+too: set `gateway.oidc.issuers` (and the workflows/atlas equivalents) instead of the
+single pair.
+
+Details: [`deploy/helm/prism/README.md`](deploy/helm/prism/README.md) (managed-DB and
+single-module variants), [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md),
+[`docs/POSTMAN.md`](docs/POSTMAN.md) §11–11b (running the E2E journey in either posture,
+and the one-time Google consent flow for Postman).
 
 ## Testing it independently
 

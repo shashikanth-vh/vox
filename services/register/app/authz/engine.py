@@ -26,6 +26,7 @@ from app.authz.matrix import (
     ASSIGNMENT_AUTHORITY,
     OPERATIONS,
     SERVICE_GRANTS,
+    SERVICE_READ_GRANTS,
     VIEW_ACCESS,
     Access,
 )
@@ -128,6 +129,39 @@ def _looks_like_uuid(value: str) -> bool:
 def _stacked(matrix_row: dict[str, Access], roles: set[str]) -> Access:
     """Role stacking: the highest access across all held roles."""
     return max((matrix_row.get(r, Access.NONE) for r in roles), default=Access.NONE)
+
+
+def enforce_service_read(resource: str | None = None,
+                         user: UserContext | None = None) -> None:
+    """Gate a READ for a machine (service) caller.
+
+    Cases:
+      * **DELEGATED read** — the request carries a signed USER context (``user`` is set).
+        The service acts on a human's behalf; that user's view/row scope governs the read
+        downstream, so the gate PASSES regardless of the service's own read grants. This is
+        what lets ``svc_atlas`` (a pure BFF with no own-key grants) serve legitimate reads.
+      * **generic / unnamed key** (service is None, no user) — dev-compat, passes ONLY when
+        RBAC is not enforced. Under ``enforce_rbac`` (production) an unnamed key gets NO
+        blanket read: it FAILS CLOSED (a leaked generic key must not read tenant-wide,
+        request deleted rows, or pivot tenants via X-Tenant). It must forward a user context.
+      * **OWN-KEY read** (named service, no user) — restricted to the resources on the
+        service's READ allowlist. Having a *write* grant does not imply tenant-wide read of
+        every table: ``svc_pulse`` may read its intelligence context, not deals.
+    """
+    if user is not None:
+        return  # delegated — the user's scope governs
+    service = service_ctx.get()
+    if service is None:
+        if get_settings().enforce_rbac:
+            raise ForbiddenError(
+                "An unnamed API key may not read the data plane without a user context "
+                "(RBAC enforced). Route through the gateway with a signed identity.")
+        return  # dev / compatibility
+    allowed = SERVICE_READ_GRANTS.get(service, set())
+    if resource is None or resource not in allowed:
+        raise ForbiddenError(
+            f"Service '{service}' may not read '{resource or 'this resource'}' on its own "
+            "key; it must forward a user context or use its own capability endpoints.")
 
 
 def view_access(user: UserContext, view: str) -> Access:

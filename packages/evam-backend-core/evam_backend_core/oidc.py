@@ -52,12 +52,20 @@ class OidcVerifier:
 
     def __init__(self, issuer: str, audience: str | None, client: httpx.AsyncClient,
                  *, email_claim: str = "email", roles_claim: str = "roles",
+                 allowed_domains: list[str] | None = None,
                  jwks_ttl_s: float = 3600.0) -> None:
         self._issuer = issuer.rstrip("/")
         self._audience = audience
         self._client = client
         self._email_claim = email_claim
         self._roles_claim = roles_claim
+        # Signature + iss + aud prove the token is GENUINE, not that its subject belongs to
+        # this organisation. With a consumer IdP as an accepted issuer (Google), ANY account —
+        # including a personal one — mints a structurally valid token; only the downstream user
+        # lookup would refuse it, one layer too late. An allowlist rejects at authentication.
+        # Empty = no restriction (dev); set it in production.
+        self._allowed_domains = [d.strip().lower().lstrip("@")
+                                 for d in (allowed_domains or []) if d.strip()]
         self._jwks_ttl_s = jwks_ttl_s
         self._jwks_uri: str | None = None
         self._keys: dict[str, Any] = {}
@@ -121,8 +129,98 @@ class OidcVerifier:
         roles = claims.get(self._roles_claim) or claims.get("groups") or []
         if isinstance(roles, str):
             roles = [r.strip() for r in roles.split(",") if r.strip()]
-        return VerifiedIdentity(email=str(email).lower(), subject=str(claims.get("sub", "")),
+        email = str(email).lower()
+        if self._allowed_domains:
+            domain = email.rpartition("@")[2]
+            if domain not in self._allowed_domains:
+                # Deliberately does not echo the address back to the caller.
+                log.warning("oidc_domain_rejected",
+                            extra={"issuer": self._issuer, "domain": domain})
+                raise OidcError(
+                    f"identities from '{domain}' are not permitted for this deployment")
+        return VerifiedIdentity(email=email, subject=str(claims.get("sub", "")),
                                 roles=list(roles), raw=claims)
+
+
+class MultiIssuerVerifier:
+    """Accepts tokens from SEVERAL issuers at once — e.g. Google for people and Dex for CI in the
+    same deployment.
+
+    The issuer is chosen from the token's own (UNVERIFIED) ``iss`` claim and then that issuer's
+    verifier validates everything properly, so this is a lookup, not a trust decision: an
+    unrecognised ``iss`` is rejected outright. Never "try each verifier until one passes" — that
+    would let a weaker issuer vouch for a stronger one's audience.
+    """
+
+    def __init__(self, verifiers: dict[str, OidcVerifier]) -> None:
+        # keyed by the normalised issuer string
+        self._by_issuer = {k.rstrip("/"): v for k, v in verifiers.items()}
+
+    @property
+    def issuers(self) -> list[str]:
+        return sorted(self._by_issuer)
+
+    async def verify(self, token: str) -> VerifiedIdentity:
+        import jwt
+
+        try:
+            claims = jwt.decode(token, options={"verify_signature": False})
+        except jwt.PyJWTError as exc:
+            raise OidcError(f"malformed token: {exc}") from exc
+        iss = str(claims.get("iss") or "").rstrip("/")
+        verifier = self._by_issuer.get(iss)
+        if verifier is None:
+            log.warning("oidc_unknown_issuer",
+                        extra={"iss": iss, "configured": self.issuers})
+            raise OidcError(f"issuer {iss!r} is not accepted by this deployment")
+        return await verifier.verify(token)
+
+
+# What a service holds after configuration: a single-issuer verifier, a multi-issuer registry,
+# or None (no OIDC configured → dev header-trust path).
+TokenVerifier = OidcVerifier | MultiIssuerVerifier
+
+
+def parse_issuer_specs(spec: str) -> list[tuple[str, str | None]]:
+    """Parse ``"issuer|audience,issuer2|audience2"`` into pairs; audience optional.
+
+    Lets one deployment accept several IdPs (``GATEWAY_OIDC_ISSUERS``) while the single-issuer
+    settings keep working unchanged.
+    """
+    out: list[tuple[str, str | None]] = []
+    for chunk in (spec or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        issuer, _, audience = chunk.partition("|")
+        issuer = issuer.strip()
+        if issuer:
+            out.append((issuer, audience.strip() or None))
+    return out
+
+
+def build_verifier(client: httpx.AsyncClient, *, issuer: str = "", audience: str | None = None,
+                   issuers_spec: str = "", email_claim: str = "email",
+                   allowed_domains: list[str] | None = None):
+    """The one place a service turns config into a verifier.
+
+    ``issuers_spec`` (multi-issuer) takes precedence; otherwise the single ``issuer`` is used.
+    Returns ``None`` when neither is configured — which is what keeps the dev header-trust path
+    available.
+    """
+    specs = parse_issuer_specs(issuers_spec)
+    if not specs and issuer:
+        specs = [(issuer, audience)]
+    if not specs:
+        return None
+    verifiers = {
+        iss: OidcVerifier(iss, aud, client, email_claim=email_claim,
+                          allowed_domains=allowed_domains)
+        for iss, aud in specs
+    }
+    if len(verifiers) == 1:
+        return next(iter(verifiers.values()))
+    return MultiIssuerVerifier(verifiers)
 
 
 def bearer_token(authorization: str | None) -> str | None:

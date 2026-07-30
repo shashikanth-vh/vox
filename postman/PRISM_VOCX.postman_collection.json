@@ -1,0 +1,511 @@
+{
+  "info": {
+    "name": "PRISM \u00b7 VocX voice capture (via NGINX)",
+    "description": "The voice pipeline end to end, through the edge (/vocx/v1/*): capabilities \u2192 capture PREVIEW (extraction + confidence gate + write plan; never writes) \u2192 COMMIT (idempotent by capture_id: Register writes as svc_vox, the RM's Google Calendar when connected) \u2192 search the interaction log. Google connect is a browser flow: open {{baseUrl}}/vocx/v1/auth/start?rm=Priya&go=1 (the gateway exempts only the CALLBACK from require_auth).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "GET capabilities \u2014 what this deployment can do",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/capabilities",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "capabilities"
+          ]
+        },
+        "description": "stt: speech backend available \u00b7 extraction: haiku|offline_stub (needs ANTHROPIC_API_KEY) \u00b7 google_configured: client secret mounted"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ok', () => pm.expect(pm.response.code).to.eql(200));",
+              "console.log(JSON.stringify(pm.response.json(), null, 2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST capture \u2014 PREVIEW a typed transcript",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/capture",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "capture"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"transcript\": \"Met the EcoSoch Solar team in Bengaluru about the 45 crore term loan for their 150 MW pipeline. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "extract \u2192 resolve (against the live Register) \u2192 gate. Returns the extraction (with _meta.capture_id \u2014 the idempotency handle), the per-field decision, an approval card when anything is low-confidence, and the write plan. NEVER writes."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('preview ok', () => pm.expect(pm.response.code).to.eql(200));",
+              "const b = pm.response.json();",
+              "pm.environment.set('vocxExtraction', JSON.stringify(b.extraction));",
+              "pm.environment.set('vocxCaptureId', b.extraction._meta.capture_id);",
+              "console.log('decision:', JSON.stringify(b.decision));",
+              "console.log('entity:', JSON.stringify(b.extraction.entity_match));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST commit \u2014 EXECUTE the approved capture (idempotent)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/commit",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "commit"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"extraction\": \"{{vocxExtraction}}\",\n  \"capture_id\": \"{{vocxCaptureId}}\",\n  \"log_to\": {\n    \"subject_type\": \"Deal\",\n    \"subject_id\": \"{{dealId}}\"\n  },\n  \"summary\": \"Term loan discussion \\u2014 financials due Friday\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "log_to (optional) routes the interaction at an explicit subject \u2014 Lending/Syndication/AssetMonetisation/Deal/Lead/Entity + UUID; remove it for automatic routing. Body note: after the capture request above, vocxExtraction holds the extraction JSON \u2014 Postman inserts it as a STRING, so replace \"{{vocxExtraction}}\" (with quotes) by the raw object before sending, or paste an edited extraction. chosen_code / new_lead+company override the entity; edits patches fields. Register writes carry Idempotency-Key vocx:<capture_id>:<op> \u2014 send twice and the Register replays, not duplicates. Calendar is skipped unless the RM connected Google."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('committed', () => pm.expect(pm.response.code).to.eql(200));",
+              "console.log(JSON.stringify(pm.response.json().writes, null, 2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET interactions \u2014 search the log",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/interactions?limit=10&sort=desc",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "interactions"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "sort",
+              "value": "desc"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ok', () => pm.expect(pm.response.code).to.eql(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET facets \u2014 counts by company/type/user",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/facets",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "facets"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GET auth status \u2014 is this RM's Google connected?",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/auth/status?rm=Priya",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "auth",
+            "status"
+          ],
+          "query": [
+            {
+              "key": "rm",
+              "value": "Priya"
+            }
+          ]
+        },
+        "description": "To connect: open {{baseUrl}}/vocx/v1/auth/start?rm=Priya&go=1 in a BROWSER (Google sign-in + consent; the callback stores the refresh token on the vocx volume). Needs the client secret mounted and the redirect URI added in Google Cloud Console."
+      }
+    },
+    {
+      "name": "GET reports \u2014 the RM's server-side report list",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/reports?rm=Priya",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "reports"
+          ],
+          "query": [
+            {
+              "key": "rm",
+              "value": "Priya"
+            }
+          ]
+        },
+        "description": "Every preview auto-saves a DRAFT; save marks it ready; commit marks it committed. The list survives device changes \u2014 no more localStorage."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ok', () => pm.expect(pm.response.code).to.eql(200));",
+              "console.log(JSON.stringify(pm.response.json().reports, null, 2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST reports/save \u2014 keep the RM's edits",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/reports/save",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "reports",
+            "save"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"capture_id\": \"{{vocxCaptureId}}\",\n  \"status\": \"ready\",\n  \"report\": {\n    \"summary\": \"edited on the laptop\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "409 once committed \u2014 a committed report is final."
+      }
+    },
+    {
+      "name": "POST reports/delete",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/reports/delete",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "reports",
+            "delete"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"capture_id\": \"{{vocxCaptureId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "GET audio \u2014 playback for an archived recording",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/audio?ref={{vocxAudioRef}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "audio"
+          ],
+          "query": [
+            {
+              "key": "ref",
+              "value": "{{vocxAudioRef}}"
+            }
+          ]
+        },
+        "description": "MinIO refs answer {url: presigned} (signed against the PUBLIC MinIO endpoint \u2014 set vocxAudioRef from the preview's _meta.transcript_ref); volume refs stream audio/wav bytes. Refs outside the captures bucket/prefix are refused."
+      }
+    },
+    {
+      "name": "GET calendar test \u2014 prove which calendar VocX writes to",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/calendar/test?rm=Priya",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "calendar",
+            "test"
+          ],
+          "query": [
+            {
+              "key": "rm",
+              "value": "Priya"
+            }
+          ]
+        },
+        "description": "Creates a real test event tomorrow 16:00 on the connected account and returns the calendar's e-mail \u2014 answers 'I can't see my follow-up' definitively."
+      }
+    }
+  ]
+}

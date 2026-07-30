@@ -13,12 +13,35 @@ imagePullSecrets: []
 upstreams:
   registerUrl: http://prism-register
   accessUrl: http://prism-access
+  # Sub-services the gateway fronts by path prefix (/atlas, /vocx, /pulse, /orchestrator).
+  # Empty = that prefix is disabled and its paths fall through to the Register, so a
+  # partial deploy still works. Set these in production so the whole platform is reachable
+  # ONLY through the single trust boundary.
+  atlasUrl: ""
+  vocxUrl: ""
+  pulseUrl: ""
+  orchestratorUrl: ""
 
 # API key the gateway itself uses against the Access service.
 accessApiKey:
   existingSecret: ""
   existingSecretKey: api-key
   value: "change-me-in-prod"
+
+# The SCOPED service credential the gateway INJECTS per upstream, having stripped the
+# client's own X-API-Key at the edge. Each must equal that upstream's inbound key
+# (registerApiKey ↔ register.apiKeys, pulseApiKey ↔ pulse.config.apiKeys, orchestratorApiKey
+# ↔ workflows.api.apiKeys). Empty = inject nothing (dev, or a service with no key gate).
+serviceCredentials:
+  registerApiKey: "change-me-in-prod"
+  atlasApiKey: ""
+  vocxApiKey: ""
+  pulseApiKey: ""
+  orchestratorApiKey: ""
+  # Tenant-administration credential the gateway injects on tenant-admin routes for a
+  # verified Admin — so the browser never holds it. Must equal register.adminApiKeys.
+  # Empty = don't inject (dev / tenant admin done out-of-band).
+  registerAdminApiKey: ""
 
 # Shared secret stamped on forwarded identity headers (Register verifies it).
 gatewaySecret:
@@ -83,3 +106,12 @@ oidc:
   issuer: ""
   audience: "prism"
   requireAuth: false
+  emailClaim: "email"
+  # Several IdPs at once: "issuer|audience,issuer2|audience2". Set this INSTEAD of the
+  # single issuer/audience pair when a deployment must accept more than one (e.g. Google
+  # for staff plus a break-glass IdP). Precedence: issuers wins when both are set.
+  issuers: ""
+  # Comma-separated e-mail domains an identity may come from. Empty = no restriction.
+  # REQUIRED when the issuer is public (Google/Microsoft) — the chart refuses to render
+  # otherwise, because those IdPs authenticate any account they host, not just yours.
+  allowedDomains: ""

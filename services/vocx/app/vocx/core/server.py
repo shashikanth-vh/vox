@@ -1,0 +1,702 @@
+"""
+core.server — the VOX web panel backend (step 5).
+
+Read endpoints over the register plus the panel page. The routing core
+(`VoxApp.handle`) is framework-agnostic — (method, path, query, body) -> (status,
+content_type, bytes) — so it drops into the existing atlas_serve.py, and a stdlib
+http.server adapter is included for standalone dev use. Logging reuses the
+service JSON-stdout logging configuration (no file handlers in containers),
+per the "reuse, don't rebuild" note.
+
+Endpoints:
+  GET  /                         -> the panel (vox_panel.html)
+  GET  /health                   -> {ok:true}
+  GET  /v1/interactions     -> search (company,user,from,to,type,ref_type,q,limit,offset,sort)
+  GET  /v1/facets           -> facet counts under the same filters
+  GET  /v1/entity?code=CODE -> one entity + its interactions
+  GET  /v1/interaction_types-> enum for the panel dropdown
+  POST /v1/capture          -> run process_capture on {transcript, rm, capture_ts?}
+                                    (plan-only preview; never auto-writes here)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from app.vocx.core import gate as vocx_gate
+from app.vocx.core.atlas import AtlasStore
+from app.vocx.core.resolve import load_config
+from app.vocx.core.search import InteractionSearch
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Input bounds: a 30-minute meeting is ~4-6k words; these caps are generous while keeping
+# a malformed client (or an attack) from parking megabytes in the extraction path.
+MAX_TRANSCRIPT_CHARS = 40_000
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+
+def _stamp_capture_id(extraction, supplied) -> None:
+    if not isinstance(extraction, dict):
+        return
+    import uuid as _uuid
+    meta = extraction.setdefault("_meta", {})
+    meta["capture_id"] = str(supplied or meta.get("capture_id") or _uuid.uuid4())
+
+
+def _logger(config: dict[str, Any]) -> logging.Logger:
+    # Twelve-factor: the service configures JSON logging to stdout at startup and this
+    # logger inherits it. The PoC's rotating vox.log file is gone — containers must not
+    # log to local files (it also leaked a stray vox.log into the working directory).
+    return logging.getLogger("vocx")
+
+
+class VocxApp:
+    def __init__(self, store: AtlasStore | None = None, config: dict[str, Any] | None = None,
+                 transcriber: Any = None, writer_factory: Any = None):
+        self.config = config or load_config()
+        self.store = store or self._load_store()
+        self.search = InteractionSearch(self.store, self.config)
+        self.log = _logger(self.config)
+        self._transcriber = transcriber          # injected in tests; else built lazily
+        self.writer_factory = writer_factory      # (rm, store, config) -> writer; None -> MockWriter
+
+    def transcriber(self):
+        if self._transcriber is None:
+            from app.vocx.speech import stt as vocx_stt
+            self._transcriber = vocx_stt.build_transcriber(self.config)
+        return self._transcriber
+
+    # ---- recorded-audio playback -------------------------------------------
+    def _audio(self, query):
+        """Playback for an archived recording: {"url": presigned} for MinIO refs, raw
+        audio bytes for volume refs. Refs outside our bucket/archive are refused."""
+        ref = _one(query, "ref")
+        if not ref:
+            return 400, "application/json", _j({"ok": False, "error": "ref required"})
+        store = self.audio_store()
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "audio_store_off"})
+        got = store.playback(ref)
+        if got is None:
+            return 404, "application/json", _j({"ok": False, "error": "not found"})
+        kind, payload = got
+        if kind == "url":
+            return 200, "application/json", _j({"ok": True, "url": payload})
+        return 200, "audio/wav", payload
+
+    # ---- server-side report list (drafts → ready → committed) ---------------
+    def _reports_list(self, query):
+        rm = _one(query, "rm")
+        store = self.report_store()
+        if not rm:
+            return 400, "application/json", _j({"ok": False, "error": "rm required"})
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        return 200, "application/json", _j({"ok": True, "reports": store.list(rm)})
+
+    def _reports_get(self, query):
+        from app.vocx import reports as reports_mod
+        rm, cid = _one(query, "rm"), _one(query, "id")
+        store = self.report_store()
+        if not rm or not reports_mod.valid_id(cid or ""):
+            return 400, "application/json", _j({"ok": False, "error": "rm and valid id required"})
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        doc = store.get(rm, cid)
+        if doc is None:
+            return 404, "application/json", _j({"ok": False, "error": "not found"})
+        return 200, "application/json", _j({"ok": True, "report": doc})
+
+    def _reports_save(self, body):
+        from app.vocx import reports as reports_mod
+        if len(body) > reports_mod.MAX_REPORT_BYTES:
+            return 413, "application/json", _j({"ok": False, "error": "report too large"})
+        try:
+            data = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON body"})
+        rm, cid = data.get("rm"), data.get("capture_id")
+        if not rm or not reports_mod.valid_id(cid or ""):
+            return 400, "application/json", _j({"ok": False, "error": "rm and valid capture_id required"})
+        store = self.report_store()
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        existing = store.get(rm, cid) or {}
+        if existing.get("status") == "committed":
+            return 409, "application/json", _j({"ok": False, "error": "already committed"})
+        doc = reports_mod.make_doc(rm, cid, data.get("status") or "ready",
+                                   data.get("report") or existing.get("report") or {})
+        ok = store.save(rm, cid, doc)
+        return ((200, "application/json", _j({"ok": True, "report": reports_mod._summary_of(doc)}))
+                if ok else
+                (502, "application/json", _j({"ok": False, "error": "save failed — retry"})))
+
+    def _reports_delete(self, body):
+        from app.vocx import reports as reports_mod
+        try:
+            data = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON body"})
+        rm, cid = data.get("rm"), data.get("capture_id")
+        if not rm or not reports_mod.valid_id(cid or ""):
+            return 400, "application/json", _j({"ok": False, "error": "rm and valid capture_id required"})
+        store = self.report_store()
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        ok = store.delete(rm, cid)
+        return ((200, "application/json", _j({"ok": True}))
+                if ok else (502, "application/json", _j({"ok": False, "error": "delete failed"})))
+
+    def _autosave_draft(self, result: dict[str, Any], rm: str) -> None:
+        """Every preview persists as a DRAFT — a dead phone loses nothing. Best-effort:
+        a store hiccup must not fail the capture (the preview still returns)."""
+        store = self.report_store()
+        if store is None:
+            return
+        from app.vocx import reports as reports_mod
+        ext = result.get("extraction") or {}
+        cid = (ext.get("_meta") or {}).get("capture_id")
+        if not reports_mod.valid_id(cid or ""):
+            return
+        existing = store.get(rm, cid) or {}
+        if existing.get("status") in ("ready", "committed"):
+            return                               # never downgrade an edited/committed report
+        report = {"extraction": ext, "decision": result.get("decision"),
+                  "approval_card": result.get("approval_card"),
+                  "write_plan": result.get("write_plan"),
+                  "summary": (result.get("extraction") or {}).get("report", {}).get("summary") or ""}
+        store.save(rm, cid, reports_mod.make_doc(rm, cid, "draft", report))
+
+    def _log_preview(self, result: dict[str, Any], rm: str) -> None:
+        """One structured line per preview: everything needed to see WHY a capture
+        resolved (or didn't) without replaying it. DEBUG adds the resolver's scoring."""
+        ext = result.get("extraction") or {}
+        em = ext.get("entity_match") or {}
+        dec = result.get("decision") or {}
+        self.log.info(
+            "vocx capture=%s rm=%s company=%r -> entity=%s score=%s new_lead=%s "
+            "needs_approval=%s ref=%s",
+            (ext.get("_meta") or {}).get("capture_id"), rm, ext.get("company_mentioned"),
+            em.get("code"), em.get("match_score"), em.get("is_new_lead"),
+            dec.get("needs_approval"), (ext.get("_meta") or {}).get("transcript_ref"))
+        if self.log.isEnabledFor(logging.DEBUG):
+            self.log.debug("vocx capture=%s alternatives=%s gate=%s",
+                           (ext.get("_meta") or {}).get("capture_id"),
+                           em.get("alternatives"), dec.get("fields"))
+
+    def audio_store(self):
+        """Where recorded captures are archived (None = no archiving). PRISM overrides
+        this with the MinIO/S3-backed store; the reference it returns becomes the
+        capture's transcript_ref and rides into the committed interaction."""
+        return None
+
+    def report_store(self):
+        """Server-side persistence for pending captures (None = stateless previews).
+        PRISM overrides this with the MinIO/S3-backed store, making the RM's report
+        list a backend fact instead of browser localStorage."""
+        return None
+
+    def _load_store(self) -> AtlasStore:
+        path = self.config.get("register_store")
+        if path and not os.path.isabs(path):
+            path = os.path.join(HERE, path)
+        return AtlasStore.from_file(path) if path and os.path.exists(path) else AtlasStore.default()
+
+    def refresh(self) -> None:
+        """Reload the register (call after external writes)."""
+        self.store = self._load_store()
+        self.search = InteractionSearch(self.store, self.config)
+
+    # ---- routing core (framework-agnostic) ---------------------------------
+    def handle(self, method: str, path: str, query: dict[str, Any],
+               body: bytes = b"") -> tuple[int, str, bytes]:
+        try:
+            status, ctype, payload = self._route(method, path, query, body)
+        except Exception as e:  # noqa: BLE001
+            self.log.exception("VOX %s %s failed", method, path)
+            return 500, "application/json", _j({"ok": False, "error": str(e)})
+        self.log.info("VOX %s %s -> %s", method, path, status)
+        return status, ctype, payload
+
+    def _route(self, method, path, query, body):
+        if method == "GET" and path in ("/", "/vox", "/index.html"):
+            return 200, "text/html; charset=utf-8", _panel_html()
+        if method == "GET" and path == "/health":
+            return 200, "application/json", _j({"ok": True, "interactions": len(self.store.interactions)})
+        if method == "GET" and path == "/v1/interaction_types":
+            return 200, "application/json", _j({"types": self.store.interaction_types})
+        if method == "GET" and path == "/v1/capabilities":
+            return 200, "application/json", _j(self._capabilities())
+        if method == "GET" and path == "/v1/interactions":
+            return 200, "application/json", _j(self.search.search(**_search_args(query)))
+        if method == "GET" and path == "/v1/facets":
+            args = _search_args(query)
+            args.pop("limit", None); args.pop("offset", None); args.pop("sort", None)
+            return 200, "application/json", _j(self.search.facets(**args))
+        if method == "GET" and path == "/v1/entity":
+            code = _one(query, "code")
+            if not code:
+                return 400, "application/json", _j({"ok": False, "error": "code required"})
+            return 200, "application/json", _j(self.search.entity(code))
+        if method == "POST" and path == "/v1/capture":
+            return self._capture(body)
+        # --- mobile (step 6) ---
+        if method == "GET" and path in ("/app", "/app/"):
+            return 200, "text/html; charset=utf-8", _asset("index.html", b"<h1>VOX app missing</h1>")
+        if method == "GET" and path == "/manifest.webmanifest":
+            return 200, "application/manifest+json", _asset("manifest.webmanifest")
+        if method == "GET" and path == "/sw.js":
+            return 200, "text/javascript", _asset("sw.js")
+        if method == "GET" and path == "/app/icon.svg":
+            return 200, "image/svg+xml", _asset("icon.svg")
+        if method == "GET" and path == "/v1/auth/status":
+            return self._auth_status(query)
+        if method == "GET" and path == "/v1/auth/start":
+            return self._auth_start(query)
+        if method == "GET" and path == "/v1/auth/callback":
+            return self._auth_callback(query)
+        if method == "POST" and path == "/v1/capture_audio":
+            return self._capture_audio(query, body)
+        if method == "POST" and path == "/v1/commit":
+            return self._commit(body)
+        if method == "GET" and path == "/v1/calendar/test":
+            return self._calendar_test(query)
+        if method == "GET" and path == "/v1/audio":
+            return self._audio(query)
+        if method == "GET" and path == "/v1/reports":
+            return self._reports_list(query)
+        if method == "GET" and path == "/v1/reports/get":
+            return self._reports_get(query)
+        if method == "POST" and path == "/v1/reports/save":
+            return self._reports_save(body)
+        if method == "POST" and path == "/v1/reports/delete":
+            return self._reports_delete(body)
+        if method == "POST" and path == "/v1/template_fill":
+            return self._template_fill(body)
+        return 404, "application/json", _j({"ok": False, "error": "not found", "path": path})
+
+    def _capabilities(self) -> dict[str, Any]:
+        """What this server can do right now, so the app can adapt the UI
+        (e.g. open straight to typing when voice STT isn't installed)."""
+        import importlib.util
+        stt_cfg = self.config.get("stt", {}) or {}
+        backend = stt_cfg.get("backend", "faster_whisper")
+        stt = False
+        try:
+            if backend == "stub":
+                stt = True
+            elif backend == "api":
+                stt = bool(os.environ.get((stt_cfg.get("api", {}) or {}).get("endpoint_env", "VOX_STT_API_URL")))
+            else:
+                stt = importlib.util.find_spec("faster_whisper") is not None
+        except Exception:  # noqa: BLE001
+            stt = False
+        gcfg = self.config.get("google", {}) or {}
+        secret = gcfg.get("client_secret_file", "client_secret.json")
+        # An EMPTY path means "Google off" — os.path.join(HERE, "") is the package
+        # directory, which exists, so the unguarded check would report configured=True.
+        google_configured = bool(secret) and (os.path.exists(secret) or (
+            not os.path.isabs(secret) and os.path.exists(os.path.join(HERE, secret))))
+        extraction = "haiku" if os.environ.get(self.config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")) else "offline_stub"
+        astore = self.audio_store()
+        return {"ok": True, "stt": stt, "stt_backend": backend,
+                "audio_store": getattr(astore, "kind", None) or "off",
+                "google_configured": google_configured, "extraction": extraction,
+                "calendar_enabled": gcfg.get("calendar_enabled", True),
+                "drive_enabled": gcfg.get("drive_enabled", False),
+                "report_templates": self.config.get("report_templates", [])}
+
+    def _store_for(self, data: dict[str, Any]) -> AtlasStore:
+        """Resolve against the live register the browser posted (its S), if given;
+        otherwise the server's own register file."""
+        ents = data.get("entities")
+        if ents:
+            from app.vocx.core.store import MutableAtlasStore
+            return MutableAtlasStore.from_entities(ents)
+        return self.store
+
+    def _capture(self, body: bytes):
+        from app.vocx.core import pipeline as vocx_pipeline
+        try:
+            data = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON body"})
+        rm = (data.get("rm") or "").strip()
+        transcript = (data.get("transcript") or "").strip()
+        # in-ATLAS path can send audio inline (base64) so one endpoint serves both
+        if not transcript and data.get("audio_b64"):
+            import base64
+            if len(data["audio_b64"]) > MAX_AUDIO_BYTES * 4 // 3 + 4:
+                return 413, "application/json", _j({"ok": False, "error": "audio too large"})
+            audio = base64.b64decode(data["audio_b64"])
+            store = self.audio_store()
+            if store is not None:
+                data["_transcript_ref"] = store.save(
+                    audio, data.get("capture_ts") or "", rm)
+            tr = self.transcriber().transcribe(audio, language=data.get("language"))
+            transcript = tr.get("text", "").strip()
+            data["_transcription"] = tr
+        if not transcript or not rm:
+            return 400, "application/json", _j({"ok": False, "error": "transcript and rm required"})
+        if len(rm) > 120 or len(transcript) > MAX_TRANSCRIPT_CHARS:
+            return 413, "application/json", _j({"ok": False, "error": "rm or transcript too long"})
+        result = vocx_pipeline.process_capture(
+            transcript, rm=rm, capture_ts=data.get("capture_ts"),
+            transcript_ref=data.get("_transcript_ref"),
+            store=self._store_for(data), config=self.config,
+            offline=bool(data.get("offline")), execute=False)  # preview only
+        # A capture id rides in _meta from preview to commit, making the commit's Register
+        # writes idempotent. Client-supplied (offline queue replay) or minted here.
+        _stamp_capture_id(result.get("extraction"), data.get("capture_id"))
+        if data.get("_transcription"):
+            result["transcription"] = data["_transcription"]
+        self._autosave_draft(result, rm)
+        self._log_preview(result, rm)
+        return 200, "application/json", _j({"ok": True, **result})
+
+    # ---- mobile: audio capture -> pipeline preview -------------------------
+    def _capture_audio(self, query, body):
+        from app.vocx.core import pipeline as vocx_pipeline
+        rm = (_one(query, "rm") or "").strip()
+        if not rm or len(rm) > 120:
+            return 400, "application/json", _j({"ok": False, "error": "rm required"})
+        if not body:
+            return 400, "application/json", _j({"ok": False, "error": "empty audio body"})
+        if len(body) > MAX_AUDIO_BYTES:
+            return 413, "application/json", _j({"ok": False, "error": "audio too large"})
+        ref = None
+        astore = self.audio_store()
+        if astore is not None:
+            ref = astore.save(bytes(body), _one(query, "ts") or "", rm)
+        result = vocx_pipeline.process_audio_capture(
+            bytes(body), rm=rm, capture_ts=_one(query, "ts"),
+            transcript_ref=ref,
+            transcriber=self.transcriber(), store=self.store, config=self.config,
+            execute=False)  # preview; the RM confirms via /commit
+        _stamp_capture_id(result.get("extraction"), _one(query, "capture_id"))
+        self._autosave_draft(result, rm)
+        self._log_preview(result, rm)
+        return 200, "application/json", _j({"ok": True, **result})
+
+    # ---- mobile: commit an approved (possibly edited) capture --------------
+    def _commit(self, body):
+        from app.vocx.core import pipeline as vocx_pipeline
+        try:
+            data = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON body"})
+        ext = data.get("extraction")
+        rm = data.get("rm")
+        if not ext or not rm:
+            return 400, "application/json", _j({"ok": False, "error": "extraction and rm required"})
+
+        store = self._store_for(data)   # live register from ATLAS, or the server's
+        vocx_gate.override_entity(ext, store, code=data.get("chosen_code"),
+                                 new_lead=bool(data.get("new_lead")), company=data.get("company"))
+        vocx_gate.apply_edits(ext, data.get("edits"))
+        ext.setdefault("_meta", {})["rm"] = rm
+
+        summary = data.get("summary") or vocx_pipeline._fallback_summary(ext)
+        decision = vocx_gate.gate(ext, self.config)
+        plan = vocx_gate.plan_writes(ext, store, self.config, summary=summary)
+
+        capture_id = (data.get("capture_id")
+                      or (ext.get("_meta") or {}).get("capture_id") or None)
+        # Explicit "Log To": route the interaction at a chosen product line / subject.
+        log_to = data.get("log_to")
+        if log_to is not None:
+            import uuid as _uuid
+            ok_types = {"Lead", "Deal", "Entity", "Lending", "Syndication", "AssetMonetisation"}
+            try:
+                st, sid = log_to.get("subject_type"), str(_uuid.UUID(str(log_to.get("subject_id"))))
+            except (ValueError, AttributeError, TypeError):
+                st, sid = None, None
+            if st not in ok_types or not sid:
+                return 400, "application/json", _j(
+                    {"ok": False, "error": "log_to needs subject_type in "
+                     + "/".join(sorted(ok_types)) + " and a UUID subject_id"})
+            log_to = {"subject_type": st, "subject_id": sid}
+        writer = None
+        writer_error = None
+        if self.writer_factory:
+            try:
+                writer = self.writer_factory(rm, store, self.config, capture_id=capture_id)
+            except Exception as e:  # noqa: BLE001 — no token, missing libs, refresh failure…
+                writer_error = f"{type(e).__name__}: {e}"
+                self.log.warning("writer_factory failed for %s: %s", rm, writer_error)
+        writer = writer or vocx_gate.MockWriter()
+        writes = writer.execute(plan, {"extraction": ext, "transcript": data.get("transcript", ""),
+                                       "summary": summary, "log_to": log_to})
+        if writes.get("ok") and self.report_store() is not None and capture_id:
+            from app.vocx import reports as reports_mod
+            if reports_mod.valid_id(capture_id):
+                self.report_store().save(rm, capture_id, reports_mod.make_doc(
+                    rm, capture_id, "committed",
+                    {"extraction": ext, "summary": summary}, writes=writes))
+        ops = {r.get("op"): r.get("status") for r in (writes.get("results") or [])}
+        self.log.info("vocx commit capture=%s rm=%s committed=%s ops=%s writer_error=%s",
+                      capture_id, rm, bool(writes.get("ok")), ops, writer_error)
+        return 200, "application/json", _j({"ok": True, "committed": bool(writes.get("ok")),
+                                            "decision": decision, "write_plan": plan, "writes": writes,
+                                            "writer_error": writer_error})
+
+    # ---- AI auto-fill for a template's extra fields ------------------------
+    def _template_fill(self, body):
+        """Given the transcript and a template's fields, ask Haiku to fill just
+        those fields from what was said. Returns {values: {key: value}}."""
+        try:
+            data = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON"})
+        transcript = (data.get("transcript") or "").strip()
+        fields = [f for f in (data.get("fields") or []) if f.get("key")]
+        if not transcript or not fields:
+            return 200, "application/json", _j({"ok": True, "values": {}})
+        key_env = self.config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")
+        if not os.environ.get(key_env):
+            return 200, "application/json", _j({"ok": False, "error": "no_api_key", "values": {}})
+        try:
+            import anthropic
+
+            from app.vocx.core import extract as vocx_extract
+            client = anthropic.Anthropic(api_key=os.environ[key_env])
+            model = self.config.get("model", "claude-haiku-4-5-20251001")
+            spec = "\n".join("- {} (json key: {})".format(f.get("label") or f["key"], f["key"]) for f in fields)
+            sys_prompt = ("You extract specific fields from a meeting transcript for a lending/finance CRM. "
+                          "Return ONE JSON object mapping each json key to a short string value, or null if the "
+                          "field is not clearly stated. NEVER guess. No prose, no markdown fences — the first "
+                          "character must be { and the last }.\n\nFields to fill:\n" + spec)
+            resp = client.messages.create(
+                model=model, max_tokens=900, system=sys_prompt,
+                messages=[{"role": "user", "content": "Transcript:\n\"\"\"\n" + transcript + "\n\"\"\""}])
+            text = "".join(getattr(b, "text", "") for b in resp.content).strip()
+            parsed = vocx_extract._parse_json_lenient(text) or {}
+            keys = {f["key"] for f in fields}
+            values = {k: str(v).strip() for k, v in parsed.items() if k in keys and v not in (None, "", [])}
+            return 200, "application/json", _j({"ok": True, "values": values})
+        except Exception as e:  # noqa: BLE001
+            return 200, "application/json", _j({"ok": False, "error": str(e), "values": {}})
+
+    # ---- diagnostic: prove which calendar VOX actually writes to -----------
+    def _calendar_test(self, query):
+        """Create a real test event NOW and report which Google account it landed
+        on — so 'I can't see my follow-up' is answered definitively (usually the
+        event is on a different account than the one being viewed)."""
+        import datetime as _dt
+        rm = _one(query, "rm") or "RM"
+        if not self.writer_factory:
+            return 200, "application/json", _j({"ok": False,
+                "error": "Google writes are OFF on the server (started with --no-google)."})
+        try:
+            writer = self.writer_factory(rm, self.store, self.config)
+        except Exception as e:  # noqa: BLE001 — no token / no fallback
+            return 200, "application/json", _j({"ok": False,
+                "error": f"No Google token for {rm} (and demo fallback found none). Connect Google first. [{e}]"})
+        try:
+            cal = getattr(writer, "cal", None)
+            if cal is None:
+                return 200, "application/json", _j({"ok": False, "error": "writer has no calendar (register-only)."})
+            email = None
+            try:
+                prim = cal.calendar.calendars().get(calendarId="primary").execute()
+                email = prim.get("id")
+            except Exception:  # noqa: BLE001
+                pass
+            d = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
+            r = cal.create_event("VOX calendar test ✓", d, "16:00", "video",
+                                 "If you can see this at 4pm tomorrow, VOX is writing to THIS calendar.")
+            return 200, "application/json", _j({"ok": True, "link": r.get("link"),
+                                                "calendar_email": email, "date": d, "rm": rm})
+        except Exception as e:  # noqa: BLE001
+            return 200, "application/json", _j({"ok": False, "error": f"Calendar write failed: {e}"})
+
+    # ---- PKCE persistence (tokens volume; entries expire after 15 min) ------
+    def _pkce_path(self) -> str:
+        d = self.config.get("google", {}).get("tokens_dir", "vocx_tokens")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "vocx_pkce.json")
+
+    def _pkce_save(self, rm: str, verifier: str | None) -> None:
+        import time as _t
+        path = self._pkce_path()
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                data = {}
+        now = _t.time()
+        data = {k: v for k, v in data.items() if now - v.get("ts", 0) < 900}
+        data[rm] = {"verifier": verifier, "ts": now}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+
+    def _pkce_pop(self, rm: str) -> str | None:
+        path = self._pkce_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+        entry = data.pop(rm, None)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return entry.get("verifier") if entry else None
+
+    # ---- mobile: per-user Google auth --------------------------------------
+    def _token_store(self):
+        from app.vocx.google.oauth import TokenStore
+        return TokenStore(self.config.get("google", {}).get("tokens_dir", "vocx_tokens"))
+
+    def _auth_status(self, query):
+        rm = _one(query, "rm")
+        if not rm:
+            return 400, "application/json", _j({"ok": False, "error": "rm required"})
+        return 200, "application/json", _j({"ok": True, "rm": rm, "connected": self._token_store().has(rm)})
+
+    def _auth_start(self, query):
+        rm = _one(query, "rm")
+        if not rm:
+            return 400, "application/json", _j({"ok": False, "error": "rm required"})
+        try:
+            from app.vocx.google.oauth import authorization_url, build_flow
+            flow = build_flow(self.config)
+            url = authorization_url(flow, rm)
+            # Remember the PKCE verifier this flow generated, so the callback can complete
+            # the exchange — persisted on the tokens volume, not in process memory, so a
+            # restart or a second replica between start and callback cannot lose it.
+            self._pkce_save(rm, getattr(flow, "code_verifier", None))
+            # ?go=1 -> redirect the browser straight to Google, so you can connect
+            # a specific RM by visiting /v1/auth/start?rm=Shubh&go=1
+            if _one(query, "go"):
+                page = ("<meta name=viewport content='width=device-width,initial-scale=1'>"
+                        f"<script>location.replace({json.dumps(url)})</script>"
+                        "<p style='font:16px system-ui;padding:24px'>Redirecting to Google…</p>"
+                        )
+                return 200, "text/html; charset=utf-8", page.encode("utf-8")
+            return 200, "application/json", _j({"ok": True, "url": url})
+        except FileNotFoundError:
+            return 503, "application/json", _j({"ok": False, "error": "google_not_configured",
+                "hint": "Add client_secret.json and set google.redirect_uri in atlas_config.json."})
+        except Exception as e:  # noqa: BLE001
+            return 503, "application/json", _j({"ok": False, "error": str(e)})
+
+    def _auth_callback(self, query):
+        code = _one(query, "code")
+        rm = _one(query, "state")
+        if not code or not rm:
+            return 400, "text/html", b"<h1>Missing code/state</h1>"
+        try:
+            from app.vocx.google.oauth import build_flow, exchange_code
+            flow = build_flow(self.config)
+            cv = self._pkce_pop(rm)                # restore the verifier from /auth/start
+            if cv is not None:
+                flow.code_verifier = cv
+            creds = exchange_code(flow, code)
+            self._token_store().save_credentials(rm, creds)
+            return 200, "text/html; charset=utf-8", (
+                "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                "<body style='font:16px system-ui;padding:40px;text-align:center'>"
+                f"<h2>✓ {rm} connected</h2>"
+                "<p>Google Calendar is linked. You can close this tab and return to VOM — "
+                "it will notice automatically.</p>"
+                "<script>try{window.close()}catch(e){}"
+                "setTimeout(function(){document.body.insertAdjacentHTML('beforeend',"
+                "'<p style=\"color:#888\">(If this tab didn\\'t close, just switch back to the VOM tab.)</p>')},800);"
+                "</script></body>"
+            ).encode()
+        except Exception as e:  # noqa: BLE001
+            return 500, "text/html", (f"<h1>Auth failed</h1><p>{e}</p>").encode()
+
+
+# --- helpers ------------------------------------------------------------------
+def _j(obj: Any) -> bytes:
+    return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+def _one(query: dict[str, Any], key: str, default=None):
+    v = query.get(key)
+    if isinstance(v, list):
+        return v[0] if v else default
+    return v if v is not None else default
+
+
+def _search_args(query: dict[str, Any]) -> dict[str, Any]:
+    g = lambda k, d=None: _one(query, k, d)  # noqa: E731
+    args = {
+        "company": g("company"), "user": g("user"),
+        "date_from": g("from") or g("date_from"), "date_to": g("to") or g("date_to"),
+        "itype": g("type") or g("itype"), "ref_type": g("ref_type"),
+        "q": g("q"), "sort": g("sort", "desc"),
+    }
+    limit = g("limit"); offset = g("offset")
+    args["limit"] = int(limit) if (limit not in (None, "")) else 50
+    args["offset"] = int(offset) if (offset not in (None, "")) else 0
+    return {k: v for k, v in args.items() if v is not None}
+
+
+def _panel_html() -> bytes:
+    path = os.path.join(HERE, "vox_panel.html")
+    if os.path.exists(path):
+        with open(path, "rb") as fh:
+            return fh.read()
+    return b"<h1>VOX</h1><p>vox_panel.html not found.</p>"
+
+
+def _asset(name: str, fallback: bytes = b"not found") -> bytes:
+    path = os.path.join(HERE, "vox_mobile", name)
+    if os.path.exists(path):
+        with open(path, "rb") as fh:
+            return fh.read()
+    return fallback
+
+
+# --- stdlib http.server adapter (standalone dev) ------------------------------
+def serve(host: str = "127.0.0.1", port: int = 8765,
+          store: AtlasStore | None = None, config: dict[str, Any] | None = None):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    app = VocxApp(store, config)
+
+    class Handler(BaseHTTPRequestHandler):
+        def _do(self, method):
+            parsed = urlparse(self.path)
+            query = {k: v for k, v in parse_qs(parsed.query).items()}
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else b""
+            status, ctype, payload = app.handle(method, parsed.path, query, body)
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            self._do("GET")
+
+        def do_POST(self):
+            self._do("POST")
+
+        def log_message(self, *a):
+            pass  # requests are logged by VoxApp
+
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f"VOX panel on http://{host}:{port}/  ({len(app.store.interactions)} interactions)")
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="VOX web panel server")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8765)
+    a = ap.parse_args()
+    serve(a.host, a.port)

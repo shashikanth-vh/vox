@@ -18,13 +18,30 @@ staticClients:
       - http://localhost:8080/callback
 enablePasswordDB: true
 # Two demo users mirroring the seeded PRISM identities. Password for both: "prism".
-# bcrypt of "prism":
+# The hash MUST verify against "prism" (bcrypt.checkpw) — an example hash copied from the
+# Dex docs encodes the string "password" and silently rejects every sign-in. Regenerate:
+#   python3 -c "import bcrypt; print(bcrypt.hashpw(b'prism', bcrypt.gensalt(10)).decode())"
 staticPasswords:
   - email: admin@evamfinance.com
-    hash: "$2y$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
     username: admin
     userID: admin-uid
   - email: chetan@evamfinance.com
-    hash: "$2y$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
     username: chetan
     userID: chetan-uid
+  # FIXED identities for the end-to-end journey. Maker-checker needs two DISTINCT verified
+  # people, and a bearer token can only be issued for an identity that exists here — so the
+  # E2E uses these stable e-mails rather than per-run generated ones. Password: "prism".
+  - email: e2e.rm@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: e2e-rm
+    userID: e2e-rm-uid
+  - email: e2e.maker@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: e2e-maker
+    userID: e2e-maker-uid
+  - email: e2e.checker@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: e2e-checker
+    userID: e2e-checker-uid

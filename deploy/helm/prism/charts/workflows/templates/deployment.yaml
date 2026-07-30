@@ -20,6 +20,7 @@ spec:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "workflows.selectorLabels" . | nindent 8 }}
+        prism.evam/temporal-client: "true"   # allowed by the Temporal NetworkPolicy
     spec:
       serviceAccountName: {{ include "workflows.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
@@ -60,6 +61,15 @@ spec:
                   name: {{ include "workflows.secretName" . }}
                   key: api-key
                   {{- end }}
+            {{- if .Values.internalSigningSecret }}
+            # Re-mint a signed context per activity so the Register authorizes workflow
+            # writes as the HUMAN (with their scope), not the worker's service key.
+            - name: WORKFLOWS_INTERNAL_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflows.secretName" . }}
+                  key: internal-signing-secret
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

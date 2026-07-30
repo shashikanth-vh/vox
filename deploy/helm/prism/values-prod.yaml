@@ -12,10 +12,17 @@
 # (helm --set from your secret manager, or existingSecret refs). OIDC issuers MUST be
 # supplied via --set; the chart does not ship one.
 
+# Production posture: FAIL the render if any credential below is left as a REPLACE-*
+# placeholder (unless an existingSecret is supplied). Rotate every value out of source control
+# — this overlay ships placeholders on purpose, and this guard stops them reaching a cluster.
+global:
+  requireRealSecrets: true
+
 # Placeholder credentials, defined once and referenced everywhere so the services agree.
 # Anchors are resolved by the YAML parser before Helm sees them, so *ref == &def.
 _credentials:
-  registerHumanKey: &registerKey    "REPLACE-register-data-key"
+  # (No generic register data key: production uses only NAMED service principals + delegated
+  # humans. svc_gateway is the gateway's transport identity.)
   accessKey:        &accessKey       "REPLACE-access-service-key"
   gatewaySecret:    &gwSecret        "REPLACE-gateway-shared-secret"
   signingSecret:    &signingSecret   "REPLACE-internal-signing-secret"
@@ -25,25 +32,61 @@ _credentials:
   svcPulseKey:      &svcPulse        "REPLACE-svc-pulse-key"
   svcWorkflowsKey:  &svcWorkflows    "REPLACE-svc-workflows-key"
   pulseFrontKey:    &pulseFront      "REPLACE-pulse-front-door-key"
+  orchestratorKey:  &orchestratorKey "REPLACE-orchestrator-front-door-key"
+  svcGatewayKey:    &svcGateway      "REPLACE-svc-gateway-key"
+  vocxFrontKey:     &vocxFront       "REPLACE-vocx-front-door-key"
 
 # ---- Identity is MANDATORY everywhere -----------------------------------------
+# The gateway is the SINGLE trust boundary: it fronts every service, routes by path prefix,
+# strips the client's key and injects the scoped per-upstream credential below. Each
+# injected key MUST equal that upstream's own inbound key (anchors keep them in lockstep).
 gateway:
   oidc:
-    # issuer: set via --set / your values; MUST be non-empty in prod.
+    # issuer: set via --set / your values; MUST be non-empty in prod. For Google Workspace:
+    #   --set gateway.oidc.issuer=https://accounts.google.com \
+    #   --set gateway.oidc.audience=<client-id>.apps.googleusercontent.com
     requireAuth: true                     # the edge refuses anonymous requests
+    # REQUIRED with a consumer IdP: a valid Google token proves the account is REAL, not that it
+    # belongs to Evam — any personal @gmail.com would otherwise authenticate and only be stopped
+    # one layer later by the user lookup. Refuse it at authentication instead.
+    allowedDomains: "evamfinance.com"
+    # Accept SEVERAL issuers at once, "issuer|audience,issuer2|audience2" — e.g. Google for
+    # people AND a test IdP for CI in a staging environment. Takes precedence over issuer/audience.
+    # Leave EMPTY in production unless you deliberately want a second accepted issuer.
+    issuers: ""
   accessApiKey:
     value: *accessKey                     # must be accepted by the Access service
   gatewaySecret:
     value: *gwSecret                      # must equal register/access gatewaySharedSecret
   internalSigningSecret: *signingSecret   # must equal register.internalSigningSecret
+  upstreams:
+    atlasUrl: http://prism-atlas
+    vocxUrl: http://prism-vocx
+    pulseUrl: http://prism-pulse
+    orchestratorUrl: http://prism-workflows-api
+  serviceCredentials:
+    registerApiKey: *svcGateway           # NAMED transport key (no own authority; delegates)
+    pulseApiKey: *pulseFront              # ↔ pulse.config.apiKeys (front door)
+    orchestratorApiKey: *orchestratorKey  # ↔ workflows.api.apiKeys (front door)
+    registerAdminApiKey: *adminKey        # ↔ register.adminApiKeys (injected for Admins)
+    vocxApiKey: *vocxFront                # ↔ vocx.config.apiKeys (front door)
+    # ATLAS gates on identity, not an inbound key — nothing to inject.
 
 # ATLAS validates the OIDC bearer itself → stops trusting client X-User-Email; it presents
-# its own service key (svc_atlas: read-only allowlist) to the Register.
+# its own service key (svc_atlas: read-only allowlist) to the Register and the SHARED access
+# key to the Access service (its view-matrix gate).
 atlas:
   oidc:
     audience: "prism"
+    # ATLAS is reached through the gateway, but it verifies the token itself too — so the same
+    # allowlist must hold here, or a personal account with a valid Google token could read the
+    # dashboard directly if the service is ever exposed.
+    allowedDomains: "evamfinance.com"
+    issuers: ""
   access:
     requireUser: true
+    apiKey:
+      value: *accessKey                   # must be accepted by the Access service
   register:
     apiKey:
       value: *svcAtlas
@@ -65,13 +108,23 @@ register:
     migrationUser: prism
     migrationExistingSecret: prism-postgresql-secret
     migrationExistingSecretPasswordKey: postgres-password
+  # NO generic/unnamed data-plane key in production. Every caller is a NAMED service
+  # principal (below) or a delegated human (signed context). An unnamed key would pass the
+  # read gate and could read tenant-wide, request deleted rows, or pivot tenants via
+  # X-Tenant — so it is removed here, and the Register ALSO fails closed for any unnamed key
+  # under enforceRbac (belt and suspenders). Service keys authenticate on their own.
   apiKeys:
-    value: *registerKey                   # human traffic (via the gateway)
+    value: ""
   gatewaySharedSecret: *gwSecret
   internalSigningSecret: *signingSecret
   adminApiKeys: *adminKey
-  # Each machine caller is bound to its service allowlist (least privilege).
-  serviceApiKeys: "svc_atlas:REPLACE-svc-atlas-key,svc_vox:REPLACE-svc-vox-key,svc_pulse:REPLACE-svc-pulse-key,svc_workflows:REPLACE-svc-workflows-key"
+  # Each machine caller is bound to its service allowlist (least privilege). svc_gateway is
+  # the gateway's transport identity — no own authority; it only ever delegates a user.
+  serviceApiKeys: "svc_atlas:REPLACE-svc-atlas-key,svc_vox:REPLACE-svc-vox-key,svc_pulse:REPLACE-svc-pulse-key,svc_workflows:REPLACE-svc-workflows-key,svc_gateway:REPLACE-svc-gateway-key"
+  # Verify assignees (identity + role) against the Access service before assigning.
+  access:
+    url: http://prism-access
+    apiKey: *accessKey
 
 # Access accepts the SAME key the gateway presents; it verifies the gateway signature too.
 access:
@@ -86,14 +139,45 @@ vocx:
   register:
     apiKey:
       value: *svcVox
+  # Company-name captures start a durable workflow — VocX must hold the orchestrator's
+  # front-door key (was missing → 401 in production).
+  orchestrator:
+    url: http://prism-workflows-api
+    apiKey: *orchestratorKey
+  # Verify + re-mint the caller's context so the human authorizes Register writes.
+  internalSigningSecret: *signingSecret
+  config:
+    apiKeys: *vocxFront                   # own front door (gateway-injected key)
+    requireDelegation: true               # refuse a capture without a verified identity
 pulse:
   register:
     apiKey:
       value: *svcPulse
-  apiKeys: *pulseFront                     # PULSE's own inbound key (news-scan trigger)
+  config:
+    apiKeys: *pulseFront                   # PULSE's own inbound key (news-scan trigger)
 workflows:
   register:
     apiKey: *svcWorkflows
+  # Re-mint the caller's context so workflow writes run as the human, not the service key.
+  internalSigningSecret: *signingSecret
   api:
     requireAuth: true
-    # oidcIssuer: set via --set; MUST be non-empty in prod.
+    apiKeys: *orchestratorKey              # orchestrator front door (must equal gateway's)
+    accessUrl: http://prism-access         # approver role checks resolve against Access
+    accessApiKey: *accessKey               # must be accepted by the Access service
+    oidcAudience: "prism"
+    # oidcIssuer: set via --set; MUST be non-empty in prod. For Google Workspace:
+    #   --set workflows.api.oidcIssuer=https://accounts.google.com \
+    #   --set workflows.api.oidcAudience=<client-id>.apps.googleusercontent.com
+    # An approval is the strongest write in the platform, so the same domain allowlist as the
+    # edge applies here — a valid Google token must ALSO be an Evam identity to approve.
+    oidcAllowedDomains: "evamfinance.com"
+    oidcIssuers: ""
+
+# Temporal is reachable ONLY by the labelled worker + orchestrator; the signalling UI is off.
+# (Add mTLS + namespace authorization on the Temporal frontend for full isolation.)
+temporal:
+  networkPolicy:
+    enabled: true
+  ui:
+    enabled: false

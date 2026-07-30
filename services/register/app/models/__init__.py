@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from app.db.base import AuditLog, Base
+from app.models.advaya import AdvayaHandoff, AdvayaHandoverPackage
+from app.models.cpcs import CpcsChecklist
 from app.models.deals import Deal, Lead
+from app.models.decisions import WorkflowDecision, WorkflowDecisionOutbox
 from app.models.documents import Document, DocumentChecklistItem
+from app.models.evidence import GovernanceEvidence, GovernanceEvidenceStatus
 from app.models.interactions import Interaction
 from app.models.prism import (
     ContractAsset,
@@ -12,6 +16,7 @@ from app.models.prism import (
     Financial,
     MonitoringReporting,
 )
+from app.models.reconciliation import ImportReconciliationItem
 from app.models.registry import Counterparty, Entity, Person
 from app.models.system import IdempotencyKey, RefValue, Tenant, TenantSettings
 from app.models.trackers import (
@@ -45,6 +50,14 @@ __all__ = [
     "ContractAsset",
     "ExternalIntelligence",
     "MonitoringReporting",
+    "ImportReconciliationItem",
+    "GovernanceEvidence",
+    "GovernanceEvidenceStatus",
     "LineAssignment",
     "ChangeRequest",
+    "WorkflowDecision",
+    "WorkflowDecisionOutbox",
+    "AdvayaHandoff",
+    "AdvayaHandoverPackage",
+    "CpcsChecklist",
 ]

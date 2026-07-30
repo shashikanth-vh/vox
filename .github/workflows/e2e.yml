@@ -1,0 +1,120 @@
+name: E2E (deployed compose smoke)
+
+# Brings up the WHOLE stack with docker compose (real PostgreSQL + Temporal + all services) and
+# runs the deployed end-to-end smoke test against it. This is the "real Postgres, Temporal and
+# deployed" E2E: the exhaustive per-endpoint assertions run in the unit/integration suites (CI's
+# `quality` job); this proves the assembled system actually starts and serves.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-e2e:
+    name: docker compose up · smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the dev TLS certs (nginx refuses to start without them)
+        run: |
+          chmod +x scripts/gen_dev_certs.sh
+          scripts/gen_dev_certs.sh
+
+      - name: Build + start the core + workflow stack
+        working-directory: deploy/compose
+        run: |
+          # Core data plane + gateway + access + the workflow plane (Temporal + worker +
+          # orchestrator) + the NGINX edge — newman enters through the edge like every real
+          # client, so it must be up in BOTH postures, not just the prod one.
+          docker compose -f docker-compose.yml up -d --build \
+            postgres minio register access gateway nginx temporal workflows orchestrator
+
+      - name: Wait for the Register to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then
+              echo "register healthy after ${i}0s"; break
+            fi
+            sleep 10
+          done
+          curl -fsS http://localhost:8000/healthz
+
+      - name: Run the deployed E2E smoke
+        run: |
+          chmod +x scripts/e2e_smoke.sh
+          REGISTER_URL=http://localhost:8000 \
+          GATEWAY_URL=http://localhost:8001 \
+          ACCESS_URL=http://localhost:8002 \
+          scripts/e2e_smoke.sh
+
+      - name: Newman — run the E2E journey collection (dev posture)
+        run: |
+          npm install -g newman
+          # Wait for the EDGE (the smoke test above proved the Register directly). /healthz is
+          # answered on :80 without a redirect, so this needs no cert handling.
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break || sleep 5
+          done
+          # The journey enters over HTTPS like every real client — :8080 serves only a 301, and
+          # following a 301 replays a POST as a GET, so plain http would break every create.
+          # --insecure accepts the self-signed dev cert. --bail stops at the first failing
+          # assertion so the log ends AT the break, not 40 requests later.
+          newman run postman/PRISM_E2E_Full.postman_collection.json \
+            -e postman/PRISM_Full.postman_environment.json \
+            --env-var baseUrl=https://localhost:8443 \
+            --env-var accessUrl=https://localhost:8443/access \
+            --env-var orchestratorUrl=https://localhost:8443/orchestrator \
+            --insecure --bail --reporters cli,json \
+            --reporter-json-export newman-dev.json
+          # (No dexUrl: Dex is not running in this posture, and with the variable empty folder
+          #  00b skips itself instead of dying on a connection-refused, which --bail would
+          #  otherwise turn into a failed run before the journey even starts.)
+
+      - name: Bring the stack up in the PRODUCTION POSTURE
+        working-directory: deploy/compose
+        run: |
+          # REQUIRE_AUTH + OIDC issuer + ENFORCE_RBAC + ENFORCE_RLS. The controls that matter in
+          # production are exactly the ones the dev-default run does NOT exercise.
+          # --profile sso is REQUIRED: an override cannot un-gate a profiled service, and
+          # REQUIRE_AUTH with no reachable issuer 401s everything.
+          docker compose -f docker-compose.yml -f docker-compose.prod-posture.yml \
+            --profile sso up -d --build postgres minio register access gateway nginx dex \
+            temporal workflows orchestrator
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break || sleep 10
+          done
+
+      - name: Newman — the SAME journey under the prod posture (bearer tokens)
+        run: |
+          # The shipped Dex environment: dexUrl is pre-filled, which is the one switch that
+          # turns folder 00b (sign-in) on. URLs still hit HTTPS — same reasons as the dev run.
+          newman run postman/PRISM_E2E_Full.postman_collection.json \
+            -e postman/PRISM_Full_Dex.postman_environment.json \
+            --env-var baseUrl=https://localhost:8443 \
+            --env-var accessUrl=https://localhost:8443/access \
+            --env-var orchestratorUrl=https://localhost:8443/orchestrator \
+            --insecure --bail --reporters cli,json \
+            --reporter-json-export newman-prod-posture.json
+
+      - name: Upload newman reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-reports
+          path: newman-*.json
+
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: deploy/compose
+        run: docker compose -f docker-compose.yml logs --tail=200
+
+      - name: Tear down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose -f docker-compose.yml down -v --remove-orphans

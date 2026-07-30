@@ -117,9 +117,19 @@ def verify_internal_context(
     verify_key: str,
     algorithms: tuple[str, ...] = ("HS256",),
     leeway_seconds: int = 10,
+    verify_exp: bool = True,
 ) -> InternalContext:
     """Verify a token's signature + iss/aud/exp and return its claims. ``verify_key`` is
-    the shared secret (HS256) or the PEM public key (RS256)."""
+    the shared secret (HS256) or the PEM public key (RS256).
+
+    ``verify_exp`` defaults to True — the short lifetime is the whole point on the request
+    hops (gateway→service), so a stolen token dies fast. It is turned OFF for exactly one
+    caller: the durable **approval** token, which is bound to a single workflow id + a single
+    immutable decision and is consumed at most once. There, the decision's durability comes
+    from Temporal history (the signal is persisted the moment it is sent) and from an audited
+    Register decision record — NOT from the token still being fresh — so a worker that is down
+    longer than the token's TTL must still be able to honour a decision already made. Signature,
+    issuer, audience, nbf and the workflow/decision binding are ALWAYS enforced."""
     import jwt
 
     try:
@@ -130,7 +140,8 @@ def verify_internal_context(
             audience=AUDIENCE,
             issuer=ISSUER,
             leeway=leeway_seconds,
-            options={"require": ["exp", "iat", "iss", "aud"]},
+            options={"require": ["exp", "iat", "iss", "aud"],
+                     "verify_exp": verify_exp},
         )
     except jwt.PyJWTError as exc:
         raise InternalTokenError(f"Invalid internal context token: {exc}") from exc

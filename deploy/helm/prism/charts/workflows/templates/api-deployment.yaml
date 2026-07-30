@@ -22,6 +22,7 @@ spec:
       labels:
         {{- include "workflows.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: orchestrator-api
+        prism.evam/temporal-client: "true"   # allowed by the Temporal NetworkPolicy
     spec:
       serviceAccountName: {{ include "workflows.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
@@ -48,6 +49,22 @@ spec:
               value: {{ .Values.temporal.namespace | quote }}
             - name: WORKFLOWS_TASK_QUEUE
               value: {{ .Values.temporal.taskQueue | quote }}
+            # The orchestrator persists each conversion decision to the Register SYNCHRONOUSLY
+            # (before it acknowledges), so it needs the Register base URL + its service key.
+            - name: WORKFLOWS_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: WORKFLOWS_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: WORKFLOWS_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.register.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: api-key
+                  {{- end }}
             # Machine-caller key and Access key come from the Secret — never plaintext env.
             - name: WORKFLOWS_API_KEYS
               valueFrom:
@@ -71,14 +88,39 @@ spec:
                   {{- end }}
             # In production set requireAuth=true AND an oidcIssuer so the approver/requester
             # identity is derived from a verified token — never a caller-supplied string.
+            {{- if and .Values.api.requireAuth (not .Values.api.oidcIssuer) (not .Values.api.oidcIssuers) }}
+            {{- fail "workflows.api.requireAuth is true but neither workflows.api.oidcIssuer nor workflows.api.oidcIssuers is set — set one (e.g. --set workflows.api.oidcIssuer=https://idp.example.com) so approver identity comes from a verified token." }}
+            {{- end }}
+            {{- /* An approval is the strongest write in the platform. A public issuer without
+                   a domain allowlist would let any consumer account be the approver. */}}
+            {{- $pub := regexMatch "accounts\\.google\\.com|login\\.microsoftonline\\.com" (printf "%s %s" (.Values.api.oidcIssuer | default "") (.Values.api.oidcIssuers | default "")) }}
+            {{- if and $pub (not .Values.api.oidcAllowedDomains) }}
+            {{- fail "workflows.api accepts a public issuer (Google/Microsoft) but workflows.api.oidcAllowedDomains is empty — set it (e.g. --set workflows.api.oidcAllowedDomains=evamfinance.com) or any personal account could approve." }}
+            {{- end }}
             - name: WORKFLOWS_REQUIRE_AUTH
               value: {{ .Values.api.requireAuth | default false | quote }}
             - name: WORKFLOWS_OIDC_ISSUER
               value: {{ .Values.api.oidcIssuer | default "" | quote }}
             - name: WORKFLOWS_OIDC_AUDIENCE
               value: {{ .Values.api.oidcAudience | default "" | quote }}
+            # Several IdPs at once — "issuer|audience,issuer2|audience2"; wins over the pair above.
+            - name: WORKFLOWS_OIDC_ISSUERS
+              value: {{ .Values.api.oidcIssuers | default "" | quote }}
+            - name: WORKFLOWS_OIDC_EMAIL_CLAIM
+              value: {{ .Values.api.oidcEmailClaim | default "email" | quote }}
+            - name: WORKFLOWS_OIDC_ALLOWED_DOMAINS
+              value: {{ .Values.api.oidcAllowedDomains | default "" | quote }}
             - name: WORKFLOWS_ACCESS_URL
               value: {{ .Values.api.accessUrl | default "" | quote }}
+            {{- if .Values.internalSigningSecret }}
+            # Verify the gateway's signed caller context and thread the human identity into
+            # the workflow input (the worker re-mints per activity).
+            - name: WORKFLOWS_INTERNAL_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflows.secretName" . }}
+                  key: internal-signing-secret
+            {{- end }}
           ports:
             - name: http
               containerPort: 8000

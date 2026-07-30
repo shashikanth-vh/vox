@@ -35,6 +35,12 @@ def _wait_healthy(port: int, timeout: float = 30.0) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def register_server() -> Iterator[None]:
+    # The VOX pipeline tests stub the Register at the transport layer and need no live
+    # server or database — VOCX_TESTS_NO_REGISTER=1 lets them run standalone (CI leaves
+    # this unset, so the touchpoint integration tests keep their real Register).
+    if os.environ.get("VOCX_TESTS_NO_REGISTER"):
+        yield
+        return
     env = {**os.environ,
            "REGISTER_DB_HOST": os.environ.get("TEST_DB_HOST", "127.0.0.1"),
            "REGISTER_DB_PORT": os.environ.get("TEST_DB_PORT", "5432"),

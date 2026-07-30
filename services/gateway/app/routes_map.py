@@ -37,6 +37,35 @@ _RAW: list[tuple[str, str, str]] = [
     ("POST",   r"^/v1/requests/[^/]+/(approve|reject)$", "approve_stage_change"),
     # Exports.
     ("GET",    r"^/v1/export/.*$", "export_csv"),
+
+    # ---- Capability routes on the FRONTED services (prefix included, since the gate runs
+    # before the gateway strips the prefix). The binary gate rejects NONE at the door; each
+    # backend still enforces its own final authorization (defence in depth). --------------
+    # VocX — field touchpoint capture is an interaction write.
+    ("POST",   r"^/vocx/v1/touchpoints$", "log_interaction"),
+    # PULSE — news radar: triggering a scan / filing items is the intel-scan capability.
+    ("POST",   r"^/pulse/v1/scan$", "run_news_scan"),
+    ("POST",   r"^/pulse/v1/items$", "run_news_scan"),
+    # Orchestrator — starting/deciding workflows maps to the same operation the applied
+    # change requires, so an unauthorized user is stopped before a durable workflow starts.
+    ("POST",   r"^/orchestrator/v1/workflows/vox-touchpoints$", "log_interaction"),
+    ("POST",   r"^/orchestrator/v1/workflows/lead-conversions$", "push_lead_to_deals"),
+    ("POST",   r"^/orchestrator/v1/workflows/[^/]+/(approve|reject)$", "approve_stage_change"),
+    # Business-lifecycle workflows: starting each maps to the capability its work exercises;
+    # the Credit Committee decision maps to the stage-approval capability. The orchestrator still
+    # re-checks fresh committee authority via Access before it persists/signals (defence in depth).
+    ("POST",   r"^/orchestrator/v1/workflows/lead-qualifications$", "edit_lead"),
+    ("POST",   r"^/orchestrator/v1/workflows/deal-structurings$", "change_lending_stage"),
+    ("POST",   r"^/orchestrator/v1/workflows/document-collections$", "upload_remove_documents"),
+    # Advaya handover — a money-movement authorization; the orchestrator re-checks Credit Head /
+    # Management / Admin authority via Access before it starts the workflow (defence in depth).
+    ("POST",   r"^/orchestrator/v1/workflows/advaya-handover$", "initiate_advaya_handover"),
+    ("POST",   r"^/orchestrator/v1/workflows/advaya-handover/[^/]+/approve$", "approve_advaya_handover"),
+    # CP/CS authoritative checklist maker-checker (business-facing via the orchestrator).
+    ("POST",   r"^/orchestrator/v1/workflows/cpcs-checklists$", "prepare_cpcs_checklist"),
+    ("POST",   r"^/orchestrator/v1/workflows/cpcs-checklists/[^/]+/approve$", "approve_cpcs_checklist"),
+    ("POST",   r"^/orchestrator/v1/workflows/[^/]+/committee-decision$", "approve_stage_change"),
+    ("POST",   r"^/orchestrator/v1/workflows/[^/]+/document-received$", "upload_remove_documents"),
 ]
 
 ROUTE_OPERATIONS: list[tuple[str, re.Pattern[str], str]] = [

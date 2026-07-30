@@ -294,6 +294,8 @@ class DealRead(ReadModel):
     rm: str | None
     analyst: str | None
     stage: str | None
+    stage_history: list[dict[str, Any]] | None = None
+    reconciliation_status: str | None = None
     temperature: str | None
     source: str | None
     source_detail: str | None
@@ -319,6 +321,8 @@ class LendingCreate(CreateModel):
     stage: str | None = Field(default=None, max_length=40)
     stage_updated_at: date | None = None
     sanction_date: date | None = None
+    proposed_disbursement_amount: float | None = None
+    proposed_disbursement_date: date | None = None
     disbursed_amount: float | None = None
     disbursement_date: date | None = None
     pending_with: str | None = Field(default=None, max_length=20)
@@ -336,6 +340,8 @@ class LendingUpdate(UpdateModel):
     stage: str | None = Field(default=None, max_length=40)
     stage_updated_at: date | None = None
     sanction_date: date | None = None
+    proposed_disbursement_amount: float | None = None
+    proposed_disbursement_date: date | None = None
     disbursed_amount: float | None = None
     disbursement_date: date | None = None
     pending_with: str | None = Field(default=None, max_length=20)
@@ -353,11 +359,14 @@ class LendingRead(ReadModel):
     stage: str | None
     stage_updated_at: date | None
     sanction_date: date | None
+    proposed_disbursement_amount: float | None = None
+    proposed_disbursement_date: date | None = None
     disbursed_amount: float | None
     disbursement_date: date | None
     pending_with: str | None
     remarks: str | None
     stage_history: list[dict[str, Any]] | None
+    reconciliation_status: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -454,6 +463,7 @@ class SyndicationRead(ReadModel):
     pending_with: str | None
     remarks: str | None
     status_history: list[dict[str, Any]] | None
+    reconciliation_status: str | None = None
     # Embedded nested lenders (populated from the ORM relationship) so an ATLAS
     # syndication row carries its lenders inline — no second call required.
     lenders: list[SyndicationLenderRead] | None = None
@@ -549,6 +559,8 @@ class AssetMonRead(ReadModel):
     investor: str | None
     investor_type: str | None
     status: str | None
+    status_history: list[dict[str, Any]] | None = None
+    reconciliation_status: str | None = None
     teaser_date: date | None
     notes: str | None
 

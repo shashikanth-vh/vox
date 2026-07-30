@@ -28,7 +28,7 @@ import httpx
 from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.logging import configure_logging, get_logger
 from evam_backend_core.middleware import RequestContextMiddleware
-from evam_backend_core.oidc import OidcError, OidcVerifier
+from evam_backend_core.oidc import OidcError, build_verifier
 from evam_backend_core.oidc import bearer_token as _bearer
 from evam_register_client import AsyncRegisterClient
 from fastapi import Depends, FastAPI, Header, Query, Request
@@ -70,13 +70,16 @@ def create_app() -> FastAPI:
         app.state.http = httpx.AsyncClient(timeout=10.0)
         app.state.gate = ViewGate(app.state.http, settings.access_url,
                                   settings.access_api_key, settings.permission_cache_ttl_s)
-        app.state.oidc = (
-            OidcVerifier(settings.oidc_issuer, settings.oidc_audience or None,
-                         app.state.http, email_claim=settings.oidc_email_claim)
-            if settings.oidc_issuer else None)
+        app.state.oidc = build_verifier(
+            app.state.http,
+            issuer=settings.oidc_issuer,
+            audience=settings.oidc_audience or None,
+            issuers_spec=settings.oidc_issuers,
+            email_claim=settings.oidc_email_claim,
+            allowed_domains=settings.oidc_allowed_domains.split(","))
         log.info("atlas_started", extra={"register": settings.register_base_url,
                                          "view_gating": app.state.gate.enabled,
-                                         "oidc": bool(settings.oidc_issuer)})
+                                         "oidc": app.state.oidc is not None})
         yield
         await app.state.http.aclose()
 
@@ -198,7 +201,7 @@ def create_app() -> FastAPI:
         return {"invalidated": True}
 
     async def _trusted_email(request: Request) -> str | None:
-        """The caller's e-mail. With ATLAS_OIDC_ISSUER set it comes from the VERIFIED
+        """The caller's e-mail. With ATLAS_OIDC_ISSUER(S) set it comes from the VERIFIED
         bearer token (client cannot assert it); otherwise from X-User-Email (dev, or
         behind the authenticated gateway). Raises OidcError on a bad token."""
         verifier = request.app.state.oidc

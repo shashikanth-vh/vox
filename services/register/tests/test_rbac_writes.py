@@ -245,11 +245,73 @@ async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
         "subject_type": "Lead", "subject_id": lead["id"], "field": "status",
         "to_value": "Converted"}, headers=BD_HEAD)
     assert cr.status_code == 422, cr.text
-    # A lending line can't be PATCHed straight to the locked Disbursed state by a
-    # non-lock role (BDRM), even assigned — that's Credit Head / Admin / Management only.
-    lend = (await client.post("/v1/lending", json={"entity_id": eid})).json()
-    r = await client.patch(f"/v1/lending/{lend['id']}", json={"stage": "Disbursed"},
-                           headers=BDRM)
+    # A lending line can't be PATCHed into the locked 'Handed Over to Advaya' state by a non-lock
+    # role (BDRM), even assigned — that's Credit Head / Admin / Management only. Walk it (ordered
+    # pipeline) to 'Ready for Disbursement' first — the stage from which handover is reachable — so
+    # the row-lock, not the sequencing rule, is what refuses the BDRM.
+    lend = (await client.post("/v1/lending",
+                              json={"entity_id": eid, "stage": "Diligence"})).json()
+    for stage in ("Note Circulated", "Sanctioned", "CP/CS Completed", "Ready for Disbursement"):
+        if stage == "Sanctioned":
+            # Sanctioning is evidence-gated: the committee approval + sanction letter must be on
+            # file first, each VERIFIED against a durable committee-authority decision. Seed one.
+            import uuid as _uuid
+
+            from sqlalchemy import text
+
+            from app.db.session import get_sessionmaker
+            wf = f"committee-{_uuid.uuid4().hex[:12]}"
+            sm = get_sessionmaker()
+            async with sm() as s:
+                await s.execute(text(
+                    "INSERT INTO workflow_decisions (workflow_id, decision, subject_type, "
+                    "subject_id, run_id, decided_by, decided_by_id, roles, tenant_id) "
+                    "SELECT :wf, 'Approved', 'Lending', CAST(:sid AS varchar), 'run-1', "
+                    "'ch@evamfinance.com', "
+                    "'u-1', CAST('[\"Credit Head\"]' AS jsonb), tenant_id "  # noqa: S608
+                    "FROM lending_tracker WHERE id = CAST(:sid AS uuid)"),
+                    {"wf": wf, "sid": lend["id"]})
+                await s.commit()
+            for ek in ("credit_committee_approval", "sanction_letter"):
+                assert (await client.post(
+                    "/v1/evidence",
+                    json={"subject_type": "Lending", "subject_id": lend["id"],
+                          "evidence_kind": ek, "reference": f"{ek}/DOC-1",
+                          "sha256": "b" * 64, "decision_ref": wf},
+                    headers=ADMIN)).status_code == 201
+        if stage == "CP/CS Completed":
+            # 'CP/CS Completed' is evidence-gated: cp_cs_completion is minted from an APPROVED
+            # maker-checker checklist (ADMIN prepares, CREDIT_HEAD approves); executed_agreement is
+            # a governance kind.
+            chk = await client.post(
+                "/v1/internal/cpcs-checklists",
+                json={"lending_id": lend["id"], "status": "Completed",
+                      "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"}]},
+                headers=ADMIN)
+            assert chk.status_code == 201, chk.text
+            assert (await client.post(
+                f"/v1/internal/cpcs-checklists/{chk.json()['id']}/approve",
+                headers=CREDIT_HEAD)).status_code == 200
+            assert (await client.post(
+                "/v1/evidence",
+                json={"subject_type": "Lending", "subject_id": lend["id"],
+                      "evidence_kind": "cp_cs_completion", "reference": "cpcs/1",
+                      "sha256": "b" * 64, "decision_ref": chk.json()["id"]},
+                headers=ADMIN)).status_code == 201
+            assert (await client.post(
+                "/v1/evidence",
+                json={"subject_type": "Lending", "subject_id": lend["id"],
+                      "evidence_kind": "executed_agreement", "reference": "ea/1",
+                      "sha256": "b" * 64, "workflow_id": "wf", "run_id": "run"},
+                headers=ADMIN)).status_code == 201
+        body = {"stage": stage}
+        if stage == "Ready for Disbursement":
+            body.update({"proposed_disbursement_amount": 5,
+                         "proposed_disbursement_date": "2026-01-01"})
+        assert (await client.patch(f"/v1/lending/{lend['id']}",
+                                   json=body)).status_code == 200
+    r = await client.patch(f"/v1/lending/{lend['id']}",
+                           json={"stage": "Handed Over to Advaya"}, headers=BDRM)
     assert r.status_code == 403, r.text
 
 

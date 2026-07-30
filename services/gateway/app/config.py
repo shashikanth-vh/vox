@@ -22,14 +22,34 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"  # noqa: S104 - binds inside a container, fronted by NGINX
     port: int = 8000
 
-    # Upstreams (in-cluster service names in real deployments).
+    # Upstreams (in-cluster service names in real deployments). The gateway is the SINGLE
+    # trust boundary: it fronts every service and routes by path prefix, so nothing is
+    # reached around it. A prefix with an empty URL is disabled (routes fall through to
+    # the Register).
     register_url: str = "http://register:8000"
     access_url: str = "http://access:8000"
+    atlas_url: str = ""
+    vocx_url: str = ""
+    pulse_url: str = ""
+    orchestrator_url: str = ""
 
-    # The API key + tenant the gateway uses when calling the ACCESS service itself
-    # (client API keys are passed through to the Register untouched).
+    # Per-upstream SERVICE credential the gateway INJECTS (having stripped the client's own
+    # X-API-Key). A client authenticates to the edge with a bearer token; it never presents
+    # a backend data-plane key. Each backend accepts only its own scoped key.
+    register_api_key: str = "dev-local-key"
+    atlas_api_key: str = ""
+    vocx_api_key: str = ""
+    pulse_api_key: str = ""
+    orchestrator_api_key: str = ""
+
+    # The API key + tenant the gateway uses when calling the ACCESS service itself.
     access_api_key: str = "dev-local-key"
     default_tenant_code: str = "EVAM"
+
+    # The tenant-administration credential the gateway INJECTS on tenant-admin routes for a
+    # verified Admin — so the browser never holds it (it stays inside the trust boundary).
+    # The client's own X-Admin-Key is always stripped. Empty = don't inject (dev).
+    register_admin_api_key: str = ""
 
     # Facts cache: how long a /resolve answer is reused before re-fetching. 0 = always
     # re-resolve (tests). The gateway serves last-known-good if Access is briefly down.
@@ -55,9 +75,23 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""
     oidc_audience: str = ""
     oidc_email_claim: str = "email"
+    # Accept SEVERAL issuers in one deployment: "issuer|audience,issuer2|audience2".
+    # Takes precedence over oidc_issuer/oidc_audience above; empty = single-issuer behaviour.
+    # e.g. Google for people AND Dex for CI against the same staging environment.
+    oidc_issuers: str = ""
+    # Comma-separated e-mail domains permitted to authenticate. Empty = no restriction (dev).
+    # REQUIRED in production once a consumer IdP (Google) is an accepted issuer: a valid token
+    # proves the account is real, not that it belongs to your organisation.
+    oidc_allowed_domains: str = ""
     # Refuse any proxied request without a verified identity (401), even when OIDC is
     # off — a trusted-mesh that still wants no-anonymous. Implied true when OIDC is on.
     require_auth: bool = False
+    # Exact paths that stay reachable WITHOUT a bearer even under require_auth —
+    # Google's OAuth redirect arrives from the BROWSER with no Authorization header.
+    # Safe because completing the exchange needs the PKCE verifier persisted by an
+    # AUTHENTICATED /auth/start; an attacker cannot land a token in someone's slot.
+    # Comma-separated, exact match only.
+    auth_exempt_paths: str = "/vocx/v1/auth/callback"
 
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0

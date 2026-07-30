@@ -25,8 +25,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
+from app.core import reconciliation as recon
 from app.core.config import get_settings
 from app.core.pagination import Page
 from app.core.router import api_router
@@ -102,7 +103,7 @@ def _parse_if_match(if_match: str | None) -> int | None:
 
 async def _enforce_row_lock(ctx: "RequestContext", spec: "ResourceSpec",
                             obj_id: uuid.UUID) -> None:
-    """Field Rules, row-lock slice: a Converted lead / Disbursed lending line refuses
+    """Field Rules, row-lock slice: a Converted lead / handed-over lending line refuses
     further edits except from the roles the policy names (Field Rules sheet)."""
     if ctx.user is None or spec.subject_type is None:
         return
@@ -156,10 +157,15 @@ async def _enforce_line_write(ctx: "RequestContext", spec: "ResourceSpec",
         raise ForbiddenError(
             "Scoped access: this company is not in your scope to edit.")
 
-    # Assignment-driven lines (Lead/Deal/Lending/Syndication/AssetMonetisation). Machine
-    # callers keep the ingestion carve-out (row-level writes from vetted API keys); when
-    # enforce_rbac is on they carry a user and are checked like everyone else.
+    # Assignment-driven lines (Lead/Deal/Lending/Syndication/AssetMonetisation). A machine
+    # caller must be a SERVICE permitted to edit this line — svc_atlas (read-only) is
+    # refused, svc_vox may edit_lead, etc. A generic key follows enforce_rbac.
     if ctx.user is None:
+        from app.authz.matrix import WRITE_OPERATION_FOR_SUBJECT
+
+        op = WRITE_OPERATION_FOR_SUBJECT.get(spec.subject_type)
+        if op is not None:
+            enforce_operation(None, op)
         return
     await _enforce_row_lock(ctx, spec, obj_id)
     if ctx.authz_decision == "FULL":
@@ -230,7 +236,8 @@ async def _enforce_company_write(ctx: "RequestContext", spec: "ResourceSpec",
 
 
 async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
-                              obj_id: uuid.UUID, data: dict) -> None:
+                              obj_id: uuid.UUID, data: dict,
+                              break_glass_justification: str | None = None) -> None:
     """Protected status/stage transitions on a generic update.
 
     Closes the "status transitions can bypass the workflow" gaps:
@@ -240,12 +247,17 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
       convert endpoint writes the status via the repository directly, unaffected by this.)
     * The transition itself must be ALLOWED by policy (``ALLOWED_TRANSITIONS``): e.g. a Lead
       may go Active→Dropped and Dropped→Active, but an arbitrary jump is rejected (422).
-    * A row lock (Converted lead, Disbursed lending) is enforced on the TARGET value, not
+    * A row lock (Converted lead, handed-over lending) is enforced on the TARGET value, not
       only once the row is already locked.
+    * A sensitive stage's EVIDENCE gate must be satisfied — the immutable governance evidence
+      that stage requires must be on file — unless a designated senior authority supplies an
+      audited break-glass justification.
     """
     if spec.subject_type is None or not data:
         return
-    from app.authz.matrix import ALLOWED_TRANSITIONS, ROW_LOCKS
+    from evam_backend_core import policy
+
+    from app.core import evidence as ev
     from app.core.errors import ForbiddenError, ValidationAppError
 
     # Converting a lead is never a bare status edit — for humans AND machines.
@@ -254,46 +266,85 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
             "A lead is converted via POST /v1/leads/{id}/convert (which creates the deal "
             "and product lines atomically), not by setting status directly.")
 
-    # Transition-graph validation for fields that have a policy.
-    for field_name, graph in (
-        (f, ALLOWED_TRANSITIONS[(spec.subject_type, f)])
-        for f in list(data)
-        if (spec.subject_type, f) in ALLOWED_TRANSITIONS
-    ):
-        target = data[field_name]
-        if target is None:
-            continue
-        current = getattr(await spec.repo.get(ctx.session, ctx.tenant_id, obj_id),
-                          field_name, None)
-        if target == current:
-            continue  # no-op
-        if target not in graph.get(current or "", set()):
-            raise ValidationAppError(
-                f"{spec.subject_type}.{field_name}: {current!r} → {target!r} is not an "
-                f"allowed transition.")
+    # The evidence kinds already on file for this record — the policy engine's evidence gate
+    # checks them against what the target stage requires. Loaded once, for every caller.
+    evidence = await ev.load_evidence_kinds(ctx, spec.subject_type, obj_id)
 
-    # Row locks on the TARGET value (human roles only; machine callers are already bound by
-    # their service allowlist above).
-    lock = ROW_LOCKS.get(spec.subject_type)
-    if lock is not None and ctx.user is not None:
-        field_name, locking_values, allowed_roles = lock
-        if (field_name in data and data[field_name] in locking_values
-                and not (ctx.user.roles & allowed_roles)):
+    # BREAK-GLASS: the only way past a MISSING-evidence gate. It is reserved to a designated
+    # senior authority (Admin/Management), must carry a justification, and is AUDITED. A caller who
+    # supplies a justification but lacks the authority is refused outright (never silently ignored).
+    break_glass = False
+    bg_reason: str | None = None
+    if break_glass_justification and break_glass_justification.strip():
+        if not ev.break_glass_allowed(ctx):
             raise ForbiddenError(
-                f"Moving {spec.subject_type}.{field_name} to {data[field_name]!r} is a "
-                f"locked transition only {sorted(allowed_roles)} may make.")
+                "An evidence break-glass is reserved to a designated senior authority "
+                "(Admin or Management).")
+        break_glass = True
+        bg_reason = break_glass_justification.strip()
+
+    # Read the CURRENT row ONCE and hand it, with the proposed change, to the SINGLE shared
+    # policy authority — the exact same call the change-request approval and creation paths make,
+    # so no write path can enforce a different (or no) policy. It runs transition-graph
+    # validation, mandatory-fields-to-enter-a-stage, role/stage field locks, row locks and the
+    # evidence gate. roles=None for a machine caller (services are bound by their service allowlist
+    # above); a human passes their roles so the role-based locks apply.
+    existing = await spec.repo.get(ctx.session, ctx.tenant_id, obj_id)
+    current = {c.name: getattr(existing, c.name) for c in existing.__table__.columns}
+    roles = ctx.user.roles if ctx.user is not None else None
+    violation = policy.check_write(spec.subject_type, current=current, changes=data, roles=roles,
+                                   evidence=evidence, break_glass=break_glass)
+    if violation is not None:
+        if violation.kind == "forbidden":
+            raise ForbiddenError(violation.message)
+        raise ValidationAppError(violation.message)
+
+    # Record an audit trail whenever a break-glass ACTUALLY bypassed a missing-evidence gate, so a
+    # senior override of the evidence requirement is never invisible.
+    if break_glass:
+        stage_field = policy.stage_field_of(spec.subject_type)
+        target = data.get(stage_field) if stage_field else None
+        if target and policy.evidence_error(spec.subject_type, target, evidence) is not None:
+            from app.core.logging import request_id_ctx
+            from app.db.base import AuditLog
+            ctx.session.add(AuditLog(
+                tenant_id=ctx.tenant_id, actor=ctx.actor, action="evidence.break_glass",
+                resource_type=spec.subject_type, resource_id=str(obj_id),
+                request_id=request_id_ctx.get(),
+                changes={"target_stage": target, "justification": bg_reason,
+                         "evidence_on_file": sorted(evidence),
+                         "by": ctx.user.email if ctx.user else None}))
+
+
+def _recon_included(ctx: "RequestContext", include_reconciliation: bool) -> bool:
+    """Whether still-'Required' rows may be returned. Only an ADMIN human may opt in explicitly;
+    a service caller (no user) can NEVER include them — operational reads fail closed."""
+    return bool(include_reconciliation and ctx.user is not None and ctx.user.is_admin)
 
 
 def _gate_include_deleted(ctx: "RequestContext", include_deleted: bool) -> None:
     """Reading soft-deleted rows is an audit/backup capability, not a normal read: a human
-    caller must hold the ``audit`` view (Admin). Machine callers follow their service/compat
-    rules. Closes "include_deleted=true remains broadly available"."""
-    if not include_deleted or ctx.user is None:
+    caller must hold the ``audit`` view (Admin); a NAMED service may never read deleted
+    rows. Closes "read-only services can still read deleted records"."""
+    if not include_deleted:
         return
-    from app.authz.engine import view_access
+    from app.authz.engine import service_ctx, view_access
     from app.authz.matrix import Access
     from app.core.errors import ForbiddenError
 
+    if ctx.user is None:
+        # A NAMED service never reads deleted rows; an UNNAMED key may only under
+        # compatibility mode — under enforce_rbac it fails closed like every other machine
+        # read, so a leaked generic key can't pull the deleted-row history.
+        from app.core.config import get_settings
+
+        if service_ctx.get() is not None:
+            raise ForbiddenError("Services may not read soft-deleted rows.")
+        if get_settings().enforce_rbac:
+            raise ForbiddenError(
+                "include_deleted requires a user context with the audit capability "
+                "(RBAC enforced); an unnamed key may not read deleted rows.")
+        return
     if view_access(ctx.user, "audit") is Access.NONE:
         raise ForbiddenError("include_deleted requires the audit capability (Admin).")
 
@@ -341,8 +392,24 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             # SERVICE allowlist (svc_vox may add_lead, svc_pulse may not), so ingestion is
             # least-privilege rather than a blanket write.
             if spec.subject_type is not None:
+                from evam_backend_core import policy
+
                 from app.authz import enforce_operation
                 from app.authz.matrix import CREATE_OPERATION_FOR_SUBJECT
+                from app.core.errors import ForbiddenError, ValidationAppError
+
+                # Creation-time lifecycle via the SAME shared authority as PATCH/approval: a
+                # terminal/governance state (a Converted lead, a Sanctioned deal, a Disbursed
+                # lending line) can never be set at birth — it is reached only through the
+                # proper flow or an approved transition — AND any mandatory fields a supplied
+                # stage requires must be present. Same rule for humans and machines.
+                roles = ctx.user.roles if ctx.user is not None else None
+                violation = policy.check_write(spec.subject_type, current={}, changes=body,
+                                               roles=roles, is_creation=True)
+                if violation is not None:
+                    if violation.kind == "forbidden":
+                        raise ForbiddenError(violation.message)
+                    raise ValidationAppError(violation.message)
 
                 op = CREATE_OPERATION_FOR_SUBJECT.get(spec.subject_type)
                 if op is not None:
@@ -421,8 +488,14 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         limit: int = Query(default=settings.default_page_size, ge=1, le=settings.max_page_size),
         cursor: str | None = Query(default=None, description="Opaque keyset cursor"),
         include_deleted: bool = Query(default=False),
+        include_reconciliation: bool = Query(
+            default=False,
+            description="Admin-only: include records still flagged reconciliation_status="
+                        "'Required'. By default they are EXCLUDED from operational lists/totals."),
         with_total: bool = Query(default=False, description="Include exact total (slower)"),
     ) -> Any:
+        from app.authz.engine import enforce_service_read
+        enforce_service_read(spec.prefix, ctx.user)
         _gate_include_deleted(ctx, include_deleted)
         # RBAC on line-resource lists (user context present): view access NONE → 403;
         # SCOPED → the central scope evaluator (assignment ∪ connected company ∪
@@ -458,7 +531,19 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         # Filters: only whitelisted equality filters are honoured. Reject an UNKNOWN
         # filter param loudly (422) rather than silently ignoring it — a dropped filter
         # is how the wrong-company lead bug leaked data.
-        _reserved = {"q", "limit", "cursor", "include_deleted", "with_total", "scope"}
+        # Operational reads EXCLUDE records still flagged reconciliation_status='Required' by
+        # default — an incomplete governed import must not silently count toward disbursed/
+        # sanctioned totals or trigger downstream processing. Services (no user) can NEVER opt in
+        # (fail closed); only an Admin human may, explicitly, via include_reconciliation=true.
+        # (Centralised predicate — the same one exports, counts and direct reads apply.)
+        if not _recon_included(ctx, include_reconciliation):
+            exclude = recon.model_exclusion(spec.repo.model)
+            if exclude is not None:
+                scope_condition = (exclude if scope_condition is None
+                                   else and_(scope_condition, exclude))
+
+        _reserved = {"q", "limit", "cursor", "include_deleted", "include_reconciliation",
+                     "with_total", "scope"}
         unknown = [k for k in request.query_params
                    if k not in spec.filterable and k not in _reserved]
         if unknown:
@@ -490,9 +575,22 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         response: Response,
         ctx: RequestContext = Depends(get_context),
         include_deleted: bool = Query(default=False),
+        include_reconciliation: bool = Query(
+            default=False,
+            description="Admin-only: also return a record still flagged reconciliation_status="
+                        "'Required' (hidden from operational reads by default)."),
     ) -> Any:
+        from app.authz.engine import enforce_service_read
+        enforce_service_read(spec.prefix, ctx.user)
         _gate_include_deleted(ctx, include_deleted)
         obj = await repo.get(ctx.session, ctx.tenant_id, obj_id, include_deleted=include_deleted)
+        # Fail closed on a known-id read too: a record still requiring reconciliation is invisible
+        # to operational callers (services always; humans unless an Admin opts in), so a downstream
+        # service that happens to know the id still cannot fetch and process it.
+        if (getattr(obj, "reconciliation_status", None) in recon.HIDDEN_STATUSES
+                and not _recon_included(ctx, include_reconciliation)):
+            from app.core.errors import NotFoundError
+            raise NotFoundError(f"{spec.name} '{obj_id}' not found.")
         # RBAC: direct GET honours the same scope as the list — a SCOPED user cannot
         # fetch an unrelated row just by knowing its id.
         if ctx.user is not None and spec.view_name is not None:
@@ -534,12 +632,14 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             payload: spec.update_schema,
             ctx: RequestContext = Depends(get_context),
             if_match: str | None = Header(default=None, alias="If-Match"),
+            break_glass: str | None = Header(default=None, alias="X-Evidence-Break-Glass"),
         ) -> Any:
             await _enforce_line_write(ctx, spec, obj_id)
             await _enforce_company_write(ctx, spec, obj_id)
             _enforce_simple_write(ctx, spec)  # people / counterparties / checklist update
             data = payload.model_dump(exclude_unset=True)
-            await _enforce_transition(ctx, spec, obj_id, data)  # protected transitions
+            await _enforce_transition(ctx, spec, obj_id, data,  # protected transitions
+                                      break_glass_justification=break_glass)
             expected = data.pop("expected_version", None)
             if expected is None:
                 expected = _parse_if_match(if_match)

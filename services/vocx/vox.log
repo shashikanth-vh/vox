@@ -1,0 +1,42 @@
+2026-07-30 18:35:16,353 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:16,363 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:16,367 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:16,376 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:16,379 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:16,386 INFO VOX GET /api/vocx/capabilities -> 200
+2026-07-30 18:35:16,397 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:16,400 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:16,404 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:16,412 INFO VOX POST /api/vocx/capture -> 413
+2026-07-30 18:35:16,447 INFO VOX POST /api/vocx/capture_audio -> 413
+2026-07-30 18:35:16,451 ERROR vocx audio: S3 put failed (minio down) — falling back to local
+2026-07-30 18:35:16,461 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:16,464 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:42,651 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:42,662 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:42,665 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:42,675 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:42,678 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:42,687 INFO VOX GET /api/vocx/capabilities -> 200
+2026-07-30 18:35:42,700 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:42,703 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:42,706 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:35:42,715 INFO VOX POST /api/vocx/capture -> 413
+2026-07-30 18:35:42,758 INFO VOX POST /api/vocx/capture_audio -> 413
+2026-07-30 18:35:42,763 ERROR vocx audio: S3 put failed (minio down) — falling back to local
+2026-07-30 18:35:42,772 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:35:42,775 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:36:24,586 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:36:24,598 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:36:24,601 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:36:24,611 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:36:24,615 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:36:24,625 INFO VOX GET /api/vocx/capabilities -> 200
+2026-07-30 18:36:24,638 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:36:24,641 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:36:24,644 INFO VOX POST /api/vocx/commit -> 200
+2026-07-30 18:36:24,653 INFO VOX POST /api/vocx/capture -> 413
+2026-07-30 18:36:24,690 INFO VOX POST /api/vocx/capture_audio -> 413
+2026-07-30 18:36:24,695 ERROR vocx audio: S3 put failed (minio down) — falling back to local
+2026-07-30 18:36:24,706 INFO VOX POST /api/vocx/capture -> 200
+2026-07-30 18:36:24,709 INFO VOX POST /api/vocx/commit -> 200

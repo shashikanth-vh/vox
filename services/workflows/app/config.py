@@ -20,8 +20,16 @@ class Settings(BaseServiceSettings):
     # Where activities reach the Register (through NGINX in a real deployment).
     register_base_url: str = "http://localhost:8000"
     register_api_key: str = "dev-local-key"
-    register_tenant: str = "EVAM"
+    register_tenant: str = "EVAM"     # DEFAULT tenant only — a caller's tenant overrides it
     register_actor: str = "workflows"
+
+    # Signed internal context. When set, the worker RE-MINTS a short-lived signed context
+    # from the caller identity carried in the workflow input, so the Register authorizes
+    # writes as the HUMAN (with their scope) — not the worker's service key. Must equal the
+    # Register's internal_signing_secret. Empty = dev (writes run as the service key).
+    internal_signing_secret: str = ""
+    internal_signing_algorithm: str = "HS256"
+    internal_token_ttl_seconds: int = 120
 
     # The Orchestrator API (python -m app.api) — the HTTP front door that starts
     # workflows / delivers signals. Empty api_keys = open (dev); set in production.
@@ -35,6 +43,14 @@ class Settings(BaseServiceSettings):
     oidc_issuer: str = ""
     oidc_audience: str = ""
     oidc_email_claim: str = "email"
+    # Accept SEVERAL issuers in one deployment: "issuer|audience,issuer2|audience2".
+    # Takes precedence over oidc_issuer/oidc_audience above; empty = single-issuer behaviour.
+    # e.g. Google for people AND Dex for CI against the same staging environment.
+    oidc_issuers: str = ""
+    # Comma-separated e-mail domains permitted to authenticate. Empty = no restriction (dev).
+    # REQUIRED in production once a consumer IdP (Google) is an accepted issuer: a valid token
+    # proves the account is real, not that it belongs to your organisation.
+    oidc_allowed_domains: str = ""
     access_url: str = ""             # e.g. http://prism-access — for role checks
     access_api_key: str = "dev-local-key"
 
@@ -42,6 +58,12 @@ class Settings(BaseServiceSettings):
     # MUST present a verified OIDC token — the orchestrator refuses to trust a
     # caller-supplied identity string. Leave false only for local dev without an IdP.
     require_auth: bool = False
+
+    # The decision-delivery reconciler (python -m app.reconciler).
+    reconciler_interval_seconds: int = 30      # sweep cadence
+    reconciler_batch: int = 50                 # deliveries claimed per tenant per sweep
+    reconciler_lease_seconds: int = 60         # how long a claimed row is leased
+    reconciler_backoff_seconds: int = 60       # backoff for a still-running / errored delivery
 
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]

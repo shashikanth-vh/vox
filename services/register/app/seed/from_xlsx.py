@@ -96,6 +96,20 @@ def _yes(v) -> bool:
     return str(v).strip().lower() in {"yes", "y", "true", "1"}
 
 
+# Legacy ATLAS-era credit-pipeline stage labels → PRISM's current vocabulary. Historical
+# spreadsheets used 'Documentation' (the CP/CS phase) and 'Disbursed' (the terminal). PRISM renamed
+# the milestones and — with no Advaya integration — its terminal is 'Handed Over to Advaya', so a
+# historical 'Disbursed' loan maps there (its recorded amount/date become the proposed drawdown).
+_LEGACY_CREDIT_STAGE: dict[str, str] = {
+    "Documentation": "CP/CS Completed",
+    "Disbursed": "Handed Over to Advaya",
+}
+
+
+def _map_credit_stage(v: str | None) -> str | None:
+    return _LEGACY_CREDIT_STAGE.get(v, v) if v is not None else v
+
+
 # Corporate suffix words peeled from the tail of a company name so that legal-form
 # variants collapse to ONE entity. Without this, "EcoSoch Solar Private Limited",
 # "EcoSoch Solar Pvt Ltd" and "EcoSoch Solar Ltd" seed three separate companies
@@ -162,10 +176,100 @@ class _CodeGen:
 # main import
 # --------------------------------------------------------------------------- #
 async def import_workbook(
-    session: AsyncSession, tenant_id: uuid.UUID, source, *, truncate: bool = True
+    session: AsyncSession, tenant_id: uuid.UUID, source, *, truncate: bool = True,
+    report: dict | None = None, retain_incomplete: bool = False, batch_id: str | None = None,
+    actor: str = "xlsx-import",
 ) -> dict[str, int]:
+    """Load the ATLAS MIS workbook. Historical data may legitimately begin at a later lifecycle
+    stage, so this is a GOVERNED exception to the interactive policy — but the two definitions of a
+    valid record must not diverge:
+
+    * An UNKNOWN / free-text lifecycle value is always QUARANTINED (skipped) — it maps to no real
+      state.
+    * A KNOWN stage missing its mandatory data (e.g. a 'Ready for Disbursement' lending line with
+      no amount/date) is by DEFAULT quarantined too — the same state the interactive API rejects.
+      Only when the caller explicitly opts in (``retain_incomplete=True``, an audited historical
+      override) is the row imported, and then it is recorded for reconciliation (batch id + missing
+      fields) so it is
+      never mistaken for operationally complete.
+
+    A batch id ties every accepted/quarantined/reconciliation row (and the appended import-history
+    events) to this one import, for lineage. All exceptions are collected in ``report``."""
+    from datetime import UTC, datetime
+
+    from evam_backend_core.policy import MANDATORY_FOR_STAGE, STAGE_VOCAB
+
+    from app.models.reconciliation import ImportReconciliationItem
+
     wb = load_workbook(source if isinstance(source, str | Path) else BytesIO(source), data_only=True)
     counts: dict[str, int] = {}
+
+    report = report if report is not None else {}
+    batch_id = batch_id or str(uuid.uuid4())
+    report["import_batch_id"] = batch_id
+    stamped_at = datetime.now(UTC).isoformat()
+    quarantined: list[dict] = report.setdefault("quarantined", [])
+    reconciliation: list[dict] = report.setdefault("reconciliation", [])
+    history_changes: list[dict] = report.setdefault("history_changes", [])
+    # Reconciliation items are created AFTER the row's id exists (post-flush) — collect them here.
+    pending_recon: list[tuple] = []
+
+    def _jsonable(v):  # noqa: ANN001
+        return v.isoformat() if hasattr(v, "isoformat") else v
+
+    def _screen(subject_type: str, value, sheet: str, company, row_fields: dict) -> tuple[str, list]:
+        """Screen a row's lifecycle value. Returns (verdict, missing):
+        * ``("skip", [])``   — quarantine (an UNKNOWN value, or a known stage missing mandatory data
+          when ``retain_incomplete`` is False): the SAME state the interactive API rejects.
+        * ``("ok", [])``     — import cleanly.
+        * ``("retain", [...])`` — a known stage missing mandatory data, imported under the historical
+          override: the caller must flag the record reconciliation_status=Required and open a
+          reconciliation item listing the missing fields. A NULL value is always ("ok", [])."""
+        if value is None:
+            return "ok", []
+        field, vocab = STAGE_VOCAB[subject_type]
+        if value not in vocab:
+            quarantined.append({"sheet": sheet, "company": company, "field": field,
+                                "value": value, "reason": "unknown lifecycle value",
+                                "batch_id": batch_id})
+            return "skip", []
+        required = MANDATORY_FOR_STAGE.get(subject_type, {}).get(value) or []
+        missing = [f for f in required if row_fields.get(f) in (None, "")]
+        if not missing:
+            return "ok", []
+        if not retain_incomplete:
+            quarantined.append({"sheet": sheet, "company": company, "field": field, "value": value,
+                                "missing": missing, "batch_id": batch_id,
+                                "reason": f"missing mandatory data for {value!r}"})
+            return "skip", []
+        reconciliation.append({"sheet": sheet, "company": company, "field": field, "value": value,
+                               "missing": missing, "batch_id": batch_id,
+                               "reconciliation_status": "Required"})
+        return "retain", missing
+
+    def _open_recon(subject_type: str, obj, field: str, value, missing: list, sheet: str,
+                    company, row_fields: dict) -> None:
+        """Flag the record and open a durable reconciliation item (with the ORIGINAL imported
+        values preserved), so a retained-incomplete import is a tracked work item — never a
+        silently 'complete'-looking record."""
+        obj.reconciliation_status = "Required"
+        pending_recon.append((subject_type, obj, field, value, missing, sheet, company,
+                              {k: _jsonable(v) for k, v in row_fields.items()}))
+
+    def _note_stage_change(obj, hist_attr: str, field: str, old, new, sheet: str) -> None:
+        """Append an ``xlsx-import`` event to a record's append-only history whenever an import
+        SETS or CHANGES its lifecycle value — for a NEW row this is the initial NULL → stage event,
+        for a MERGE it is the transition — so history is complete and reconstructable for EVERY
+        product line, not silently overwritten. Also validates the record ends AT the value the
+        final history entry names (they cannot diverge)."""
+        if old == new or new is None:
+            return
+        history = list(getattr(obj, hist_attr) or [])
+        history.append({"from": old, "to": new, "by": actor, "at": stamped_at,
+                        "source": "xlsx-import", "batch_id": batch_id, "sheet": sheet})
+        setattr(obj, hist_attr, history)
+        history_changes.append({"sheet": sheet, "field": field, "from": old, "to": new,
+                                "batch_id": batch_id})
 
     if truncate:
         # TENANT-SCOPED wipe (the reviewer's data-loss fix): delete only THIS tenant's
@@ -402,24 +506,34 @@ async def import_workbook(
         fields = {
             "is_lending": _yes(r.get("Lending?")), "is_syndication": _yes(r.get("Syndication?")),
             "is_asset_mon": _yes(r.get("Asset Mon?")), "rm": _s(r.get("RM")),
-            "stage": _s(r.get("Stage")), "temperature": _s(r.get("Status")),
+            "stage": _map_credit_stage(_s(r.get("Stage"))), "temperature": _s(r.get("Status")),
             "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),
             "date_received": _date(r.get("Date Received")), "remarks": _s(r.get("Remarks")),
         }
+        verdict, missing = _screen("Deal", fields["stage"], "Deals", nm, fields)
+        if verdict == "skip":
+            continue
         existing = deal_obj_by_entity.get(entity)
         if existing is None:
             deal = Deal(tenant_id=tenant_id, deal_no=None, entity_id=entity, code=None,
                         created_by="xlsx-import", updated_by="xlsx-import", **fields)
+            _note_stage_change(deal, "stage_history", "stage", None, fields["stage"], "Deals")
             session.add(deal)
             deal_obj_by_entity[entity] = deal
             n_new += 1
+            obj = deal
         else:
+            _note_stage_change(existing, "stage_history", "stage",
+                               getattr(existing, "stage", None), fields["stage"], "Deals")
             for key, val in fields.items():
                 # flags are always meaningful; strings only overwrite when present.
                 if key.startswith("is_") or val is not None:
                     setattr(existing, key, val)
             existing.updated_by = "xlsx-import"
             n_upd += 1
+            obj = existing
+        if verdict == "retain":
+            _open_recon("Deal", obj, "stage", fields["stage"], missing, "Deals", nm, fields)
     await session.flush()
     counts["deals"] = n_new
     counts["deals_updated"] = n_upd
@@ -464,30 +578,53 @@ async def import_workbook(
         entity = eid(nm)
         if entity is None:
             continue
+        raw_stage = _s(r.get("Stage"))
+        disb_amt = _float(r.get("Disbursed Amount (₹ Cr)"))
+        disb_date = _date(r.get("Disbursement Date"))
+        prop_amt = _float(r.get("Proposed Disbursement Amount (₹ Cr)"))
+        prop_date = _date(r.get("Proposed Disbursement Date"))
+        # A legacy 'Disbursed' row carries no separate proposed column — its recorded disbursement
+        # amount/date ARE the proposed drawdown for the mapped 'Handed Over to Advaya' terminal.
+        if raw_stage == "Disbursed":
+            prop_amt = prop_amt if prop_amt is not None else disb_amt
+            prop_date = prop_date if prop_date is not None else disb_date
         fields = {
             "deal_id": deal_by_entity.get(entity),
             "amount_cr": _float(r.get("Lending Amount (₹ Cr)")), "rm": _s(r.get("RM")),
-            "analyst": _s(r.get("Credit Analyst")), "stage": _s(r.get("Stage")),
+            "analyst": _s(r.get("Credit Analyst")), "stage": _map_credit_stage(raw_stage),
             "stage_updated_at": _date(r.get("Stage Updated")),
             "sanction_date": _date(r.get("Sanction Date")),
-            "disbursed_amount": _float(r.get("Disbursed Amount (₹ Cr)")),
-            "disbursement_date": _date(r.get("Disbursement Date")),
+            "proposed_disbursement_amount": prop_amt, "proposed_disbursement_date": prop_date,
+            "disbursed_amount": disb_amt, "disbursement_date": disb_date,
             "remarks": _s(r.get("Remarks")),
         }
+        verdict, missing = _screen("Lending", fields["stage"], "Lending Tracker", nm, fields)
+        if verdict == "skip":
+            continue
         existing = lend_by_entity.get(entity)
         if existing is None:
             lt = LendingTracker(tenant_id=tenant_id, tracker_no=next_lending_no(),
                                 entity_id=entity, created_by="xlsx-import",
                                 updated_by="xlsx-import", **fields)
+            _note_stage_change(lt, "stage_history", "stage", None, fields["stage"],
+                               "Lending Tracker")
             session.add(lt)
             lend_by_entity[entity] = lt
             n_new += 1
+            obj = lt
         else:
+            _note_stage_change(existing, "stage_history", "stage",
+                               getattr(existing, "stage", None), fields["stage"],
+                               "Lending Tracker")
             for key, val in fields.items():
                 if val is not None:
                     setattr(existing, key, val)
             existing.updated_by = "xlsx-import"
             n_upd += 1
+            obj = existing
+        if verdict == "retain":
+            _open_recon("Lending", obj, "stage", fields["stage"], missing, "Lending Tracker",
+                        nm, fields)
     await session.flush()
     counts["lending_tracker"] = n_new
     counts["lending_tracker_updated"] = n_upd
@@ -522,18 +659,28 @@ async def import_workbook(
         entity = eid(nm)
         if entity is None:
             continue
+        syn_status = _s(r.get("Deal Status"))
+        verdict, missing = _screen("Syndication", syn_status, "Syndication", nm, {})
+        if verdict == "skip":
+            continue
         k = _key(nm)
         tr = syn_tracker_by.get(k) or syn_by_entity.get(entity)
         if tr is None:
             tr = SyndicationTracker(
                 tenant_id=tenant_id, tracker_no=next_syn_no(), entity_id=entity,
                 deal_id=deal_by_entity.get(entity),
-                status=_s(r.get("Deal Status")), amount_cr=_float(r.get("Amount (₹ Cr)")),
+                status=syn_status, amount_cr=_float(r.get("Amount (₹ Cr)")),
                 created_by="xlsx-import", updated_by="xlsx-import",
             )
+            _note_stage_change(tr, "status_history", "status", None, syn_status, "Syndication")
             session.add(tr)
             await session.flush()
             n_syn += 1
+        elif syn_status is not None and tr.status != syn_status:
+            # A merge that moves an existing syndication's status records the transition too.
+            _note_stage_change(tr, "status_history", "status", tr.status, syn_status,
+                               "Syndication")
+            tr.status = syn_status
         syn_tracker_by[k] = tr
         syn_by_entity[entity] = tr
         bank = _s(r.get("Bank"))
@@ -578,20 +725,31 @@ async def import_workbook(
             "investor_type": _s(r.get("Investor Type")), "status": _s(r.get("Status")),
             "teaser_date": _date(r.get("Date Teaser Shared")), "notes": notes or None,
         }
+        verdict, missing = _screen("AssetMonetisation", fields["status"], "Asset Mon", nm, fields)
+        if verdict == "skip":
+            continue
         existing = am_by_entity.get(entity)
         if existing is None:
             a = AssetMonetisation(tenant_id=tenant_id, tracker_no=next_am_no(),
                                   entity_id=entity, created_by="xlsx-import",
                                   updated_by="xlsx-import", **fields)
+            _note_stage_change(a, "status_history", "status", None, fields["status"], "Asset Mon")
             session.add(a)
             am_by_entity[entity] = a
             n_new += 1
+            obj = a
         else:
+            _note_stage_change(existing, "status_history", "status",
+                               getattr(existing, "status", None), fields["status"], "Asset Mon")
             for key, val in fields.items():
                 if val is not None:
                     setattr(existing, key, val)
             existing.updated_by = "xlsx-import"
             n_upd += 1
+            obj = existing
+        if verdict == "retain":
+            _open_recon("AssetMonetisation", obj, "status", fields["status"], missing,
+                        "Asset Mon", nm, fields)
     await session.flush()
     counts["asset_monetisation"] = n_new
     counts["asset_monetisation_updated"] = n_upd
@@ -626,5 +784,16 @@ async def import_workbook(
         n += 1
     await session.flush()
     counts["mandate_applied"] = n
+
+    # Open a durable reconciliation item for every retained-incomplete row (now that each row's id
+    # exists after the flushes above). The ORIGINAL imported values are preserved on the item.
+    for subject_type, obj, field, value, missing, sheet, company, original in pending_recon:
+        session.add(ImportReconciliationItem(
+            tenant_id=tenant_id, import_batch_id=batch_id, checksum=batch_id,
+            subject_type=subject_type, subject_id=obj.id, sheet=sheet, company=company,
+            stage_field=field, stage_value=value, missing_fields=list(missing),
+            original_values=original, status="Required", created_by=actor))
+    await session.flush()
+    counts["reconciliation_items"] = len(pending_recon)
 
     return counts

@@ -153,6 +153,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       name: {{ include "register.secretName" . }}
       key: service-api-keys
 {{- end }}
+{{- if .Values.access.url }}
+# Verify an ASSIGNEE's identity + role against the Access service before an assignment is
+# placed (so a service can't assign an arbitrary UUID, nor a role the user doesn't hold).
+- name: REGISTER_ACCESS_URL
+  value: {{ .Values.access.url | quote }}
+- name: REGISTER_ACCESS_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "register.secretName" . }}
+      key: access-api-key
+{{- end }}
 # RBAC-mandatory mode: gated operations (delete/restore/import/audit/line creates)
 # refuse machine callers without a user context. On by default in the umbrella.
 - name: REGISTER_ENFORCE_RBAC

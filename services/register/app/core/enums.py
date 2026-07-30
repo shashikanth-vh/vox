@@ -107,8 +107,10 @@ class LendingStage(StrEnum):
     DILIGENCE = "Diligence"
     NOTE_CIRCULATED = "Note Circulated"
     SANCTIONED = "Sanctioned"
-    DOCUMENTATION = "Documentation"
-    DISBURSED = "Disbursed"
+    CP_CS_COMPLETED = "CP/CS Completed"
+    READY_FOR_DISBURSEMENT = "Ready for Disbursement"
+    HANDED_OVER_TO_ADVAYA = "Handed Over to Advaya"
+    DISBURSEMENT_PENDING = "Disbursement Pending"
     REJECTED = "Rejected"
     ON_HOLD = "On Hold"
 

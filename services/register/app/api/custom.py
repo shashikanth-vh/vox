@@ -103,6 +103,14 @@ async def _ensure_subject_scope(ctx: RequestContext, operation: str,
 async def _ensure_company_read(ctx: RequestContext, entity_id: uuid.UUID | None) -> None:
     """Gate a company-wide READ (dossier, documents, timeline, data register) on the
     clients view: NONE → 403; SCOPED → the company must be connected to the user."""
+    from app.authz.engine import enforce_service_read
+    # Composite company reads (dossier, financial history, timelines, documents + content,
+    # lender matrix) expose FAR more than entity-matching: they are gated on a DISTINCT
+    # capability that NO service holds on its own key. A service that only needs to match
+    # entities (svc_pulse) therefore cannot pull a company's full footprint — it must
+    # forward a user context (delegated). Only a delegated (human) read, or a generic dev
+    # key, passes here.
+    enforce_service_read("company:composite", ctx.user)
     if ctx.user is None or entity_id is None:
         return
     from app.authz import scope as scope_mod

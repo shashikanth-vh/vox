@@ -1,4 +1,5 @@
-# PRISM VocX (voice touchpoint capture). Stateless.
+# PRISM VocX (voice touchpoint capture + the voice pipeline). Stateless except the
+# pipeline volume (Google tokens, PKCE state, alias map, audio archive, Whisper cache).
 fullnameOverride: ""       # umbrella sets prism-vocx
 nameOverride: ""
 
@@ -25,9 +26,21 @@ orchestrator:
   url: http://prism-workflows-api
   apiKey: ""
 
+# Verify + re-mint the caller's signed context so the HUMAN (not VocX's service key)
+# authorizes Register interaction writes. Must equal register.internalSigningSecret.
+# Empty = dev (the service key is the actor). Rendered into the chart Secret.
+internalSigningSecret: ""
+
 config:
   logLevel: INFO
   logJson: true
+  # VocX's OWN front door: the key the gateway injects. Empty = open (rely on a
+  # NetworkPolicy). Set in production so VocX is not directly callable by any pod. Must
+  # equal gateway.serviceCredentials.vocxApiKey.
+  apiKeys: ""
+  # Refuse a user-triggered capture without a verified delegated identity (implied when
+  # internalSigningSecret is set). Keeps VocX from silently writing as its own service key.
+  requireDelegation: false
 
 service:
   type: ClusterIP
@@ -56,3 +69,41 @@ podSecurityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+
+# --- The voice pipeline (/vocx/api/vocx/*) --------------------------------------------
+pipeline:
+  enabled: true
+  # Anthropic key for Claude extraction; empty = offline stub. Prefer existingSecret.
+  anthropicApiKey:
+    existingSecret: ""
+    existingSecretKey: api-key
+    value: ""
+  # Persistent state: per-RM Google tokens, PKCE, alias map, audio archive, Whisper
+  # model cache. ReadWriteOnce is fine with replicaCount 1; use RWX storage to scale out.
+  state:
+    enabled: true
+    size: 5Gi
+    storageClassName: ""
+    existingClaim: ""
+  google:
+    # Secret holding client_secret.json (create it out of band; never in values):
+    #   kubectl create secret generic prism-vocx-google --from-file=client_secret.json
+    existingSecret: ""
+    # The OAuth redirect as the BROWSER reaches it — the EDGE url; also add it in
+    # Google Cloud Console. The gateway exempts exactly this path from require_auth.
+    redirectUri: ""
+  # faster_whisper (baked into the image; model downloads once to the volume) | api | stub
+  sttBackend: "faster_whisper"
+  # Recorded-audio bytes → MinIO/S3 (references ride on the interaction). Empty endpoint =
+  # volume-only. Retention >0 becomes a bucket lifecycle rule.
+  audio:
+    s3EndpointUrl: "http://prism-minio:9000"
+    # Browser-reachable endpoint for presigned playback URLs (ingress/NodePort to MinIO).
+    s3PublicEndpointUrl: ""
+    bucket: "prism-vocx-captures"
+    retentionDays: 0
+    credentials:
+      existingSecret: ""            # keys: access-key-id, secret-access-key
+      accessKeyId: ""
+      secretAccessKey: ""

@@ -49,3 +49,26 @@ async def test_incoming_user_email_is_stripped_from_forwarding(monkeypatch):
         assert h in _SKIP_REQUEST_HEADERS
     from app.config import get_settings
     get_settings.cache_clear()
+
+
+async def test_oauth_callback_is_exempt_under_require_auth(monkeypatch):
+    """Google's OAuth redirect reaches the edge with NO bearer. The exact exempt path
+    must pass the auth gate (and then fail on the missing upstream — anything but 401);
+    every other vocx path stays refused."""
+    app = await _app(monkeypatch, GATEWAY_REQUIRE_AUTH="true",
+                     GATEWAY_GATEWAY_SHARED_SECRET="s")
+    seen = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, text="<h2>connected</h2>")
+
+    app.state.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://gw") as c:
+        exempt = await c.get("/vocx/v1/auth/callback?code=x&state=Priya")
+        assert exempt.status_code == 200, exempt.text     # forwarded to the vocx upstream
+        assert seen and "/v1/auth/callback" in seen[0]
+        gated = await c.get("/vocx/v1/interactions")
+        assert gated.status_code == 401                    # everything else stays gated
+    await app.state.client.aclose()

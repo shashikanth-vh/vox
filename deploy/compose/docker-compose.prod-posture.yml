@@ -1,0 +1,76 @@
+# PRODUCTION POSTURE overlay — turns on every control that defaults to OFF in dev.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod-posture.yml \
+#     --profile sso up -d --build
+#
+# NOTE the `--profile sso`: it is REQUIRED. Dex is profile-gated in the base file, and an override
+# CANNOT un-gate it — Compose filters profiled services out before merging, so `profiles: []` here
+# has no effect (verified on Compose v5). Without the flag the stack comes up with REQUIRE_AUTH on
+# and NO issuer reachable, and every request 401s.
+#
+# What changes:
+#   * gateway      REQUIRE_AUTH + an OIDC issuer  → anonymous refused; identity comes ONLY from a
+#                  verified bearer token. X-User-Email is no longer trusted.
+#   * orchestrator REQUIRE_AUTH + issuer          → an approver's `by` is no longer taken on trust.
+#   * register     ENFORCE_RBAC                   → an operation with no user context is refused
+#                  (a generic api key can no longer act); ENFORCE_RLS → PostgreSQL row-level
+#                  security is applied and converged at startup, so a query can never leave its
+#                  tenant even if application code forgets a filter.
+#   * dex          the OIDC issuer — started via `--profile sso` (see the note above).
+#
+# This is the posture the E2E collection must pass before the platform is production-ready: the
+# dev-default run proves the business flow, this run proves the CONTROLS.
+#
+# Dex is a DEV IdP — for real deployments point the issuer at your own (Entra ID, Okta, Keycloak)
+# and delete the dex service. Nothing else here changes.
+services:
+  register:
+    environment:
+      # Every operation must resolve to a real user; a bare api key is refused.
+      REGISTER_ENFORCE_RBAC: "true"
+      # Row-level security applied + force-converged at startup (fail-closed).
+      REGISTER_ENFORCE_RLS: "true"
+
+  gateway:
+    environment:
+      GATEWAY_REQUIRE_AUTH: "true"
+      # The issuer as reachable INSIDE the compose network — the gateway fetches JWKS from it and
+      # matches the `iss` claim, so it must equal dex's own `issuer` value.
+      GATEWAY_OIDC_ISSUER: "http://dex:5556/dex"
+      GATEWAY_OIDC_AUDIENCE: "prism"
+      # Only identities from these domains may authenticate. Empty = no restriction, which is
+      # fine while Dex is the only issuer (it holds just your own accounts) but MUST be set once
+      # a consumer IdP such as Google is accepted — a valid Google token proves the account is
+      # real, not that it belongs to Evam.
+      GATEWAY_OIDC_ALLOWED_DOMAINS: "evamfinance.com"
+      # Accept MORE than one issuer at once, e.g. Google for people + Dex for CI in staging:
+      #   GATEWAY_OIDC_ISSUERS: "https://accounts.google.com|<client-id>.apps.googleusercontent.com,http://dex:5556/dex|prism"
+      # When set it takes precedence over the single ISSUER/AUDIENCE pair above.
+      GATEWAY_OIDC_ISSUERS: ""
+
+  orchestrator:
+    environment:
+      WORKFLOWS_REQUIRE_AUTH: "true"
+      WORKFLOWS_OIDC_ISSUER: "http://dex:5556/dex"
+      WORKFLOWS_OIDC_AUDIENCE: "prism"
+      WORKFLOWS_OIDC_ALLOWED_DOMAINS: "evamfinance.com"
+      WORKFLOWS_OIDC_ISSUERS: ""
+
+  # ATLAS also verifies tokens itself (ATLAS_OIDC_ISSUER / _ISSUERS / _ALLOWED_DOMAINS behave
+  # exactly like the gateway's, and the gateway preserves the bearer upstream). It is left OFF
+  # here on purpose: the E2E collection makes no /atlas call, so switching it on would add a
+  # control this run does not exercise. Enable it once you have a dashboard request to prove it —
+  # in Kubernetes it IS set, via atlas.oidc in values-prod.yaml.
+  #
+  # atlas:
+  #   environment:
+  #     ATLAS_OIDC_ISSUER: "http://dex:5556/dex"
+  #     ATLAS_OIDC_AUDIENCE: "prism"
+  #     ATLAS_OIDC_ALLOWED_DOMAINS: "evamfinance.com"
+
+  # The worker talks to the Register as the svc_workflows SERVICE principal (not a human), so it
+  # needs no OIDC — but it must keep working under ENFORCE_RBAC, which is exactly what the
+  # service-principal allowlist is for.
+  workflows:
+    environment:
+      WORKFLOWS_REQUIRE_AUTH: "false"

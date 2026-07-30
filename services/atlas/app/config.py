@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""
     oidc_audience: str = ""
     oidc_email_claim: str = "email"
+    # Accept SEVERAL issuers at once — "issuer|audience,issuer2|audience2". Takes precedence
+    # over the single pair above; a token is verified only by the issuer that matches its
+    # `iss`, never by trying each in turn.
+    oidc_issuers: str = ""
+    # Organisation e-mail domains an identity may come from (comma-separated). Empty = no
+    # restriction (dev). Set it whenever a PUBLIC issuer is accepted: Google will happily
+    # mint a valid token for any consumer account, so the domain is the membership test.
+    oidc_allowed_domains: str = ""
 
     # How many rows per vertical the aggregations read, page-cap. 10 pages x 200 rows
     # covers the ATLAS book comfortably; raise deliberately for very large tenants.

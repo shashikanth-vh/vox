@@ -28,9 +28,20 @@ config:
   logLevel: INFO
   logJson: true
 
+# Re-mint / verify the signed caller context so workflow writes run as the HUMAN (with
+# their scope), not the worker's service key. Must equal register.internalSigningSecret.
+# Empty = dev (writes run under the service key). Rendered into the chart Secret.
+internalSigningSecret: ""
+
 # The Orchestrator API — same image, `python -m app.api`. The HTTP front door that
 # starts workflows with stable business ids, delivers approve/reject signals and
 # answers status queries. Disable if workflows are only started from code.
+# The decision-delivery reconciler daemon (re-drives accepted-but-undelivered decisions).
+reconciler:
+  enabled: true
+  replicaCount: 1
+  intervalSeconds: 30
+
 api:
   enabled: true
   replicaCount: 1
@@ -39,6 +50,12 @@ api:
   # Verified approvals (opt-in): OIDC issuer + Access for approver role checks.
   oidcIssuer: ""
   oidcAudience: ""
+  oidcEmailClaim: "email"
+  # Several IdPs at once: "issuer|audience,issuer2|audience2" — wins over the pair above.
+  oidcIssuers: ""
+  # Comma-separated e-mail domains an approver may come from. REQUIRED when the issuer is
+  # public (Google/Microsoft); the chart refuses to render without it.
+  oidcAllowedDomains: ""
   accessUrl: ""
   accessApiKey: ""
   service:

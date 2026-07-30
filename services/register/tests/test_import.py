@@ -28,19 +28,23 @@ def _mini_mis() -> bytes:
                "Lending?", "Syndication?", "Asset Mon?", "Stage", "Date Received",
                "Contact Person", "Contact Phone", "Remarks"])
     ws.append(["ANV Web Ventures Private Limited", "EV", "TG", "DSA", "Get Vantage", "Hot",
-               "Shubh Dave", "Yes", "Yes", "No", "Closed Won", None, "", "", "in process"])
+               "Shubh Dave", "Yes", "Yes", "No", "CP/CS Completed", None, "", "", "in process"])
 
     ws = wb.create_sheet("Lending Tracker")
     ws.append(["Company Name", "Lending Amount (₹ Cr)", "RM", "Credit Analyst", "Stage",
-               "Stage Updated", "Remarks"])
-    ws.append(["ANV Web Ventures Private Limited", 1.15, "Shubh Dave", "AT", "Disbursed", None, "ok"])
+               "Stage Updated", "Remarks", "Proposed Disbursement Amount (₹ Cr)",
+               "Proposed Disbursement Date"])
+    # A 'Ready for Disbursement' line carries its mandatory amount + date (the default importer
+    # quarantines such a row missing them, exactly as the interactive API rejects it).
+    ws.append(["ANV Web Ventures Private Limited", 1.15, "Shubh Dave", "AT",
+               "Ready for Disbursement", None, "ok", 1.15, "2026-01-10"])
 
     ws = wb.create_sheet("Syndication")
     ws.append(["Company Name", "Deal Status", "Bank", "Status", "Amount (₹ Cr)",
                "Accepted by Client", "Remarks"])
-    ws.append(["ANV Web Ventures Private Limited", "Deal Live", "Axis Finance", "IM Circulated",
+    ws.append(["ANV Web Ventures Private Limited", "IM Circulated", "Axis Finance", "IM Circulated",
                10, "No", "shared"])
-    ws.append(["ANV Web Ventures Private Limited", "Deal Live", "Bajaj Finance", "Rejected",
+    ws.append(["ANV Web Ventures Private Limited", "IM Circulated", "Bajaj Finance", "Rejected",
                10, "No", "dropped"])
 
     ws = wb.create_sheet("Asset Mon")
@@ -62,7 +66,8 @@ def _mini_mis() -> bytes:
 async def test_import_atlas_xlsx_replace(client: AsyncClient):
     files = {"file": ("mis.xlsx", _mini_mis(),
                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "replace"}, files=files)
+    r = await client.post("/v1/import/atlas-xlsx",
+                          params={"mode": "replace", "reason": "test import"}, files=files)
     assert r.status_code == 200, r.text
     counts = r.json()["counts"]
     # 3 distinct companies across the sheets → 3 entities
@@ -96,7 +101,8 @@ async def test_merge_reimport_is_upsert_not_duplicate(client: AsyncClient):
     mis = _mini_mis()
     files = {"file": ("mis.xlsx", mis,
                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "replace"}, files=files)
+    r = await client.post("/v1/import/atlas-xlsx",
+                          params={"mode": "replace", "reason": "test import"}, files=files)
     assert r.status_code == 200, r.text
 
     ents = (await client.get("/v1/entities", params={"with_total": True})).json()["total"]
@@ -110,7 +116,8 @@ async def test_merge_reimport_is_upsert_not_duplicate(client: AsyncClient):
     # constraint violation.
     files = {"file": ("mis.xlsx", mis,
                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "merge"}, files=files)
+    r = await client.post("/v1/import/atlas-xlsx",
+                          params={"mode": "merge", "reason": "test import"}, files=files)
     assert r.status_code == 200, r.text
     c = r.json()["counts"]
     assert c["entities"] == 0 and c["leads"] == 0 and c["deals"] == 0
@@ -135,7 +142,7 @@ async def test_company_suffix_variants_canonicalise_to_one_entity(client: AsyncC
     ws.append(["Helios Power Private Limited", "Shubh Dave", "Solar"])
     ws = wb.create_sheet("Deals")
     ws.append(["Company Name", "RM", "Lending?", "Syndication?", "Asset Mon?", "Stage"])
-    ws.append(["Helios Power Pvt Ltd", "Shubh Dave", "Yes", "No", "No", "Live"])
+    ws.append(["Helios Power Pvt Ltd", "Shubh Dave", "Yes", "No", "No", "Diligence"])
     ws = wb.create_sheet("Lending Tracker")
     ws.append(["Company Name", "Lending Amount (₹ Cr)", "RM"])
     ws.append(["Helios Power Ltd", 5.0, "Shubh Dave"])
@@ -144,7 +151,8 @@ async def test_company_suffix_variants_canonicalise_to_one_entity(client: AsyncC
 
     files = {"file": ("mis.xlsx", buf.getvalue(),
                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    r = await client.post("/v1/import/atlas-xlsx", params={"mode": "replace"}, files=files)
+    r = await client.post("/v1/import/atlas-xlsx",
+                          params={"mode": "replace", "reason": "test import"}, files=files)
     assert r.status_code == 200, r.text
     # All three suffix variants collapse to ONE entity.
     assert r.json()["counts"]["entities"] == 1
@@ -152,7 +160,7 @@ async def test_company_suffix_variants_canonicalise_to_one_entity(client: AsyncC
 
 async def test_import_rejects_non_xlsx(client: AsyncClient):
     files = {"file": ("data.txt", b"not a workbook", "text/plain")}
-    r = await client.post("/v1/import/atlas-xlsx", files=files)
+    r = await client.post("/v1/import/atlas-xlsx", params={"reason": "test import"}, files=files)
     assert r.status_code == 422
 
 
@@ -179,7 +187,7 @@ async def test_replace_import_is_tenant_scoped(client, tmp_path):
     path = tmp_path / "mis.xlsx"
     wb.save(path)
     with open(path, "rb") as fh:
-        r = await client.post("/v1/import/atlas-xlsx?mode=replace",
+        r = await client.post("/v1/import/atlas-xlsx?mode=replace&reason=test%20import",
                               files={"file": ("mis.xlsx", fh.read())},
                               headers={"X-Tenant": code})
     assert r.status_code == 200, r.text
@@ -187,3 +195,500 @@ async def test_replace_import_is_tenant_scoped(client, tmp_path):
     # The EVAM row is untouched — a TRUNCATE would have wiped it.
     still = await client.get(f"/v1/entities/{keep['id']}")
     assert still.status_code == 200
+
+
+async def test_import_requires_a_reason(client, tmp_path):
+    """A governed import bypasses the interactive lifecycle policy, so a non-empty reason is
+    mandatory — an import without one is refused."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Leads"
+    ws.append(["Company Name", "Sector"])
+    ws.append(["Reason Co", "Solar - EPC"])
+    path = tmp_path / "m.xlsx"
+    wb.save(path)
+    with open(path, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              files={"file": ("m.xlsx", fh.read())})
+    assert r.status_code == 422, r.text
+
+
+async def test_import_quarantines_unknown_lifecycle_values_and_audits(client, tmp_path):
+    """A spreadsheet row whose lifecycle value is unknown is QUARANTINED (skipped), surfaced in
+    the response report, and the import is recorded in an immutable audit event with its file
+    checksum, mode and reason."""
+    from openpyxl import Workbook
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    wb = Workbook()
+    leads = wb.active
+    leads.title = "Leads"
+    leads.append(["Company Name", "Sector"])
+    leads.append(["QuarantineCo", "Solar - EPC"])
+    lend = wb.create_sheet("Lending Tracker")
+    lend.append(["Company Name", "Stage", "Lending Amount (₹ Cr)"])
+    lend.append(["QuarantineCo", "Bogus Stage", 5])
+    path = tmp_path / "q.xlsx"
+    wb.save(path)
+    with open(path, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "hist load", "ticket": "INC-9"},
+                              files={"file": ("q.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The bad lending row is quarantined, not imported.
+    assert body["report"]["quarantined_count"] >= 1
+    q = body["report"]["quarantined"][0]
+    assert q["value"] == "Bogus Stage" and "unknown" in q["reason"].lower()
+    assert body["counts"]["lending_tracker"] == 0
+    assert len(body["checksum"]) == 64
+    # An immutable audit event records the import with its checksum + reason + ticket.
+    sm = get_sessionmaker()
+    async with sm() as s:
+        row = (await s.execute(text(
+            "SELECT actor, changes FROM audit_log WHERE action='mis.import' "
+            "AND resource_id=:c"), {"c": body["checksum"]})).first()
+    assert row is not None
+    assert row[1]["reason"] == "hist load" and row[1]["ticket"] == "INC-9"
+    assert row[1]["quarantined_count"] >= 1
+
+
+async def test_import_quarantines_incomplete_terminal_by_default(client, tmp_path):
+    """A 'Ready for Disbursement' lending row missing its mandatory amount/date is QUARANTINED by
+    default — the same state the interactive API rejects — and only imported (flagged
+    reconciliation) under an explicit retain_incomplete override."""
+    from openpyxl import Workbook
+
+    def _wb():
+        wb = Workbook()
+        leads = wb.active
+        leads.title = "Leads"
+        leads.append(["Company Name", "Sector"])
+        leads.append(["IncompleteCo", "Solar - EPC"])
+        lend = wb.create_sheet("Lending Tracker")
+        lend.append(["Company Name", "Stage"])
+        lend.append(["IncompleteCo", "Ready for Disbursement"])   # no Disbursed Amount / Date
+        p = tmp_path / "inc.xlsx"
+        wb.save(p)
+        return p
+
+    with open(_wb(), "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "load"},
+                              files={"file": ("inc.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["report"]["quarantined_count"] >= 1
+    assert body["counts"]["lending_tracker"] == 0
+    # Explicit historical override → imported, flagged reconciliation_status=Required.
+    with open(_wb(), "rb") as fh:
+        r2 = await client.post("/v1/import/atlas-xlsx",
+                               params={"mode": "replace", "reason": "hist",
+                                       "retain_incomplete": "true"},
+                               files={"file": ("inc.xlsx", fh.read())})
+    b2 = r2.json()
+    assert b2["report"]["reconciliation_count"] >= 1
+    assert b2["report"]["reconciliation"][0]["reconciliation_status"] == "Required"
+    assert "proposed_disbursement_amount" in b2["report"]["reconciliation"][0]["missing"]
+    assert b2["counts"]["lending_tracker"] == 1
+    assert b2["import_batch_id"]
+
+
+async def test_merge_import_appends_stage_history(client, tmp_path):
+    """A MERGE import that changes an existing tracker's stage appends an xlsx-import event to the
+    append-only history (not a silent overwrite) and reports the change with a batch id."""
+    from openpyxl import Workbook
+
+    def _wb(stage):
+        wb = Workbook()
+        leads = wb.active
+        leads.title = "Leads"
+        leads.append(["Company Name", "Sector"])
+        leads.append(["HistCo", "Solar - EPC"])
+        lend = wb.create_sheet("Lending Tracker")
+        lend.append(["Company Name", "Stage"])
+        lend.append(["HistCo", stage])
+        p = tmp_path / f"h_{stage}.xlsx"
+        wb.save(p)
+        return p
+
+    with open(_wb("Diligence"), "rb") as fh:
+        await client.post("/v1/import/atlas-xlsx", params={"mode": "replace", "reason": "a"},
+                          files={"file": ("h.xlsx", fh.read())})
+    with open(_wb("Note Circulated"), "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx", params={"mode": "merge", "reason": "b"},
+                              files={"file": ("h.xlsx", fh.read())})
+    body = r.json()
+    assert body["report"]["history_change_count"] >= 1
+    change = body["report"]["history_changes"][0]
+    assert change["from"] == "Diligence" and change["to"] == "Note Circulated"
+    # The tracker's own append-only history carries the xlsx-import event with the batch id.
+    items = (await client.get("/v1/lending", params={"with_total": True})).json()["items"]
+    hist = items[0]["stage_history"]
+    assert hist and hist[-1]["source"] == "xlsx-import"
+    assert hist[-1]["batch_id"] == body["import_batch_id"]
+
+
+_ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+_MGMT = {"X-User-Email": "cro@evamfinance.com", "X-User-Roles": "Management"}
+
+
+async def _import_incomplete_disbursed(client, tmp_path, company="ReconCo"):  # noqa: ANN001
+    """Import a 'Ready for Disbursement' lending row missing its amount/date under the retain
+    override; returns the reconciliation item and the lending subject id."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    leads = wb.active
+    leads.title = "Leads"
+    leads.append(["Company Name", "Sector"])
+    leads.append([company, "Solar - EPC"])
+    lend = wb.create_sheet("Lending Tracker")
+    lend.append(["Company Name", "Stage"])
+    lend.append([company, "Ready for Disbursement"])
+    p = tmp_path / f"{company}.xlsx"
+    wb.save(p)
+    with open(p, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "hist",
+                                      "retain_incomplete": "true"},
+                              files={"file": (f"{company}.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    items = (await client.get("/v1/reconciliation", params={"status": "Required"},
+                              headers=_ADMIN)).json()["items"]
+    item = next(i for i in items if i["company"] == company)
+    return item, item["subject_id"]
+
+
+async def test_incomplete_import_is_excluded_from_operational_reads(client, tmp_path):
+    """An unresolved incomplete record must NOT appear in normal operational lists/totals — for
+    services (fail closed) or ordinary reads — only via an Admin's explicit opt-in."""
+    item, lid = await _import_incomplete_disbursed(client, tmp_path)
+    assert item["subject_type"] == "Lending"
+    assert "proposed_disbursement_amount" in item["missing_fields"] and item["original_values"]
+    # Default (service) operational list EXCLUDES it — it can't count toward disbursed totals.
+    default_list = (await client.get("/v1/lending", params={"with_total": True})).json()
+    assert all(x["id"] != lid for x in default_list["items"])
+    # A non-Admin opt-in is ignored (fail closed); an Admin opt-in reveals it, still flagged.
+    admin_incl = (await client.get("/v1/lending",
+                                   params={"include_reconciliation": "true"},
+                                   headers=_ADMIN)).json()
+    flagged = next(x for x in admin_incl["items"] if x["id"] == lid)
+    assert flagged["reconciliation_status"] == "Required"
+
+
+async def test_reconciliation_resolve_requires_actual_correction(client, tmp_path):
+    """Resolving must PROVE the data is correct — a note alone is refused while a mandatory field
+    is still missing; it succeeds only once the record is corrected, and then clears the flag."""
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    item, lid = await _import_incomplete_disbursed(client, tmp_path)
+    # A non-Admin may not touch reconciliation.
+    assert (await client.get("/v1/reconciliation")).status_code == 403
+    # Resolve with only a note → refused (proposed_disbursement_amount/date still missing).
+    bad = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                            json={"note": "looks fine"}, headers=_ADMIN)
+    assert bad.status_code == 422, bad.text
+    assert "still missing" in bad.text.lower()
+    # Correct the record through its normal (policy-enforcing) API…
+    fix = await client.patch(
+        f"/v1/lending/{lid}",
+        json={"proposed_disbursement_amount": 3.5, "proposed_disbursement_date": "2026-02-01"})
+    assert fix.status_code == 200, fix.text
+    # …now resolution succeeds, the flag clears, and the record re-enters operational reads.
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                           json={"note": "amount/date confirmed from sanction letter"},
+                           headers=_ADMIN)
+    assert ok.status_code == 200 and ok.json()["status"] == "Resolved"
+    assert any(x["id"] == lid
+               for x in (await client.get("/v1/lending")).json()["items"])
+    sm = get_sessionmaker()
+    async with sm() as s:
+        row = (await s.execute(text(
+            "SELECT changes FROM audit_log WHERE action='reconciliation.resolve' "
+            "AND resource_id=:i"), {"i": item["id"]})).first()
+    assert row is not None
+    # The audit preserves the ORIGINAL incomplete import and the corrected (after) value.
+    assert row[0]["original_values"].get("proposed_disbursement_amount") in (None, "")
+    assert row[0]["after"]["proposed_disbursement_amount"] not in (None, "")
+
+
+async def test_reconciliation_resolve_has_no_inline_write_bypass(client, tmp_path):
+    """The resolve endpoint accepts NO business-field payload — a caller cannot slip an inline
+    'corrected' (or stage/tenant/version) change through it, bypassing the update schema, policy
+    engine and locks. Corrections must go through the record's own policy-enforcing API."""
+    item, _lid = await _import_incomplete_disbursed(client, tmp_path, company="BypassCo")
+    for body in (
+        {"note": "x", "corrected": {"proposed_disbursement_amount": 9}},   # inline correction — forbidden
+        {"note": "x", "corrected": {"stage": "Data Awaited"}},  # lifecycle jump — forbidden
+        {"note": "x", "tenant_id": "00000000-0000-0000-0000-000000000000"},
+        {"note": "x", "version": 99},
+    ):
+        r = await client.post(f"/v1/reconciliation/{item['id']}/resolve", json=body,
+                              headers=_ADMIN)
+        assert r.status_code == 422, f"{body} should be refused (extra fields forbidden): {r.text}"
+
+
+async def test_reconciliation_waiver_requires_senior_authority(client, tmp_path):
+    """A WAIVER keeps an incomplete record in the business of record — it is a senior business
+    decision reserved to Management (a maker-checker style designated authority), NOT any single
+    Admin operator who can otherwise run reconciliation."""
+    item, _lid = await _import_incomplete_disbursed(client, tmp_path, company="AuthCo")
+    # A plain Admin may list/assign/resolve, but may NOT waive.
+    admin_waive = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                                    json={"status": "Waived", "note": "legacy", "ticket": "OPS-1"},
+                                    headers=_ADMIN)
+    assert admin_waive.status_code == 403, admin_waive.text
+    assert "management" in admin_waive.text.lower()
+    # Management can.
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                           json={"status": "Waived", "note": "legacy", "ticket": "OPS-1"},
+                           headers=_MGMT)
+    assert ok.status_code == 200 and ok.json()["status"] == "Waived"
+
+
+async def test_reconciliation_waiver_requires_ticket_and_stays_marked(client, tmp_path):
+    """Waived is a break-glass outcome keeping an incomplete record — it requires a ticket, and
+    the subject stays visibly flagged 'Waived' (NOT cleared to look fully reconciled)."""
+    item, lid = await _import_incomplete_disbursed(client, tmp_path, company="WaiveCo")
+    no_ticket = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                                  json={"status": "Waived", "note": "legacy row, accept as-is"},
+                                  headers=_MGMT)
+    assert no_ticket.status_code == 422 and "ticket" in no_ticket.text.lower()
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                           json={"status": "Waived", "note": "legacy row", "ticket": "OPS-7"},
+                           headers=_MGMT)
+    assert ok.status_code == 200 and ok.json()["status"] == "Waived"
+    # The subject is marked 'Waived' (a deliberate exception) — NOT cleared to None.
+    lend = next(x for x in (await client.get("/v1/lending",
+                                             params={"include_reconciliation": "true"},
+                                             headers=_ADMIN)).json()["items"] if x["id"] == lid)
+    assert lend["reconciliation_status"] == "Waived"
+
+
+async def test_waived_record_is_excluded_from_default_operational_reads(client, tmp_path):
+    """A WAIVED-but-incomplete record is a governed exception, NOT fully reconciled — it must stay
+    OUT of routine operational lists/GET/exports/counts by default (so a waived incomplete line can
+    never silently enter disbursed totals or trigger downstream), surfacing only under explicit
+    Admin/Management inclusion."""
+    item, lid = await _import_incomplete_disbursed(client, tmp_path, company="WaivedHidden")
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                           json={"status": "Waived", "note": "legacy row", "ticket": "OPS-9"},
+                           headers=_MGMT)
+    assert ok.status_code == 200 and ok.json()["status"] == "Waived"
+    # Default (service) list, known-id GET, JSON export and counts all EXCLUDE the waived record.
+    default_list = (await client.get("/v1/lending")).json()["items"]
+    assert all(x["id"] != lid for x in default_list)
+    assert (await client.get(f"/v1/lending/{lid}")).status_code == 404
+    ex = (await client.get("/v1/export/json", params={"tables": "lending_tracker"})).json()
+    assert all(row["id"] != lid for row in ex["tables"]["lending_tracker"])
+    base_count = (await client.get("/v1/export/counts")).json().get("lending_tracker", 0)
+    admin_count = (await client.get("/v1/export/counts",
+                                    params={"include_reconciliation": "true"},
+                                    headers=_ADMIN)).json().get("lending_tracker", 0)
+    assert admin_count == base_count + 1
+    # Under explicit Admin inclusion it is visible, still flagged 'Waived' (distinguishable).
+    incl = next(x for x in (await client.get("/v1/lending",
+                                             params={"include_reconciliation": "true"},
+                                             headers=_ADMIN)).json()["items"] if x["id"] == lid)
+    assert incl["reconciliation_status"] == "Waived"
+
+
+async def test_concurrent_resolution_of_two_items_leaves_correct_flag(client, tmp_path):
+    """Two admins resolving DIFFERENT items on the SAME subject at the same time must not race and
+    leave the subject flag wrong. The item + subject + sibling-item FOR UPDATE locks serialize the
+    two closing transactions, so the recompute always runs against the settled set — the final flag
+    is deterministic (both resolved → cleared to None), never stuck 'Required'."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    item1, lid = await _import_incomplete_disbursed(client, tmp_path, company="RaceCo")
+    # Open a SECOND item on the same lending subject (a different missing field set).
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text(
+            "INSERT INTO import_reconciliation_items "
+            "(import_batch_id, subject_type, subject_id, missing_fields, status, tenant_id) "
+            "SELECT 'batchB', 'Lending', CAST(:sid AS uuid), '[]'::jsonb, 'Required', "
+            "tenant_id FROM lending_tracker WHERE id = CAST(:sid AS uuid)"), {"sid": lid})
+        await s.commit()
+    item2 = next(i for i in (await client.get("/v1/reconciliation", params={"status": "Required"},
+                             headers=_ADMIN)).json()["items"]
+                 if i["subject_id"] == lid and i["id"] != item1["id"])
+    # Correct the record so BOTH items are resolvable (item2 flagged no fields).
+    await client.patch(f"/v1/lending/{lid}",
+                       json={"proposed_disbursement_amount": 4.0, "proposed_disbursement_date": "2026-04-01"})
+    # Fire both resolutions concurrently — each runs in its own request/session/transaction.
+    r1, r2 = await asyncio.gather(
+        client.post(f"/v1/reconciliation/{item1['id']}/resolve",
+                    json={"note": "amount/date filled"}, headers=_ADMIN),
+        client.post(f"/v1/reconciliation/{item2['id']}/resolve",
+                    json={"note": "nothing else missing"}, headers=_ADMIN))
+    assert r1.status_code == 200 and r2.status_code == 200, (r1.text, r2.text)
+    # With BOTH items resolved the flag must have cleared — a lost race would leave it 'Required'.
+    lend = next(x for x in (await client.get("/v1/lending",
+                                             params={"include_reconciliation": "true"},
+                                             headers=_ADMIN)).json()["items"] if x["id"] == lid)
+    assert lend["reconciliation_status"] is None, lend
+    assert any(x["id"] == lid for x in (await client.get("/v1/lending")).json()["items"])
+
+
+async def test_stale_if_match_version_is_refused(client, tmp_path):
+    """Assignment/closure are idempotent via optimistic concurrency: a stale If-Match version is
+    refused (409) so a caller working from an out-of-date view can't clobber a concurrent change."""
+    item, _lid = await _import_incomplete_disbursed(client, tmp_path, company="IfMatchCo")
+    ver = item["version"]
+    # A matching version assigns fine and bumps the version.
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/assign",
+                           json={"owner": "ops"}, headers={**_ADMIN, "If-Match": str(ver)})
+    assert ok.status_code == 200, ok.text
+    # Re-using the now-stale version is refused.
+    stale = await client.post(f"/v1/reconciliation/{item['id']}/assign",
+                              json={"owner": "ops2"}, headers={**_ADMIN, "If-Match": str(ver)})
+    assert stale.status_code == 409, stale.text
+
+
+async def test_incomplete_record_absent_from_get_export_and_counts(client, tmp_path):
+    """An unresolved incomplete record must be invisible to a known-id GET, JSON export and counts
+    for services (fail closed) — only an Admin opt-in reveals it."""
+    item, lid = await _import_incomplete_disbursed(client, tmp_path, company="HiddenCo")
+    # Known-id GET fails closed (404) for a service caller; Admin opt-in reveals it.
+    assert (await client.get(f"/v1/lending/{lid}")).status_code == 404
+    assert (await client.get(f"/v1/lending/{lid}",
+                             params={"include_reconciliation": "true"},
+                             headers=_ADMIN)).status_code == 200
+    # JSON export (default) omits it; counts don't count it.
+    ex = (await client.get("/v1/export/json", params={"tables": "lending_tracker"})).json()
+    assert all(row["id"] != lid for row in ex["tables"]["lending_tracker"])
+    base_count = (await client.get("/v1/export/counts")).json().get("lending_tracker", 0)
+    admin_count = (await client.get("/v1/export/counts",
+                                    params={"include_reconciliation": "true"},
+                                    headers=_ADMIN)).json().get("lending_tracker", 0)
+    assert admin_count == base_count + 1
+
+
+async def test_flag_stays_until_all_items_for_a_subject_are_resolved(client, tmp_path):
+    """A record with two open reconciliation items stays flagged until BOTH are resolved — one
+    resolution must not make a still-incomplete record look reconciled."""
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    item, lid = await _import_incomplete_disbursed(client, tmp_path, company="TwoIssues")
+    # Open a SECOND reconciliation item for the same lending subject.
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text(
+            "INSERT INTO import_reconciliation_items "
+            "(import_batch_id, subject_type, subject_id, missing_fields, status, tenant_id) "
+            "SELECT 'batch2', 'Lending', CAST(:sid AS uuid), '[\"analyst\"]'::jsonb, 'Required', "
+            "tenant_id FROM lending_tracker WHERE id = CAST(:sid AS uuid)"), {"sid": lid})
+        await s.commit()
+    # Correct + resolve the FIRST item.
+    await client.patch(f"/v1/lending/{lid}",
+                       json={"proposed_disbursement_amount": 2.0, "proposed_disbursement_date": "2026-03-01"})
+    await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                      json={"note": "amount/date filled"}, headers=_ADMIN)
+    # The record is STILL flagged — the second issue remains open.
+    still = (await client.get("/v1/lending", params={"include_reconciliation": "true"},
+                              headers=_ADMIN)).json()["items"]
+    assert next(x for x in still if x["id"] == lid)["reconciliation_status"] == "Required"
+
+
+async def test_reconciliation_flag_is_scoped_by_subject_type(client, tmp_path):
+    """Remaining-item matching keys on subject_type + subject_id — a Deal item that happens to
+    share the Lending row's uuid (ids live in separate tables) must NOT keep the Lending flagged."""
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    item, lid = await _import_incomplete_disbursed(client, tmp_path, company="CrossType")
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text(
+            "INSERT INTO import_reconciliation_items "
+            "(import_batch_id, subject_type, subject_id, missing_fields, status, tenant_id) "
+            "SELECT 'b', 'Deal', CAST(:sid AS uuid), '[\"rm\"]'::jsonb, 'Required', tenant_id "
+            "FROM lending_tracker WHERE id = CAST(:sid AS uuid)"), {"sid": lid})
+        await s.commit()
+    # Fix + resolve the LENDING item — its flag clears despite the same-id Deal item still open.
+    await client.patch(f"/v1/lending/{lid}",
+                       json={"proposed_disbursement_amount": 1.0, "proposed_disbursement_date": "2026-01-01"})
+    ok = await client.post(f"/v1/reconciliation/{item['id']}/resolve",
+                           json={"note": "done"}, headers=_ADMIN)
+    assert ok.status_code == 200, ok.text
+    assert any(x["id"] == lid for x in (await client.get("/v1/lending")).json()["items"])
+
+
+async def test_import_writes_initial_history_for_every_product_line(client, tmp_path):
+    """A newly imported historical record created directly at an advanced stage gets an INITIAL
+    null → stage history event — for EVERY product line (Deal, Lending, Syndication, AssetMon)."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    leads = wb.active
+    leads.title = "Leads"
+    leads.append(["Company Name", "Sector"])
+    leads.append(["AllLines Co", "Solar - EPC"])
+    deals = wb.create_sheet("Deals")
+    deals.append(["Company Name", "Stage"])
+    deals.append(["AllLines Co", "CP/CS Completed"])
+    lend = wb.create_sheet("Lending Tracker")
+    lend.append(["Company Name", "Stage"])
+    lend.append(["AllLines Co", "Note Circulated"])
+    syn = wb.create_sheet("Syndication")
+    syn.append(["Company Name", "Deal Status"])
+    syn.append(["AllLines Co", "IM Circulated"])
+    am = wb.create_sheet("Asset Mon")
+    am.append(["Company Name", "Status"])
+    am.append(["AllLines Co", "NBO Received"])
+    p = tmp_path / "all.xlsx"
+    wb.save(p)
+    with open(p, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "historical load"},
+                              files={"file": ("all.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+
+    deal = (await client.get("/v1/deals", params={"with_total": True})).json()["items"][0]
+    assert deal["stage_history"][-1]["from"] is None and deal["stage_history"][-1]["to"] == "CP/CS Completed"
+    assert deal["stage_history"][-1]["source"] == "xlsx-import"
+    lend = (await client.get("/v1/lending", params={"with_total": True})).json()["items"][0]
+    assert lend["stage_history"][-1]["to"] == "Note Circulated"
+    syn = (await client.get("/v1/syndication", params={"with_total": True})).json()["items"][0]
+    assert syn["status_history"][-1]["to"] == "IM Circulated"
+    am = (await client.get("/v1/asset-monetisation", params={"with_total": True})).json()["items"][0]
+    assert am["status_history"][-1]["to"] == "NBO Received"
+
+
+async def test_legacy_stage_labels_map_to_new_vocabulary(client, tmp_path):
+    """Legacy ATLAS 'Documentation' / 'Disbursed' lending labels map to the current vocabulary
+    ('CP/CS Completed' / 'Handed Over to Advaya'); a legacy 'Disbursed' row's recorded amount/date
+    become the proposed drawdown, so it is not quarantined for a missing proposed amount."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    leads = wb.create_sheet("Leads")
+    leads.append(["Company Name", "Sector"])
+    leads.append(["LegacyCo", "Solar - EPC"])
+    deals = wb.create_sheet("Deals")
+    deals.append(["Company Name", "Stage"])
+    deals.append(["LegacyCo", "Documentation"])
+    lend = wb.create_sheet("Lending Tracker")
+    lend.append(["Company Name", "Stage", "Disbursed Amount (₹ Cr)", "Disbursement Date"])
+    lend.append(["LegacyCo", "Disbursed", 7.5, "2025-12-01"])
+    p = tmp_path / "legacy.xlsx"
+    wb.save(p)
+    with open(p, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "legacy"},
+                              files={"file": ("legacy.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    assert r.json()["counts"]["lending_tracker"] == 1
+
+    deal = (await client.get("/v1/deals", params={"with_total": True})).json()["items"][0]
+    assert deal["stage"] == "CP/CS Completed"
+    row = (await client.get("/v1/lending", params={"with_total": True})).json()["items"][0]
+    assert row["stage"] == "Handed Over to Advaya"
+    assert float(row["proposed_disbursement_amount"]) == 7.5

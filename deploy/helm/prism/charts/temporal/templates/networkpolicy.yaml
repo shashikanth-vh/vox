@@ -1,0 +1,31 @@
+{{- if .Values.networkPolicy.enabled }}
+# Restrict the Temporal frontend (gRPC :7233) so that ONLY vetted clients — pods carrying
+# the `prism.evam/temporal-client: "true"` label (the PRISM worker + orchestrator) — can
+# reach it. A pod that could otherwise signal a workflow directly (bypassing the
+# orchestrator's verified-approval path) is denied at the network layer. Requires a CNI that
+# enforces NetworkPolicy. (Defence in depth: even a reachable signal cannot convert — the
+# convert activity verifies a signed, workflow-bound approval token.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "temporal.fullname" . }}-frontend
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "temporal.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              prism.evam/temporal-client: "true"
+      ports:
+        - protocol: TCP
+          port: 7233
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -22,8 +22,9 @@ from typing import Any
 from fastapi import Depends, Query
 from fastapi.responses import ORJSONResponse, StreamingResponse
 from openpyxl import Workbook
-from sqlalchemy import Table, select
+from sqlalchemy import Table, and_, select
 
+from app.core import reconciliation as recon
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.models import (
@@ -69,6 +70,23 @@ _EXPORT_MODELS: list[tuple[str, Any]] = [
     ("ref_values", RefValue),
 ]
 _MODELS_BY_NAME = dict(_EXPORT_MODELS)
+
+
+def _allow_recon(ctx: RequestContext, include_reconciliation: bool) -> bool:
+    """Only an Admin human may include still-'Required' records in an export/count; a service
+    caller can never (fail closed)."""
+    return bool(include_reconciliation and ctx.user is not None and ctx.user.is_admin)
+
+
+def _with_recon(cond: Any, table: Table, allow_recon: bool) -> Any:
+    """AND the operational reconciliation exclusion into an export condition, unless an Admin has
+    explicitly opted in — so incomplete governed imports don't leak into MIS exports or counts."""
+    if allow_recon:
+        return cond
+    excl = recon.table_exclusion(table)
+    if excl is None:
+        return cond
+    return excl if cond is None else and_(cond, excl)
 
 
 def _rows_query(table: Table, tenant_id: uuid.UUID, include_deleted: bool,
@@ -235,14 +253,19 @@ async def export_excel(
     ctx: RequestContext = Depends(get_context),
     include_deleted: bool = Query(default=False),
     tables: str | None = Query(default=None, description="Comma-separated subset, e.g. leads,deals"),
+    include_reconciliation: bool = Query(
+        default=False, description="Admin-only: also export records still flagged "
+                                   "reconciliation_status='Required' (excluded by default)."),
 ) -> StreamingResponse:
     restricted, scope = await _guard_export(ctx, include_deleted)
+    allow_recon = _allow_recon(ctx, include_reconciliation)
     wb = Workbook(write_only=True)  # constant-memory writer for large datasets
     for name, model in _selected(tables):
         if not _viewable(ctx, name):
             continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
+        cond = _with_recon(cond, table, allow_recon)
         ws = wb.create_sheet(title=name[:31])
         cols = [c.name for c in table.columns]
         ws.append(cols)  # header row
@@ -268,8 +291,10 @@ async def export_json(
     ctx: RequestContext = Depends(get_context),
     include_deleted: bool = Query(default=False),
     tables: str | None = Query(default=None),
+    include_reconciliation: bool = Query(default=False),
 ) -> ORJSONResponse:
     restricted, scope = await _guard_export(ctx, include_deleted)
+    allow_recon = _allow_recon(ctx, include_reconciliation)
     out: dict[str, Any] = {
         "tenant": ctx.tenant_code,
         "exported_at": datetime.now(UTC).isoformat(),
@@ -281,6 +306,7 @@ async def export_json(
             continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
+        cond = _with_recon(cond, table, allow_recon)
         rows: list[dict] = []
         result = await ctx.session.stream(
             _rows_query(table, ctx.tenant_id, include_deleted, cond))
@@ -294,16 +320,19 @@ async def export_json(
 async def export_counts(
     ctx: RequestContext = Depends(get_context),
     include_deleted: bool = Query(default=False),
+    include_reconciliation: bool = Query(default=False),
 ) -> dict[str, int]:
     from sqlalchemy import func
 
     restricted, scope = await _guard_export(ctx, include_deleted)
+    allow_recon = _allow_recon(ctx, include_reconciliation)
     counts: dict[str, int] = {}
     for name, model in _EXPORT_MODELS:
         if not _viewable(ctx, name):
             continue
         table: Table = model.__table__
         cond = _scope_condition(name, table, scope) if restricted else None
+        cond = _with_recon(cond, table, allow_recon)
         stmt = select(func.count()).select_from(table)
         if "tenant_id" in table.c:
             stmt = stmt.where(table.c.tenant_id == ctx.tenant_id)

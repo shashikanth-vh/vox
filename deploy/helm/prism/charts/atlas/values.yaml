@@ -42,6 +42,11 @@ oidc:
   issuer: ""
   audience: "prism"
   emailClaim: "email"
+  # Several IdPs at once: "issuer|audience,issuer2|audience2" — wins over the pair above.
+  issuers: ""
+  # Comma-separated e-mail domains an identity may come from. REQUIRED when the issuer is
+  # public (Google/Microsoft); the chart refuses to render without it.
+  allowedDomains: ""
 
 config:
   logLevel: INFO

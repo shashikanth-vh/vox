@@ -42,6 +42,20 @@ spec:
           env:
             {{- include "register.envVars" . | nindent 12 }}
             {{- if .Values.database.migrationUser }}
+            # apply_rls (run by the migrate step, as the OWNER) sets register_app's LOGIN
+            # password to the SAME secret the Deployment's runtime uses — so a fresh deploy
+            # self-provisions the non-owner login with no manual psql step. Sourced from the
+            # RUNTIME database secret (register_app's password), NOT the migration secret.
+            - name: REGISTER_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.database.existingSecret }}
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.existingSecretPasswordKey }}
+                  {{- else }}
+                  name: {{ include "register.secretName" . }}
+                  key: db-password
+                  {{- end }}
             # Migrations run DDL + create the register_app role + FORCE RLS, so they must
             # connect as the schema OWNER — not the non-owner runtime role the Deployment
             # uses. These duplicate names override the shared block (last value wins).

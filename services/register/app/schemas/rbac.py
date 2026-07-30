@@ -79,6 +79,10 @@ class LeadConvertRequest(CreateModel):
     rm_id: uuid.UUID | None = None
     analyst_id: uuid.UUID | None = None
     note: str | None = None
+    # The human who approved the conversion (from the orchestrator's verified decision).
+    # Recorded as provenance in the conversion trail — a service key never becomes the
+    # audit actor, so this is data, not identity.
+    approved_by: str | None = Field(default=None, max_length=200)
 
 
 class LeadConvertResult(BaseModel):

@@ -60,5 +60,12 @@ test:  ## Run all test suites (needs a Postgres for the Register — see QUICKST
 
 ci: lint type test  ## Everything CI runs
 
+postman:  ## Regenerate Postman collections + VALIDATE the E2E bodies against the contract
+	python scripts/gen_postman.py
+	python scripts/gen_e2e_postman.py
+
+certs:  ## Generate the self-signed TLS cert for the local NGINX edge
+	bash scripts/gen_dev_certs.sh
+
 new-service:  ## Scaffold a new service on evam-backend-core:  make new-service NAME=cipher
 	python scripts/new_service.py $(NAME)

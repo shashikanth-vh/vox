@@ -36,8 +36,8 @@ docker-up:  ## Build and start the full stack (Postgres + Register)
 docker-down:  ## Stop the stack
 	docker compose -f ../deploy/compose/docker-compose.yml down
 
-postman:  ## Regenerate the Postman collection from the live OpenAPI schema
-	python scripts/gen_postman.py
+postman:  ## Regenerate ALL Postman collections from the frozen OpenAPI contracts (repo-level)
+	cd ../.. && python scripts/gen_postman.py
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

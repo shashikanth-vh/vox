@@ -87,6 +87,11 @@ services:
       REGISTER_DB_PASSWORD: prism
       REGISTER_DB_NAME: register
       REGISTER_API_KEYS: "dev-local-key"
+      # Named service principals — the production least-privilege trust model, demonstrated
+      # locally: each service presents its OWN key and is bound to its allowlist. svc_gateway
+      # carries no authority of its own (it only ever delegates a user). dev-local-key stays
+      # as a generic direct-access key for the curl examples below.
+      REGISTER_SERVICE_API_KEYS: "svc_atlas:${SVC_ATLAS_KEY:-compose-svc-atlas},svc_vox:${SVC_VOX_KEY:-compose-svc-vox},svc_pulse:${SVC_PULSE_KEY:-compose-svc-pulse},svc_workflows:${SVC_WORKFLOWS_KEY:-compose-svc-workflows},svc_gateway:${SVC_GATEWAY_KEY:-compose-svc-gateway}"
       REGISTER_WEB_CONCURRENCY: "4"
       REGISTER_DB_POOL_SIZE: "20"
       REGISTER_LOG_JSON: "true"
@@ -104,6 +109,9 @@ services:
       # Production identity channel: verify the gateway's SIGNED internal context and
       # enforce the live grant it carries. Must equal the gateway's signing secret.
       REGISTER_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
+      # Verify an assignee's identity + role against the Access service before assigning.
+      REGISTER_ACCESS_URL: "http://access:8000"
+      REGISTER_ACCESS_API_KEY: "dev-local-key"
     # Migrate, provision the tenant + reference dropdowns (NO business data), then serve.
     # This is "start fresh, but usable" — the API works immediately, the DB has no leads/
     # deals/entities. Use "migrate-serve" for a truly bare DB (you must then create a tenant
@@ -155,6 +163,20 @@ services:
       GATEWAY_REGISTER_URL: "http://register:8000"
       GATEWAY_ACCESS_URL: "http://access:8000"
       GATEWAY_ACCESS_API_KEY: "dev-local-key"
+      # The gateway fronts EVERY service and routes by path prefix. Each upstream URL makes
+      # its `/{prefix}/...` routes reachable ONLY through the gateway; the gateway strips
+      # the client's key and injects the per-upstream scoped credential below.
+      GATEWAY_ATLAS_URL: "http://atlas:8000"
+      GATEWAY_VOCX_URL: "http://vocx:8000"
+      GATEWAY_PULSE_URL: "http://pulse:8000"
+      GATEWAY_ORCHESTRATOR_URL: "http://orchestrator:8000"
+      # Per-upstream service credential the gateway INJECTS (client key already stripped).
+      # Each must equal that service's inbound key; svc_gateway carries no own authority.
+      GATEWAY_REGISTER_API_KEY: "${SVC_GATEWAY_KEY:-compose-svc-gateway}"
+      GATEWAY_ATLAS_API_KEY: "${SVC_ATLAS_KEY:-compose-svc-atlas}"
+      GATEWAY_VOCX_API_KEY: "${VOCX_FRONT_KEY:-compose-vocx-front}"
+      GATEWAY_PULSE_API_KEY: "${PULSE_API_KEYS:-compose-pulse-key}"
+      GATEWAY_ORCHESTRATOR_API_KEY: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       GATEWAY_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
       # Mint the SIGNED internal context the Register verifies (production identity
       # channel). Must equal REGISTER_INTERNAL_SIGNING_SECRET.
@@ -179,16 +201,52 @@ services:
       dockerfile: services/vocx/Dockerfile
     depends_on:
       - register
+      - minio
     environment:
       VOCX_REGISTER_BASE_URL: "http://register:8000"
-      VOCX_REGISTER_API_KEY: "dev-local-key"
+      VOCX_REGISTER_API_KEY: "${SVC_VOX_KEY:-compose-svc-vox}"   # named svc_vox principal
       VOCX_REGISTER_TENANT: "EVAM"
+      # VocX's OWN front door: only the gateway's injected key is accepted.
+      VOCX_API_KEYS: "${VOCX_FRONT_KEY:-compose-vocx-front}"
       # Company-name captures (no resolved subject id) run as durable workflows.
       VOCX_ORCHESTRATOR_URL: "http://orchestrator:8000"
       VOCX_ORCHESTRATOR_API_KEY: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
+      # Verify + re-mint the caller's signed context so the human authorizes Register writes.
+      VOCX_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
+      # --- The voice pipeline (/vocx/api/vocx/*) ----------------------------------------
+      # Claude extraction; empty = the offline stub (typed transcripts still work).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Per-RM Google tokens, PKCE state, alias map, audio archive, Whisper model cache —
+      # all on the persistent volume below. Losing it only means RMs reconnect Google
+      # and the first transcription re-downloads the model.
+      VOCX_TOKENS_DIR: "/data/vocx"
+      # Google OAuth client secret, mounted read-only from deploy/vocx-secrets/
+      # (git-ignored). File absent = Google integration off; register writes still work.
+      VOCX_GOOGLE_CLIENT_SECRET_FILE: "/run/vocx-secrets/client_secret.json"
+      # The OAuth redirect as the BROWSER reaches it — add this exact URL in Google
+      # Cloud Console. Through the edge: https://<host>:8443/vocx/v1/auth/callback
+      VOCX_OAUTH_REDIRECT_URI: "${VOCX_REDIRECT_URI:-https://localhost:8443/vocx/v1/auth/callback}"
+      # faster-whisper is baked into the image; the model (small, CPU int8 — tune in
+      # app/vocx/config.json) downloads once onto the volume. api|stub also available.
+      VOCX_STT_BACKEND: "${VOCX_STT_BACKEND:-faster_whisper}"
+      # Recorded audio: bytes in MinIO (same platform rule as Register documents), the
+      # s3://bucket/key reference rides on the committed interaction. An S3 failure
+      # degrades to the volume — a recording is never discarded. Retention: >0 becomes a
+      # bucket lifecycle rule on the captures prefix.
+      VOCX_S3_ENDPOINT_URL: "http://minio:9000"
+      # Playback presigned URLs are opened by the BROWSER — sign against the published
+      # MinIO port (swap localhost for the VM's IP when testing from another machine).
+      VOCX_S3_PUBLIC_ENDPOINT_URL: "${VOCX_S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}"
+      VOCX_S3_BUCKET: "prism-vocx-captures"
+      VOCX_S3_ACCESS_KEY_ID: "prism"
+      VOCX_S3_SECRET_ACCESS_KEY: "prism-secret"
+      VOCX_AUDIO_RETENTION_DAYS: "${VOCX_AUDIO_RETENTION_DAYS:-0}"
       VOCX_LOG_JSON: "true"
-    ports:
-      - "8003:8000"   # direct capture endpoint for dev
+    volumes:
+      - vocx_state:/data/vocx
+      - ../vocx-secrets:/run/vocx-secrets:ro
+    # No host port: VocX is reachable ONLY through the gateway (edge → /vocx/...), so the
+    # single trust boundary is not bypassable even locally. `docker compose exec` for debug.
     restart: unless-stopped
 
   # PULSE — the news / adverse-media radar. Fetches configured sources, matches items
@@ -203,14 +261,16 @@ services:
       - register
     environment:
       PULSE_REGISTER_BASE_URL: "http://register:8000"
-      PULSE_REGISTER_API_KEY: "dev-local-key"
+      PULSE_REGISTER_API_KEY: "${SVC_PULSE_KEY:-compose-svc-pulse}"   # named svc_pulse principal
       PULSE_REGISTER_TENANT: "EVAM"
+      # PULSE's OWN front door: only the gateway's injected key is accepted. Must equal
+      # GATEWAY_PULSE_API_KEY so gateway-routed /pulse/... calls authenticate.
+      PULSE_API_KEYS: "${PULSE_API_KEYS:-compose-pulse-key}"
       # Dev default: the offline sample feed. Point at real feeds like:
       # PULSE_SOURCES: '[{"name":"google-news","kind":"rss","url":"https://news.google.com/rss/search?q=..."}]'
       PULSE_SOURCES: '[{"name": "sample", "kind": "sample"}]'
       PULSE_LOG_JSON: "true"
-    ports:
-      - "8004:8000"   # direct radar endpoint for dev
+    # No host port: PULSE is reachable ONLY through the gateway (edge → /pulse/...).
     restart: unless-stopped
 
   # ATLAS — the live management dashboard service (read-side BFF). Composes
@@ -225,7 +285,7 @@ services:
       - access
     environment:
       ATLAS_REGISTER_BASE_URL: "http://register:8000"
-      ATLAS_REGISTER_API_KEY: "dev-local-key"
+      ATLAS_REGISTER_API_KEY: "${SVC_ATLAS_KEY:-compose-svc-atlas}"   # named svc_atlas principal
       ATLAS_REGISTER_TENANT: "EVAM"
       ATLAS_ACCESS_URL: "http://access:8000"
       ATLAS_ACCESS_API_KEY: "dev-local-key"
@@ -236,8 +296,7 @@ services:
       # REGISTER_INTERNAL_SIGNING_SECRET; replaces plaintext X-User-* + shared secret.
       ATLAS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       ATLAS_LOG_JSON: "true"
-    ports:
-      - "8005:8000"   # direct dashboard endpoint for dev
+    # No host port: ATLAS is reachable ONLY through the gateway (edge → /atlas/...).
     restart: unless-stopped
 
   # Dev OIDC IdP (opt-in): `docker compose --profile sso up`. Turns the gateway's
@@ -254,14 +313,20 @@ services:
     restart: unless-stopped
 
   # Edge reverse proxy — TLS (prod), routing, load-balancing, edge rate-limit, correlation id.
+  # The public edge — terminates TLS. Generate the self-signed pair BEFORE first start:
+  #     scripts/gen_dev_certs.sh
+  # (nginx will not start without deploy/nginx/certs/tls.{crt,key}.) :8080 serves only a
+  # 301 to HTTPS plus the health probes; real traffic goes to :8443.
   nginx:
     image: nginx:1.27-alpine
     depends_on:
       - gateway
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/certs:/etc/nginx/certs:ro
     ports:
-      - "8080:80"
+      - "8080:80"     # HTTP → 301 redirect to HTTPS (+ /healthz, /readyz)
+      - "8443:443"    # HTTPS — the real front door
     restart: unless-stopped
 
   # ------------------------------------------------------------------------- #
@@ -286,12 +351,19 @@ services:
       POSTGRES_SEEDS: postgres
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
-    ports:
-      - "7233:7233"
+    # NO host port for the Temporal gRPC frontend (7233): a client that can reach it can
+    # SIGNAL a workflow directly, bypassing the orchestrator's verified-approval path. The
+    # worker + orchestrator reach it over the internal compose network only. In a real
+    # deployment secure Temporal with mTLS + namespace authorization + a NetworkPolicy; the
+    # Register still fails closed on a forged approval (the convert activity verifies a
+    # signed, workflow-bound approval token), so a direct signal cannot convert.
     restart: unless-stopped
 
+  # Temporal Web UI — a DEV convenience. It can also signal workflows, so it is exposed only
+  # for local debugging; do NOT expose it (or run it) in production without auth in front.
   temporal-ui:
     image: temporalio/ui:2.31.2
+    profiles: ["debug"]
     depends_on:
       - temporal
     environment:
@@ -312,8 +384,11 @@ services:
       WORKFLOWS_TEMPORAL_ADDRESS: temporal:7233
       WORKFLOWS_TASK_QUEUE: prism-workflows
       WORKFLOWS_REGISTER_BASE_URL: http://register:8000
-      WORKFLOWS_REGISTER_API_KEY: dev-local-key
+      # Named service principal (svc_workflows allowlist) — least privilege.
+      WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
       WORKFLOWS_REGISTER_TENANT: EVAM
+      # Re-mint the caller's signed context so a conversion writes as the human, not the key.
+      WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       WORKFLOWS_LOG_JSON: "true"
     restart: unless-stopped
 
@@ -333,8 +408,14 @@ services:
       WORKFLOWS_TEMPORAL_ADDRESS: temporal:7233
       WORKFLOWS_TASK_QUEUE: prism-workflows
       WORKFLOWS_LOG_JSON: "true"
+      # The orchestrator calls the Register directly for durable decision records + the handover
+      # approval (server-minted delegated context), so it needs the Register's in-network URL.
+      WORKFLOWS_REGISTER_BASE_URL: http://register:8000
       # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
       WORKFLOWS_API_KEYS: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
+      WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
+      # Verify the gateway's signed caller context and thread the human into the workflow.
+      WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       # Approver role checks resolve against the Access service.
       WORKFLOWS_ACCESS_URL: "http://access:8000"
       WORKFLOWS_ACCESS_API_KEY: "dev-local-key"
@@ -343,10 +424,11 @@ services:
       WORKFLOWS_OIDC_ISSUER: "${GATEWAY_OIDC_ISSUER:-}"
       WORKFLOWS_OIDC_AUDIENCE: "${GATEWAY_OIDC_AUDIENCE:-prism}"
       WORKFLOWS_REQUIRE_AUTH: "${WORKFLOWS_REQUIRE_AUTH:-false}"
-    ports:
-      - "8006:8000"   # direct workflow-start endpoint for dev
+    # No host port: the orchestrator API is reachable ONLY through the gateway
+    # (edge → /orchestrator/...), so workflow starts pass the RBAC gate first.
     restart: unless-stopped
 
 volumes:
   pgdata:
   miniodata:
+  vocx_state:

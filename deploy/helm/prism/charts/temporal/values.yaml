@@ -25,7 +25,15 @@ service:
   type: ClusterIP
   port: 7233                          # frontend gRPC — workers dial this
 
+# Restrict who may reach the Temporal frontend (:7233). Enable in production so only the
+# labelled PRISM worker + orchestrator can signal workflows (needs a NetworkPolicy-enforcing
+# CNI). extraIngress lets you allow additional clients (e.g. the UI) explicitly.
+networkPolicy:
+  enabled: false
+  extraIngress: []
+
 ui:
+  # The Web UI can SIGNAL workflows — disable it in production (or put auth in front).
   enabled: true
   image:
     repository: temporalio/ui

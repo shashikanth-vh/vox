@@ -80,18 +80,18 @@ _SPECS: list[ResourceSpec] = [
     ResourceSpec(
         name="lending record", prefix="/v1/lending", tags=["Lending Tracker"],
         repo=CRUDRepository(LendingTracker, searchable=["tracker_no", "rm", "remarks"],
-                            filterable=["stage", "pending_with", "entity_id", "rm"]),
+                            filterable=["stage", "pending_with", "entity_id", "deal_id", "rm"]),
         create_schema=s.LendingCreate, update_schema=s.LendingUpdate, read_schema=s.LendingRead,
-        filterable=["stage", "pending_with", "entity_id", "rm"],
+        filterable=["stage", "pending_with", "entity_id", "deal_id", "rm"],
         subject_type="Lending", view_name="lending",
     ),
     ResourceSpec(
         name="syndication record", prefix="/v1/syndication", tags=["Syndication Tracker"],
         repo=CRUDRepository(SyndicationTracker, searchable=["tracker_no", "remarks", "toi"],
-                            filterable=["status", "priority", "entity_id", "rm", "pending_with"]),
+                            filterable=["status", "priority", "entity_id", "deal_id", "rm", "pending_with"]),
         create_schema=s.SyndicationCreate, update_schema=s.SyndicationUpdate,
         read_schema=s.SyndicationRead,
-        filterable=["status", "priority", "entity_id", "rm", "pending_with"],
+        filterable=["status", "priority", "entity_id", "deal_id", "rm", "pending_with"],
         subject_type="Syndication", view_name="syndication",
     ),
     ResourceSpec(
@@ -114,9 +114,9 @@ _SPECS: list[ResourceSpec] = [
     ResourceSpec(
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],
         repo=CRUDRepository(AssetMonetisation, searchable=["investor", "notes"],
-                            filterable=["status", "nature", "entity_id", "state"]),
+                            filterable=["status", "nature", "entity_id", "deal_id", "state"]),
         create_schema=s.AssetMonCreate, update_schema=s.AssetMonUpdate, read_schema=s.AssetMonRead,
-        filterable=["status", "nature", "entity_id", "state"],
+        filterable=["status", "nature", "entity_id", "deal_id", "state"],
         subject_type="AssetMonetisation", view_name="asset_monetisation",
     ),
     ResourceSpec(

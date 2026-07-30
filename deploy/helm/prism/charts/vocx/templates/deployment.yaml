@@ -37,6 +37,64 @@ spec:
               value: {{ .Values.config.logLevel | quote }}
             - name: VOCX_LOG_JSON
               value: {{ .Values.config.logJson | quote }}
+            # --- voice pipeline -------------------------------------------------------
+            - name: VOCX_PIPELINE_ENABLED
+              value: {{ .Values.pipeline.enabled | quote }}
+            {{- if .Values.pipeline.enabled }}
+            - name: VOCX_TOKENS_DIR
+              value: "/data/vocx"
+            - name: VOCX_STT_BACKEND
+              value: {{ .Values.pipeline.sttBackend | quote }}
+            {{- if .Values.pipeline.audio.s3EndpointUrl }}
+            - name: VOCX_S3_ENDPOINT_URL
+              value: {{ .Values.pipeline.audio.s3EndpointUrl | quote }}
+            - name: VOCX_S3_BUCKET
+              value: {{ .Values.pipeline.audio.bucket | quote }}
+            {{- if .Values.pipeline.audio.s3PublicEndpointUrl }}
+            - name: VOCX_S3_PUBLIC_ENDPOINT_URL
+              value: {{ .Values.pipeline.audio.s3PublicEndpointUrl | quote }}
+            {{- end }}
+            - name: VOCX_AUDIO_RETENTION_DAYS
+              value: {{ .Values.pipeline.audio.retentionDays | quote }}
+            {{- if .Values.pipeline.audio.credentials.existingSecret }}
+            - name: VOCX_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.pipeline.audio.credentials.existingSecret }}
+                  key: access-key-id
+            - name: VOCX_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.pipeline.audio.credentials.existingSecret }}
+                  key: secret-access-key
+            {{- else }}
+            - name: VOCX_S3_ACCESS_KEY_ID
+              value: {{ .Values.pipeline.audio.credentials.accessKeyId | quote }}
+            - name: VOCX_S3_SECRET_ACCESS_KEY
+              value: {{ .Values.pipeline.audio.credentials.secretAccessKey | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.pipeline.google.redirectUri }}
+            - name: VOCX_OAUTH_REDIRECT_URI
+              value: {{ .Values.pipeline.google.redirectUri | quote }}
+            {{- end }}
+            {{- if .Values.pipeline.google.existingSecret }}
+            - name: VOCX_GOOGLE_CLIENT_SECRET_FILE
+              value: "/run/vocx-secrets/client_secret.json"
+            {{- end }}
+            {{- if or .Values.pipeline.anthropicApiKey.existingSecret .Values.pipeline.anthropicApiKey.value }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.pipeline.anthropicApiKey.existingSecret }}
+                  name: {{ .Values.pipeline.anthropicApiKey.existingSecret }}
+                  key: {{ .Values.pipeline.anthropicApiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "vocx.secretName" . }}
+                  key: anthropic-api-key
+                  {{- end }}
+            {{- end }}
+            {{- end }}
             - name: VOCX_REGISTER_BASE_URL
               value: {{ .Values.register.baseUrl | quote }}
             - name: VOCX_REGISTER_TENANT
@@ -55,6 +113,17 @@ spec:
                   name: {{ include "vocx.secretName" . }}
                   key: register-api-key
                   {{- end }}
+            {{- if .Values.internalSigningSecret }}
+            - name: VOCX_INTERNAL_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vocx.secretName" . }}
+                  key: internal-signing-secret
+            {{- end }}
+            - name: VOCX_API_KEYS
+              value: {{ .Values.config.apiKeys | default "" | quote }}
+            - name: VOCX_REQUIRE_DELEGATION
+              value: {{ .Values.config.requireDelegation | default false | quote }}
           ports:
             - name: http
               containerPort: 8000
@@ -71,9 +140,28 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.pipeline.enabled .Values.pipeline.state.enabled }}
+            - name: vocx-state
+              mountPath: /data/vocx
+            {{- end }}
+            {{- if and .Values.pipeline.enabled .Values.pipeline.google.existingSecret }}
+            - name: vocx-google
+              mountPath: /run/vocx-secrets
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.pipeline.enabled .Values.pipeline.state.enabled }}
+        - name: vocx-state
+          persistentVolumeClaim:
+            claimName: {{ .Values.pipeline.state.existingClaim | default (printf "%s-state" (include "vocx.fullname" .)) }}
+        {{- end }}
+        {{- if and .Values.pipeline.enabled .Values.pipeline.google.existingSecret }}
+        - name: vocx-google
+          secret:
+            secretName: {{ .Values.pipeline.google.existingSecret }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

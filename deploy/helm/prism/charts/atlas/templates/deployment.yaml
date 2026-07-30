@@ -57,6 +57,17 @@ spec:
               value: {{ .Values.oidc.audience | default "" | quote }}
             - name: ATLAS_OIDC_EMAIL_CLAIM
               value: {{ .Values.oidc.emailClaim | default "email" | quote }}
+            # Several IdPs at once — "issuer|audience,issuer2|audience2"; wins over the pair above.
+            - name: ATLAS_OIDC_ISSUERS
+              value: {{ .Values.oidc.issuers | default "" | quote }}
+            {{- /* A public issuer authenticates every account it hosts, so without a domain
+                   allowlist any consumer identity would reach the dashboard. */}}
+            {{- $pub := regexMatch "accounts\\.google\\.com|login\\.microsoftonline\\.com" (printf "%s %s" (.Values.oidc.issuer | default "") (.Values.oidc.issuers | default "")) }}
+            {{- if and $pub (not .Values.oidc.allowedDomains) }}
+            {{- fail "atlas.oidc accepts a public issuer (Google/Microsoft) but atlas.oidc.allowedDomains is empty — set it (e.g. --set atlas.oidc.allowedDomains=evamfinance.com) or any personal account could authenticate." }}
+            {{- end }}
+            - name: ATLAS_OIDC_ALLOWED_DOMAINS
+              value: {{ .Values.oidc.allowedDomains | default "" | quote }}
             {{- if .Values.internalSigningSecret }}
             - name: ATLAS_INTERNAL_SIGNING_SECRET
               value: {{ .Values.internalSigningSecret | quote }}
