@@ -8685,7 +8685,7 @@
       ]
     },
     {
-      "name": "Access  (13 requests \u00b7 {{baseUrl}}/access)",
+      "name": "Access  (14 requests \u00b7 {{baseUrl}}/access)",
       "item": [
         {
           "name": "Access Matrix",
@@ -8770,6 +8770,42 @@
                       "language": "json"
                     }
                   }
+                }
+              }
+            },
+            {
+              "name": "GET /access/v1/access/drift \u2014 Compare the live matrix against the approved compiled baseline \u2014 report only, Admin-only, no writes",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/access/v1/access/drift",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "access",
+                    "v1",
+                    "access",
+                    "drift"
+                  ]
                 }
               }
             }
@@ -9826,7 +9862,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"facilities\": [\n    {\n      \"lending_id\": \"sample\",\n      \"approved\": false,\n      \"note\": \"sample\"\n    }\n  ],\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

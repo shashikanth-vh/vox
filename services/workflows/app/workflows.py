@@ -478,6 +478,7 @@ class DealStructuringWorkflow:
         total = timedelta(hours=inp.decision_timeout_hours)
         start = workflow.now()
         verified: dict[str, Any] | None = None
+        facility_outcomes: dict[str, dict[str, Any]] = {}
         while verified is None:
             remaining = total - (workflow.now() - start)
             if remaining <= timedelta(0):
@@ -491,7 +492,17 @@ class DealStructuringWorkflow:
             v = await workflow.execute_activity(
                 activities.verify_committee_decision, args=[inp.deal_id, caller], **_DURABLE_IO)
             if v.get("valid"):
-                verified = v
+                # Committee approval is FACILITY-SPECIFIC: the orchestrator records one
+                # outcome per lending line before signalling. Read them all; a gap means
+                # this wake-up did not come from the orchestrator → keep waiting.
+                fv = await workflow.execute_activity(
+                    activities.verify_facility_decisions,
+                    args=[[str(line.get("id")) for line in lines], caller], **_DURABLE_IO)
+                if fv.get("valid"):
+                    verified = v
+                    facility_outcomes = fv["facilities"]
+                else:
+                    self._stage = "Awaiting committee decision"
             else:
                 self._stage = "Awaiting committee decision"   # spoofed / premature → keep waiting
 
@@ -502,58 +513,66 @@ class DealStructuringWorkflow:
                 stage=lines[0].get("stage"), evidence_ids=evidence_ids,
                 note="No committee decision within the window.")
 
-        # Everything below is derived from the VERIFIED record — not the signal.
-        outcome = verified["outcome"]
+        # Everything below is derived from the VERIFIED records — not the signal.
         decided_by = verified.get("decided_by")
         note = verified.get("note")
         committee_ref = verified.get("committee_reference") or f"committee/{wf_id}"
         sanction_ref = verified.get("sanction_letter_reference") or f"sanction/{wf_id}"
 
-        if outcome == "Rejected":
-            # The rejection lands on each LENDING line: file the committee-rejection evidence
-            # (citing the per-line subject-bound decision) and move the line to 'Rejected'. The
-            # deal's commercial funnel is the RM's call (a rejected facility may be re-worked or
-            # the deal closed) — the workflow never touches it.
-            self._stage = "Rejected"
-            for line in lines:
-                line_id = str(line.get("id"))
-                line_ref = f"{wf_id}:lending:{line_id}"
-                await workflow.execute_activity(
-                    activities.attach_evidence,
-                    args=["Lending", line_id, "credit_committee_rejection", committee_ref,
-                          None, note or "Committee rejected", caller, line_ref],
-                    **_DURABLE_IO)
-                await workflow.execute_activity(
-                    activities.advance_stage,
-                    args=["lending", line_id, "stage", "Rejected", None, caller], **_DURABLE_IO)
-            return DealStructuringResult(
-                workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
-                decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids, note=note)
-
-        # -- 4. Approved → per line: FILE the sanction evidence (committee approval + sanction
-        #       letter), each VERIFIED by the Register against the per-line subject-bound decision
-        #       the orchestrator recorded under "{wf_id}:lending:{line_id}" with the committee's
-        #       own authority, THEN advance the line to 'Sanctioned' — a transition its evidence
-        #       gate accepts only because that evidence is now on file.
-        self._stage = "Filing sanction evidence"
+        # -- 4. Act on each facility's OWN recorded outcome. Committee approval is
+        #       facility-specific: an approved line gets the sanction evidence (committee
+        #       approval + sanction letter, each VERIFIED by the Register against the per-line
+        #       subject-bound decision under "{wf_id}:lending:{line_id}") and advances to
+        #       'Sanctioned'; a rejected line gets the rejection evidence and moves to
+        #       'Rejected'. A single deal-wide result never implicitly sanctions lines — even a
+        #       grouped submission was recorded per facility, and that record is what rules here.
+        #       The deal's commercial funnel is the RM's call — the workflow never touches it.
+        line_outcomes: dict[str, str] = {}
         for line in lines:
             line_id = str(line.get("id"))
             line_ref = f"{wf_id}:lending:{line_id}"
-            for kind, ref in (("credit_committee_approval", committee_ref),
-                              ("sanction_letter", sanction_ref)):
-                ev = await workflow.execute_activity(
-                    activities.attach_evidence,
-                    args=["Lending", line_id, kind, ref, None, note, caller, line_ref],
+            fac = facility_outcomes.get(line_id, {})
+            line_note = fac.get("note") or note
+            if fac.get("outcome") == "Approved":
+                self._stage = "Filing sanction evidence"
+                for kind, ref in (("credit_committee_approval", committee_ref),
+                                  ("sanction_letter", sanction_ref)):
+                    ev = await workflow.execute_activity(
+                        activities.attach_evidence,
+                        args=["Lending", line_id, kind, ref, None, line_note, caller,
+                              line_ref],
+                        **_DURABLE_IO)
+                    evidence_ids.append(ev.get("id"))
+                self._stage = "Sanctioning lending facility"
+                # product_type is a DEAL field — LendingUpdate is extra="forbid", so send only
+                # fields the lending line actually has.
+                line_extra = {k: v for k, v in {"rm": inp.rm}.items() if v is not None}
+                await workflow.execute_activity(
+                    activities.advance_stage,
+                    args=["lending", line_id, "stage", "Sanctioned", line_extra or None,
+                          caller],
                     **_DURABLE_IO)
-                evidence_ids.append(ev.get("id"))
-            self._stage = "Sanctioning lending facility"
-            # product_type is a DEAL field — LendingUpdate is extra="forbid", so send only
-            # fields the lending line actually has.
-            line_extra = {k: v for k, v in {"rm": inp.rm}.items() if v is not None}
-            await workflow.execute_activity(
-                activities.advance_stage,
-                args=["lending", line_id, "stage", "Sanctioned", line_extra or None, caller],
-                **_DURABLE_IO)
+                line_outcomes[line_id] = "Sanctioned"
+            else:
+                self._stage = "Recording facility rejection"
+                await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["Lending", line_id, "credit_committee_rejection", committee_ref,
+                          None, line_note or "Committee rejected", caller, line_ref],
+                    **_DURABLE_IO)
+                await workflow.execute_activity(
+                    activities.advance_stage,
+                    args=["lending", line_id, "stage", "Rejected", None, caller],
+                    **_DURABLE_IO)
+                line_outcomes[line_id] = "Rejected"
+
+        sanctioned = [lid for lid, o in line_outcomes.items() if o == "Sanctioned"]
+        if not sanctioned:
+            self._stage = "Rejected"
+            return DealStructuringResult(
+                workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
+                decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids,
+                note=note, line_outcomes=line_outcomes)
 
         # -- 5. Record the sanction basics on the DEAL as plain data (product_type/rm carried on
         #       the structuring request). This is NOT a lifecycle change — the deal's stage is the
@@ -565,11 +584,12 @@ class DealStructuringWorkflow:
                 activities.update_fields,
                 args=["deals", inp.deal_id, deal_fields, caller], **_DURABLE_IO)
 
-        self._stage = "Sanctioned"
+        status = "Sanctioned" if len(sanctioned) == len(line_outcomes) else "PartiallySanctioned"
+        self._stage = status
         return DealStructuringResult(
-            workflow_id=wf_id, deal_id=inp.deal_id, status="Sanctioned",
+            workflow_id=wf_id, deal_id=inp.deal_id, status=status,
             decided_by=decided_by, stage="Sanctioned",
-            evidence_ids=evidence_ids, note=note)
+            evidence_ids=evidence_ids, note=note, line_outcomes=line_outcomes)
 
 
 @workflow.defn

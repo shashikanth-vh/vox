@@ -640,7 +640,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approved\": false,\n  \"by\": \"sample by\",\n  \"committee_reference\": \"sample committee_reference\",\n  \"note\": \"sample note\",\n  \"sanction_letter_reference\": \"sample sanction_letter_reference\"\n}",
+              "raw": "{\n  \"approved\": false,\n  \"by\": \"sample by\",\n  \"committee_reference\": \"sample committee_reference\",\n  \"facilities\": [\n    {\n      \"approved\": false,\n      \"lending_id\": \"{{id}}\",\n      \"note\": \"sample note\"\n    }\n  ],\n  \"note\": \"sample note\",\n  \"sanction_letter_reference\": \"sample sanction_letter_reference\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -523,6 +523,35 @@ async def verify_committee_decision(deal_id: str,
 
 
 @activity.defn
+async def verify_facility_decisions(line_ids: list[str],
+                                    caller: CallerContext | None = None) -> dict[str, Any]:
+    """Read the PER-FACILITY committee outcomes the orchestrator persisted under
+    ``{workflow_id}:lending:{line_id}`` — committee approval is facility-specific, so the
+    workflow acts on each line's own recorded outcome, never a blanket deal result.
+
+    FAIL CLOSED like the deal-level verifier: a missing or non-terminal record for ANY line
+    returns ``valid=False`` (the orchestrator persists every line's decision before it
+    signals, so a gap means the wake-up did not come from the orchestrator)."""
+    from evam_register_client.errors import NotFoundError
+    wf_id = str(activity.info().workflow_id)
+    outcomes: dict[str, dict[str, Any]] = {}
+    async with _client(caller) as reg:
+        for lid in line_ids:
+            try:
+                rec = await reg.get_decision(f"{wf_id}:lending:{lid}", request_id=wf_id)
+            except NotFoundError:
+                return {"valid": False,
+                        "reason": f"no committee decision recorded for facility {lid}"}
+            if (rec.get("subject_type") != "Lending"
+                    or str(rec.get("subject_id")) != str(lid)
+                    or rec.get("decision") not in ("Approved", "Rejected")):
+                return {"valid": False,
+                        "reason": f"facility decision for {lid} is invalid or non-terminal"}
+            outcomes[str(lid)] = {"outcome": rec.get("decision"), "note": rec.get("note")}
+    return {"valid": True, "facilities": outcomes}
+
+
+@activity.defn
 async def advance_stage(resource: str, obj_id: str, stage_field: str, stage_value: str,
                         extra: dict[str, Any] | None = None,
                         caller: CallerContext | None = None) -> dict[str, Any]:

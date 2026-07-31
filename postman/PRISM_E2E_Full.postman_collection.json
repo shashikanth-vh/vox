@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PRISM \u00b7 E2E FULL (via NGINX, with Temporal)",
-    "description": "Every request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`. The edge forwards everything to the gateway, which routes by prefix: `/access` \u2192 Access, `/orchestrator` \u2192 the workflow plane, anything else \u2192 the Register. **Postman sends no backend api key** \u2014 the gateway strips it and injects each upstream's own.\\n\\nAll three product lines reach their terminal state:\\n* **Lending** \u2192 `Handed Over to Advaya`\\n* **Syndication** \u2192 `Disbursed`\\n* **Asset monetisation** \u2192 `Closed`\\n\\n### The sanction goes through Temporal\\n`Sanctioned` cannot be typed (folder 05 proves it). Instead: start a deal-structuring workflow, then send the committee decision. The orchestrator durably records a subject-bound decision for the deal AND for each lending line \u2014 carrying the deciding human's committee authority \u2014 and the workflow files the Lending-scoped evidence before advancing the line.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification OFF in Postman for the self-signed cert.\\n\\n**Temporal is asynchronous:** if folder 05's 'lending is Sanctioned' check races the run, re-send the status request and then the two GETs.\\n\\nFour requests MUST fail (unknown filter, lead\u2192Converted, hand-typed `Sanctioned`) \u2014 their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",
+    "description": "Every request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`. The edge forwards everything to the gateway, which routes by prefix: `/access` \u2192 Access, `/orchestrator` \u2192 the workflow plane, anything else \u2192 the Register. **Postman sends no backend api key** \u2014 the gateway strips it and injects each upstream's own.\\n\\nAll three product lines reach their terminal state:\\n* **Lending** \u2192 `Disbursed`\\n* **Syndication** \u2192 `Disbursed`\\n* **Asset monetisation** \u2192 `Closed`\\n\\n### The sanction goes through Temporal\\n`Sanctioned` cannot be typed (folder 05 proves it). Instead: start a deal-structuring workflow, then send the committee decision. The orchestrator durably records a subject-bound decision for the deal AND for each lending line \u2014 carrying the deciding human's committee authority \u2014 and the workflow files the Lending-scoped evidence before advancing the line.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification OFF in Postman for the self-signed cert.\\n\\n**Temporal is asynchronous:** if folder 05's 'lending is Sanctioned' check races the run, re-send the status request and then the two GETs.\\n\\nFour requests MUST fail (unknown filter, lead\u2192Converted, hand-typed `Sanctioned`) \u2014 their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -2607,7 +2607,7 @@
       ]
     },
     {
-      "name": "07 \u00b7 LENDING \u25b8 Handed Over to Advaya  (TERMINAL)",
+      "name": "07 \u00b7 LENDING \u25b8 Disbursed  (TERMINAL)",
       "item": [
         {
           "name": "PATCH lending \u2014 \u2192 Ready for Disbursement",
@@ -2829,7 +2829,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.test('LENDING terminal = Handed Over to Advaya', () => pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));",
+                  "pm.test('LENDING terminal = Disbursed', () => pm.expect(pm.response.json().stage).to.eql('Disbursed'));",
                   "console.log('LENDING =', pm.response.json().stage);"
                 ]
               }
@@ -4009,7 +4009,7 @@
       "name": "11 \u00b7 Final verification \u2014 all three lines terminal",
       "item": [
         {
-          "name": "GET /v1/lending/{id} \u2014 Handed Over to Advaya",
+          "name": "GET /v1/lending/{id} \u2014 Disbursed",
           "request": {
             "method": "GET",
             "header": [
@@ -4053,7 +4053,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.test('LENDING complete', () => pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));"
+                  "pm.test('LENDING complete', () => pm.expect(pm.response.json().stage).to.eql('Disbursed'));"
                 ]
               }
             }

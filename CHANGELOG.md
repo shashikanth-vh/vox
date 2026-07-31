@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Committee approval is FACILITY-SPECIFIC.** `POST /v1/workflows/{id}/committee-decision`
+  now takes either `facilities` (one outcome per lending line — approve/reject + its own
+  note/conditions; must cover exactly the deal's lines, no gaps/unknowns/duplicates) or the
+  grouped `approved` form — which is still RECORDED as a separate per-facility decision for
+  every line, so the audit trail always answers per facility. The structuring workflow reads
+  the per-line records (fail-closed: a missing line record = spoof, keep waiting) and acts on
+  each facility's own outcome — sanction evidence + `Sanctioned` for approved lines,
+  rejection evidence + `Rejected` for refused ones — reporting `Sanctioned` /
+  `PartiallySanctioned` / `Rejected` with a `line_outcomes` map. A single deal-wide result
+  never implicitly sanctions all lending lines. All 8 workflow input contracts now carry
+  `schema_version` for worker/version compatibility.
+
 - **RBAC authority model hardened for release 1: PostgreSQL decides, code enforces.**
   The compiled matrix is DEMOTED to a versioned reference (`rbac.py` split into
   `rbac_catalog` / `service_policy` / `lifecycle` with compatibility re-exports;

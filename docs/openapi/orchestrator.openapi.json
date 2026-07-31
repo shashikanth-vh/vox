@@ -19,7 +19,7 @@
       },
       "AdvayaHandoverIn": {
         "additionalProperties": false,
-        "description": "MAKER prepares the Advaya handover of a Lending line that is 'Ready for Disbursement'.\nRequires senior credit authority (Credit Head / Management / Admin). The workflow prepares the\ndurable handover package (authoritative amounts + package digest generated server-side); a\nDIFFERENT checker must then approve it to advance the line to 'Handed Over to Advaya'.",
+        "description": "MAKER prepares the Advaya handover of a Lending line that is 'Ready for Disbursement'.\nRequires senior credit authority (Credit Head / Management / Admin). The workflow prepares the\ndurable handover package (authoritative amounts + package digest generated server-side); a\nDIFFERENT checker must then approve it to advance the line to 'Disbursed'.",
         "properties": {
           "cpcs_checklist_version": {
             "anyOf": [
@@ -88,11 +88,18 @@
       },
       "CommitteeDecisionIn": {
         "additionalProperties": false,
-        "description": "The Credit Committee's recorded decision on a structured deal, delivered through the\norchestrator (fresh-authorized + durably persisted BEFORE the workflow is signalled).",
+        "description": "The Credit Committee's recorded decision on a structured deal, delivered through the\norchestrator (fresh-authorized + durably persisted BEFORE the workflow is signalled).\n\nTWO submission forms, exactly one of which must be used:\n* ``facilities`` \u2014 FACILITY-SPECIFIC outcomes: one entry per lending line, each with its\n  own approve/reject (+ note/conditions). Every line of the deal must be covered.\n* ``approved``   \u2014 a GROUPED submission: one outcome applied to every line \u2014 but still\n  RECORDED as a separate per-facility decision for each line, so the audit trail always\n  answers per facility. A single deal-wide result never implicitly sanctions lines.",
         "properties": {
           "approved": {
-            "title": "Approved",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved"
           },
           "by": {
             "maxLength": 200,
@@ -104,6 +111,20 @@
             "maxLength": 500,
             "title": "Committee Reference",
             "type": "string"
+          },
+          "facilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FacilityDecision"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facilities"
           },
           "note": {
             "anyOf": [
@@ -125,8 +146,7 @@
           }
         },
         "required": [
-          "by",
-          "approved"
+          "by"
         ],
         "title": "CommitteeDecisionIn",
         "type": "object"
@@ -453,6 +473,39 @@
           "name"
         ],
         "title": "DocumentReceivedIn",
+        "type": "object"
+      },
+      "FacilityDecision": {
+        "additionalProperties": false,
+        "description": "The committee's outcome for ONE lending facility. Committee approval is\nfacility-specific: each line gets its own recorded outcome (and note/conditions).",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "lending_id": {
+            "maxLength": 60,
+            "title": "Lending Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "lending_id",
+          "approved"
+        ],
+        "title": "FacilityDecision",
         "type": "object"
       },
       "HTTPValidationError": {

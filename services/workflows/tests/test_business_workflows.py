@@ -98,6 +98,7 @@ async def _env():
 def _biz_activities():
     return [activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.mark_lead_note, activities.verify_committee_decision,
+            activities.verify_facility_decisions,
             activities.find_lines_for_deal, activities.update_fields,
             activities.prepare_cpcs_checklist, activities.create_handover_package,
             activities.record_advaya_handoff]
@@ -126,7 +127,7 @@ async def test_cpcs_checklist_workflow_prepares_checklist(mock_register):
 
 
 def _seed_committee(mock_register, wf_id, did, decision="Approved",  # noqa: ANN001
-                    lending_ids=(), **extra):
+                    lending_ids=(), line_decisions=None, **extra):
     """Stand in for the orchestrator's persist-before-signal: the AUTHORITATIVE committee decision
     the workflow will read + verify (the workflow NEVER trusts the signal payload) — plus the
     per-line SUBJECT-BOUND decisions (keyed "{wf_id}:lending:{line_id}") the orchestrator records
@@ -139,7 +140,8 @@ def _seed_committee(mock_register, wf_id, did, decision="Approved",  # noqa: ANN
     for lid in lending_ids:
         key = f"{wf_id}:lending:{lid}"
         mock_register.state.committee[key] = {
-            "id": uuid.uuid4().hex, "workflow_id": key, "decision": decision,
+            "id": uuid.uuid4().hex, "workflow_id": key,
+            "decision": (line_decisions or {}).get(lid, decision),
             "subject_type": "Lending", "subject_id": lid,
             "decided_by": "chair@evamfinance.com", "roles": ["Credit Head"],
             "committee_reference": "committee/MIN-9",
@@ -219,6 +221,58 @@ async def test_deal_structuring_rejection_does_not_sanction(mock_register):
     kinds = {e["evidence_kind"] for e in mock_register.state.evidence if e["subject_id"] == lid}
     assert "sanction_letter" not in kinds        # nothing sanctioned
     assert "credit_committee_rejection" in kinds
+
+
+async def test_facility_specific_decisions_partially_sanction(mock_register):
+    """Committee approval is FACILITY-SPECIFIC: with two lending lines and a mixed recorded
+    outcome (one approved, one rejected), the approved line is sanctioned with its evidence,
+    the rejected line moves to Rejected with the rejection evidence, and the run reports
+    PartiallySanctioned with the per-line outcome map — a deal-wide result never implicitly
+    sanctions every facility."""
+    env = await _env()
+    from temporalio.worker import Worker
+
+    did = uuid.uuid4().hex
+    lid_a, lid_b = uuid.uuid4().hex, uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    for lid in (lid_a, lid_b):
+        mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                            "stage": "Data Awaited"}
+
+    async with env:
+        tq = "biz-tq"
+        async with Worker(env.client, task_queue=tq,
+                          workflows=[DealStructuringWorkflow], activities=_biz_activities()):
+            wf_id = f"struct-{did}"
+            handle = await env.client.start_workflow(
+                DealStructuringWorkflow.run,
+                DealStructuringInput(deal_id=did, requested_by="rm@evamfinance.com",
+                                     product_type="Term Loan", rm="asha",
+                                     credit_note_reference="note/CN-2"),
+                id=wf_id, task_queue=tq)
+            # The orchestrator records the OVERALL outcome (Approved — a sanction happened)
+            # plus one decision PER FACILITY, then signals.
+            _seed_committee(mock_register, wf_id, did, "Approved",
+                            lending_ids=[lid_a, lid_b],
+                            line_decisions={lid_a: "Approved", lid_b: "Rejected"})
+            await handle.signal(DealStructuringWorkflow.committee_decision, "")
+            result = await handle.result()
+
+    assert result.status == "PartiallySanctioned"
+    assert result.line_outcomes == {lid_a: "Sanctioned", lid_b: "Rejected"}
+    assert mock_register.state.lending[lid_a]["stage"] == "Sanctioned"
+    assert mock_register.state.lending[lid_b]["stage"] == "Rejected"
+    # Evidence follows each facility's own outcome.
+    kinds_a = {e["evidence_kind"] for e in mock_register.state.evidence
+               if e["subject_type"] == "Lending" and e["subject_id"] == lid_a}
+    kinds_b = {e["evidence_kind"] for e in mock_register.state.evidence
+               if e["subject_type"] == "Lending" and e["subject_id"] == lid_b}
+    assert {"credit_committee_approval", "sanction_letter"} <= kinds_a
+    assert "credit_committee_rejection" not in kinds_a
+    assert "credit_committee_rejection" in kinds_b
+    assert "sanction_letter" not in kinds_b
+    # The deal still records the sanction basics; its funnel stage is untouched.
+    assert mock_register.state.deals[did]["stage"] == "In Pipeline"
 
 
 async def test_deal_structuring_ignores_a_spoofed_signal_without_a_record(mock_register):

@@ -57,6 +57,7 @@ async def main() -> None:
             # Business-lifecycle set (qualification / structuring / document collection / Advaya).
             activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.verify_committee_decision,
+            activities.verify_facility_decisions,  # per-facility committee outcomes
             activities.find_lines_for_deal,       # a deal's product lines (sanction fan-out)
             activities.update_fields,             # plain data update, no lifecycle change
             activities.prepare_cpcs_checklist,   # authoritative CP/CS checklist (maker)

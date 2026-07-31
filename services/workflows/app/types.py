@@ -47,6 +47,9 @@ class InteractionInput:
     performed_by: str | None = None
     source: str = "Temporal"
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
@@ -110,6 +113,9 @@ class VoxTouchpoint:
 
     # The tenant + human this capture acts for (set by the orchestrator from the request).
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
@@ -151,6 +157,9 @@ class LeadConversionInput:
     note: str | None = None
     # The tenant + human this conversion acts for (set by the orchestrator from the request).
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
     # Auto-reject if nobody decides within this window.
     approval_timeout_hours: int = 24 * 7
 
@@ -192,6 +201,9 @@ class LeadQualificationInput:
     passed: bool = True
     reason: str | None = None
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
@@ -230,17 +242,24 @@ class DealStructuringInput:
     credit_note_reference: str = ""     # the structured credit note circulated to committee
     decision_timeout_hours: int = 24 * 14
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
 class DealStructuringResult:
     workflow_id: str
     deal_id: str
-    status: str                     # Sanctioned / Rejected / TimedOut / NoLendingLine / NoLendingLine
+    # Sanctioned / PartiallySanctioned / Rejected / TimedOut / NoLendingLine — the BUSINESS
+    # outcome (the workflow's technical progress is the separate `status` query).
+    status: str
     decided_by: str | None = None
     stage: str | None = None
     evidence_ids: list = field(default_factory=list)
     note: str | None = None
+    # Facility-specific outcomes: lending line id → Sanctioned / Rejected / NoDecision.
+    line_outcomes: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -266,6 +285,9 @@ class DocumentCollectionInput:
     required_documents: list = field(default_factory=list)   # list[str] of mandatory names
     collection_timeout_hours: int = 24 * 30
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
@@ -296,6 +318,9 @@ class AdvayaHandoffInput:
     recipient: str | None = None
     note: str | None = None
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass
@@ -320,6 +345,9 @@ class CpcsChecklistInput:
     checklist_version: int = 1
     note: str | None = None
     caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
 
 
 @dataclass

@@ -31,7 +31,7 @@ from evam_backend_core.oidc import (
 )
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import ORJSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import httpx
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.exceptions import TemporalError
@@ -153,16 +153,44 @@ class DealStructuringIn(BaseModel):
     decision_timeout_hours: int = Field(default=24 * 14, ge=1, le=24 * 90)
 
 
+class FacilityDecision(BaseModel):
+    """The committee's outcome for ONE lending facility. Committee approval is
+    facility-specific: each line gets its own recorded outcome (and note/conditions)."""
+
+    model_config = ConfigDict(extra="forbid")
+    lending_id: str = Field(max_length=60)
+    approved: bool
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class CommitteeDecisionIn(BaseModel):
     """The Credit Committee's recorded decision on a structured deal, delivered through the
-    orchestrator (fresh-authorized + durably persisted BEFORE the workflow is signalled)."""
+    orchestrator (fresh-authorized + durably persisted BEFORE the workflow is signalled).
+
+    TWO submission forms, exactly one of which must be used:
+    * ``facilities`` — FACILITY-SPECIFIC outcomes: one entry per lending line, each with its
+      own approve/reject (+ note/conditions). Every line of the deal must be covered.
+    * ``approved``   — a GROUPED submission: one outcome applied to every line — but still
+      RECORDED as a separate per-facility decision for each line, so the audit trail always
+      answers per facility. A single deal-wide result never implicitly sanctions lines."""
 
     model_config = ConfigDict(extra="forbid")
     by: str = Field(max_length=200)
-    approved: bool
+    approved: bool | None = None
+    facilities: list[FacilityDecision] | None = None
     committee_reference: str = Field(default="", max_length=500)
     sanction_letter_reference: str = Field(default="", max_length=500)
     note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _exactly_one_form(self) -> "CommitteeDecisionIn":
+        if (self.approved is None) == (self.facilities is None):
+            raise ValueError(
+                "Provide exactly one of 'approved' (grouped) or 'facilities' "
+                "(facility-specific outcomes).")
+        if self.facilities is not None and not self.facilities:
+            raise ValueError("'facilities' must not be empty.")
+        return self
 
 
 class DocumentCollectionIn(BaseModel):
@@ -1083,7 +1111,14 @@ def create_app() -> FastAPI:
                                  ) -> Any:
         if (resp := denied(x_api_key)) is not None:
             return resp
-        outcome = "Approved" if payload.approved else "Rejected"
+        # The OVERALL outcome (the deal-level submission record; used for authority binding
+        # and reconciliation): Approved when ANY facility is approved — the deal got a
+        # sanction — Rejected only when every facility is refused.
+        if payload.facilities is not None:
+            outcome = ("Approved" if any(f.approved for f in payload.facilities)
+                       else "Rejected")
+        else:
+            outcome = "Approved" if payload.approved else "Rejected"
         # FRESH authority check (committee roles) via Access, bound to the workflow's tenant.
         decided_by, approver, _token, err = await _decider(
             request, workflow_id, outcome, DecisionIn(by=payload.by, note=payload.note))
@@ -1100,6 +1135,27 @@ def create_app() -> FastAPI:
         deal_id = await desc.memo_value("deal_id", None)
         if not deal_id:
             return _problem(409, "Conflict", "This workflow has no bound deal to decide on.")
+        # Resolve the deal's lending lines FIRST so a facility-specific submission can be
+        # validated against reality: every line must receive an outcome, and an unknown
+        # lending_id is refused — a committee cannot decide a facility that does not exist.
+        lines = await _lending_lines_for_deal(request, deal_id, approver, decided_by)
+        if payload.facilities is not None:
+            wanted = {f.lending_id: f for f in payload.facilities}
+            if len(wanted) != len(payload.facilities):
+                return _problem(422, "Validation failed",
+                                "Duplicate lending_id in 'facilities'.")
+            actual = {str(x) for x in lines}
+            if set(wanted) != actual:
+                return _problem(
+                    422, "Validation failed",
+                    f"'facilities' must cover exactly this deal's lending lines "
+                    f"{sorted(actual)}; got {sorted(wanted)}.")
+            line_outcome = {lid: ("Approved" if f.approved else "Rejected")
+                            for lid, f in wanted.items()}
+            line_note = {lid: (f.note or payload.note) for lid, f in wanted.items()}
+        else:
+            line_outcome = {str(x): outcome for x in lines}
+            line_note = {str(x): payload.note for x in lines}
         # DURABLY record the committee decision (single-winner, subject-bound, provenance server-set)
         # BEFORE signalling — so the evidence gate can VERIFY the sanction against it, and a raw
         # signal alone can never manufacture a committee outcome.
@@ -1120,11 +1176,12 @@ def create_app() -> FastAPI:
         # "{workflow_id}:lending:{lending_id}" so it stays single-winner per line. The workflow
         # then cites that key when filing the line's evidence. Best-effort: a line that cannot
         # be recorded simply is not sanctioned; the deal outcome still stands.
-        for line in await _lending_lines_for_deal(request, deal_id, approver, decided_by):
+        for line in lines:
+            lid = str(line)
             await _persist_decision(
-                request, f"{workflow_id}:lending:{line}", outcome, decided_by, payload.note,
-                approver, None,
-                extra={"kind": "committee", "subject_type": "Lending", "subject_id": line,
+                request, f"{workflow_id}:lending:{lid}", line_outcome[lid], decided_by,
+                line_note[lid], approver, None,
+                extra={"kind": "committee", "subject_type": "Lending", "subject_id": lid,
                        "run_id": desc.run_id,
                        "committee_reference": payload.committee_reference or workflow_id,
                        "sanction_letter_reference": payload.sanction_letter_reference})
@@ -1144,7 +1201,8 @@ def create_app() -> FastAPI:
                                 "Decision persisted but signal delivery failed transiently; "
                                 "retry delivery.")
             return await _reconcile_closed(handle, desc2, workflow_id, outcome)
-        return {"workflow_id": workflow_id, "decision": outcome, "by": authoritative_by}
+        return {"workflow_id": workflow_id, "decision": outcome, "by": authoritative_by,
+                "facilities": line_outcome}
 
     @app.post("/v1/workflows/{workflow_id}/document-received", tags=["Workflows"],
               summary="Signal that a required document was received")
