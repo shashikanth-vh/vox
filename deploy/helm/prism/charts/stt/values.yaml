@@ -1,0 +1,53 @@
+# PRISM STT (dedicated speech-to-text). Stateless; the model ships inside the image.
+fullnameOverride: ""       # umbrella sets prism-stt
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/evam/prism-stt
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+config:
+  logLevel: INFO
+  logJson: true
+  # STT's front door. Empty = open; ALWAYS set in production (VocX presents it as
+  # its VOCX_STT_API_KEY).
+  apiKeys: ""
+  # Must match the model baked into the image (Dockerfile ARG STT_MODEL_SIZE).
+  modelSize: small
+  device: cpu
+  computeType: int8
+  preload: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Whisper inference is the heavy lifter of the platform — give it real CPU. Bump
+# limits (or replicas) before touching anything else when transcription queues.
+resources:
+  requests: { cpu: "1", memory: 1Gi }
+  limits: { cpu: "2", memory: 2Gi }
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

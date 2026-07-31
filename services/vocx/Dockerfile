@@ -9,16 +9,21 @@ COPY packages/evam-backend-core /tmp/evam-backend-core
 COPY packages/evam-register-client /tmp/evam-register-client
 RUN pip install --upgrade pip && pip install --no-deps /tmp/evam-backend-core /tmp/evam-register-client
 COPY services/vocx/pyproject.toml services/vocx/README.md ./
-# Speech-to-text is part of the production image ([stt] = faster-whisper): every
-# deployment can take audio out of the box. Only the LIBRARY is baked — the Whisper
-# model itself downloads once at first use into the vocx VOLUME (stt.model_cache_dir),
-# so the image stays deterministic and model upgrades don't need a rebuild.
-RUN pip install .[stt]
+# Speech-to-text lives in the dedicated STT service (services/stt) — VocX calls it
+# over HTTP (VOCX_STT_BACKEND=api), so this image stays slim. To run Whisper
+# IN-PROCESS instead (fallback), change both installs to `pip install .[stt]` and set
+# VOCX_STT_BACKEND=faster_whisper (the HF_HOME env below keeps its cache writable).
+RUN pip install .
 COPY services/vocx/app ./app
-RUN pip install .[stt]
+RUN pip install .
 
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
+# HF_HOME on the state volume: the model itself honours download_root, but the HF hub's
+# xet download backend keeps its chunk cache + logs under $HOME/.cache/huggingface —
+# and the system user's home does not exist. Without this the FIRST model download dies
+# with 'Permission denied (os error 13)'.
+ENV HF_HOME=/data/vocx/hf
 RUN groupadd -r vocx && useradd -r -g vocx vocx && mkdir -p /app /data/vocx \
     && chown vocx:vocx /app /data/vocx
 COPY --from=builder /opt/venv /opt/venv

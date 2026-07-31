@@ -35,6 +35,15 @@ def build_vox_config(settings: Any) -> dict[str, Any]:
 
     if getattr(settings, "stt_backend", ""):
         config.setdefault("stt", {})["backend"] = settings.stt_backend
+
+    # Intelligence feature flags — env-driven, each independently switchable; the
+    # config.json "intelligence" block only serves standalone/vendored use.
+    intel = config.setdefault("intelligence", {})
+    for cfg_key, attr in (("stt_priming", "stt_priming"),
+                          ("glossary", "extract_glossary"),
+                          ("few_shot", "extract_few_shot"),
+                          ("structured_output", "extract_structured")):
+        intel[cfg_key] = bool(getattr(settings, attr, True))
     # Archive captured audio onto the tokens volume (the one writable mount).
     if getattr(settings, "tokens_dir", ""):
         stt = config.setdefault("stt", {})

@@ -1,93 +1,325 @@
 <!doctype html>
-<!-- TEMPORARY DEV UI — for exercising the VocX pipeline end to end from a browser.
+<!-- TEMPORARY DEV UI — VOM-styled test console for the VocX pipeline.
      Served only when VOCX_DEV_UI=true (off by default; the prod-posture overlay keeps
-     it off). To remove permanently: delete this file + the dev-ui block in mount.py. -->
+     it off). To remove permanently: delete this file + the dev-ui block in mount.py.
+     Everything here talks to the real backend: capture/capture_audio, suggest, commit,
+     reports (list/get/save/delete/print), audio playback, template_fill, auth. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VocX · dev test console</title>
+<title>VOM · dev test console</title>
 <style>
-  :root { color-scheme: dark; }
-  body { font: 15px/1.45 system-ui, sans-serif; background:#0b1512; color:#e6f2ec;
-         max-width: 880px; margin: 0 auto; padding: 16px 16px 80px; }
-  h1 { font-size: 20px; } h2 { font-size: 16px; margin: 18px 0 8px; color:#7fe0b2; }
-  .card { background:#101d18; border:1px solid #1d332a; border-radius:12px;
-          padding:14px; margin:12px 0; }
-  .banner { background:#3a2b12; border-color:#6b4d1d; color:#ffd48a; font-size:13px; }
-  button { background:#173a2c; color:#e6f2ec; border:1px solid #2c5a44;
-           border-radius:9px; padding:8px 14px; margin:4px 6px 4px 0; cursor:pointer; }
-  button.primary { background:#1f7a4f; border-color:#2aa76c; font-weight:600; }
-  button.danger { background:#4a1b1b; border-color:#7a2c2c; }
-  button:disabled { opacity:.45; cursor:default; }
-  input, textarea, select { width:100%; box-sizing:border-box; background:#0d1714;
-           color:#e6f2ec; border:1px solid #24453a; border-radius:8px; padding:8px; margin:4px 0 10px; }
-  textarea { min-height: 90px; }
-  label { font-size:12px; letter-spacing:.06em; color:#8fb3a4; text-transform:uppercase; }
-  pre { background:#0d1714; border:1px solid #24453a; border-radius:8px; padding:10px;
-        overflow-x:auto; font-size:12.5px; white-space:pre-wrap; }
-  .pill { display:inline-block; border:1px solid #2c5a44; border-radius:999px;
-          padding:2px 10px; margin:2px 4px 2px 0; font-size:12.5px; }
-  .ok { color:#7fe0b2; } .bad { color:#ff9d9d; } .muted { color:#8fb3a4; font-size:13px; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; } .row > div { flex:1; min-width:220px; }
-  table { width:100%; border-collapse:collapse; font-size:13.5px; }
-  td, th { border-bottom:1px solid #1d332a; padding:6px 8px; text-align:left; }
+  :root {
+    color-scheme: dark;
+    --bg: #0a120e; --card: #101d18; --card2: #0d1713; --line: #1d332a;
+    --ink: #e6f2ec; --mut: #8fa89c; --grn: #34d399; --grn2: #7fe0b2;
+    --teal: #35b8a4; --amber: #c9a227; --red: #e05d5d;
+  }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--ink); margin: 0; padding-bottom: 90px; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(10,18,14,.92);
+           backdrop-filter: blur(6px); border-bottom: 1px solid var(--line);
+           display: flex; align-items: center; gap: 12px; padding: 10px 14px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand .dot { width: 26px; height: 26px; border-radius: 8px; background: var(--grn);
+                display: grid; place-items: center; color: #06251a; font-size: 15px; }
+  .brand b { font-size: 17px; letter-spacing: .02em; }
+  .brand small { display: block; color: var(--mut); font-size: 9.5px; letter-spacing: .18em; }
+  nav { display: flex; gap: 4px; margin-left: 6px; background: var(--card);
+        border: 1px solid var(--line); border-radius: 12px; padding: 3px; }
+  nav button { background: none; border: 0; color: var(--mut); padding: 7px 14px;
+               border-radius: 9px; font-size: 14px; cursor: pointer; margin: 0; }
+  nav button.on { background: #16281f; color: var(--grn2); }
+  #rm { width: 90px; margin-left: auto; }
+  main { max-width: 760px; margin: 0 auto; padding: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+          padding: 16px; margin: 14px 0; }
+  h2.sec { color: var(--teal); font-size: 12.5px; letter-spacing: .14em;
+           text-transform: uppercase; margin: 20px 0 8px; font-weight: 600; }
+  h3.big { font-size: 26px; margin: 8px 0 4px; }
+  label { display: block; color: var(--mut); font-size: 11.5px; letter-spacing: .12em;
+          text-transform: uppercase; margin: 12px 0 5px; }
+  input, textarea, select { width: 100%; background: var(--card2); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+      font: inherit; }
+  textarea { min-height: 84px; resize: vertical; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--grn); }
+  button { background: #173a2c; color: var(--ink); border: 1px solid #2c5a44;
+           border-radius: 11px; padding: 10px 16px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--grn); border-color: var(--grn); color: #06251a; font-weight: 700; }
+  button.ghost { background: none; border: 1px dashed var(--line); color: var(--mut); }
+  button.danger { background: #2a1414; border-color: #5a2c2c; color: #f0b0b0; }
+  button:disabled { opacity: .45; cursor: default; }
+  .chip { display: inline-block; background: var(--card2); border: 1px solid var(--line);
+          border-radius: 999px; padding: 7px 15px; margin: 3px 5px 3px 0; cursor: pointer;
+          font-size: 14px; user-select: none; }
+  .chip.on { background: var(--grn); border-color: var(--grn); color: #06251a; font-weight: 600; }
+  .chip.dashed { border-style: dashed; color: var(--grn2); }
+  .chip.dashed.on { color: #06251a; border-style: solid; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 8px; font-size: 12px;
+           font-weight: 700; letter-spacing: .06em; }
+  .badge.draft { background: #2a2414; color: #e0c05d; }
+  .badge.ready { background: var(--grn); color: #06251a; }
+  .badge.committed { background: #14322a; color: var(--grn2); }
+  .mut { color: var(--mut); } .grn { color: var(--grn2); } .bad { color: var(--red); }
+  a { color: var(--grn2); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 1; } .row > .fix { flex: 0 0 auto; }
+  .banner { background: #0f2a1e; border: 1px solid #1d4a35; border-radius: 12px;
+            padding: 12px 14px; margin: 10px 0; color: var(--grn2); font-size: 14px; }
+  .banner.warn { background: #241f10; border-color: #4a3d1d; color: #e0c05d; }
+  /* --- record screen --- */
+  .step { display: inline-block; border: 1px solid var(--line); border-radius: 999px;
+          padding: 6px 18px; color: var(--mut); font-size: 12px; letter-spacing: .22em; }
+  .hero { text-align: center; padding: 26px 0 10px; }
+  .hero h1 { font-size: 40px; margin: 18px 0 8px; }
+  .hero .sub { color: var(--mut); max-width: 430px; margin: 0 auto; }
+  .micwrap { position: relative; width: 240px; height: 240px; margin: 34px auto 10px; }
+  .ring { position: absolute; inset: 0; border-radius: 50%;
+          background: repeating-conic-gradient(var(--line) 0 1.6deg, transparent 1.6deg 6deg); }
+  .ring::after { content: ""; position: absolute; inset: 10px; border-radius: 50%; background: var(--bg); }
+  #micBtn { position: absolute; inset: 34px; border-radius: 50%; border: 0; cursor: pointer;
+            background: radial-gradient(circle at 35% 30%, #6fe3ae, var(--grn) 70%);
+            color: #06251a; font-size: 52px; display: grid; place-items: center; padding: 0;
+            box-shadow: 0 0 40px rgba(52, 211, 153, .25); }
+  .rec .ring { animation: spin 9s linear infinite; }
+  .rec #micBtn { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 80px rgba(52,211,153,.55); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #timer { font-size: 30px; color: var(--grn); font-weight: 700; min-height: 36px; }
+  .list-row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  .list-row .bullet { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--grn); }
+  .list-row input { flex: 1; }
+  .list-row .x { flex: 0 0 auto; background: none; border: 0; color: var(--mut);
+                 font-size: 17px; padding: 4px 8px; }
+  .list-row .x:hover { color: var(--red); }
+  .score { display: flex; gap: 8px; }
+  .score button { width: 52px; height: 52px; font-size: 18px; }
+  .score button.on { background: var(--grn); border-color: var(--grn); color: #06251a; font-weight: 700; }
+  .suggest-pop { background: var(--card2); border: 1px solid var(--line); border-radius: 10px;
+                 margin-top: 4px; max-height: 220px; overflow: auto; }
+  .suggest-pop div { padding: 9px 12px; cursor: pointer; }
+  .suggest-pop div:hover { background: #16281f; }
+  details summary { cursor: pointer; font-size: 19px; font-weight: 700; padding: 4px 0; }
+  details summary .mut { font-size: 14px; font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left; }
+  .rep-item { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line);
+              border-radius: 12px; padding: 12px 14px; margin: 10px 0; cursor: pointer; }
+  .rep-item:hover { background: var(--card2); }
+  .foot { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 11px;
+          color: var(--mut); background: rgba(10,18,14,.9); border-top: 1px solid var(--line);
+          padding: 6px; }
+  #capsline { font-size: 12px; color: var(--mut); margin-left: 8px; }
+  #toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+           background: #16281f; border: 1px solid var(--grn); color: var(--grn2);
+           border-radius: 12px; padding: 10px 20px; display: none; z-index: 9; }
 </style>
 </head>
 <body>
-<h1>VocX · dev test console <span class="muted">(temporary — VOCX_DEV_UI)</span></h1>
-<div class="card banner">Throwaway testing page. Not the product UI. Disable with
-<code>VOCX_DEV_UI=false</code> when done.</div>
 
-<div class="card" id="caps">Loading capabilities…</div>
+<header>
+  <div class="brand"><div class="dot">🎙</div>
+    <div><b>VOM</b><small>EVAM · FIELD INTEL</small></div></div>
+  <nav>
+    <button id="tabRecord" class="on" onclick="showView('record')">🎙 Record</button>
+    <button id="tabReports" onclick="showView('reports')">📋 Reports</button>
+    <button id="tabCalendar" onclick="showView('calendar')">📅 Calendar</button>
+  </nav>
+  <span id="capsline">…</span>
+  <input id="rm" value="Priya" title="RM (speaker) — dev control">
+</header>
 
-<div class="card">
-  <h2>1 · Capture</h2>
-  <div class="row">
-    <div><label>RM (speaker)</label><input id="rm" value="Priya"></div>
-    <div><label>Recording</label><div>
-      <button id="recBtn" class="primary">● Record</button>
-      <button id="stopBtn" disabled>■ Stop &amp; transcribe</button>
-      <span id="recState" class="muted"></span>
-    </div></div>
+<main>
+
+<!-- ============================ RECORD ============================ -->
+<section id="viewRecord">
+  <div class="hero">
+    <span class="step">STEP 1 · RECORD THE MEETING</span>
+    <h1>Tap. Speak. Done.</h1>
+    <div class="sub">Up to 90 seconds. Any language — EN, HI, Hinglish. VOM handles
+      transcription, translation to English, structure, and filing.</div>
+    <div class="micwrap" id="micwrap">
+      <div class="ring"></div>
+      <button id="micBtn" title="record">🎙</button>
+    </div>
+    <div id="timer"></div>
+    <div id="recState" class="mut">Tap the mic to start.</div>
+    <p><a href="#" onclick="toggleType(); return false;">Type instead</a></p>
   </div>
-  <label>…or type / edit the transcript, then analyze</label>
-  <textarea id="transcript" placeholder="Met the EcoSoch Solar team about the 45 crore term loan. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi."></textarea>
-  <button id="analyzeBtn" class="primary">Analyze transcript</button>
-  <span id="capState" class="muted"></span>
-</div>
-
-<div class="card" id="previewCard" style="display:none">
-  <h2>2 · Preview <span id="captureId" class="muted"></span></h2>
-  <div id="entityBox"></div>
-  <div class="row">
-    <div><label>Summary</label><input id="sumEdit"></div>
-    <div><label>Next meeting (date · time)</label>
-      <div class="row"><div><input id="nmDate" placeholder="YYYY-MM-DD"></div>
-      <div><input id="nmTime" placeholder="HH:MM"></div></div></div>
+  <div class="card" id="typeCard" style="display:none">
+    <label>Transcript (any language — stored as English)</label>
+    <textarea id="typed">Met the EcoSoch Solar team about the 45 crore term loan. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.</textarea>
+    <p><button class="primary" onclick="analyzeTyped()">Analyze transcript</button></p>
   </div>
-  <div class="row">
-    <div><label>Log to (optional — overrides auto routing)</label>
-      <select id="logType"><option value="">auto</option><option>Lead</option><option>Deal</option>
-      <option>Entity</option><option>Lending</option><option>Syndication</option>
-      <option>AssetMonetisation</option></select></div>
-    <div><label>Subject UUID (when Log-to set)</label><input id="logId" placeholder="row uuid"></div>
+  <div class="card" style="display:flex; gap:10px; align-items:center">
+    <span style="font-size:22px">📍</span>
+    <div><b>GPS</b><br><span id="gpsState" class="mut">acquiring…</span></div>
   </div>
-  <div id="audioBox"></div>
-  <button id="commitBtn" class="primary">✓ Approve &amp; commit</button>
-  <span id="commitState" class="muted"></span>
-  <details><summary class="muted">full preview JSON</summary><pre id="previewJson"></pre></details>
-  <div id="commitBox"></div>
-</div>
+</section>
 
-<div class="card">
-  <h2>3 · Reports (server-side)</h2>
-  <button id="reloadReports">↻ Reload</button>
-  <div id="reports"></div>
-</div>
+<!-- ============================ REPORT CARD ============================ -->
+<section id="viewCard" style="display:none">
+  <div class="card">
+    <div class="row">
+      <span class="fix"><span id="stBadge" class="badge draft">DRAFT</span></span>
+      <span class="fix chip" data-temp="Hot" onclick="setTemp(this)">Hot</span>
+      <span class="fix chip" data-temp="Warm" onclick="setTemp(this)">Warm</span>
+      <span class="fix chip" data-temp="Cold" onclick="setTemp(this)">Cold</span>
+    </div>
+    <h3 class="big" id="cardTitle">—</h3>
+    <div class="mut" id="cardMeta">—</div>
+
+    <div style="border-left:3px solid var(--grn); border-radius:4px; background:var(--card2); padding:12px 14px; margin:16px 0">
+      <label style="margin-top:0">Log to</label>
+      <span class="chip on" data-lt="" onclick="setLogTo(this)">Auto</span>
+      <span class="chip" data-lt="Lead" onclick="setLogTo(this)">Lead</span>
+      <span class="chip" data-lt="Deal" onclick="setLogTo(this)">Deal</span>
+      <span class="chip" data-lt="Lending" onclick="setLogTo(this)">Lending</span>
+      <span class="chip" data-lt="Syndication" onclick="setLogTo(this)">Syndication</span>
+      <span class="chip" data-lt="AssetMonetisation" onclick="setLogTo(this)">Asset Monetisation</span>
+      <div id="logToId" style="display:none">
+        <label>Subject row id (UUID of the chosen line)</label>
+        <input id="logToUuid" placeholder="paste the row's UUID (dev console — the real UI lists them)">
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="fix" onclick="openPrint()">⬇ Download PDF</button>
+      <button class="fix primary" id="approveBtn" onclick="approve()">Approve</button>
+      <button class="fix" id="saveBtn" onclick="saveChanges()">Save changes</button>
+      <button class="fix danger" onclick="discard()" title="delete report">🗑</button>
+    </div>
+    <div id="commitOut"></div>
+
+    <h2 class="sec">Original audio</h2>
+    <div id="playerSlot" class="mut">no recording for this capture</div>
+
+    <h2 class="sec">Summary</h2>
+    <textarea id="fSummary" oninput="R().summary = this.value"></textarea>
+
+    <h2 class="sec">Key intel</h2>
+    <div id="kiList"></div>
+    <button class="ghost" onclick="addRow('key_intel','kiList')">+ Add bullet</button>
+
+    <h2 class="sec">Nuances &amp; soft signals</h2>
+    <div id="nuList"></div>
+    <button class="ghost" onclick="addRow('nuances','nuList')">+ Add nuance</button>
+
+    <h2 class="sec">Next steps</h2>
+    <div id="nsList"></div>
+    <button class="ghost" onclick="addStep()">+ Add next step</button>
+
+    <h2 class="sec">Next meeting</h2>
+    <div class="row">
+      <div><label>Follow-up date</label><input type="date" id="nmDate" onchange="NM().date=this.value; calBanner()"></div>
+      <div><label>Time</label><input type="time" id="nmTime" onchange="NM().time=this.value; calBanner()"></div>
+      <div><label>Mode</label><select id="nmMode" onchange="NM().mode=this.value; calBanner()">
+        <option value="">—</option><option>in-person</option><option>video</option>
+        <option>phone</option><option>site</option><option>whatsapp</option></select></div>
+    </div>
+    <div id="calBannerSlot"></div>
+
+    <div class="card" style="margin:18px 0">
+      <details id="trDetails">
+        <summary>Full transcript <span class="mut" id="trPeek"></span></summary>
+        <p class="mut" style="font-size:13px">Edit any mis-heard words, then re-analyze to rebuild the report.</p>
+        <textarea id="fTranscript" style="min-height:120px"></textarea>
+        <p><button onclick="reanalyze()">⟳ Re-analyze from transcript</button></p>
+      </details>
+    </div>
+
+    <div class="card" style="margin:18px 0">
+      <details open>
+        <summary>Additional details <span class="mut" id="attCount"></span></summary>
+        <label>Client name</label><input id="fTitle" oninput="R().title = this.value">
+        <label>ATLAS entity</label>
+        <input id="atlasQ" placeholder="Not linked to ATLAS yet — type to search…" autocomplete="off"
+               oninput="atlasSuggest(this.value)">
+        <div id="atlasPop" class="suggest-pop" style="display:none"></div>
+        <div id="atlasPick" class="grn" style="margin-top:6px"></div>
+        <div class="row">
+          <div><label>Sector</label><input data-f="sector"></div>
+          <div><label>Project type</label><input data-f="project_type"></div>
+        </div>
+        <div class="row">
+          <div><label>Project size</label><input data-f="project_size"></div>
+          <div><label>Location</label><input data-f="location"></div>
+        </div>
+        <div class="row">
+          <div><label>Loan product</label><input data-f="loan_product"></div>
+          <div><label>Ticket size</label><input data-f="ticket_size"></div>
+        </div>
+        <div class="row">
+          <div><label>Collateral</label><input data-f="collateral"></div>
+          <div><label>Equity raised</label><input data-f="equity_raised"></div>
+        </div>
+        <div class="row">
+          <div><label>Turnover</label><input data-f="turnover"></div>
+          <div><label>Pipeline stage</label>
+            <select id="fStage" onchange="R().pipeline_stage = this.value || null">
+              <option value="">—</option><option>Prospecting</option><option>Proposal</option>
+              <option>Negotiation</option><option>Sanctioned</option><option>Disbursed</option>
+              <option>Closed</option></select></div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <label class="fix" style="margin:0">Template fields</label>
+          <span style="flex:1"></span>
+          <button class="fix" onclick="autoFill()">✨ Auto-fill from transcript</button>
+        </div>
+        <div id="tplChips"></div>
+        <div id="tplFields"></div>
+        <button class="ghost" onclick="addCustomField()">+ Add field</button>
+
+        <label>Opportunity score (1–5)</label>
+        <div class="score" id="scoreRow">
+          <button onclick="setScore(1)">1</button><button onclick="setScore(2)">2</button>
+          <button onclick="setScore(3)">3</button><button onclick="setScore(4)">4</button>
+          <button onclick="setScore(5)">5</button>
+        </div>
+
+        <h2 class="sec">Attendees</h2>
+        <div id="attList"></div>
+        <button class="ghost" onclick="addAttendee()">+ Add attendee</button>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ REPORTS ============================ -->
+<section id="viewReports" style="display:none">
+  <div class="card">
+    <div class="row">
+      <h3 class="big fix" style="margin:0">Reports</h3>
+      <span style="flex:1"></span>
+      <button class="fix" onclick="loadReports()">↻ Reload</button>
+    </div>
+    <div id="repList" class="mut">loading…</div>
+  </div>
+</section>
+
+<!-- ============================ CALENDAR ============================ -->
+<section id="viewCalendar" style="display:none">
+  <div class="card">
+    <h3 class="big">Google Calendar</h3>
+    <div id="calStatusSlot" class="mut">checking…</div>
+    <p class="row">
+      <button class="fix" onclick="connectGoogle()">Connect Google</button>
+      <button class="fix" onclick="calTest()">Create a test event</button>
+    </p>
+    <div id="calOut"></div>
+  </div>
+</section>
+
+</main>
+<div class="foot">TEMPORARY dev console (VOCX_DEV_UI) — not the product UI. The real VOM app binds to these same endpoints.</div>
+<div id="toast"></div>
 
 <script>
-const base = new URL('.', location.href);           // …/vocx/v1/
+const base = new URL('.', location.href);
 const api = p => new URL(p, base).toString();
 const j = async r => {
   const text = await r.text();
@@ -96,157 +328,492 @@ const j = async r => {
   if (body === null) throw new Error('non-JSON response: ' + text.slice(0, 200));
   return body;
 };
-let preview = null, chosen = null, mediaRec = null, chunks = [];
+const H = {headers: {'X-Tenant': 'EVAM'}};
+const rmv = () => document.getElementById('rm').value.trim() || 'Priya';
+const toast = m => { const t = document.getElementById('toast'); t.textContent = m;
+  t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 2600); };
 
-async function caps() {
+// ---------------- state ----------------
+let ext = null;              // the extraction object (mutated in place by the card)
+let status = 'draft';        // draft | ready | committed
+let meta = {};               // duration/language shown on the card
+let chosen = null;           // ATLAS entity code | '__new__' | null (keep resolver's pick)
+let logTo = null;            // subject_type for Log To (uuid typed separately)
+let caps = null;
+let gps = {};                // gps_lat/gps_lng from the browser
+const R  = () => (ext.report = ext.report || {});
+const NM = () => (ext.next_meeting = ext.next_meeting || {});
+
+// ---------------- views ----------------
+function showView(v) {
+  for (const x of ['Record', 'Reports', 'Calendar'])
+    document.getElementById('tab' + x).classList.toggle('on', x.toLowerCase() === v);
+  document.getElementById('viewRecord').style.display = (v === 'record' && !ext) ? '' : 'none';
+  document.getElementById('viewCard').style.display = (v === 'record' && ext) ? '' : 'none';
+  document.getElementById('viewReports').style.display = v === 'reports' ? '' : 'none';
+  document.getElementById('viewCalendar').style.display = v === 'calendar' ? '' : 'none';
+  if (v === 'reports') loadReports();
+  if (v === 'calendar') calStatus();
+}
+function toggleType() {
+  const c = document.getElementById('typeCard');
+  c.style.display = c.style.display === 'none' ? '' : 'none';
+}
+
+// ---------------- capabilities ----------------
+async function loadCaps() {
   try {
-    const c = await fetch(api('capabilities'), {headers:{'X-Tenant':'EVAM'}}).then(j);
-    document.getElementById('caps').innerHTML =
-      `<span class="pill">stt: <b class="${c.stt?'ok':'bad'}">${c.stt?c.stt_backend:'off'}</b></span>` +
-      `<span class="pill">extraction: <b class="${c.extraction==='haiku'?'ok':'bad'}">${c.extraction}</b></span>` +
-      `<span class="pill">audio store: <b>${c.audio_store}</b></span>` +
-      `<span class="pill">google: <b class="${c.google_configured?'ok':'bad'}">${c.google_configured?'configured':'off'}</b></span>`;
-  } catch (e) { document.getElementById('caps').innerHTML = '<span class="bad">capabilities failed: '+e+'</span>'; }
+    caps = await fetch(api('capabilities'), H).then(j);
+    document.getElementById('capsline').innerHTML =
+      `stt:<b class="${caps.stt ? 'grn' : 'bad'}">${caps.stt ? caps.stt_backend : 'off'}</b> · ` +
+      `ai:<b class="${caps.extraction === 'haiku' ? 'grn' : 'bad'}">${caps.extraction}</b> · ` +
+      `g:<b class="${caps.google_configured ? 'grn' : 'bad'}">${caps.google_configured ? 'on' : 'off'}</b>`;
+  } catch (e) { document.getElementById('capsline').innerHTML = `<span class="bad">${e.message}</span>`; }
 }
 
-function renderPreview(p) {
-  preview = p; chosen = null;
-  const ext = p.extraction || {}, em = ext.entity_match || {}, meta = ext._meta || {};
-  document.getElementById('previewCard').style.display = '';
-  document.getElementById('captureId').textContent = 'capture ' + (meta.capture_id||'');
-  document.getElementById('sumEdit').value = (ext.report&&ext.report.summary) || '';
-  document.getElementById('nmDate').value = (ext.next_meeting||{}).date || '';
-  document.getElementById('nmTime').value = (ext.next_meeting||{}).time || '';
-  document.getElementById('previewJson').textContent = JSON.stringify(p, null, 2);
-  let html = `<label>Entity</label><div>heard <b>${ext.company_mentioned||'?'}</b> → ` +
-    (em.code ? `<b class="ok">${em.canonical_name||em.code}</b> (score ${em.match_score})`
-             : `<b class="bad">no confident match</b>`) +
-    (p.decision && p.decision.needs_approval ? ' · <span class="bad">needs approval</span>'
-                                             : ' · <span class="ok">auto-write ok</span>') + '</div>';
-  const alts = em.alternatives || [];
-  if (alts.length) {
-    html += '<div class="muted">pick a different match:</div>';
-    for (const a of alts) html +=
-      `<button onclick="chosen='${a.code||a.ref_id}';this.classList.add('primary')">${a.name||a.code} (${(a.score??'')})</button>`;
-  }
-  html += `<button onclick="chosen='__new__'" title="create a new lead">＋ New lead instead</button>`;
-  document.getElementById('entityBox').innerHTML = html;
-  const ref = meta.transcript_ref;
-  document.getElementById('audioBox').innerHTML = ref
-    ? `<label>Recording</label><div class="muted">${ref}</div><span id="playerSlot"></span>
-       <button onclick="playAudio('${encodeURIComponent(ref)}')">▶ Play stored audio</button>` : '';
-  document.getElementById('commitBox').innerHTML = '';
+// ---------------- GPS ----------------
+function getGps() {
+  if (!navigator.geolocation) { document.getElementById('gpsState').textContent = 'not available'; return; }
+  navigator.geolocation.getCurrentPosition(
+    p => { gps = {gps_lat: p.coords.latitude.toFixed(6), gps_lng: p.coords.longitude.toFixed(6)};
+           document.getElementById('gpsState').innerHTML =
+             `<span class="grn">${gps.gps_lat}, ${gps.gps_lng}</span> — rides on the interaction`; },
+    () => { document.getElementById('gpsState').textContent = 'denied — capture proceeds without location'; },
+    {timeout: 8000});
 }
 
-async function playAudio(ref) {
-  const r = await fetch(api('audio?ref=') + ref, {headers:{'X-Tenant':'EVAM'}});
-  const slot = document.getElementById('playerSlot');
-  if (r.headers.get('content-type')?.startsWith('audio/')) {
-    const url = URL.createObjectURL(await r.blob());
-    slot.innerHTML = `<audio controls src="${url}"></audio>`;
-  } else {
-    const b = await r.json();
-    slot.innerHTML = b.url ? `<audio controls src="${b.url}"></audio>`
-                           : `<span class="bad">${b.error||'no audio'}</span>`;
-  }
-}
-
-async function analyze() {
-  const rm = document.getElementById('rm').value.trim();
-  const tx = document.getElementById('transcript').value.trim();
-  if (!rm || !tx) return alert('rm and transcript required');
-  setState('capState', 'analyzing…');
-  const r = await fetch(api('capture'), {method:'POST',
-    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
-    body: JSON.stringify({rm, transcript: tx})}).then(j);
-  setState('capState', r.ok ? 'ok' : ('failed: ' + r.error));
-  if (r.ok) renderPreview(r);
-  loadReports();
-}
-
-async function record(start) {
-  if (start) {
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-    chunks = []; mediaRec = new MediaRecorder(stream);
+// ---------------- record ----------------
+let mediaRec = null, chunks = [], tHandle = null, tSec = 0;
+const MAXS = 90;
+document.getElementById('micBtn').onclick = async () => {
+  if (mediaRec && mediaRec.state === 'recording') { mediaRec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    chunks = []; tSec = 0;
+    mediaRec = new MediaRecorder(stream);
     mediaRec.ondataavailable = e => chunks.push(e.data);
-    mediaRec.start();
-    document.getElementById('recBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = false;
-    setState('recState', 'recording…');
-  } else {
     mediaRec.onstop = async () => {
-      mediaRec.stream.getTracks().forEach(t=>t.stop());
-      setState('recState', 'transcribing (first run downloads the model — be patient)…');
-      const blob = new Blob(chunks);
-      const rm = encodeURIComponent(document.getElementById('rm').value.trim());
-      const r = await fetch(api('capture_audio?rm=') + rm, {method:'POST',
-        headers:{'X-Tenant':'EVAM'}, body: blob}).then(j);
-      if (r.ok) {
-        document.getElementById('transcript').value = (r.transcription||{}).text || '';
-        setState('recState', `done (${((r.transcription||{}).duration||0).toFixed?.(1)??''}s)`);
-        renderPreview(r);
-        loadReports();
-      } else setState('recState', 'failed: ' + r.error);
-      document.getElementById('recBtn').disabled = false;
-      document.getElementById('stopBtn').disabled = true;
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(tHandle); document.getElementById('micwrap').classList.remove('rec');
+      document.getElementById('recState').textContent = 'transcribing (any language → English)…';
+      try {
+        const blob = new Blob(chunks, {type: mediaRec.mimeType || 'audio/webm'});
+        const qs = new URLSearchParams({rm: rmv(), ...gps});
+        const res = await fetch(api('capture_audio?') + qs, {method: 'POST',
+          headers: {'X-Tenant': 'EVAM', 'Content-Type': blob.type}, body: blob}).then(j);
+        onPreview(res);
+      } catch (e) { document.getElementById('recState').innerHTML = `<span class="bad">${e.message}</span>`; }
     };
-    mediaRec.stop();
+    mediaRec.start();
+    document.getElementById('micwrap').classList.add('rec');
+    document.getElementById('recState').textContent = 'Recording… tap the mic to stop.';
+    tHandle = setInterval(() => {
+      tSec++; document.getElementById('timer').textContent =
+        Math.floor(tSec / 60) + ':' + String(tSec % 60).padStart(2, '0');
+      if (tSec >= MAXS) mediaRec.stop();
+    }, 1000);
+  } catch (e) { document.getElementById('recState').innerHTML = `<span class="bad">mic: ${e.message}</span>`; }
+};
+
+async function analyzeTyped() {
+  const t = document.getElementById('typed').value.trim();
+  if (!t) return;
+  document.getElementById('recState').textContent = 'analyzing…';
+  try {
+    const res = await fetch(api('capture'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({rm: rmv(), transcript: t, ...gps})}).then(j);
+    onPreview(res);
+  } catch (e) { toast(e.message); }
+  document.getElementById('recState').textContent = 'Tap the mic to start.';
+}
+
+async function reanalyze() {
+  const t = document.getElementById('fTranscript').value.trim();
+  if (!t) return;
+  toast('re-analyzing…');
+  try {
+    const res = await fetch(api('capture'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({rm: rmv(), transcript: t,
+                            capture_id: ext._meta.capture_id, ...gps})}).then(j);
+    onPreview(res); toast('report rebuilt from the edited transcript');
+  } catch (e) { toast(e.message); }
+}
+
+// ---------------- preview → card ----------------
+function onPreview(res) {
+  ext = res.extraction; status = 'draft'; chosen = null; logTo = null;
+  meta = {duration: (res.transcription || {}).duration,
+          language: (res.transcription || {}).language || (ext._meta || {}).language};
+  document.getElementById('commitOut').innerHTML = '';
+  renderCard(); showView('record');
+}
+
+function renderCard() {
+  const rep = R(), em = ext.entity_match || {};
+  document.getElementById('stBadge').className = 'badge ' + status;
+  document.getElementById('stBadge').textContent = status.toUpperCase();
+  document.getElementById('cardTitle').textContent = rep.title || em.canonical_name || 'Field report';
+  const bits = [new Date().toLocaleString()];
+  if (meta.duration) bits.push('⏱ 0:' + String(Math.round(meta.duration)).padStart(2, '0'));
+  bits.push((meta.language || 'en').toUpperCase());
+  document.getElementById('cardMeta').innerHTML = bits.join(' · ') +
+    ' · <a href="#" onclick="document.getElementById(\'trDetails\').open = true; return false;">✎ Fix a mis-heard name</a>';
+  for (const c of document.querySelectorAll('[data-temp]'))
+    c.classList.toggle('on', c.dataset.temp === rep.deal_temp);
+  document.getElementById('fSummary').value = rep.summary || '';
+  document.getElementById('fTitle').value = rep.title || '';
+  renderList('key_intel', 'kiList');
+  renderList('nuances', 'nuList');
+  renderSteps(); renderAttendees(); renderTplChips(); renderTplFields(); renderScore();
+  document.getElementById('nmDate').value = NM().date || '';
+  document.getElementById('nmTime').value = NM().time || '';
+  document.getElementById('nmMode').value = NM().mode || '';
+  calBanner();
+  const tr = rep.transcript_english || (ext._meta || {}).transcript || '';
+  document.getElementById('fTranscript').value = tr;
+  document.getElementById('trPeek').textContent = tr.slice(0, 44) + (tr.length > 44 ? '…' : '');
+  for (const inp of document.querySelectorAll('[data-f]')) {
+    inp.value = rep[inp.dataset.f] || '';
+    inp.oninput = () => { R()[inp.dataset.f] = inp.value || null; };
+  }
+  document.getElementById('fStage').value = rep.pipeline_stage || '';
+  const na = (rep.attendees || []).length;
+  document.getElementById('attCount').textContent = (na || 'no') + ' attendee' + (na === 1 ? '' : 's');
+  const pick = document.getElementById('atlasPick');
+  if (chosen === '__new__') pick.textContent = '→ will be created as a NEW company';
+  else if (chosen) pick.textContent = '→ linked to ' + chosen;
+  else if (em.code) pick.textContent = 'resolver: ' + (em.canonical_name || '') + ' (' + em.code + ', ' +
+    Math.round((em.match_score || 0) * 100) + '%)' + (em.is_new_lead ? ' → new lead' : '');
+  else pick.textContent = '';
+  playAudio((ext._meta || {}).transcript_ref);
+  checkRmGoogle();
+  const done = status === 'committed';
+  document.getElementById('approveBtn').disabled = done;
+  document.getElementById('saveBtn').disabled = done;
+}
+
+function renderList(key, elId) {
+  const arr = R()[key] = R()[key] || [];
+  const el = document.getElementById(elId);
+  el.innerHTML = '';
+  arr.forEach((v, i) => {
+    const row = document.createElement('div'); row.className = 'list-row';
+    const b = document.createElement('span'); b.className = 'bullet';
+    const inp = document.createElement('input'); inp.value = v;
+    inp.oninput = () => arr[i] = inp.value;
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.onclick = () => { arr.splice(i, 1); renderList(key, elId); };
+    row.append(b, inp, x); el.append(row);
+  });
+  if (!arr.length) el.innerHTML = '<div class="mut">None yet.</div>';
+}
+function addRow(key, elId) { (R()[key] = R()[key] || []).push(''); renderList(key, elId); }
+
+function renderSteps() {
+  const arr = R().next_steps = R().next_steps || [];
+  const el = document.getElementById('nsList'); el.innerHTML = '';
+  arr.forEach((s, i) => {
+    const row = document.createElement('div'); row.className = 'list-row';
+    for (const [k, ph, w] of [['owner', 'owner', '90px'], ['action', 'action…', ''], ['date', 'YYYY-MM-DD', '130px']]) {
+      const inp = document.createElement('input'); inp.placeholder = ph; inp.value = s[k] || '';
+      if (w) inp.style.flex = '0 0 ' + w;
+      inp.oninput = () => s[k] = inp.value || null;
+      row.append(inp);
+    }
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.onclick = () => { arr.splice(i, 1); renderSteps(); };
+    row.append(x); el.append(row);
+  });
+  if (!arr.length) el.innerHTML = '<div class="mut">None yet.</div>';
+}
+function addStep() { (R().next_steps = R().next_steps || []).push({owner: null, action: '', date: null}); renderSteps(); }
+
+function renderAttendees() {
+  const arr = R().attendees = R().attendees || [];
+  const el = document.getElementById('attList'); el.innerHTML = '';
+  arr.forEach((a, i) => {
+    const row = document.createElement('div'); row.className = 'list-row';
+    for (const [k, ph] of [['name', 'Name'], ['role', 'Role'], ['company', 'Company']]) {
+      const inp = document.createElement('input'); inp.placeholder = ph; inp.value = a[k] || '';
+      inp.oninput = () => a[k] = inp.value || null;
+      row.append(inp);
+    }
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.onclick = () => { arr.splice(i, 1); renderAttendees(); };
+    row.append(x); el.append(row);
+  });
+  if (!arr.length) el.innerHTML = '<div class="mut">None yet.</div>';
+}
+function addAttendee() { (R().attendees = R().attendees || []).push({name: '', role: null, company: null}); renderAttendees(); }
+
+// ---------------- temp / score / log-to ----------------
+function setTemp(elm) {
+  R().deal_temp = R().deal_temp === elm.dataset.temp ? null : elm.dataset.temp;
+  for (const c of document.querySelectorAll('[data-temp]'))
+    c.classList.toggle('on', c.dataset.temp === R().deal_temp);
+}
+function setScore(n) { R().opportunity_score = R().opportunity_score === n ? null : n; renderScore(); }
+function renderScore() {
+  document.querySelectorAll('#scoreRow button').forEach((b, i) =>
+    b.classList.toggle('on', R().opportunity_score === i + 1));
+}
+function setLogTo(elm) {
+  logTo = elm.dataset.lt || null;
+  for (const c of document.querySelectorAll('[data-lt]')) c.classList.toggle('on', c === elm);
+  document.getElementById('logToId').style.display = logTo ? '' : 'none';
+}
+
+// ---------------- ATLAS entity typeahead ----------------
+let sugT = null;
+function atlasSuggest(q) {
+  clearTimeout(sugT);
+  const pop = document.getElementById('atlasPop');
+  if (q.trim().length < 2) { pop.style.display = 'none'; return; }
+  sugT = setTimeout(async () => {
+    try {
+      const r = await fetch(api('suggest?q=') + encodeURIComponent(q) + '&rm=' + encodeURIComponent(rmv()), H).then(j);
+      pop.innerHTML = (r.matches || []).map(mt =>
+        `<div onclick="pickEntity('${mt.code}', '${(mt.name || '').replace(/'/g, '')}')">` +
+        `${mt.name} <span class="mut">${mt.code} · ${mt.kind} · ${Math.round(mt.score * 100)}%</span></div>`).join('') +
+        (r.new_company ? `<div class="grn" onclick="pickEntity('__new__', '${q.replace(/'/g, '')}')">＋ Create “${q}” as a new company</div>` : '');
+      pop.style.display = '';
+    } catch (e) { pop.innerHTML = `<div class="bad">${e.message}</div>`; pop.style.display = ''; }
+  }, 250);
+}
+function pickEntity(code, name) {
+  chosen = code;
+  if (code === '__new__' && name) { ext.company_mentioned = name; R().title = R().title || name; }
+  document.getElementById('atlasPop').style.display = 'none';
+  document.getElementById('atlasQ').value = code === '__new__' ? name + ' (new)' : name;
+  document.getElementById('atlasPick').textContent =
+    code === '__new__' ? '→ will be created as a NEW company' : '→ linked to ' + code;
+}
+
+// ---------------- template fields ----------------
+function activeTplIds() { return (R()._tpl_active = R()._tpl_active || []); }
+function renderTplChips() {
+  const el = document.getElementById('tplChips'); el.innerHTML = '';
+  for (const t of (caps && caps.report_templates) || []) {
+    const on = activeTplIds().includes(t.id);
+    const c = document.createElement('span');
+    c.className = 'chip dashed' + (on ? ' on' : '');
+    c.textContent = (on ? '' : '+ ') + t.label + (on ? ' ✕' : '');
+    c.onclick = () => {
+      const a = activeTplIds(), i = a.indexOf(t.id);
+      if (i >= 0) a.splice(i, 1); else a.push(t.id);
+      renderTplChips(); renderTplFields();
+    };
+    el.append(c);
+  }
+}
+function tplFieldDefs() {
+  const defs = [];
+  for (const t of (caps && caps.report_templates) || [])
+    if (activeTplIds().includes(t.id)) defs.push(...(t.fields || []));
+  defs.push(...(R()._custom || []));
+  return defs;
+}
+function renderTplFields() {
+  const extra = R().extra = R().extra || {};
+  const el = document.getElementById('tplFields'); el.innerHTML = '';
+  for (const f of tplFieldDefs()) {
+    const lab = document.createElement('label'); lab.textContent = f.label || f.key;
+    el.append(lab);
+    let inp;
+    if (f.type === 'select') {
+      inp = document.createElement('select');
+      for (const o of f.options || []) { const op = document.createElement('option'); op.textContent = o; inp.append(op); }
+    } else { inp = document.createElement('input'); }
+    inp.value = extra[f.key] || '';
+    inp.oninput = inp.onchange = () => { extra[f.key] = inp.value || null; };
+    el.append(inp);
+  }
+  if (!tplFieldDefs().length)
+    el.innerHTML = '<div class="mut">Pick a template above, or add your own field.</div>';
+}
+function addCustomField() {
+  const name = prompt('Field label:');
+  if (!name) return;
+  const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  (R()._custom = R()._custom || []).push({key: key, label: name});
+  renderTplFields();
+}
+async function autoFill() {
+  const fields = tplFieldDefs();
+  if (!fields.length) { toast('pick a template first'); return; }
+  toast('auto-filling…');
+  try {
+    const r = await fetch(api('template_fill'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({transcript: document.getElementById('fTranscript').value, fields: fields})}).then(j);
+    if (r.error === 'no_api_key') { toast('needs ANTHROPIC_API_KEY'); return; }
+    Object.assign(R().extra = R().extra || {}, r.values || {});
+    renderTplFields(); toast('filled ' + Object.keys(r.values || {}).length + ' field(s)');
+  } catch (e) { toast(e.message); }
+}
+
+// ---------------- calendar banner ----------------
+// The truthful signal is PER-RM (auth/status), not the deployment flag: a mounted
+// client secret does not mean THIS RM has connected their Google account.
+let rmConnected = null;
+async function checkRmGoogle() {
+  try {
+    const r = await fetch(api('auth/status?rm=') + encodeURIComponent(rmv()), H).then(j);
+    rmConnected = !!r.connected;
+  } catch (e) { rmConnected = null; }
+  calBanner();
+}
+function calBanner() {
+  const el = document.getElementById('calBannerSlot'), nm = NM();
+  if (!nm.date) { el.innerHTML = ''; return; }
+  const line = `📅 <b>${nm.date}</b> — Follow-up: ${R().title || 'client'}` +
+               (nm.time ? ' · ' + nm.time : '') + (nm.mode ? ' · ' + nm.mode : '');
+  if (rmConnected === true) {
+    el.innerHTML = `<div class="banner">✓ 1 event will be added to ${rmv()}'s Google Calendar on approve.<br>${line}</div>`;
+  } else if (caps && caps.google_configured) {
+    el.innerHTML = `<div class="banner warn">⚠ ${rmv()} has not connected Google — the follow-up is recorded ` +
+      `in the Register but NO calendar event will be created. ` +
+      `<a href="#" onclick="connectGoogle(); return false;">Connect now</a>, then Approve.<br>${line}</div>`;
+  } else {
+    el.innerHTML = `<div class="banner warn">Google is not configured on this deployment — no calendar event.<br>${line}</div>`;
   }
 }
 
-async function commit() {
-  if (!preview) return;
-  const ext = preview.extraction, meta = ext._meta || {};
-  const body = {rm: document.getElementById('rm').value.trim(), extraction: ext,
-                capture_id: meta.capture_id,
-                summary: document.getElementById('sumEdit').value,
-                edits: {next_meeting: {date: document.getElementById('nmDate').value || null,
-                                       time: document.getElementById('nmTime').value || null}}};
-  if (chosen === '__new__') { body.new_lead = true; body.company = ext.company_mentioned; }
-  else if (chosen) body.chosen_code = chosen;
-  const lt = document.getElementById('logType').value, li = document.getElementById('logId').value.trim();
-  if (lt && li) body.log_to = {subject_type: lt, subject_id: li};
-  setState('commitState', 'committing…');
-  const r = await fetch(api('commit'), {method:'POST',
-    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
-    body: JSON.stringify(body)}).then(j);
-  setState('commitState', r.committed ? 'committed ✓' : ('failed: ' + (r.error||r.writer_error||'')));
-  let rows = (r.writes && r.writes.results || []).map(x =>
-    `<tr><td>${x.op}</td><td class="${x.status==='ok'?'ok':(x.status==='error'?'bad':'muted')}">${x.status}</td>` +
-    `<td class="muted">${x.reason||x.error||JSON.stringify(x.result||'')}</td></tr>`).join('');
-  document.getElementById('commitBox').innerHTML =
-    `<h2>Write results</h2><table><tr><th>op</th><th>status</th><th>detail</th></tr>${rows}</table>`;
-  loadReports();
-}
-
-async function loadReports() {
-  const rm = encodeURIComponent(document.getElementById('rm').value.trim() || 'Priya');
+// ---------------- audio ----------------
+async function playAudio(ref) {
+  const slot = document.getElementById('playerSlot');
+  if (!ref) { slot.textContent = 'no recording for this capture'; return; }
   try {
-    const r = await fetch(api('reports?rm=') + rm, {headers:{'X-Tenant':'EVAM'}}).then(j);
-    const rows = (r.reports||[]).map(x =>
-      `<tr><td>${(x.updated_at||'').replace('T',' ').replace('Z','')}</td>` +
-      `<td>${x.company||''}</td><td>${x.status}</td><td>${x.summary||''}</td>` +
-      `<td><button class="danger" onclick="delReport('${x.capture_id}')">🗑</button></td></tr>`).join('');
-    document.getElementById('reports').innerHTML = rows
-      ? `<table><tr><th>updated</th><th>company</th><th>status</th><th>summary</th><th></th></tr>${rows}</table>`
-      : '<span class="muted">no reports yet</span>';
-  } catch (e) { document.getElementById('reports').innerHTML = '<span class="bad">'+e+'</span>'; }
+    const r = await fetch(api('audio?ref=') + encodeURIComponent(ref), H);
+    if ((r.headers.get('content-type') || '').startsWith('audio/')) {
+      slot.innerHTML = `<audio controls style="width:100%" src="${URL.createObjectURL(await r.blob())}"></audio>`;
+    } else {
+      const b = await r.json();
+      slot.innerHTML = b.url ? `<audio controls style="width:100%" src="${b.url}"></audio>`
+                             : `<span class="bad">${b.error || 'no audio'}</span>`;
+    }
+  } catch (e) { slot.innerHTML = `<span class="bad">${e.message}</span>`; }
 }
 
+// ---------------- save / approve / print / discard ----------------
+async function saveChanges() {
+  try {
+    await fetch(api('reports/save'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({rm: rmv(), capture_id: ext._meta.capture_id,
+                            status: 'ready',
+                            report: {extraction: ext, summary: R().summary || ''}})}).then(j);
+    status = 'ready'; renderCard(); toast('saved — READY');
+  } catch (e) { toast(e.message); }
+}
+async function approve() {
+  const body = {rm: rmv(), extraction: ext, capture_id: ext._meta.capture_id,
+                summary: R().summary || undefined,
+                edits: {date: NM().date || null, time: NM().time || null,
+                        mode: NM().mode || null, temp: R().deal_temp || null}};
+  if (chosen === '__new__') body.new_lead = true;
+  else if (chosen) body.chosen_code = chosen;
+  if (logTo) {
+    const id = document.getElementById('logToUuid').value.trim();
+    if (!id) { toast('Log To needs the subject row UUID'); return; }
+    body.log_to = {subject_type: logTo, subject_id: id};
+  }
+  document.getElementById('approveBtn').disabled = true;
+  try {
+    const r = await fetch(api('commit'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify(body)}).then(j);
+    status = 'committed'; renderCard();
+    const rows = ((r.writes || {}).results || []).map(w =>
+      `<tr><td>${w.op}</td><td class="${w.status === 'ok' ? 'grn' : (w.status === 'skipped' ? 'mut' : 'bad')}">${w.status}</td>` +
+      `<td class="mut">${w.reason || w.error || ''}</td></tr>`).join('');
+    document.getElementById('commitOut').innerHTML =
+      `<div class="banner">✓ Committed — the interaction is on the Register timeline.</div>` +
+      (rows ? `<table><tr><th>write</th><th>status</th><th></th></tr>${rows}</table>` : '');
+    toast('approved & filed');
+  } catch (e) { toast(e.message); document.getElementById('approveBtn').disabled = false; }
+}
+function openPrint() {
+  window.open(api('reports/print?rm=') + encodeURIComponent(rmv()) +
+              '&id=' + encodeURIComponent(ext._meta.capture_id), '_blank');
+}
+async function discard() {
+  if (!confirm('Delete this report?')) return;
+  try {
+    await fetch(api('reports/delete'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({rm: rmv(), capture_id: ext._meta.capture_id})}).then(j);
+  } catch (e) { /* draft may not exist yet */ }
+  ext = null; showView('record'); toast('discarded');
+}
+
+// ---------------- reports list ----------------
+async function loadReports() {
+  const el = document.getElementById('repList');
+  try {
+    const r = await fetch(api('reports?rm=') + encodeURIComponent(rmv()), H).then(j);
+    el.innerHTML = (r.reports || []).map(x =>
+      `<div class="rep-item" onclick="openReport('${x.capture_id}')">` +
+      `<span class="badge ${x.status}">${(x.status || '').toUpperCase()}</span>` +
+      `<div style="flex:1"><b>${x.company || x.summary || x.capture_id}</b>` +
+      `<div class="mut" style="font-size:12.5px">${(x.updated_at || '').replace('T', ' ').replace('Z', '')}</div></div>` +
+      `<a class="fix" href="${api('reports/print?rm=')}${encodeURIComponent(rmv())}&id=${x.capture_id}" target="_blank" onclick="event.stopPropagation()">print</a>` +
+      `<button class="danger fix" onclick="event.stopPropagation(); delReport('${x.capture_id}')">🗑</button></div>`).join('')
+      || '<div class="mut">No reports yet — record your first capture.</div>';
+  } catch (e) { el.innerHTML = `<span class="bad">${e.message}</span>`; }
+}
+async function openReport(cid) {
+  try {
+    const r = await fetch(api('reports/get?rm=') + encodeURIComponent(rmv()) + '&id=' + cid, H).then(j);
+    const doc = r.report || {};
+    const loaded = (doc.report || {}).extraction;
+    if (!loaded) { toast('this report has no extraction payload'); return; }
+    ext = loaded; status = doc.status || 'draft'; chosen = null; logTo = null;
+    meta = {language: (ext._meta || {}).language};
+    document.getElementById('commitOut').innerHTML =
+      doc.status === 'committed' ? '<div class="banner">This report is committed (read-only).</div>' : '';
+    renderCard(); showView('record');
+  } catch (e) { toast(e.message); }
+}
 async function delReport(cid) {
-  await fetch(api('reports/delete'), {method:'POST',
-    headers:{'Content-Type':'application/json','X-Tenant':'EVAM'},
-    body: JSON.stringify({rm: document.getElementById('rm').value.trim(), capture_id: cid})});
-  loadReports();
+  if (!confirm('Delete report?')) return;
+  try {
+    await fetch(api('reports/delete'), {method: 'POST',
+      headers: {'X-Tenant': 'EVAM', 'Content-Type': 'application/json'},
+      body: JSON.stringify({rm: rmv(), capture_id: cid})}).then(j);
+    loadReports();
+  } catch (e) { toast(e.message); }
 }
 
-function setState(id, msg) { document.getElementById(id).textContent = msg; }
-document.getElementById('analyzeBtn').onclick = analyze;
-document.getElementById('commitBtn').onclick = commit;
-document.getElementById('recBtn').onclick = () => record(true);
-document.getElementById('stopBtn').onclick = () => record(false);
-document.getElementById('reloadReports').onclick = loadReports;
-caps(); loadReports();
+// ---------------- calendar view ----------------
+async function calStatus() {
+  const el = document.getElementById('calStatusSlot');
+  try {
+    const r = await fetch(api('auth/status?rm=') + encodeURIComponent(rmv()), H).then(j);
+    el.innerHTML = r.connected
+      ? `<span class="grn">✓ ${rmv()}'s Google is connected</span>`
+      : `${rmv()} has not connected Google — follow-ups are recorded in the Register only.`;
+  } catch (e) { el.innerHTML = `<span class="bad">${e.message}</span>`; }
+}
+function connectGoogle() {
+  window.open(api('auth/start?rm=') + encodeURIComponent(rmv()) + '&go=1', '_blank');
+}
+async function calTest() {
+  try {
+    const r = await fetch(api('calendar/test?rm=') + encodeURIComponent(rmv()), H).then(j);
+    document.getElementById('calOut').innerHTML =
+      `<div class="banner">${JSON.stringify(r).slice(0, 400)}</div>`;
+  } catch (e) { document.getElementById('calOut').innerHTML = `<span class="bad">${e.message}</span>`; }
+}
+
+// ---------------- boot ----------------
+loadCaps(); getGps();
+document.addEventListener('click', e => {
+  if (!e.target.closest('#atlasQ') && !e.target.closest('#atlasPop'))
+    document.getElementById('atlasPop').style.display = 'none';
+});
 </script>
 </body>
 </html>

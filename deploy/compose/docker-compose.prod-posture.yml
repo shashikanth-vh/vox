@@ -30,6 +30,19 @@ services:
       REGISTER_ENFORCE_RBAC: "true"
       # Row-level security applied + force-converged at startup (fail-closed).
       REGISTER_ENFORCE_RLS: "true"
+      # SENSITIVE operations (delete/restore, assignments, governed imports, evidence
+      # break-glass) revalidate the caller ONLINE against Access before acting — a role
+      # revocation / deactivation takes effect immediately for them, regardless of any
+      # signed context still being within its TTL. Fails CLOSED (503) if Access is down.
+      REGISTER_ONLINE_REVALIDATION: "true"
+
+  # The authority model in production: PostgreSQL (access_grants) decides human access;
+  # the container start never writes grants — it prints the drift report against the
+  # approved compiled baseline, and seeding happens only through the explicit command
+  # (docker compose exec access python -m app.seed).
+  access:
+    environment:
+      ACCESS_AUTO_SEED: "false"
 
   gateway:
     environment:
@@ -43,10 +56,12 @@ services:
       # a consumer IdP such as Google is accepted — a valid Google token proves the account is
       # real, not that it belongs to Evam.
       GATEWAY_OIDC_ALLOWED_DOMAINS: "evamfinance.com"
-      # Accept MORE than one issuer at once, e.g. Google for people + Dex for CI in staging:
-      #   GATEWAY_OIDC_ISSUERS: "https://accounts.google.com|<client-id>.apps.googleusercontent.com,http://dex:5556/dex|prism"
+      # Accept MORE than one issuer at once — Google for people + Dex for CI/Postman.
+      # Set it in deploy/compose/.env (no YAML edit needed):
+      #   GATEWAY_OIDC_ISSUERS=https://accounts.google.com|<client-id>.apps.googleusercontent.com,http://dex:5556/dex|prism
       # When set it takes precedence over the single ISSUER/AUDIENCE pair above.
-      GATEWAY_OIDC_ISSUERS: ""
+      # (Keep --profile sso so Dex is actually running for its tokens to verify.)
+      GATEWAY_OIDC_ISSUERS: "${GATEWAY_OIDC_ISSUERS:-}"
 
   # The TEMPORARY VocX browser test console is a dev tool — pinned OFF in this posture
   # regardless of the host's VOCX_DEV_UI value.
@@ -60,7 +75,7 @@ services:
       WORKFLOWS_OIDC_ISSUER: "http://dex:5556/dex"
       WORKFLOWS_OIDC_AUDIENCE: "prism"
       WORKFLOWS_OIDC_ALLOWED_DOMAINS: "evamfinance.com"
-      WORKFLOWS_OIDC_ISSUERS: ""
+      WORKFLOWS_OIDC_ISSUERS: "${WORKFLOWS_OIDC_ISSUERS:-}"
 
   # ATLAS also verifies tokens itself (ATLAS_OIDC_ISSUER / _ISSUERS / _ALLOWED_DOMAINS behave
   # exactly like the gateway's, and the gateway preserves the bearer upstream). It is left OFF

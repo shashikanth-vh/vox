@@ -146,11 +146,30 @@ class RegisterWriter:
             "interaction_type": record.get("interactionType") or "In-Person Meeting",
             "direction": record.get("direction"),
             "occurred_at": occurred or None,
-            "summary": (notes.splitlines()[0][:300] if notes else None),
+            "summary": (record.get("summaryLine")
+                        or (notes.splitlines()[0][:300] if notes else None)),
             "notes": notes or None,
-            "performed_by": record.get("user") or None,
-            "contact_name": (record.get("person") or "")[:200] or None,
+            # The CAPTURING RM is the actor on the timeline — the service key is only
+            # the transport (the Register separately records the principal in audit).
+            "performed_by": record.get("performedBy") or record.get("user") or None,
+            "contact_name": (record.get("contactName") or record.get("person") or "")[:200] or None,
             "lender_name": record.get("lenderName"),
+            # Structured capture columns — the VOM card's chips/fields, queryable.
+            "transcript": record.get("transcript"),
+            "language": record.get("language"),
+            "gps_lat": record.get("gpsLat"),
+            "gps_lng": record.get("gpsLng"),
+            "location": (record.get("locationText") or "")[:200] or None,
+            "attendees": record.get("attendees"),
+            "key_intel": record.get("keyIntel"),
+            "next_steps": record.get("nextSteps"),
+            "next_action": record.get("nextAction"),
+            "next_action_date": record.get("nextActionDate"),
+            "next_meeting_date": record.get("nextMeetingDate"),
+            "source": "VOX",
+            "source_ref": record.get("sourceRef"),
+            "attachments": record.get("attachments"),
+            "meta": record.get("interactionMeta"),
         }.items() if v is not None}
         created = self._post("/v1/interactions", body, op="interaction")
         return {"interaction_id": created.get("id"), "subject_type": subject_type,
@@ -222,8 +241,10 @@ class PrismVoxWriter:
                 elif name == "atlas_append_interaction":
                     record = dict(op["record"])
                     if ref:
-                        record["notes"] = ((record.get("notes") or "").rstrip()
-                                           + f"\n\nRecording: {ref}").strip()
+                        # The recording is a first-class ATTACHMENT on the row (with the
+                        # capture id as source_ref), not a line buried in the narrative.
+                        record["attachments"] = [{"name": "recording.wav", "ref": ref,
+                                                  "content_type": "audio/wav"}]
                     r = self.register.append_interaction(record, subject_override=log_to)
                 elif name == "calendar_create_event":
                     if self.cal is None:

@@ -100,7 +100,7 @@ Production-grade port of the field PoC, backend-only. Through the edge:
     POST /vocx/v1/capture_audio  raw audio (?rm=) → the recording is archived to
                                        MinIO (s3://prism-vocx-captures/captures/YYYY/MM/…;
                                        volume fallback — a failed PUT never discards) →
-                                       STT (faster-whisper, baked into the image; model
+                                       STT (the dedicated STT service via HTTP; model
                                        downloads once to the volume) → the same preview.
                                        The committed interaction carries the Recording:
                                        reference in its notes. 25 MB / 40k-char caps.
@@ -127,7 +127,9 @@ Configuration (compose defaults in deploy/compose/docker-compose.yml, Helm in
 charts/vocx/values.yaml → `pipeline:`): `ANTHROPIC_API_KEY`, `VOCX_TOKENS_DIR` (volume),
 `VOCX_GOOGLE_CLIENT_SECRET_FILE` (mounted from deploy/vocx-secrets/, git-ignored),
 `VOCX_OAUTH_REDIRECT_URI` (the edge URL — add it in Google Cloud Console),
-`VOCX_STT_BACKEND` (faster_whisper | api | stub; model size/cache in app/vocx/config.json).
+`VOCX_STT_BACKEND` (api = the dedicated `services/stt` container, the compose/Helm
+default — plus `VOCX_STT_API_URL` / `VOCX_STT_API_KEY`; faster_whisper = in-process
+fallback, needs the `[stt]` extra baked into the image; stub = tests).
 
 Prod posture: the gateway exempts exactly `/vocx/v1/auth/callback` from
 require_auth (Google's redirect carries no bearer). Completing the exchange still needs
@@ -141,7 +143,7 @@ used to plant a token in someone else's slot.
     loader.py      packaged config.json + env overrides (secrets never in-repo)
     core/          pipeline engine: pipeline · extract · resolve · gate · server ·
                    atlas/store (corpus model) · search        (PoC lineage, relaxed lint)
-    speech/        stt.py (faster-whisper/API/stub) · audio_store.py (MinIO→volume)
+    speech/        stt.py (STT-service API/faster-whisper/stub) · audio_store.py (MinIO→volume)
     registry/      Register adapters: store.py (live corpus) · writer.py (idempotent writes)
     google/        oauth.py (PKCE on volume) · workspace.py · notes.py · drive_writer.py
 
@@ -167,6 +169,36 @@ lint relaxed); everything else is PRISM-owned and fully linted/typed.
 
 Report documents live in MinIO under reports/<rm>/<capture_id>.json (same bucket as the
 audio), volume fallback, last-write-wins (single-writer by nature).
+
+### Domain intelligence (Batch 1) — each feature independently switchable
+
+| env (compose/Helm) | feature | default |
+| --- | --- | --- |
+| `VOCX_STT_PRIMING` | Whisper vocabulary + corpus-name priming | on |
+| `VOCX_EXTRACT_GLOSSARY` | Evam domain glossary in the prompt | on |
+| `VOCX_EXTRACT_FEW_SHOT` | worked examples in the prompt | on |
+| `VOCX_EXTRACT_STRUCTURED` | forced structured output (off = text + lenient parse) | on |
+
+Disabling a flag reverts exactly that feature to pre-Batch-1 behaviour (Helm:
+`pipeline.intelligence.*`; standalone default: the `intelligence` block in
+config.json).
+
+- **STT vocabulary priming** — every audio capture primes Whisper (`initial_prompt`)
+  with `stt.vocabulary` from `config.json` plus the LIVE client & lead names from the
+  Register corpus (names last — Whisper reads the prompt's tail). Misheard company
+  names were the #1 resolution failure; this attacks them at the source.
+- **Evam glossary in the extraction prompt** — `config.glossary` teaches the model the
+  business lines, lifecycle vocabularies, and Indian climate-finance jargon (IM, IP,
+  NBO, CP/CS, PPA, SECI, discom, VGF, CBG…) so signals land in the right FIELDS.
+- **Few-shot worked examples** — `config.few_shot_examples` (lending / syndication /
+  asset-monetisation) set the depth and shape of a good report. Replace them with real
+  RM-approved reports as they accumulate.
+- **Enforced structured output** — extraction is a forced tool call validated against
+  `EXTRACTION_SCHEMA`; fences/truncation/type drift can't corrupt it (text+lenient
+  parse remains as the fallback path).
+- **Eval harness** (`evals/`) — `python -m evals.run` scores the real pipeline against
+  `evals/cases.json` (EN + Hinglish, all three business lines); `--offline` smokes the
+  harness with the stub. Run it before/after any prompt or model change.
 
 ### TEMPORARY dev test console (`/v1/dev-ui`)
 

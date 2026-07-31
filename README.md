@@ -58,6 +58,8 @@ services/
                        admin-editable access matrix (guardrails; /v1/resolve)
   vocx/                VocX — voice touchpoint capture → Register interactions via the
                        SDK (capture-id idempotency = exactly-once); stateless
+  stt/                 STT — dedicated speech-to-text (faster-whisper, model baked
+                       into the image at build; serving is offline). VocX's transcriber
   pulse/               PULSE — news/adverse-media radar → matches Register entities,
                        files RED/AMBER/GREEN intel idempotently; stateless
   atlas/               ATLAS — management dashboard service (read-side BFF):

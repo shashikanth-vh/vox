@@ -33,8 +33,13 @@ AudioInput = Any  # bytes | file path — mirrors vocx_stt
 
 
 def _safe_name(capture_ts: str, rm: str, ext: str = ".wav") -> tuple[str, str, str]:
-    """(yyyy, mm, filename) — deterministic, filesystem- and key-safe."""
-    ts = (capture_ts or "").replace("-", "").replace(":", "").replace("T", "_")[:15] or "capture"
+    """(yyyy, mm, filename) — deterministic, filesystem- and key-safe. A client that
+    sends no timestamp gets NOW, not a shared "capture_<rm>" name — a constant key
+    would make every new capture silently overwrite the RM's previous recording."""
+    import datetime as _dt
+    if not (capture_ts or "").strip():
+        capture_ts = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    ts = capture_ts.replace("-", "").replace(":", "").replace("T", "_")[:15] or "capture"
     yyyy = ts[:4] if ts[:4].isdigit() else "0000"
     mm = ts[4:6] if ts[4:6].isdigit() else "00"
     safe_rm = "".join(c for c in (rm or "") if c.isalnum()) or "rm"
@@ -116,13 +121,18 @@ class S3AudioStore:
     def __init__(self, *, bucket: str, endpoint_url: str, access_key_id: str,
                  secret_access_key: str, auto_create_bucket: bool = True,
                  retention_days: int = 0, prefix: str = "captures",
-                 public_endpoint_url: str = "",
+                 public_endpoint_url: str = "", presign: bool = False,
                  fallback: LocalAudioStore | None = None) -> None:
         self.bucket = bucket
         self.endpoint_url = endpoint_url
         # Presigned URLs are opened by the BROWSER, which cannot resolve in-cluster
         # hostnames — sign against the public endpoint when one is configured.
         self.public_endpoint_url = public_endpoint_url or endpoint_url
+        # Playback default is STREAMING the bytes through VocX (HTTPS via the edge, same
+        # auth as every route). Presigned URLs are opt-in: the page is served over HTTPS,
+        # so a plain-http MinIO link is blocked as mixed content by every modern browser
+        # — presign only when object storage is properly reachable over TLS.
+        self.presign = presign
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.auto_create_bucket = auto_create_bucket
@@ -185,22 +195,31 @@ class S3AudioStore:
             config=Config(s3={"addressing_style": "path"}, signature_version="s3v4"))
 
     def playback(self, ref: str, expires_s: int = 900) -> tuple[str, Any] | None:
-        """("url", presigned GET) for a ref in OUR bucket+prefix; local refs go to the
-        fallback tier. A ref pointing at any other bucket/prefix is refused — this
-        must never become a generic S3 presigner."""
+        """Playback for a ref in OUR bucket+prefix; local refs go to the fallback tier.
+        Default: ("bytes", data) — the audio streams through VocX itself, so it rides
+        the edge's HTTPS and the normal auth path. With presign=True: ("url", presigned
+        GET) against the public endpoint. A ref pointing at any other bucket/prefix is
+        refused — this must never become a generic S3 reader/presigner."""
         if not ref.startswith("s3://"):
             return self.fallback.playback(ref) if self.fallback else None
         bucket, _, key = ref[5:].partition("/")
         if bucket != self.bucket or not key.startswith(self.prefix + "/"):
             log.warning("vocx audio: playback refused for foreign ref %r", ref)
             return None
+        if self.presign:
+            try:
+                url = self._public_s3().generate_presigned_url(
+                    "get_object", Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=max(60, min(expires_s, 3600)))
+                return ("url", url)
+            except Exception as e:  # noqa: BLE001
+                log.error("vocx audio: presign failed for %r: %s", ref, e)
+                return None
         try:
-            url = self._public_s3().generate_presigned_url(
-                "get_object", Params={"Bucket": bucket, "Key": key},
-                ExpiresIn=max(60, min(expires_s, 3600)))
-            return ("url", url)
+            obj = self._s3().get_object(Bucket=bucket, Key=key)
+            return ("bytes", obj["Body"].read())
         except Exception as e:  # noqa: BLE001
-            log.error("vocx audio: presign failed for %r: %s", ref, e)
+            log.error("vocx audio: fetch failed for %r: %s", ref, e)
             return None
 
     # -- save -----------------------------------------------------------------
@@ -236,6 +255,7 @@ def build_audio_store(settings: Any) -> S3AudioStore | LocalAudioStore | None:
             secret_access_key=getattr(settings, "s3_secret_access_key", "") or "",
             auto_create_bucket=bool(getattr(settings, "s3_auto_create_bucket", True)),
             public_endpoint_url=getattr(settings, "s3_public_endpoint_url", "") or "",
+            presign=bool(getattr(settings, "audio_presign", False)),
             retention_days=retention, fallback=local)
     return local
 

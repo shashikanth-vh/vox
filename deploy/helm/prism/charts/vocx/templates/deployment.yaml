@@ -45,6 +45,22 @@ spec:
               value: "/data/vocx"
             - name: VOCX_STT_BACKEND
               value: {{ .Values.pipeline.sttBackend | quote }}
+            - name: VOCX_STT_PRIMING
+              value: {{ .Values.pipeline.intelligence.sttPriming | quote }}
+            - name: VOCX_EXTRACT_GLOSSARY
+              value: {{ .Values.pipeline.intelligence.glossary | quote }}
+            - name: VOCX_EXTRACT_FEW_SHOT
+              value: {{ .Values.pipeline.intelligence.fewShot | quote }}
+            - name: VOCX_EXTRACT_STRUCTURED
+              value: {{ .Values.pipeline.intelligence.structuredOutput | quote }}
+            {{- if eq .Values.pipeline.sttBackend "api" }}
+            - name: VOCX_STT_API_URL
+              value: {{ .Values.pipeline.stt.apiUrl | quote }}
+            {{- if .Values.pipeline.stt.apiKey }}
+            - name: VOCX_STT_API_KEY
+              value: {{ .Values.pipeline.stt.apiKey | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.pipeline.audio.s3EndpointUrl }}
             - name: VOCX_S3_ENDPOINT_URL
               value: {{ .Values.pipeline.audio.s3EndpointUrl | quote }}

@@ -93,8 +93,20 @@ pipeline:
     # The OAuth redirect as the BROWSER reaches it — the EDGE url; also add it in
     # Google Cloud Console. The gateway exempts exactly this path from require_auth.
     redirectUri: ""
-  # faster_whisper (baked into the image; model downloads once to the volume) | api | stub
-  sttBackend: "faster_whisper"
+  # Intelligence features (Batch 1) — each independently switchable.
+  intelligence:
+    sttPriming: true        # prime Whisper with finance vocabulary + live corpus names
+    glossary: true          # Evam domain glossary in the extraction prompt
+    fewShot: true           # worked examples in the extraction prompt
+    structuredOutput: true  # forced structured output (off = text + lenient parse)
+  # api (the dedicated PRISM STT service — default) | faster_whisper (in-process;
+  # needs the vocx [stt] extra baked into the image) | stub (tests)
+  sttBackend: "api"
+  stt:
+    # The STT service as reachable in-cluster (the umbrella deploys it as prism-stt).
+    apiUrl: "http://prism-stt/v1/audio/transcriptions"
+    # Must be one of the STT service's STT_API_KEYS.
+    apiKey: ""
   # Recorded-audio bytes → MinIO/S3 (references ride on the interaction). Empty endpoint =
   # volume-only. Retention >0 becomes a bucket lifecycle rule.
   audio:

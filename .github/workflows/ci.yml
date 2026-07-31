@@ -85,6 +85,7 @@ jobs:
           pip install -e "services/gateway[dev]"
           pip install -e "services/vocx[dev]"
           pip install -e "services/pulse[dev]"
+          pip install -e "services/stt[dev]"
           pip install -e "services/atlas[dev]"
 
       - name: Lint (ruff)
@@ -95,6 +96,7 @@ jobs:
           python -m ruff check services/gateway/app services/gateway/tests
           python -m ruff check services/vocx/app services/vocx/tests
           python -m ruff check services/pulse/app services/pulse/tests
+          python -m ruff check services/stt/app services/stt/tests
           python -m ruff check services/atlas/app services/atlas/tests
           python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
           python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
@@ -107,6 +109,7 @@ jobs:
           (cd services/gateway && python -m mypy app)
           (cd services/vocx && python -m mypy app)
           (cd services/pulse && python -m mypy app)
+          (cd services/stt && python -m mypy app)
           (cd services/atlas && python -m mypy app)
           (cd packages/evam-backend-core && python -m mypy evam_backend_core)
           (cd packages/evam-register-client && python -m mypy evam_register_client)
@@ -135,6 +138,9 @@ jobs:
 
       - name: Test (pulse — matching + scan → intel e2e)
         run: cd services/pulse && python -m pytest -q
+
+      - name: Test — STT (stub engine; no model download)
+        run: cd services/stt && python -m pytest -q
 
       - name: Test (atlas — aggregations + composed views e2e)
         run: cd services/atlas && python -m pytest -q

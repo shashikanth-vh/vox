@@ -1,0 +1,59 @@
+[project]
+name = "prism-stt"
+version = "0.1.0"
+description = "PRISM STT — dedicated speech-to-text service (faster-whisper behind an OpenAI-compatible endpoint)"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "evam-backend-core",
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "gunicorn==23.0.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-json-logger==3.2.1",
+    "python-multipart==0.0.20",
+    "orjson==3.10.12",
+]
+
+[project.optional-dependencies]
+# The model runtime is an EXTRA so CI / unit tests stay light (they use the stub
+# engine); the Docker image installs .[whisper] and bakes the model at build time.
+# requests: faster_whisper.utils imports it at module level but does not always get
+# it transitively (huggingface_hub >= 1.0 uses httpx) — declare it explicitly.
+whisper = ["faster-whisper==1.1.1", "requests==2.32.3"]
+dev = ["pytest==8.3.4", "pytest-asyncio==0.25.0", "httpx==0.28.1", "ruff==0.8.4", "mypy==1.14.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
+ignore = ["S101", "B008", "S105"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S603", "S607", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["faster_whisper.*"]
+ignore_missing_imports = true

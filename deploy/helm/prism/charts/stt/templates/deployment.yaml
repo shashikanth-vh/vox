@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stt.fullname" . }}
+  labels:
+    {{- include "stt.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stt.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels:
+        {{- include "stt.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "stt.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: stt
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: STT_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: STT_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: STT_API_KEYS
+              value: {{ .Values.config.apiKeys | quote }}
+            - name: STT_MODEL_SIZE
+              value: {{ .Values.config.modelSize | quote }}
+            - name: STT_DEVICE
+              value: {{ .Values.config.device | quote }}
+            - name: STT_COMPUTE_TYPE
+              value: {{ .Values.config.computeType | quote }}
+            - name: STT_PRELOAD
+              value: {{ .Values.config.preload | quote }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            # Readiness gates on the preloaded model — a pod joins the Service only
+            # once it can actually transcribe.
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

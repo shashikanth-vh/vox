@@ -225,7 +225,7 @@ def build_interaction(
         direction = rep.get("direction") if rep.get("direction") in ("inbound", "outbound") else "outbound"
         lender = rep.get("lender") or None
 
-    notes = _report_notes(extraction, summary, config)
+    notes = _lean_notes(extraction, summary)
     next_action = _first_next_step(rep) or rs.get("next_action")
     if not next_action:
         commits = extraction.get("commitments") or []
@@ -234,6 +234,17 @@ def build_interaction(
     next_date = nm.get("date") or _first_next_step_date(rep)
 
     person = _attendee_line(rep) or extraction.get("contact_person") or meta.get("rm") or ""
+
+    # Structured intel: what the VOM card shows as chips/fields is what the Register
+    # row stores as COLUMNS (queryable, renderable) — notes stays the human narrative.
+    key_intel = {k: v for k, v in {
+        "bullets": [b for b in (rep.get("key_intel") or []) if b],
+        "nuances": [n for n in (rep.get("nuances") or []) if n],
+        "facts": {k2: rep.get(k2) for k2 in (
+            "loan_product", "ticket_size", "collateral", "project_type", "project_size",
+            "location", "sector", "equity_raised", "turnover") if rep.get(k2)},
+        "template_fields": rep.get("extra") or None,
+    }.items() if v}
 
     return {
         "interactionId": new_interaction_id(
@@ -247,8 +258,31 @@ def build_interaction(
         "direction": direction,
         "lenderName": lender,
         "notes": notes,
+        "summaryLine": (rep.get("summary") or summary or "").strip()[:300] or None,
         "nextAction": next_action or None,
         "nextActionDate": next_date,
+        # --- structured columns (Register interactions schema) -------------------
+        "performedBy": meta.get("rm"),
+        "contactName": (extraction.get("contact_person")
+                        or next((a.get("name") for a in rep.get("attendees") or []
+                                 if a.get("name")), None)),
+        "transcript": rep.get("transcript_english") or meta.get("transcript"),
+        "language": meta.get("language"),
+        "gpsLat": meta.get("gps_lat"),
+        "gpsLng": meta.get("gps_lng"),
+        "locationText": meta.get("location") or rep.get("location"),
+        "attendees": [a for a in rep.get("attendees") or [] if a.get("name")] or None,
+        "keyIntel": key_intel or None,
+        "nextSteps": [st for st in rep.get("next_steps") or [] if st.get("action")] or None,
+        "nextMeetingDate": nm.get("date"),
+        "sourceRef": meta.get("capture_id"),
+        "interactionMeta": {k: v for k, v in {
+            "capture_id": meta.get("capture_id"),
+            "opportunity_score": rep.get("opportunity_score"),
+            "pipeline_stage": rep.get("pipeline_stage"),
+            "deal_temp": rep.get("deal_temp"),
+            "business_line": rep.get("business_line"),
+        }.items() if v is not None} or None,
     }
 
 
@@ -277,6 +311,25 @@ def _attendee_line(rep: dict[str, Any]) -> str:
         role = (a.get("role") or "").strip()
         names.append(f"{n} ({role})" if role else n)
     return ", ".join(names)
+
+
+def _lean_notes(extraction: dict[str, Any], summary: str | None) -> str:
+    """The interaction's NOTES field: the human narrative only. Everything the RM sees
+    as chips/fields on the card rides in the structured columns (key_intel, next_steps,
+    attendees, ...) — an RM's own words never compete with machine output here."""
+    rep = extraction.get("report") or {}
+    lines: list[str] = []
+    desk = {"lending": "Lending", "syndication": "Syndication",
+            "asset_mgmt": "Asset Monetisation"}.get((rep.get("business_line") or "").lower())
+    tags = [t for t in (desk, rep.get("deal_temp"), rep.get("pipeline_stage")) if t]
+    if tags:
+        lines.append("[ " + " · ".join(str(t) for t in tags) + " ]")
+    head = rep.get("summary") or summary or " · ".join(extraction.get("discussion_points") or [])
+    if head:
+        lines.append(str(head).strip())
+    rm_name = (extraction.get("_meta") or {}).get("rm")
+    lines.append(f"— captured by {rm_name} via VocX" if rm_name else "— captured via VocX")
+    return "\n".join(lines).strip()
 
 
 def _report_notes(extraction: dict[str, Any], summary: str | None,

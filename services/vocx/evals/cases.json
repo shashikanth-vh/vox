@@ -1,0 +1,68 @@
+[
+  {
+    "name": "lending_en_basic",
+    "transcript": "Met the EcoSoch Solar team in Bengaluru about a 45 crore term loan for their 150 megawatt pipeline. Tenor discussed was 10 years with a one year moratorium. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.",
+    "expected": {
+      "company_contains": "ecosoch",
+      "business_line_hint": "lend",
+      "next_meeting_time": "15:00",
+      "next_meeting_has_date": true,
+      "report.ticket_size_contains": "45",
+      "report.extra.tenor_contains": "10",
+      "key_intel_min": 2
+    }
+  },
+  {
+    "name": "syndication_lender_states",
+    "transcript": "Update on Meghdoot Hydro syndication. Circulated the IM to Axis and Kotak last week. Axis came back with queries on the PPA, Kotak acknowledged receipt. HDFC gave an in-principle for 30 crores. Chase Axis responses by Thursday.",
+    "expected": {
+      "company_contains": "meghdoot",
+      "business_line_hint": "syn",
+      "lender_updates_min": 2,
+      "next_meeting_has_date": false,
+      "key_intel_min": 2
+    }
+  },
+  {
+    "name": "asset_monetisation_teaser",
+    "transcript": "Sat with the Vertex Renewables CFO today. They want to monetise their operating 50 megawatt wind portfolio in Tamil Nadu, expecting around 300 crores. We will prepare the teaser by month end. Two InvITs are already interested so we need to move fast. This one is hot.",
+    "expected": {
+      "company_contains": "vertex",
+      "business_line_hint": "am",
+      "deal_temp": "Hot",
+      "report.project_size_contains": "50",
+      "nuances_min": 1
+    }
+  },
+  {
+    "name": "hinglish_mixed",
+    "transcript": "Aaj GreenVolt Energy ke Suresh se mila. Unko 40 crore ka term loan chahiye apne Karnataka solar project ke liye. Financials Thursday tak bhej denge bola. Next Wednesday 12 baje review call rakh lo.",
+    "expected": {
+      "company_contains": "greenvolt",
+      "business_line_hint": "lend",
+      "next_meeting_time": "12:00",
+      "next_meeting_has_date": true,
+      "report.ticket_size_contains": "40",
+      "summary_in_english": true
+    }
+  },
+  {
+    "name": "no_meeting_no_guess",
+    "transcript": "Short call with Priya at Suryodaya Biogas. Their CBG plant commissioning slipped by a quarter because of a discom delay on the power connection. No numbers discussed. Nothing to schedule yet.",
+    "expected": {
+      "company_contains": "suryodaya",
+      "next_meeting_has_date": false,
+      "key_intel_min": 1
+    }
+  },
+  {
+    "name": "relative_date_resolution",
+    "transcript": "Met Arjun of BlueOrb Water about their WASH treatment plant expansion. They committed to sending the DPR day after tomorrow. Fix a site visit this Saturday morning 10 am.",
+    "expected": {
+      "company_contains": "blueorb",
+      "next_meeting_time": "10:00",
+      "next_meeting_has_date": true,
+      "commitments_min": 1
+    }
+  }
+]

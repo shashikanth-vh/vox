@@ -1,0 +1,11 @@
+apiVersion: v2
+name: stt
+description: >-
+  PRISM STT — dedicated speech-to-text (faster-whisper behind an OpenAI-compatible
+  endpoint). One shared model instance, baked into the image at build time; serving
+  never depends on huggingface.co. Internal-only: VocX is the consumer.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Evam Finance

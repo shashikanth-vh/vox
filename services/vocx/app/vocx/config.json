@@ -49,8 +49,9 @@
     "tokens_dir": "vocx_tokens"
   },
   "stt": {
-    "_comment": "Speech-to-text. backend: faster_whisper (baked into the image; model downloads once to the vocx volume) | api (Whisper-compatible remote) | stub (tests). model_size small=fast CPU default; medium/large-v3 for accuracy — set via this file, cache persists per size.",
+    "_comment": "Speech-to-text. backend: api (the dedicated PRISM STT service — the compose/Helm default) | faster_whisper (in-process; needs the [stt] extra) | stub (tests). task translate = capture in ANY language, store ENGLISH (Whisper translates; the spoken language is still recorded). model_size only applies in-process; the STT service bakes its own model.",
     "backend": "faster_whisper",
+    "task": "translate",
     "model_size": "small",
     "device": "cpu",
     "compute_type": "int8",
@@ -59,10 +60,44 @@
     "vad_filter": true,
     "archive_dir": "captures",
     "api": {
-      "endpoint_env": "VOX_STT_API_URL",
-      "key_env": "VOX_STT_API_KEY",
+      "endpoint_env": "VOCX_STT_API_URL",
+      "key_env": "VOCX_STT_API_KEY",
       "model": "whisper-1"
-    }
+    },
+    "vocabulary": [
+      "crore",
+      "lakh",
+      "term loan",
+      "tenor",
+      "moratorium",
+      "DSCR",
+      "sanction",
+      "disbursement",
+      "syndication",
+      "debt syndication",
+      "NBFC",
+      "IM",
+      "in-principle",
+      "credit committee",
+      "collateral",
+      "working capital",
+      "refinance",
+      "solar EPC",
+      "megawatt",
+      "BESS",
+      "biogas",
+      "CBG",
+      "PPA",
+      "SECI",
+      "discom",
+      "ALMM",
+      "VGF",
+      "EV mobility",
+      "WASH",
+      "asset monetisation",
+      "InvIT",
+      "offtaker"
+    ]
   },
   "_report_templates_note": "Extra Additional-details fields, composed from the matched business-line template + the matched sector template. axis=business_line matches report.business_line exactly; axis=sector matches if any 'match' token is a substring of report.sector (lowercased). Add/edit freely — the app renders these dynamically. field.type: text (default) | number | date | select(+options).",
   "report_templates": [
@@ -290,5 +325,178 @@
       "Agri / Drone"
     ]
   },
-  "_integration_note": "PRISM VocX defaults. Deployment concerns (Google client secret path, redirect URI, tokens dir, STT backend, Anthropic key) come from VOCX_* / ANTHROPIC_API_KEY env vars via app.vocx.loader — never from this file. Thresholds/templates are tuning, edit freely."
+  "_integration_note": "PRISM VocX defaults. Deployment concerns (Google client secret path, redirect URI, tokens dir, STT backend, Anthropic key) come from VOCX_* / ANTHROPIC_API_KEY env vars via app.vocx.loader — never from this file. Thresholds/templates are tuning, edit freely.",
+  "_stt_vocabulary_note": "stt.vocabulary primes Whisper (initial_prompt) so domain terms and client names are HEARD correctly. VocX appends the live Register client/lead names after these terms (names last — Whisper reads only the prompt's tail). Edit freely; no rebuild needed beyond restart.",
+  "glossary": [
+    "Evam Finance is an Indian climate-finance intermediary. Amounts are in INR; 1 crore (Cr) = 10 million, 1 lakh = 100,000.",
+    "Business lines: LENDING (Evam arranges/underwrites debt for a client; stages: Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, Handed Over to Advaya), SYNDICATION (Evam places a client's debt requirement with other lenders/NBFCs/banks; statuses: Deal Sourced, Docs Pending, IM in Prep, IM Circulated, Queries Received, IP Received, Sanctioned, Disbursed), ASSET MONETISATION (selling/monetising operating assets; statuses: Teaser Prepared, Teaser Shared, In Discussion, NBO Received).",
+    "Jargon: IM = Information Memorandum (deal document circulated to lenders); IP = In-Principle approval; NBO = Non-Binding Offer; CAM = Credit Assessment Memo; CP/CS = Conditions Precedent / Conditions Subsequent; DSCR = Debt Service Coverage Ratio; tenor = loan duration; moratorium = repayment holiday; sanction = lender's formal approval; disbursement = money released.",
+    "Sector jargon: PPA = Power Purchase Agreement; SECI = Solar Energy Corporation of India; discom = power distribution company; ALMM = Approved List of Models & Manufacturers (solar); VGF = Viability Gap Funding; CBG = Compressed Biogas; BESS = Battery Energy Storage; EPC = Engineering/Procurement/Construction contractor; offtaker = the buyer of the project's output; WASH = Water/Sanitation/Hygiene.",
+    "When the RM says a lender 'has the IM' or 'queries came back', that is SYNDICATION activity (business_line_hint=syn) and usually a lender_update. 'Sanction', 'CAM', 'credit committee', 'disbursement' talk is LENDING (lend). 'Teaser', 'NBO', 'asset sale' talk is ASSET MONETISATION (am)."
+  ],
+  "few_shot_examples": [
+    {
+      "label": "lending call",
+      "transcript": "Met Suresh from GreenVolt Energy about their 25 megawatt solar project in Karnataka. They need a 40 crore term loan, 12 year tenor with a 6 month moratorium. Their DSCR looks comfortable at 1.4. CAM goes to credit committee next week. They'll send the audited financials by Thursday. Set a review call next Wednesday at noon.",
+      "extraction": {
+        "company_mentioned": "GreenVolt Energy",
+        "company_aliases_heard": [
+          "GreenVolt"
+        ],
+        "sector_hint": "Solar variants",
+        "contact_person": "Suresh",
+        "next_meeting": {
+          "date": "<next Wednesday resolved from capture_ts>",
+          "time": "12:00",
+          "mode": "phone",
+          "confidence": 0.85
+        },
+        "commitments": [
+          {
+            "who": "them",
+            "what": "Send audited financials",
+            "due": "<Thursday resolved>"
+          }
+        ],
+        "register_signals": {
+          "temp": "Warm",
+          "business_line_hint": "lend",
+          "next_action": "Take CAM to credit committee",
+          "confidence": 0.9
+        },
+        "report": {
+          "title": "GreenVolt Energy",
+          "summary": "The RM met Suresh of GreenVolt Energy to discuss a ₹40 Cr, 12-year term loan (6-month moratorium) for their 25 MW Karnataka solar project. DSCR is comfortable at 1.4; the CAM goes to credit committee next week.",
+          "key_intel": [
+            "₹40 Cr term loan sought, 12-year tenor with 6-month moratorium (Suresh)",
+            "25 MW solar project in Karnataka",
+            "DSCR 1.4 — comfortable coverage",
+            "CAM to credit committee next week; audited financials due <Thursday resolved>"
+          ],
+          "loan_product": "Term Loan",
+          "ticket_size": "₹40 Cr",
+          "project_type": "Solar",
+          "project_size": "25 MW",
+          "location": "Karnataka",
+          "business_line": "lending",
+          "pipeline_stage": "Proposal",
+          "opportunity_score": 4,
+          "deal_temp": "Warm",
+          "extra": {
+            "tenor": "12 years",
+            "moratorium": "6 months"
+          }
+        }
+      }
+    },
+    {
+      "label": "syndication lender chase",
+      "transcript": "Quick note — spoke to Axis about the Meghdoot Hydro IM we circulated. Queries came back on the offtaker PPA, they want the discom payment track record. Kotak has gone quiet, chase them Friday. Meghdoot side, nothing new.",
+      "extraction": {
+        "company_mentioned": "Meghdoot Hydro",
+        "company_aliases_heard": [
+          "Meghdoot"
+        ],
+        "sector_hint": null,
+        "contact_person": null,
+        "next_meeting": {
+          "date": null,
+          "time": null,
+          "mode": null,
+          "confidence": 0.0
+        },
+        "commitments": [
+          {
+            "who": "us",
+            "what": "Chase Kotak on the IM",
+            "due": "<Friday resolved>"
+          }
+        ],
+        "register_signals": {
+          "temp": null,
+          "business_line_hint": "syn",
+          "lender_updates": [
+            {
+              "lender": "Axis",
+              "state": "Queries Received"
+            },
+            {
+              "lender": "Kotak",
+              "state": "IM Circulated"
+            }
+          ],
+          "next_action": "Send discom payment track record to Axis",
+          "confidence": 0.85
+        },
+        "report": {
+          "title": "Meghdoot Hydro",
+          "summary": "Syndication update on Meghdoot Hydro: Axis returned queries on the circulated IM (offtaker PPA — they want the discom payment track record); Kotak is unresponsive and will be chased Friday.",
+          "key_intel": [
+            "Axis queries on IM: offtaker PPA — discom payment track record requested",
+            "Kotak silent since IM circulation — chase <Friday resolved>"
+          ],
+          "business_line": "syndication",
+          "opportunity_score": 3
+        }
+      }
+    },
+    {
+      "label": "asset monetisation teaser",
+      "transcript": "Sat with the Vertex Renewables CFO. They want to monetise their operating 50 megawatt wind portfolio in Tamil Nadu, expecting around 300 crores. We'll prepare the teaser by month end. He hinted two InvITs already sniffing around, so move fast. Hot one.",
+      "extraction": {
+        "company_mentioned": "Vertex Renewables",
+        "company_aliases_heard": [
+          "Vertex"
+        ],
+        "sector_hint": null,
+        "contact_person": null,
+        "next_meeting": {
+          "date": null,
+          "time": null,
+          "mode": null,
+          "confidence": 0.0
+        },
+        "commitments": [
+          {
+            "who": "us",
+            "what": "Prepare the teaser",
+            "due": "<month end resolved>"
+          }
+        ],
+        "register_signals": {
+          "temp": "Hot",
+          "business_line_hint": "am",
+          "next_action": "Prepare teaser",
+          "confidence": 0.9
+        },
+        "report": {
+          "title": "Vertex Renewables",
+          "summary": "The Vertex Renewables CFO wants to monetise their operating 50 MW Tamil Nadu wind portfolio at ~₹300 Cr. Evam prepares the teaser by month end; two InvITs are already circling, so speed matters.",
+          "key_intel": [
+            "Monetising operating 50 MW wind portfolio, Tamil Nadu — expectation ~₹300 Cr",
+            "Teaser due <month end resolved>",
+            "Competitive pressure: two InvITs already engaged"
+          ],
+          "nuances": [
+            "CFO signalling urgency — competing InvIT interest may compress timeline and pricing leverage"
+          ],
+          "project_type": "Wind",
+          "project_size": "50 MW",
+          "location": "Tamil Nadu",
+          "business_line": "asset_mgmt",
+          "pipeline_stage": "Prospecting",
+          "opportunity_score": 5,
+          "deal_temp": "Hot"
+        }
+      }
+    }
+  ],
+  "_few_shot_note": "few_shot_examples are rendered into the extraction prompt as worked examples (<...resolved> placeholders remind the model to resolve relative dates against capture_ts). Replace these with real RM-approved reports as they accumulate.",
+  "intelligence": {
+    "stt_priming": true,
+    "glossary": true,
+    "few_shot": true,
+    "structured_output": true
+  },
+  "_intelligence_note": "Feature flags for the Batch-1 intelligence upgrades — each independently switchable. In PRISM deployments the ENV VARS win (VOCX_STT_PRIMING, VOCX_EXTRACT_GLOSSARY, VOCX_EXTRACT_FEW_SHOT, VOCX_EXTRACT_STRUCTURED); this block is only the default for standalone/vendored use. Disabling a flag reverts that one feature to pre-Batch-1 behaviour."
 }

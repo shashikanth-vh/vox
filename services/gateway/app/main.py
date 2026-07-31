@@ -26,6 +26,7 @@ from evam_backend_core.oidc import (
     bearer_token,
     build_verifier,
 )
+from evam_backend_core.rbac_catalog import POLICY_VERSION
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import ORJSONResponse
 
@@ -89,11 +90,14 @@ def _route(settings, full_path: str) -> tuple[str, str, str]:  # noqa: ANN001
 
 
 def _problem(status: int, detail: str) -> ORJSONResponse:
+    # Title/type by status — a 401 must read as an auth refusal, not a broken upstream.
+    kind, title = {
+        401: ("unauthorized", "Authentication required"),
+        403: ("forbidden", "Forbidden"),
+    }.get(status, ("bad_gateway", "Upstream unavailable"))
     return ORJSONResponse(
         status_code=status,
-        content={"error": {"type": "forbidden" if status == 403 else "bad_gateway",
-                           "title": "Forbidden" if status == 403 else "Upstream unavailable",
-                           "detail": detail}},
+        content={"error": {"type": kind, "title": title, "detail": detail}},
     )
 
 
@@ -218,7 +222,9 @@ def create_app() -> FastAPI:
                     effective_views=user.views, effective_operations=user.operations,
                     matrix_version=user.version, decision=decision,
                     method=method or request.method,
-                    path=path or request.url.path, operation=operation)
+                    path=path or request.url.path, operation=operation,
+                    policy_version=POLICY_VERSION, epoch=user.epoch,
+                    kid=settings.internal_signing_kid)
             # Legacy header propagation (kept for dev / mixed rollout). When the signed
             # context is on, these are advisory only — the Register prefers the token.
             headers["X-User-Email"] = user.email

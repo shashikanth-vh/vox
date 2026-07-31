@@ -1,10 +1,92 @@
 {
   "info": {
     "name": "PRISM \u00b7 VocX voice capture (via NGINX)",
-    "description": "The voice pipeline end to end, through the edge (/vocx/v1/*): capabilities \u2192 capture PREVIEW (extraction + confidence gate + write plan; never writes) \u2192 COMMIT (idempotent by capture_id: Register writes as svc_vox, the RM's Google Calendar when connected) \u2192 search the interaction log. Google connect is a browser flow: open {{baseUrl}}/vocx/v1/auth/start?rm=Priya&go=1 (the gateway exempts only the CALLBACK from require_auth).",
+    "description": "The voice pipeline end to end, through the edge (/vocx/v1/*): capabilities \u2192 capture PREVIEW (extraction + confidence gate + write plan; never writes) \u2192 COMMIT (idempotent by capture_id: Register writes as svc_vox, the RM's Google Calendar when connected) \u2192 search the interaction log. Google connect is a browser flow: open {{baseUrl}}/vocx/v1/auth/start?rm=Priya&go=1 (the gateway exempts only the CALLBACK from require_auth). Works in BOTH postures: run request 00 first \u2014 with dexUrl set it signs in and every call carries the bearer; with dexUrl empty it skips and header trust applies.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
+    {
+      "name": "00 \u00b7 POST /dex/token \u2014 sign in (skips itself in the dev posture)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "url": {
+          "raw": "{{dexUrl}}/dex/token",
+          "host": [
+            "{{dexUrl}}"
+          ],
+          "path": [
+            "dex",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "password"
+            },
+            {
+              "key": "client_id",
+              "value": "prism"
+            },
+            {
+              "key": "scope",
+              "value": "openid email profile"
+            },
+            {
+              "key": "username",
+              "value": "{{rmEmail}}"
+            },
+            {
+              "key": "password",
+              "value": "{{ssoPassword}}"
+            }
+          ]
+        },
+        "description": "Needed only in the PRODUCTION POSTURE (prod-posture overlay + --profile sso): REQUIRE_AUTH means identity comes ONLY from a verified bearer, and this captures the ID TOKEN as vocxToken for every following request. With dexUrl empty (dev posture) the request SKIPS ITSELF and the gateway trusts X-User-Email instead. Identities: e2e.rm@ / e2e.maker@ / e2e.checker@evamfinance.com, password 'prism' (deploy/compose/dex/config.yaml)."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Transport failures (Dex not running) never reach the test script,",
+              "// so the dev-posture guard must live HERE or --bail would abort.",
+              "if (!pm.environment.get('dexUrl')) {",
+              "  pm.environment.set('vocxToken', '');",
+              "  console.log('dexUrl empty \u2014 dev posture, header trust.');",
+              "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const b = pm.response.json();",
+              "  pm.environment.set('vocxToken', b.id_token || '');",
+              "  pm.test('signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
+              "} else {",
+              "  pm.environment.set('vocxToken', '');",
+              "  console.log('Dex sign-in failed \u2014 status ' + pm.response.code);",
+              "  pm.test('Dex sign-in', () => pm.expect(pm.response.code).to.eql(200));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
     {
       "name": "GET capabilities \u2014 what this deployment can do",
       "request": {
@@ -16,11 +98,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -50,6 +132,60 @@
       ]
     },
     {
+      "name": "GET suggest \u2014 company typeahead (matches or new-company)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{vocxToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{rmEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/suggest?q=EcoSoch&rm=Priya",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "suggest"
+          ],
+          "query": [
+            {
+              "key": "q",
+              "value": "EcoSoch"
+            },
+            {
+              "key": "rm",
+              "value": "Priya"
+            }
+          ]
+        },
+        "description": "Ranks entities + open leads with the SAME scorer capture resolution uses (incl. own-client boost via rm). new_company:true when nothing is even a weak match \u2014 the UI offers 'create as new company'."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('ok', () => pm.expect(pm.response.code).to.eql(200));",
+              "console.log(JSON.stringify(pm.response.json(), null, 2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "POST capture \u2014 PREVIEW a typed transcript",
       "request": {
         "method": "POST",
@@ -60,11 +196,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           },
           {
             "key": "Content-Type",
@@ -84,7 +220,7 @@
         },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"rm\": \"Priya\",\n  \"transcript\": \"Met the EcoSoch Solar team in Bengaluru about the 45 crore term loan for their 150 MW pipeline. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.\"\n}",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"transcript\": \"Met the EcoSoch Solar team in Bengaluru about the 45 crore term loan for their 150 MW pipeline. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.\",\n  \"gps_lat\": \"12.9716\",\n  \"gps_lng\": \"77.5946\",\n  \"location\": \"Bengaluru\"\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -103,6 +239,7 @@
               "const b = pm.response.json();",
               "pm.environment.set('vocxExtraction', JSON.stringify(b.extraction));",
               "pm.environment.set('vocxCaptureId', b.extraction._meta.capture_id);",
+              "pm.environment.set('vocxAudioRef', b.extraction._meta.transcript_ref || '');",
               "console.log('decision:', JSON.stringify(b.decision));",
               "console.log('entity:', JSON.stringify(b.extraction.entity_match));"
             ]
@@ -121,11 +258,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           },
           {
             "key": "Content-Type",
@@ -145,14 +282,14 @@
         },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"rm\": \"Priya\",\n  \"extraction\": \"{{vocxExtraction}}\",\n  \"capture_id\": \"{{vocxCaptureId}}\",\n  \"log_to\": {\n    \"subject_type\": \"Deal\",\n    \"subject_id\": \"{{dealId}}\"\n  },\n  \"summary\": \"Term loan discussion \\u2014 financials due Friday\"\n}",
+          "raw": "{\n  \"rm\": \"Priya\",\n  \"extraction\": \"{{vocxExtraction}}\",\n  \"capture_id\": \"{{vocxCaptureId}}\",\n  \"summary\": \"Term loan discussion \\u2014 financials due Friday\"\n}",
           "options": {
             "raw": {
               "language": "json"
             }
           }
         },
-        "description": "log_to (optional) routes the interaction at an explicit subject \u2014 Lending/Syndication/AssetMonetisation/Deal/Lead/Entity + UUID; remove it for automatic routing. Body note: after the capture request above, vocxExtraction holds the extraction JSON \u2014 Postman inserts it as a STRING, so replace \"{{vocxExtraction}}\" (with quotes) by the raw object before sending, or paste an edited extraction. chosen_code / new_lead+company override the entity; edits patches fields. Register writes carry Idempotency-Key vocx:<capture_id>:<op> \u2014 send twice and the Register replays, not duplicates. Calendar is skipped unless the RM connected Google."
+        "description": "Optional explicit routing: add log_to {subject_type: Lending|Syndication|AssetMonetisation|Deal|Lead|Entity, subject_id: <uuid>} to land the interaction on a chosen line (omitted here = automatic routing). Body note: after the capture request above, vocxExtraction holds the extraction JSON \u2014 Postman inserts it as a STRING, so replace \"{{vocxExtraction}}\" (with quotes) by the raw object before sending, or paste an edited extraction. chosen_code / new_lead+company override the entity; edits patches fields. Register writes carry Idempotency-Key vocx:<capture_id>:<op> \u2014 send twice and the Register replays, not duplicates. Calendar is skipped unless the RM connected Google."
       },
       "event": [
         {
@@ -178,11 +315,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -230,11 +367,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -261,11 +398,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -300,11 +437,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -340,6 +477,137 @@
       ]
     },
     {
+      "name": "GET reports/get \u2014 one report document",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{vocxToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{rmEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/reports/get?rm=Priya&id={{vocxCaptureId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "reports",
+            "get"
+          ],
+          "query": [
+            {
+              "key": "rm",
+              "value": "Priya"
+            },
+            {
+              "key": "id",
+              "value": "{{vocxCaptureId}}"
+            }
+          ]
+        },
+        "description": "report.extraction reloads the card exactly as saved."
+      }
+    },
+    {
+      "name": "GET reports/print \u2014 print-ready HTML (browser print \u2192 PDF)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{vocxToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{rmEmail}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/reports/print?rm=Priya&id={{vocxCaptureId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "reports",
+            "print"
+          ],
+          "query": [
+            {
+              "key": "rm",
+              "value": "Priya"
+            },
+            {
+              "key": "id",
+              "value": "{{vocxCaptureId}}"
+            }
+          ]
+        },
+        "description": "Open in a browser tab; Ctrl+P produces the VOM report PDF."
+      }
+    },
+    {
+      "name": "POST template_fill \u2014 \u2728 auto-fill template fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{vocxToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{rmEmail}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/vocx/v1/template_fill",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "vocx",
+            "v1",
+            "template_fill"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"transcript\": \"Met the EcoSoch Solar team in Bengaluru about the 45 crore term loan for their 150 MW pipeline. They will share audited financials by Friday. Schedule a follow-up meeting next Monday at 3pm with Ravi.\",\n  \"fields\": [\n    {\n      \"key\": \"tenor\",\n      \"label\": \"Tenor\"\n    },\n    {\n      \"key\": \"pricing\",\n      \"label\": \"Pricing / ROI\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Merge .values into report.extra. {ok:false, error:'no_api_key'} when Claude isn't configured."
+      }
+    },
+    {
       "name": "POST reports/save \u2014 keep the RM's edits",
       "request": {
         "method": "POST",
@@ -350,11 +618,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           },
           {
             "key": "Content-Type",
@@ -396,11 +664,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           },
           {
             "key": "Content-Type",
@@ -441,11 +709,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {
@@ -465,8 +733,23 @@
             }
           ]
         },
-        "description": "MinIO refs answer {url: presigned} (signed against the PUBLIC MinIO endpoint \u2014 set vocxAudioRef from the preview's _meta.transcript_ref); volume refs stream audio/wav bytes. Refs outside the captures bucket/prefix are refused."
-      }
+        "description": "Default: STREAMS the audio bytes through VocX (feed to <audio> via a blob URL). With VOCX_AUDIO_PRESIGN=true: answers {url: presigned}. Set vocxAudioRef from the preview's _meta.transcript_ref. Refs outside the captures bucket/prefix are refused."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A TYPED capture archives no audio \u2014 skip instead of 400ing a --bail run.",
+              "if (!pm.environment.get('vocxAudioRef')) {",
+              "  console.log('no recording for this capture \u2014 skipping playback');",
+              "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "GET calendar test \u2014 prove which calendar VocX writes to",
@@ -479,11 +762,11 @@
           },
           {
             "key": "Authorization",
-            "value": "Bearer {{adminToken}}"
+            "value": "Bearer {{vocxToken}}"
           },
           {
             "key": "X-User-Email",
-            "value": "{{userEmail}}"
+            "value": "{{rmEmail}}"
           }
         ],
         "url": {

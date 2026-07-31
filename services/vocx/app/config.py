@@ -77,9 +77,25 @@ class Settings(BaseSettings):
     s3_access_key_id: str = ""
     s3_secret_access_key: str = ""
     s3_auto_create_bucket: bool = True
+    # Playback: false (default) streams recording bytes THROUGH VocX (HTTPS via the
+    # edge, same auth as every route — works everywhere). true answers presigned MinIO
+    # URLs signed against s3_public_endpoint_url — only sensible when object storage is
+    # browser-reachable over TLS (an https page blocks plain-http media as mixed content).
+    audio_presign: bool = False
     # Days to keep recordings. 0 = forever. With S3 this becomes a bucket LIFECYCLE rule
     # (enforced by the store, not an app cron); locally an opportunistic sweep.
     audio_retention_days: int = 0
+    # --- intelligence features (Batch 1) — each independently switchable ---------
+    # Defaults ON; flip any off per deployment. Disabling reverts that ONE feature to
+    # pre-Batch-1 behaviour; nothing else changes.
+    # Prime Whisper with finance vocabulary + live corpus names (VOCX_STT_PRIMING).
+    stt_priming: bool = True
+    # Inject the Evam domain glossary into the extraction prompt (VOCX_EXTRACT_GLOSSARY).
+    extract_glossary: bool = True
+    # Include the few-shot worked examples in the prompt (VOCX_EXTRACT_FEW_SHOT).
+    extract_few_shot: bool = True
+    # Forced tool-call structured output; off = text + lenient parse (VOCX_EXTRACT_STRUCTURED).
+    extract_structured: bool = True
     # TEMPORARY browser test console at /v1/dev-ui (edge: /vocx/v1/dev-ui) — record,
     # preview, commit, reports against the live pipeline. Dev only: OFF by default,
     # and the prod-posture overlay pins it off. Delete app/vocx/dev_ui.html + the

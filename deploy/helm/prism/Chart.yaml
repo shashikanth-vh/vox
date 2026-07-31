@@ -34,6 +34,9 @@ dependencies:
   - name: vocx
     version: "0.1.0"
     condition: vocx.enabled
+  - name: stt
+    version: "0.1.0"
+    condition: stt.enabled
   - name: pulse
     version: "0.1.0"
     condition: pulse.enabled

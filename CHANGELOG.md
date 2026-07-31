@@ -6,6 +6,230 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **RBAC authority model hardened for release 1: PostgreSQL decides, code enforces.**
+  The compiled matrix is DEMOTED to a versioned reference (`rbac.py` split into
+  `rbac_catalog` / `service_policy` / `lifecycle` with compatibility re-exports;
+  `POLICY_VERSION` + `policy_fingerprint()`); it never decides a production request.
+  The signed internal context now carries `policy_version`, the caller's revocation
+  `epoch` and the signing-key id (`kid`). Gateway: the last-known-good resolve cache is
+  BOUNDED (`GATEWAY_CACHE_MAX_STALE_S`, default 300s) — past it, FAIL CLOSED instead of
+  serving stale grants through an Access outage. Access: users carry a revocation epoch
+  (bumped on role grant/revoke and (de)activation), matrix cells carry provenance
+  (`baseline` from the approved policy vs runtime `override`), every governance change
+  lands on the append-only `access_audit` trail (DB-trigger immutable) stamped with the
+  policy version (migration 0002); seeding is EXPLICIT (`python -m app.seed`, gated off
+  at container start by `ACCESS_AUTO_SEED=false` in the production posture) and
+  `--check` / `GET /v1/access/drift` compare the live matrix against the approved
+  baseline without writing (exit 3 on drift for pipeline gating). Register: SENSITIVE
+  operations (delete/restore, assignments, governed imports, evidence break-glass)
+  revalidate ONLINE against Access under `REGISTER_ONLINE_REVALIDATION` (on in the
+  production posture): user active, operation still granted, epoch unchanged; Access
+  unreachable → 503 fail closed. New tests across core/access/gateway/register pin all
+  of it; FOUNDATION_SPEC §3 documents the authority model.
+
+- **Two-layer stage model, folded into the RELEASE BASELINE: the deal's stage IS the
+  funnel; credit governance lives on the Lending line.** A Deal carries exactly one
+  business stage — the commercial origination funnel (`New Inquiry → In Screening →
+  In Pipeline → Closed Won/Lost`, plus `Screened Out`/`On Hold`), RM-owned, with its
+  own ordered transition graph (rework back-steps, re-openable Screened Out, final
+  Closed terminals). Because this ships pre-release, there are NO incremental
+  migrations: the baseline schema (0001) creates `deals.stage` as the funnel (indexed)
+  and no deal-level credit-stage column exists at all — a fresh install is born
+  correct (recreate the dev database: `docker compose down -v && up -d`).
+  ALL credit governance now keys on the LENDING line: `DealStructuringWorkflow` walks
+  the lending line(s) to Note Circulated, files credit-note/committee/sanction (and
+  rejection) evidence against the Lending subject citing the per-line subject-bound
+  decisions, sanctions the lines, and fails clearly (`NoLendingLine`) when a deal has
+  no lending line; the sanction basics (product_type/rm) land on the deal as plain
+  data via a new `update_fields` activity. `MANDATORY_FOR_STAGE`/`EVIDENCE_FOR_STAGE`
+  Deal entries removed; the sanctioned-`rm` field lock moved to Lending. Lead
+  conversion (endpoint + workflow) creates deals at funnel `In Pipeline`. The importer
+  routes the Deals sheet purely to the funnel (a credit word there quarantines by
+  name). Exports hide the legacy column; ATLAS "deals by stage" now groups the funnel;
+  OpenAPI/Postman/E2E collections regenerated; register/workflows/atlas tests
+  rewritten to the two-layer model. `docs/FOUNDATION_SPEC.md` §4/§5/§6 and
+  `docs/MIS_IMPORT.md` updated.
+- **Team guide `docs/MIS_IMPORT.md`** — the workbook's structure, the two stage
+  languages, what the lossless import does, and the fill-the-sheet rules the team
+  follows (allowed values, don't-invent-stages, how to read the import report).
+- **MIS v4 imports LOSSLESSLY: funnel dimension + normalisation — zero omissions.**
+  The v4 Deals sheet speaks the ORIGINATION FUNNEL (New Inquiry / In Screening / In
+  Pipeline / Screened Out / Closed Won / Closed Lost / On Hold) — a different layer
+  from the governed bank/NBFC credit pipeline, which stays untouched (structuring
+  workflow, evidence gates, committee governance all keyed to credit stages). Deals
+  gain a funnel-stage dimension (now the baseline `deals.stage`; schema-validated vocabulary;
+  `/v1/ref` "Deal Funnel Stage"): the sheet's value lands VERBATIM there, and the
+  credit `stage` is set only where the value IS credit semantics (On Hold). The
+  importer also gains **case/whitespace-insensitive canonicalisation** with curated
+  wording aliases (`IP received → IP Received`, `IM under preparation → IM in Prep`,
+  `IM Sent → IM Circulated`, `Final sanction received → Sanctioned`) — every
+  normalisation is RECORDED in the import report's new `translated` list. Syndication
+  semantics fixed for v4: the per-bank "Status" drives the tracker's pipeline position
+  (previously the coarse "Deal Status" column quarantined ALL 162 rows); "Deal
+  Dropped/Deal Closed" overlay the Dropped/Disbursed terminals; a live deal with no
+  bank status enters at Deal Sourced. Unknown future values still quarantine with a
+  named reason (fail-closed drift alarm). Verified against the real v4 workbook: 127
+  deals + 162 syndication + 61 lending + 26 asset-mon lifecycle rows, **0 quarantined**;
+  pure-function tests pin the v4 value census (run DB-less via REGISTER_TESTS_NO_DB=1).
+
+- **Intelligence features are now independently switchable.** Four env flags —
+  `VOCX_STT_PRIMING`, `VOCX_EXTRACT_GLOSSARY`, `VOCX_EXTRACT_FEW_SHOT`,
+  `VOCX_EXTRACT_STRUCTURED` — each defaulting ON, wired through compose
+  (`${VAR:-true}` passthroughs), the Helm vocx chart (`pipeline.intelligence.*`),
+  and a config.json `intelligence` block for standalone use (env wins). Disabling a
+  flag reverts exactly that one feature to pre-Batch-1 behaviour; a test proves the
+  full off→on round trip.
+
+- **VocX intelligence Batch 1 + eval harness.** (1) *STT vocabulary priming*: the STT
+  service and both VocX backends accept a priming `prompt` (Whisper `initial_prompt`);
+  VocX builds it per capture from `config.stt.vocabulary` (32 finance/climate terms) +
+  the live Register client/lead names (names last — Whisper reads only the tail).
+  (2) *Evam glossary* in the extraction prompt (`config.glossary`): business lines,
+  lifecycle vocabularies, IM/IP/NBO/CP-CS/PPA/SECI/discom/VGF/CBG expanded — signals
+  land in fields, not prose. (3) *Few-shot worked examples* (`config.few_shot_examples`:
+  lending, syndication chase, AM teaser) set report depth/shape; swap in real
+  RM-approved reports over time. (4) *Enforced structured output*: extraction is a
+  forced tool call validated against `EXTRACTION_SCHEMA`, with the lenient text parse
+  kept as fallback. (5) *Eval harness* `services/vocx/evals/` — 6 scored cases (EN +
+  Hinglish, all three business lines), `python -m evals.run` live / `--offline` smoke;
+  run before/after any prompt or model change. Tests: prompt carries glossary+examples;
+  capture primes the transcriber with vocabulary + corpus names in the right order;
+  STT service accepts the prompt field.
+
+- **Prod-posture overlay: multi-issuer via `.env`.** `GATEWAY_OIDC_ISSUERS` /
+  `WORKFLOWS_OIDC_ISSUERS` are now env passthroughs, so Google + Dex side by side is a
+  two-line `.env` entry (issuer|audience pairs) instead of a YAML edit — keep
+  `--profile sso` so Dex is running for its tokens to verify.
+
+- **Dev console: the calendar banner now tells the truth per RM.** It checked only the
+  deployment flag (client secret mounted) and promised an event even when the RM had
+  never connected Google — the commit then skipped `calendar_create_event`. The card
+  now queries `auth/status?rm=` and shows either the green "will be added to <RM>'s
+  calendar" banner or an amber "not connected — Connect now, then Approve" warning
+  with the connect link inline.
+
+- **VocX Postman collection works under Dex too** — request 00 does the password-grant
+  sign-in (identical skip-guard pattern to the E2E journey: `dexUrl` empty ⇒ skips,
+  header trust; set ⇒ every call carries the captured ID token as `vocxToken`). Audit
+  clean (0 blocking): the commit example no longer ships a `log_to` with an unset
+  dealId, and playback skips itself for typed captures (no recording) instead of
+  failing a --bail run.
+
+- **VocX API integration reference** (`docs/VOCX_API.md`) — the complete REST contract
+  for the real PRISM/VOM UI: auth/headers through the edge, the five-call UI flow,
+  every endpoint with request/response examples (capture incl. GPS/language/capture_id
+  reuse, suggest, save/commit with idempotency semantics, reports incl. print,
+  streaming audio playback with the dual-shape handler, template_fill, Google auth,
+  the read-side log), plus the full endpoint index. Postman `PRISM_VOCX` collection
+  regenerated: 15 requests (adds suggest, reports/get, reports/print, template_fill;
+  GPS on capture; streaming-playback notes).
+
+- **Fix: a capture with no client timestamp stored its audio at a CONSTANT key**
+  (`captures/0000/00/capture_<rm>.wav`) — every new recording silently overwrote the
+  RM's previous one. Empty timestamps now default to NOW (UTC), giving correct
+  year/month partitions and unique keys.
+
+- **Dev console restyled as VOM.** The temporary test UI now looks and flows like the
+  real VOM app: Record / Reports / Calendar tabs; "Tap. Speak. Done." record screen
+  (pulsing mic, 90-second cap + timer, Type-instead, live GPS chip); a full report
+  card — status badge, Hot/Warm/Cold, Log-To chips, Download PDF / Approve / Save
+  changes, original-audio player, editable summary / key-intel / nuances / next steps
+  / attendees, next-meeting with the calendar banner, collapsible transcript with
+  re-analyze (same capture id), Additional details with the ATLAS-entity typeahead
+  (create-new-company offer), template-field chips + ✨ auto-fill, opportunity score;
+  Reports tab lists drafts→ready→committed with open/print/delete; Calendar tab shows
+  Google status/connect/test. Same single file, same VOCX_DEV_UI flag, same removal.
+
+- **English-at-rest: capture in ANY language, store English.** Whisper's built-in
+  `translate` task is now the default end to end — the STT service accepts
+  `task=transcribe|translate` (validated), both VocX backends send `translate`
+  (config `stt.task`), so the transcript text is English no matter what was spoken
+  (identity for English input; guaranteed even when Claude extraction is offline).
+  The DETECTED spoken language still lands in the interaction's `language` column.
+  Extraction prompt now also mandates English for every produced field (summaries,
+  bullets, next steps — proper nouns kept as-is). Tests pin the contract from both
+  sides.
+
+- **Audio playback fixed: recordings now STREAM through VocX** (`/vocx/v1/audio`) —
+  the dev console is HTTPS and browsers block plain-http MinIO presigned links as
+  mixed content (and `localhost:9000` links never worked from another machine).
+  Default playback fetches the object server-side and streams the bytes over the
+  edge's HTTPS behind the normal auth; presigned URLs are opt-in
+  (`VOCX_AUDIO_PRESIGN=true`, for TLS-fronted object storage). Foreign bucket/prefix
+  refs stay refused in both modes.
+- **Company typeahead** (`GET /vocx/v1/suggest?q=&rm=`) — ranks the live corpus
+  (entities + open leads) with the SAME scorer capture resolution uses (incl. the
+  own-client boost); `new_company: true` when nothing is even a weak match, so the UI
+  offers "create as new company" instead of a wrong link. Demoed in the dev console
+  (Company lookup box).
+
+- **Committed interactions now land in the Register's STRUCTURED columns** (the
+  interactions table was designed for this — VocX finally uses it). Per commit:
+  `transcript` + `language`, `gps_lat`/`gps_lng`/`location` (new GPS/language
+  passthrough on both capture endpoints; junk coordinates dropped, never fatal),
+  `attendees`, `key_intel` (bullets + nuances + deal facts + template fields as JSON),
+  `next_steps`, `next_action(_date)`, `next_meeting_date`, **`performed_by` = the
+  capturing RM** (the service key is only transport), `contact_name`,
+  `source="VOX"`, `source_ref` = capture id, the recording as a first-class
+  **attachment** (no more "Recording:" line in prose), and `meta` (opportunity score,
+  pipeline stage, deal temp, business line). **Notes is now the lean human
+  narrative** — tag line, summary, "captured by <RM> via VocX" — the RM's field, not
+  a machine dump (the timeline is append-only by design; RMs shape notes in the
+  report card before Approve). Key-intel extraction tightened: every bullet must be
+  self-contained (amount + concrete date + who). Tests assert the structured row.
+
+- **Report print view** (`GET /v1/reports/print?rm=&id=`) — the stored report rendered
+  as print-ready HTML (VocX · EVAM FIELD INTEL header, summary, key intel, details
+  incl. labeled template fields, next steps, nuances, attendees, full transcript;
+  content HTML-escaped). The PoC's "Download PDF" is the browser printing exactly this
+  view, so parity = serve it (browser → Ctrl+P → PDF; a Print button is hidden in
+  print media). Dev console report rows link to it. Full-card parity audit result:
+  everything else in the VOM report card already exists in the backend — the report
+  schema (summary/key-intel/nuances/next-steps/attendees/additional details/pipeline
+  stage/opportunity score/deal temperature), the template catalog + /v1/template_fill
+  ("Auto-fill from transcript"), re-analyze (POST /v1/capture accepts capture_id so
+  the SAME draft updates), and the commit note carries tags, deal facts, labeled
+  template extras, next steps, nuances and attendees.
+
+- **Dedicated STT service (`services/stt`)** — speech-to-text moved out of the VocX
+  process into its own container: faster-whisper behind an OpenAI-compatible
+  `POST /v1/audio/transcriptions` (multipart; Bearer/X-API-Key front door; 25 MB cap;
+  stub engine for tests). ONE shared model instance per pod instead of one per VocX
+  worker; the model is downloaded at **image build time** (`--build-arg
+  STT_MODEL_SIZE=small`) and the container serves with `HF_HUB_OFFLINE=1` — no runtime
+  dependency on huggingface.co, no first-request stall, air-gap friendly. VocX now
+  defaults to `VOCX_STT_BACKEND=api` (its `APITranscriber` ported from requests to
+  httpx + bounded retries; 4xx surface immediately) and its image no longer bakes
+  faster-whisper (slimmer builds; the `[stt]` extra remains an opt-in fallback).
+  Wired everywhere: compose service `stt` (internal-only, no host port), Helm subchart
+  `charts/stt` (+ umbrella dependency, readiness gates on the preloaded model, vocx
+  chart gets `pipeline.stt.apiUrl/apiKey`), CI (install/lint/mypy/pytest). Contract
+  pinned from both sides: STT service tests (multipart/auth/caps) and a VocX
+  APITranscriber test against the same shapes.
+
+- **Fix: first Whisper model download died with `Permission denied`.** The model obeys
+  `download_root` (the volume), but huggingface_hub's xet backend keeps its chunk cache
+  under `$HOME/.cache/huggingface` — and the container's system user has no home. The
+  image now sets `HF_HOME=/data/vocx/hf`, so every HF artefact (model, chunk cache,
+  logs) lives on the state volume. Rebuild vocx: `docker compose ... up -d --build vocx`.
+
+- **Gateway error titles now match the status.** A 401 ("Authentication required")
+  was labelled `bad_gateway / "Upstream unavailable"`, which sent debugging in exactly
+  the wrong direction. 401 → `unauthorized`, 403 → `forbidden`, everything else keeps
+  the upstream wording.
+
+- **Fix: VocX captures 500'd — svc_vox could not read the deal book.** The pipeline's
+  resolution corpus reads `/v1/entities` + `/v1/leads` + `/v1/deals`, but `svc_vox`'s
+  own-key read grant predated the pipeline and stopped at leads, so the Register 403'd
+  the deals read and every `/vocx/v1/*` call died at corpus build. The grant now covers
+  every book a touchpoint can land on — `/v1/deals` plus `/v1/lending`,
+  `/v1/syndication`, `/v1/asset-monetisation` (the commit-time `log_to` targets) —
+  read-only; the write stays log_interaction only. Regression test asserts all six
+  corpus reads are 200 on the svc_vox key while `/v1/financials` / `/v1/documents`
+  stay 403. **Rebuild the
+  Register** (the grant lives in `evam-backend-core`, baked into its image):
+  `docker compose -f deploy/compose/docker-compose.yml up -d --build register`.
+
 - **TEMPORARY VocX dev test console** at `https://<host>:8443/vocx/v1/dev-ui` — a single
   self-contained page served by VocX itself for real end-to-end testing from a browser:
   record (MediaRecorder) or type a transcript → preview with entity match/alternatives/
@@ -311,7 +535,7 @@ bundle, or just check that the newest item below is present in your copy).
 
 - **A committee decision now sanctions the deal AND its lending facility (correctness fix).** The
   lending line could never reach `Sanctioned`, which made `CP/CS Completed`, `Ready for
-  Disbursement` and `Handed Over to Advaya` unreachable — the entire handover feature set was
+  Disbursement` and `Disbursed` unreachable — the entire handover feature set was
   effectively dead. Cause: `DealStructuringWorkflow` filed evidence and advanced the stage on the
   **Deal** only (every `attach_evidence` used `"Deal"`/`"Lead"`, every `advance_stage` used
   `"deals"`), while the Register binds a decision to its subject
@@ -335,7 +559,7 @@ bundle, or just check that the newest item below is present in your copy).
 - **`postman/PRISM_E2E_Full.postman_collection.json` (new, 58 requests / 12 folders).** Every
   request enters at `https://<host>:8443`; Postman presents **no backend api key** (the gateway
   injects each upstream's). All three product lines reach terminal state — Lending
-  `Handed Over to Advaya` via the Temporal committee decision, Syndication `Disbursed`, Asset
+  `Disbursed` via the Temporal committee decision, Syndication `Disbursed`, Asset
   monetisation `Closed` — with real maker-checker on CP/CS and the handover. Four requests must
   fail (unknown filter, lead→`Converted`, hand-typed `Sanctioned`), proving the gates. Generated by
   `scripts/gen_e2e_full.py`; all 32 request bodies validated against the frozen register +
@@ -466,7 +690,7 @@ bundle, or just check that the newest item below is present in your copy).
     register handover/CP/CS flow is exercised end-to-end against real Postgres).
 
 - **Operationally complete handover: durable package, authenticated operation, disabled dormant path,
-  authoritative CP/CS.** Completes the three handover P1s so `Handed Over to Advaya` is a real,
+  authoritative CP/CS.** Completes the three handover P1s so `Disbursed` is a real,
   provable operation — not just a stage change.
   - **Durable, immutable handover PACKAGE (P1-1).** New `advaya_handover_packages` aggregate
     (migration 0016): handover id/timestamp, lending+deal ids, the AUTHORITATIVE facility + proposed
@@ -484,7 +708,7 @@ bundle, or just check that the newest item below is present in your copy).
     endpoint. Exposed to the workspace via `GET /v1/lending/{id}/handover-package` and
     `POST …/download`; gateway mapping added. The workflow no longer does a bare stage PATCH.
   - **Dormant Advaya acknowledgement path DISABLED by default (P1-3).** `Disbursement Pending` is
-    removed from the current lifecycle — `Handed Over to Advaya` is now the terminal. A default-off
+    removed from the current lifecycle — `Disbursed` is now the terminal. A default-off
     `REGISTER_ADVAYA_INTEGRATION_ENABLED` flag gates the whole ack path: the internal
     `/v1/internal/advaya-handoffs` router is not registered, `attach_advaya_evidence` is not in the
     workflow service's grant, the `advaya_acknowledgement` attach is refused as disabled, and startup
@@ -499,7 +723,7 @@ bundle, or just check that the newest item below is present in your copy).
     pre-existing `disbursed_amount` / `disbursement_date` are reserved for a real disbursement
     confirmation and never set by PRISM.
   - **Legacy import mapping.** The governed XLSX importer maps ATLAS-era `Documentation` →
-    `CP/CS Completed` and `Disbursed` → `Handed Over to Advaya` (a legacy Disbursed row's amount/date
+    `CP/CS Completed`; `Disbursed` imports verbatim (a Disbursed row's amount/date
     become the proposed drawdown), so historical spreadsheets load into the current vocabulary.
   - New tests: `register/test_handover.py`, `register/test_cpcs.py`, updated `test_evidence`,
     `test_policy_enforcement`, `test_import`, `test_rbac_writes`, `workflows/test_business_workflows`.
@@ -509,19 +733,19 @@ bundle, or just check that the newest item below is present in your copy).
   The post-sanction credit pipeline is renamed for the real-world work at each milestone and the
   synthetic self-disbursement is removed:
   - **New stage chain** (Deal & Lending share it):
-    `Sanctioned → CP/CS Completed → Ready for Disbursement → Handed Over to Advaya →
+    `Sanctioned → CP/CS Completed → Ready for Disbursement → Disbursed →
     Disbursement Pending`. The old vague `Documentation` / `Disbursed` labels are gone (Syndication
-    keeps its own `Disbursed` status — unchanged). `Handed Over to Advaya` is PRISM's honest
+    keeps its own `Disbursed` status — unchanged). `Disbursed` is PRISM's honest
     TERMINAL: the last state it can assert on its own authority.
   - **Gates.** `CP/CS Completed` requires `cp_cs_completion` + `executed_agreement` evidence;
     `Ready for Disbursement` requires the `disbursed_amount` + `disbursement_date` mandatory fields;
-    `Ready for Disbursement` / `Handed Over to Advaya` / `Disbursement Pending` are row-locked to
+    `Ready for Disbursement` / `Disbursed` / `Disbursement Pending` are row-locked to
     senior credit authority (Admin / Management / Credit Head). `Disbursement Pending` (Advaya has
     taken the package up) is reachable ONLY on a real, verified `advaya_acknowledgement` — which
-    nothing can produce until Advaya is integrated, so a facility honestly rests at `Handed Over to
-    Advaya` and disbursement is never fabricated.
+    nothing can produce until Advaya is integrated, so a facility honestly rests at the
+    terminal and onward states are never fabricated.
   - **Workflow.** `AdvayaHandoffWorkflow` now performs the single handover hop
-    `Ready for Disbursement → Handed Over to Advaya` (no Advaya call, no fabricated acknowledgement);
+    `Ready for Disbursement → Disbursed` (no Advaya call, no fabricated acknowledgement);
     the `advaya_handoffs` record + verified-ack machinery is retained, dormant, as the ready hook for
     a future Advaya integration.
   - **Vocabulary + import.** `STAGE_VOCAB`, the `Lending Stage` / `Terminal (Lending)` reference

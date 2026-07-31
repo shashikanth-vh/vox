@@ -41,8 +41,13 @@ def process_capture(
     summary: str | None = None,
     execute: bool = False,
     writer: Any = None,
+    meta_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a captured meeting through the full step-1+2 pipeline.
+
+    meta_extra: capture-side facts that ride on _meta into the committed interaction's
+    STRUCTURED columns (language, gps_lat/gps_lng/location, ...). Never trusted for
+    routing — only recorded.
 
     Returns:
       {extraction, decision, approval_card|None, write_plan, writes|None}
@@ -55,6 +60,11 @@ def process_capture(
     # 1) extract
     ext = vocx_extract.extract(transcript, capture_ts=capture_ts, rm=rm,
                               transcript_ref=transcript_ref, config=config, offline=offline)
+    # The raw transcript + capture-side facts land in the interaction's structured
+    # columns at commit; the report's transcript_english stays the polished copy.
+    ext["_meta"]["transcript"] = transcript
+    if meta_extra:
+        ext["_meta"].update({k: v for k, v in meta_extra.items() if v not in (None, "")})
     _promote_followup(ext)   # a meeting-like next step becomes the scheduled follow-up
     # 2) resolve entity (fills entity_match)
     ext["entity_match"] = resolver.resolve(
@@ -104,11 +114,19 @@ def process_audio_capture(
     capture_ts = capture_ts or _dt.datetime.now().isoformat(timespec="seconds")
     transcriber = transcriber or vocx_stt.build_transcriber(config)
 
-    tr = transcriber.transcribe(audio, language=language)
+    tr = transcriber.transcribe(audio, language=language,
+                                prompt=kwargs.pop("stt_prompt", None))
     ref = kwargs.pop("transcript_ref", None) or vocx_stt.archive_audio(audio, capture_ts, rm, config)
 
+    # The STT-detected language rides into the interaction's `language` column unless
+    # the client already asserted one.
+    meta_extra = dict(kwargs.pop("meta_extra", None) or {})
+    if tr.get("language"):
+        meta_extra.setdefault("language", tr["language"])
+
     result = process_capture(tr["text"], rm=rm, capture_ts=capture_ts,
-                             transcript_ref=ref, config=config, **kwargs)
+                             transcript_ref=ref, config=config,
+                             meta_extra=meta_extra or None, **kwargs)
     result["transcription"] = tr
     return result
 

@@ -40,6 +40,29 @@ MAX_TRANSCRIPT_CHARS = 40_000
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 
+def _gps_meta(get) -> dict:
+    """Capture-side facts (GPS fix, spoken-language hint) → _meta → the interaction's
+    structured columns. `get` maps a key to a raw string/None; bad numbers are dropped
+    (a capture must never fail because the phone sent a junk coordinate)."""
+    out: dict = {}
+    for key in ("gps_lat", "gps_lng"):
+        raw = get(key)
+        if raw not in (None, ""):
+            try:
+                v = float(raw)
+                if abs(v) <= (90 if key == "gps_lat" else 180):
+                    out[key] = v
+            except (TypeError, ValueError):
+                pass
+    loc = get("location")
+    if loc:
+        out["location"] = str(loc)[:200]
+    lang = get("language")
+    if lang:
+        out["language"] = str(lang)[:20]
+    return out
+
+
 def _stamp_capture_id(extraction, supplied) -> None:
     if not isinstance(extraction, dict):
         return
@@ -70,6 +93,31 @@ class VocxApp:
             from app.vocx.speech import stt as vocx_stt
             self._transcriber = vocx_stt.build_transcriber(self.config)
         return self._transcriber
+
+    def stt_prompt(self) -> str | None:
+        """Prime Whisper with OUR vocabulary: finance/climate terms from config plus the
+        live client & lead names from the Register corpus. Whisper reads only the LAST
+        ~224 tokens of the prompt, so the names — the highest-value words — go last."""
+        if not (self.config.get("intelligence", {}) or {}).get("stt_priming", True):
+            return None
+        stt_cfg = self.config.get("stt", {}) or {}
+        terms = [t for t in (stt_cfg.get("vocabulary") or []) if t]
+        names: list[str] = []
+        try:
+            for c in (getattr(self.store, "clients", {}) or {}).values():
+                n = (c.get("name") or c.get("display_name") or c.get("legal_name") or "").strip()
+                if n:
+                    names.append(n)
+            for ld in (getattr(self.store, "leads", []) or []):
+                n = (ld.get("company") or "").strip()
+                if n:
+                    names.append(n)
+        except Exception:  # noqa: BLE001 — priming is best-effort, never fatal
+            pass
+        seen: set[str] = set()
+        uniq = [n for n in names if not (n.lower() in seen or seen.add(n.lower()))]
+        parts = terms + uniq[:60]
+        return (", ".join(parts))[:1500] or None
 
     # ---- recorded-audio playback -------------------------------------------
     def _audio(self, query):
@@ -111,6 +159,22 @@ class VocxApp:
         if doc is None:
             return 404, "application/json", _j({"ok": False, "error": "not found"})
         return 200, "application/json", _j({"ok": True, "report": doc})
+
+    def _reports_print(self, query):
+        """The report as print-ready HTML — open in a browser tab, Ctrl+P → PDF.
+        Same lookup rules as /v1/reports/get; renders whatever status the doc is in."""
+        from app.vocx import reports as reports_mod
+        rm, cid = _one(query, "rm"), _one(query, "id")
+        store = self.report_store()
+        if not rm or not reports_mod.valid_id(cid or ""):
+            return 400, "application/json", _j({"ok": False, "error": "rm and valid id required"})
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        doc = store.get(rm, cid)
+        if doc is None:
+            return 404, "application/json", _j({"ok": False, "error": "not found"})
+        html = reports_mod.render_print_html(doc, self.config)
+        return 200, "text/html; charset=utf-8", html.encode("utf-8")
 
     def _reports_save(self, body):
         from app.vocx import reports as reports_mod
@@ -238,6 +302,8 @@ class VocxApp:
             args = _search_args(query)
             args.pop("limit", None); args.pop("offset", None); args.pop("sort", None)
             return 200, "application/json", _j(self.search.facets(**args))
+        if method == "GET" and path == "/v1/suggest":
+            return self._suggest(query)
         if method == "GET" and path == "/v1/entity":
             code = _one(query, "code")
             if not code:
@@ -272,6 +338,8 @@ class VocxApp:
             return self._reports_list(query)
         if method == "GET" and path == "/v1/reports/get":
             return self._reports_get(query)
+        if method == "GET" and path == "/v1/reports/print":
+            return self._reports_print(query)
         if method == "POST" and path == "/v1/reports/save":
             return self._reports_save(body)
         if method == "POST" and path == "/v1/reports/delete":
@@ -279,6 +347,39 @@ class VocxApp:
         if method == "POST" and path == "/v1/template_fill":
             return self._template_fill(body)
         return 404, "application/json", _j({"ok": False, "error": "not found", "path": path})
+
+    def _suggest(self, query):
+        """Company typeahead for the capture UI: rank the live corpus (entities + open
+        leads) against what the user has typed so far. `new_company` says the best hit
+        is not even a weak match — the UI offers "create <q> as a new company" instead
+        of a wrong link. Same scorer as capture-time resolution, so what the typeahead
+        suggests is exactly what a commit would resolve to."""
+        from app.vocx.core.resolve import EntityResolver
+        q = (_one(query, "q") or "").strip()
+        if len(q) < 2:
+            return 400, "application/json", _j({"ok": False, "error": "q (min 2 chars) required"})
+        try:
+            limit = max(1, min(int(_one(query, "limit") or 8), 20))
+        except ValueError:
+            limit = 8
+        rm = (_one(query, "rm") or "").strip()
+        resolver = EntityResolver(self.store, self.config)
+        scored = []
+        for cand in resolver._cands:                     # noqa: SLF001 — same-package core
+            got = resolver._score_one([q], cand)         # noqa: SLF001
+            if got["base"] <= 0.0:
+                continue
+            score = got["base"]
+            if rm and cand.rm and cand.rm.strip().lower() == rm.lower():
+                score = min(1.0, score + resolver.boost)
+            scored.append({"code": cand.ref_id, "name": cand.name, "kind": cand.kind,
+                           "ref_type": cand.ref_type, "rm": cand.rm,
+                           "score": round(score, 4), "match_type": got["how"]})
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        matches = scored[:limit]
+        new_company = not matches or matches[0]["score"] < resolver.match_min
+        return 200, "application/json", _j({
+            "ok": True, "q": q, "matches": matches, "new_company": new_company})
 
     def _capabilities(self) -> dict[str, Any]:
         """What this server can do right now, so the app can adapt the UI
@@ -338,18 +439,23 @@ class VocxApp:
             if store is not None:
                 data["_transcript_ref"] = store.save(
                     audio, data.get("capture_ts") or "", rm)
-            tr = self.transcriber().transcribe(audio, language=data.get("language"))
+            tr = self.transcriber().transcribe(audio, language=data.get("language"),
+                                               prompt=self.stt_prompt())
             transcript = tr.get("text", "").strip()
             data["_transcription"] = tr
         if not transcript or not rm:
             return 400, "application/json", _j({"ok": False, "error": "transcript and rm required"})
         if len(rm) > 120 or len(transcript) > MAX_TRANSCRIPT_CHARS:
             return 413, "application/json", _j({"ok": False, "error": "rm or transcript too long"})
+        meta_extra = _gps_meta(data.get)
+        if data.get("_transcription", {}).get("language"):
+            meta_extra.setdefault("language", data["_transcription"]["language"])
         result = vocx_pipeline.process_capture(
             transcript, rm=rm, capture_ts=data.get("capture_ts"),
             transcript_ref=data.get("_transcript_ref"),
             store=self._store_for(data), config=self.config,
-            offline=bool(data.get("offline")), execute=False)  # preview only
+            offline=bool(data.get("offline")), execute=False,  # preview only
+            meta_extra=meta_extra)
         # A capture id rides in _meta from preview to commit, making the commit's Register
         # writes idempotent. Client-supplied (offline queue replay) or minted here.
         _stamp_capture_id(result.get("extraction"), data.get("capture_id"))
@@ -377,7 +483,9 @@ class VocxApp:
             bytes(body), rm=rm, capture_ts=_one(query, "ts"),
             transcript_ref=ref,
             transcriber=self.transcriber(), store=self.store, config=self.config,
-            execute=False)  # preview; the RM confirms via /commit
+            execute=False,  # preview; the RM confirms via /commit
+            stt_prompt=self.stt_prompt(),
+            meta_extra=_gps_meta(lambda k: _one(query, k)))
         _stamp_capture_id(result.get("extraction"), _one(query, "capture_id"))
         self._autosave_draft(result, rm)
         self._log_preview(result, rm)

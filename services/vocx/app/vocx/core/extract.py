@@ -52,11 +52,13 @@ Rules:
 - register_signals.temp: Hot/Warm/Cold if the RM signals deal temperature, else null. business_line_hint: lend, syn, am, or null. lender_updates: only for syndication chatter — [{lender, state}].
 - discussion_points: short bullet strings capturing what was discussed.
 
+ALL output fields — summaries, bullets, next steps, attendees' roles, every report field — must be in ENGLISH regardless of the language(s) spoken; translate faithfully, keep proper nouns as-is.
+
 Also produce the "report" object — a polished field-intel call report:
 - report.title: the client / counterparty name as a clean report title (usually company_mentioned).
 - report.summary: a 2-4 sentence third-person narrative summary of the meeting ("The BDM met with ... to discuss ...").
 - report.transcript_english: the FULL transcript translated inline into fluent English, word-for-word in meaning. If the note is already English, lightly clean it. Never invent content.
-- report.key_intel: 3-6 concise factual bullet strings — the substantive intel (asks, amounts, projects, decisions).
+- report.key_intel: 3-6 concise factual bullet strings — the substantive intel (asks, amounts, projects, decisions). Each bullet must be SELF-CONTAINED: name the amount with its unit, the concrete date (YYYY-MM-DD when derivable from the capture date), and who owns/said it — "₹50 Cr term loan under discussion, financials due 2026-07-31 (Ravi)" not "they will share financials".
 - report.nuances: 0-4 soft-signal bullets — tone, hesitations, internal politics, off-hand remarks worth remembering.
 - report.next_steps: action items as [{owner, action, date}] — owner = the team/person responsible (e.g. "Credit", "RM", a name), action = what to do, date = YYYY-MM-DD or null.
 - report.attendees: people present as [{name, role, company}] — role/company null if unknown.
@@ -205,6 +207,66 @@ def _coerce_report(rep: Any, ext: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def build_system_prompt(config: dict[str, Any] | None = None) -> str:
+    """SYSTEM_PROMPT + the Evam domain glossary + few-shot worked examples, both from
+    config.json — editable without touching code. The glossary teaches the model what
+    Evam's process words mean; the examples teach it the depth/shape of a good report."""
+    config = config or {}
+    intel = config.get("intelligence", {}) or {}
+    parts = [SYSTEM_PROMPT]
+    glossary = ([g for g in (config.get("glossary") or []) if g]
+                if intel.get("glossary", True) else [])
+    if glossary:
+        parts.append("\n\nEVAM DOMAIN GLOSSARY (authoritative — use these meanings):\n- "
+                     + "\n- ".join(glossary))
+    examples = ((config.get("few_shot_examples") or [])
+                if intel.get("few_shot", True) else [])
+    if examples:
+        blocks = []
+        for i, ex in enumerate(examples, 1):
+            if not (ex.get("transcript") and ex.get("extraction")):
+                continue
+            blocks.append(
+                f"EXAMPLE {i} ({ex.get('label', '')}):\nTranscript:\n\"\"\"\n{ex['transcript']}\n\"\"\"\n"
+                f"Ideal extraction (dates like <...resolved> mean: resolve against capture_ts):\n"
+                + json.dumps(ex["extraction"], ensure_ascii=False))
+        if blocks:
+            parts.append("\n\nWORKED EXAMPLES — match this depth and structure:\n\n"
+                         + "\n\n".join(blocks))
+    return "".join(parts)
+
+
+# The extraction contract as a JSON SCHEMA — used to FORCE structured output via
+# tool-use (the API guarantees a schema-valid object; no fence/truncation parsing).
+# Kept permissive (additionalProperties) so prompt evolution never hard-fails.
+EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "company_mentioned": {"type": ["string", "null"]},
+        "company_aliases_heard": {"type": "array", "items": {"type": "string"}},
+        "sector_hint": {"type": ["string", "null"]},
+        "contact_person": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "next_meeting": {"type": "object", "properties": {
+            "date": {"type": ["string", "null"]}, "time": {"type": ["string", "null"]},
+            "mode": {"type": ["string", "null"]}, "confidence": {"type": ["number", "null"]}},
+            "additionalProperties": True},
+        "discussion_points": {"type": "array", "items": {"type": "string"}},
+        "commitments": {"type": "array", "items": {"type": "object", "properties": {
+            "who": {"type": ["string", "null"]}, "what": {"type": ["string", "null"]},
+            "due": {"type": ["string", "null"]}}, "additionalProperties": True}},
+        "register_signals": {"type": "object", "additionalProperties": True},
+        "report": {"type": "object", "additionalProperties": True},
+    },
+    "required": ["company_mentioned", "report"],
+    "additionalProperties": True,
+}
+
+
+class _StructuredOffError(Exception):
+    """Internal: structured output disabled by flag — take the text path."""
+
+
 # --- live extraction (Haiku) --------------------------------------------------
 def extract(
     transcript: str,
@@ -228,25 +290,48 @@ def extract(
     if use_stub:
         result = _stub_extract(transcript, capture_ts)
     else:
-        result = _haiku_extract(transcript, capture_ts, model, key_env, client)
+        result = _haiku_extract(transcript, capture_ts, model, key_env, client, config)
 
     ext = _coerce(result)
     ext["_meta"] = {"capture_ts": capture_ts, "rm": rm, "transcript_ref": transcript_ref}
     return ext
 
 
-def _haiku_extract(transcript, capture_ts, model, key_env, client) -> dict[str, Any]:
+def _haiku_extract(transcript, capture_ts, model, key_env, client,
+                   config: dict[str, Any] | None = None) -> dict[str, Any]:
     if client is None:
         import anthropic  # imported lazily so offline use needs no SDK
         client = anthropic.Anthropic(api_key=os.environ[key_env])
+    system = build_system_prompt(config)
     user_msg = (
         f"capture_ts (resolve all relative dates against this): {capture_ts}\n\n"
         f"Transcript:\n\"\"\"\n{transcript.strip()}\n\"\"\""
     )
+    # STRUCTURED OUTPUT: force a tool call whose input must match EXTRACTION_SCHEMA —
+    # the API validates, so fences/truncation/type drift can't corrupt the extraction.
+    # Flag-off or any SDK/feature failure → the original text+lenient-parse path.
+    structured = ((config or {}).get("intelligence", {}) or {}).get("structured_output", True)
+    try:
+        if not structured:
+            raise _StructuredOffError
+        resp = client.messages.create(
+            model=model, max_tokens=3000, system=system,
+            tools=[{"name": "file_extraction",
+                    "description": "File the structured call-report extraction.",
+                    "input_schema": EXTRACTION_SCHEMA}],
+            tool_choice={"type": "tool", "name": "file_extraction"},
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        for block in resp.content:
+            if getattr(block, "type", "") == "tool_use" and isinstance(
+                    getattr(block, "input", None), dict):
+                return block.input
+    except _StructuredOffError:
+        pass
+    except Exception:  # noqa: BLE001 — degrade to the text path, never fail a capture
+        pass
     resp = client.messages.create(
-        model=model,
-        max_tokens=3000,
-        system=SYSTEM_PROMPT,
+        model=model, max_tokens=3000, system=system,
         messages=[{"role": "user", "content": user_msg}],
     )
     text = "".join(getattr(b, "text", "") for b in resp.content).strip()

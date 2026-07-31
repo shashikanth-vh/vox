@@ -16,6 +16,7 @@ pytestmark = pytest.mark.asyncio
 SIGN = "test-internal-signing-secret"
 ATLAS_KEY = "svc-atlas-key"
 PULSE_KEY = "svc-pulse-key"
+VOX_KEY = "svc-vox-key"
 
 
 def _as(email: str, roles: str) -> dict:
@@ -25,7 +26,8 @@ def _as(email: str, roles: str) -> dict:
 @pytest.fixture
 def _svc_and_signing():
     s = get_settings()
-    s.service_api_keys = {ATLAS_KEY: "svc_atlas", PULSE_KEY: "svc_pulse"}
+    s.service_api_keys = {ATLAS_KEY: "svc_atlas", PULSE_KEY: "svc_pulse",
+                          VOX_KEY: "svc_vox"}
     s.internal_signing_secret = SIGN
     s.internal_signing_algorithm = "HS256"
     try:
@@ -89,3 +91,22 @@ def test_transition_validator_fails_closed_on_unknown_state():
     # …a known allowed transition passes, and a same-value no-op passes.
     assert transition_error("Lead", "status", "Active", "Dropped") is None
     assert transition_error("Lead", "status", "Active", "Active") is None
+
+
+# --------------------------------------------------------------------------- #
+# svc_vox own key: the capture-resolution corpus INCLUDES the deal book
+# --------------------------------------------------------------------------- #
+async def test_svc_vox_own_key_reads_its_resolution_corpus(client: AsyncClient,
+                                                           _svc_and_signing):
+    # The VocX pipeline resolves spoken touchpoints against entities/leads/deals, and an
+    # RM may log an interaction against any product line (log_to) — every book a
+    # touchpoint can land on must be readable on its own key (the regression here 500'd
+    # every capture).
+    for path in ("/v1/entities", "/v1/leads", "/v1/deals", "/v1/lending",
+                 "/v1/syndication", "/v1/asset-monetisation"):
+        r = await client.get(path, headers={"X-API-Key": VOX_KEY})
+        assert r.status_code == 200, f"{path}: {r.status_code} {r.text}"
+    # …but not tables outside its context (write grants never imply blanket read).
+    for path in ("/v1/financials", "/v1/documents"):
+        denied = await client.get(path, headers={"X-API-Key": VOX_KEY})
+        assert denied.status_code == 403, f"{path}: {denied.status_code} {denied.text}"

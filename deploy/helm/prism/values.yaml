@@ -42,6 +42,7 @@ register:
   # RBAC-mandatory: gated operations require a user identity even from machine callers.
   # (Platform services use ungated write paths; flip to false only for bare-Register dev.)
   enforceRbac: true
+  onlineRevalidation: true
   gatewaySharedSecret: "prism-gateway-secret"   # must match gateway.gatewaySecret.value
   # A SEPARATE admin credential for tenant administration (create/(de)activate tenants),
   # presented as X-Admin-Key — NOT the shared data-plane key. Empty = compat (shared key +
@@ -131,6 +132,11 @@ vocx:
     tenant: EVAM
     apiKey:
       value: "dev-local-key"      # must be in the Register's REGISTER_API_KEYS
+
+# ---- STT — dedicated speech-to-text (the VocX pipeline's transcriber) -----------
+stt:
+  enabled: true
+  fullnameOverride: prism-stt
 
 # ---- PULSE — news / adverse-media radar (individually deployable) ---------------
 pulse:

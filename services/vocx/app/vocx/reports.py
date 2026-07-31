@@ -239,3 +239,96 @@ def build_report_store(settings: Any) -> S3ReportStore | LocalReportStore | None
             auto_create_bucket=bool(getattr(settings, "s3_auto_create_bucket", True)),
             fallback=local)
     return local
+
+
+# --- print view ----------------------------------------------------------------
+def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None) -> str:
+    """The report as print-ready HTML — the PoC's "Download PDF" is the browser printing
+    exactly this kind of view, so parity means serving it, not bundling a PDF engine."""
+    import html as _html
+
+    def esc(v: Any) -> str:
+        return _html.escape(str(v)) if v not in (None, "") else ""
+
+    ext = (doc.get("report") or {}).get("extraction") or {}
+    rep = ext.get("report") or {}
+    meta = ext.get("_meta") or {}
+    nm = ext.get("next_meeting") or {}
+    title = rep.get("title") or (ext.get("entity_match") or {}).get("canonical_name") \
+        or ext.get("company_mentioned") or "Field report"
+    ts = (meta.get("capture_ts") or doc.get("updated_at") or "")[:16].replace("T", " ")
+
+    # DETAILS rows: client/follow-up + the deal facts + labeled template extras.
+    rows: list[tuple[str, Any]] = [("Client", rep.get("title") or ext.get("company_mentioned"))]
+    if nm.get("date"):
+        follow = str(nm["date"]) + (f" {nm['time']}" if nm.get("time") else "") \
+            + (f" ({nm['mode']})" if nm.get("mode") else "")
+        rows.append(("Follow-up", follow))
+    for label, key in (("Sector", "sector"), ("Project type", "project_type"),
+                       ("Project size", "project_size"), ("Location", "location"),
+                       ("Loan product", "loan_product"), ("Ticket size", "ticket_size"),
+                       ("Collateral", "collateral"), ("Equity raised", "equity_raised"),
+                       ("Turnover", "turnover"), ("Pipeline stage", "pipeline_stage"),
+                       ("Opportunity score", "opportunity_score"), ("Temperature", "deal_temp")):
+        if rep.get(key) not in (None, ""):
+            rows.append((label, rep[key]))
+    labels: dict[str, str] = {}
+    for t in (config or {}).get("report_templates", []):
+        for fdef in t.get("fields", []):
+            if fdef.get("key"):
+                labels[fdef["key"]] = fdef.get("label", fdef["key"])
+    for fdef in rep.get("_custom") or []:
+        if fdef.get("key"):
+            labels[fdef["key"]] = fdef.get("label", fdef["key"])
+    for k, v in (rep.get("extra") or {}).items():
+        if v not in (None, "", []):
+            rows.append((labels.get(k, k), v))
+
+    def section(name: str, body: str) -> str:
+        return f'<h2>{esc(name)}</h2>\n{body}' if body.strip() else ""
+
+    bullets = "".join(f"<li>{esc(k)}</li>" for k in rep.get("key_intel") or [] if k)
+    nuances = "".join(f"<li>{esc(n)}</li>" for n in rep.get("nuances") or [] if n)
+    steps = "".join(
+        "<li>{}{}{}</li>".format(
+            f"<b>{esc(s.get('owner'))}:</b> " if s.get("owner") else "",
+            esc(s.get("action")), f" — due {esc(s.get('date'))}" if s.get("date") else "")
+        for s in rep.get("next_steps") or [] if s.get("action"))
+    attendees = " · ".join(
+        " ".join(x for x in (esc(a.get("name")), f"({esc(a.get('role'))})" if a.get("role") else "",
+                             f"— {esc(a.get('company'))}" if a.get("company") else "") if x)
+        for a in rep.get("attendees") or [] if a.get("name"))
+    detail_rows = "".join(f"<tr><td>{esc(lbl)}</td><td>{esc(v)}</td></tr>" for lbl, v in rows
+                          if v not in (None, ""))
+    transcript = rep.get("transcript_english") or ""
+    status = esc((doc.get("status") or "draft").upper())
+
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>{esc(title)}</title>
+<style>
+  body {{ font: 14px/1.55 system-ui, sans-serif; color: #111; max-width: 800px;
+         margin: 24px auto; padding: 0 16px; }}
+  .brand {{ color: #0e7a7a; font-weight: 700; letter-spacing: .06em; font-size: 12px; }}
+  h1 {{ margin: 4px 0 2px; font-size: 26px; }}
+  .ts {{ color: #666; margin-bottom: 18px; }}
+  h2 {{ color: #0e7a7a; font-size: 13px; letter-spacing: .08em; text-transform: uppercase;
+        border-bottom: 1px solid #ddd; padding-bottom: 4px; margin: 22px 0 8px; }}
+  table {{ border-collapse: collapse; }}
+  td {{ padding: 3px 24px 3px 0; vertical-align: top; }}
+  td:first-child {{ color: #666; min-width: 140px; }}
+  ul {{ margin: 6px 0; padding-left: 22px; }}
+  .print-btn {{ position: fixed; top: 12px; right: 12px; padding: 8px 14px; }}
+  @media print {{ .print-btn {{ display: none; }} }}
+</style></head><body>
+<button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+<div class="brand">VOCX · EVAM FIELD INTEL · {status}</div>
+<h1>{esc(title)}</h1>
+<div class="ts">{esc(ts)}</div>
+{section("Summary", f"<p>{esc(rep.get('summary'))}</p>" if rep.get("summary") else "")}
+{section("Key intel", f"<ul>{bullets}</ul>" if bullets else "")}
+{section("Details", f"<table>{detail_rows}</table>" if detail_rows else "")}
+{section("Next steps", f"<ul>{steps}</ul>" if steps else "")}
+{section("Nuances", f"<ul>{nuances}</ul>" if nuances else "")}
+{section("Attendees", f"<p>{attendees}</p>" if attendees else "")}
+{section("Full transcript (English)", f"<p>{esc(transcript)}</p>" if transcript else "")}
+</body></html>"""

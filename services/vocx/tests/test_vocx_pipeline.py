@@ -224,6 +224,12 @@ class _FakeS3:  # noqa: N801 — mirrors boto3's CamelCase kwargs
     def head_bucket(self, Bucket):  # noqa: N803
         return {}
 
+    def get_object(self, Bucket, Key):  # noqa: N803
+        import io as _io
+        if Key not in self.objects:
+            raise KeyError(Key)
+        return {"Body": _io.BytesIO(self.objects[Key])}
+
     def create_bucket(self, Bucket):  # noqa: N803
         return {}
 
@@ -266,8 +272,9 @@ def test_s3_failure_degrades_to_the_volume_never_discards(tmp_path):
 
 
 async def test_committed_interaction_carries_the_recording_reference(stub_register, monkeypatch):
-    """capture(audio_b64, stub STT) stores the audio and the COMMIT's interaction notes
-    end with 'Recording: s3://…' — the register row points back at what was said."""
+    """capture(audio_b64, stub STT) stores the audio and the COMMIT's interaction row
+    carries it as a first-class ATTACHMENT — the register row points back at what
+    was said without polluting the RM's notes."""
     import base64
 
     from app.vocx import mount as mount_mod
@@ -307,7 +314,9 @@ async def test_committed_interaction_carries_the_recording_reference(stub_regist
             "summary": "From audio"})
     assert r.status_code == 200 and r.json()["committed"], r.text
     inter = stub_register["interactions"][-1]
-    assert f"Recording: {ref}" in inter["notes"]
+    assert inter["attachments"] == [{"name": "recording.wav", "ref": ref,
+                                     "content_type": "audio/wav"}]
+    assert "Recording:" not in (inter.get("notes") or "")
 
 
 # --------------------------------------------------------------------------- #
@@ -360,7 +369,7 @@ async def test_audio_playback_presigns_own_bucket_only(stub_register, monkeypatc
             return f"http://public-minio/{Params['Bucket']}/{Params['Key']}?sig=x&exp={ExpiresIn}"
 
     store = S3AudioStore(bucket="caps", endpoint_url="http://minio:9000",
-                         access_key_id="k", secret_access_key="s")
+                         access_key_id="k", secret_access_key="s", presign=True)
     monkeypatch.setattr(store, "_public_s3", lambda: _Signer())
     kind, url = store.playback("s3://caps/captures/2026/07/x.wav")
     assert kind == "url" and url.startswith("http://public-minio/caps/captures/")
@@ -420,3 +429,215 @@ async def test_dev_ui_hidden_unless_enabled(stub_register, monkeypatch):
         # (and therefore out of every generated Postman collection).
         spec = (await c.get("/openapi.json")).json()
         assert "/v1/dev-ui" not in spec["paths"]
+
+
+async def test_api_transcriber_calls_the_stt_service(monkeypatch):
+    """The api backend speaks the STT service's contract: OpenAI-style multipart out,
+    transcript JSON back, bearer key from env. (The service side of this contract is
+    pinned in services/stt/tests.)"""
+    from app.vocx.speech.stt import APITranscriber
+
+    seen = {}
+
+    def fake_post(url, headers=None, data=None, files=None, timeout=None):
+        seen.update(url=url, headers=headers or {}, data=data or {}, files=files or {})
+        return httpx.Response(200, json={"text": "Met the EcoSoch team.", "language": "en",
+                                         "duration": 3.2, "segments": []},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setenv("VOCX_STT_API_URL", "http://stt:8000/v1/audio/transcriptions")
+    monkeypatch.setenv("VOCX_STT_API_KEY", "k1")
+    out = APITranscriber().transcribe(b"fake-bytes", language="en")
+    assert out["text"] == "Met the EcoSoch team."
+    assert out["backend"] == "api"
+    assert seen["url"].endswith("/v1/audio/transcriptions")
+    assert seen["headers"]["Authorization"] == "Bearer k1"
+    assert seen["data"]["language"] == "en"
+    # English-at-rest: any-language capture is translated by Whisper before storage.
+    assert seen["data"]["task"] == "translate"
+    assert seen["files"]["file"][1] == b"fake-bytes"
+
+
+async def test_report_print_view(stub_register, tmp_path, monkeypatch):
+    """/v1/reports/print renders the stored report as print-ready HTML (the PoC's
+    'Download PDF' is the browser printing this view) and escapes content."""
+    monkeypatch.setenv("VOCX_TOKENS_DIR", str(tmp_path / "vox"))
+    get_settings.cache_clear()
+    app = create_app()
+    async with await _client(app) as c:
+        prev = await c.post("/v1/capture", json={
+            "rm": "Priya", "offline": True,
+            "transcript": "Met the EcoSoch Solar team about the <b>term loan</b>."})
+        cid = prev.json()["extraction"]["_meta"]["capture_id"]
+        r = await c.get(f"/v1/reports/print?rm=Priya&id={cid}")
+        missing = await c.get("/v1/reports/print?rm=Priya&id=nope-123")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("text/html")
+    assert "EVAM FIELD INTEL" in r.text
+    assert "<b>term loan</b>" not in r.text          # HTML in the transcript is escaped
+    assert missing.status_code == 404
+
+
+async def test_committed_interaction_lands_in_structured_columns(stub_register):
+    """The VOM card's chips/fields land in the Register's STRUCTURED interaction
+    columns — transcript, key_intel, next_steps, attendees, next_meeting_date, GPS,
+    provenance (source/source_ref) and the CAPTURING RM as performed_by — while
+    notes stays the lean human narrative."""
+    app = create_app()
+    async with await _client(app) as c:
+        prev = await c.post("/v1/capture", json={
+            "rm": "Priya", "offline": True,
+            "gps_lat": "12.9716", "gps_lng": "77.5946", "location": "Bengaluru",
+            "transcript": "Met the EcoSoch Solar team about the 45 crore term loan. "
+                          "Schedule a follow-up meeting next Monday at 3pm."})
+        ext = prev.json()["extraction"]
+        cid = ext["_meta"]["capture_id"]
+        r = await c.post("/v1/commit", json={
+            "rm": "Priya", "extraction": ext, "chosen_code": "ECOSOCH"})
+    assert r.status_code == 200 and r.json()["committed"], r.text
+    inter = stub_register["interactions"][-1]
+    # Provenance + actor: the capturing RM, not the service key; source is VOX.
+    assert inter["performed_by"] == "Priya"
+    assert inter["source"] == "VOX"
+    assert inter["source_ref"] == cid
+    # Capture facts in their own columns.
+    assert "EcoSoch" in inter["transcript"]
+    assert inter["gps_lat"] == pytest.approx(12.9716)
+    assert inter["gps_lng"] == pytest.approx(77.5946)
+    assert inter["location"] == "Bengaluru"
+    assert inter["next_meeting_date"], inter
+    # Structured intel block + meta ride as JSON, not prose.
+    assert inter["key_intel"]["bullets"], inter["key_intel"]
+    assert inter["meta"]["capture_id"] == cid
+    # Notes is the lean narrative: no KEY INTEL / NEXT STEPS dumps.
+    assert "KEY INTEL" not in inter["notes"]
+    assert "captured by Priya via VocX" in inter["notes"]
+
+
+async def test_suggest_typeahead_matches_and_new_company(stub_register):
+    """/v1/suggest ranks the live corpus for a partial name; an unknown name answers
+    new_company=true so the UI can offer 'create as new company'."""
+    app = create_app()
+    async with await _client(app) as c:
+        hit = await c.get("/v1/suggest?q=EcoSoch&rm=Priya")
+        miss = await c.get("/v1/suggest?q=Totally Unknown Ventures")
+        short = await c.get("/v1/suggest?q=E")
+    assert hit.status_code == 200, hit.text
+    body = hit.json()
+    assert body["matches"] and body["matches"][0]["code"] == "ECOSOCH"
+    assert body["new_company"] is False
+    assert miss.json()["new_company"] is True
+    assert short.status_code == 400
+
+
+async def test_s3_playback_streams_bytes_by_default(tmp_path):
+    """Playback default = bytes THROUGH VocX (https/auth safe everywhere); presign is
+    opt-in and still refuses foreign refs."""
+    from app.vocx.speech.audio_store import S3AudioStore
+    fake = _FakeS3()
+    store = S3AudioStore(bucket="caps", endpoint_url="http://minio:9000",
+                         access_key_id="k", secret_access_key="s", fallback=None)
+    store._client = fake
+    ref = store.save(b"RIFFdata", "2026-07-31T10:00:00", "Priya")
+    got = store.playback(ref)
+    assert got is not None and got[0] == "bytes" and got[1] == b"RIFFdata"
+    # Foreign refs stay refused in streaming mode too.
+    assert store.playback("s3://other-bucket/captures/x.wav") is None
+
+
+def test_audio_name_defaults_to_now_when_no_timestamp():
+    """No capture_ts must NOT collapse to a shared 'capture_<rm>' key — that would make
+    each new capture silently overwrite the RM's previous recording."""
+    import time
+
+    from app.vocx.speech.audio_store import _safe_name
+    yyyy, mm, name = _safe_name("", "Priya")
+    assert yyyy == time.strftime("%Y", time.gmtime())
+    assert mm == time.strftime("%m", time.gmtime())
+    assert name != "capture_Priya.wav" and name.endswith("_Priya.wav")
+
+
+def test_system_prompt_carries_glossary_and_examples():
+    """Batch-1 intelligence: the extraction prompt embeds the Evam glossary and the
+    few-shot worked examples from config.json (editable without code changes)."""
+    from app.vocx.core.extract import EXTRACTION_SCHEMA, build_system_prompt
+    from app.vocx.core.resolve import load_config
+    sp = build_system_prompt(load_config())
+    assert "EVAM DOMAIN GLOSSARY" in sp
+    assert "Information Memorandum" in sp          # jargon expanded
+    assert "WORKED EXAMPLES" in sp and "GreenVolt" in sp
+    assert build_system_prompt({}) != sp           # config-driven, not hardcoded
+    assert EXTRACTION_SCHEMA["required"] == ["company_mentioned", "report"]
+
+
+async def test_stt_priming_prompt_carries_vocabulary_and_corpus_names(stub_register, monkeypatch):
+    """capture_audio primes the transcriber with finance vocabulary + the LIVE corpus
+    names (names last — Whisper reads only the prompt's tail)."""
+    from app.vocx.speech import stt as vocx_stt
+    seen = {}
+
+    class _Rec(vocx_stt.StubTranscriber):
+        def transcribe(self, audio, language=None, prompt=None):
+            seen["prompt"] = prompt
+            return super().transcribe(audio, language)
+
+    monkeypatch.setenv("VOCX_STT_BACKEND", "stub")
+    monkeypatch.setattr(vocx_stt, "build_transcriber",
+                        lambda config: _Rec("Met the EcoSoch Solar team."))
+    get_settings.cache_clear()
+    app = create_app()
+    async with await _client(app) as c:
+        r = await c.post("/v1/capture_audio?rm=Priya", content=b"RIFFfake",
+                         headers={"Content-Type": "audio/wav"})
+    assert r.status_code == 200, r.text
+    prompt = seen["prompt"] or ""
+    assert "crore" in prompt                        # config vocabulary
+    assert "EcoSoch" in prompt                      # live Register corpus name
+    assert prompt.index("crore") < prompt.index("EcoSoch")   # names LAST
+
+
+async def test_intelligence_features_are_independently_switchable(stub_register, monkeypatch):
+    """Each Batch-1 feature has its own env flag; disabling one reverts exactly that
+    feature to pre-Batch-1 behaviour."""
+    from app.vocx.core.extract import build_system_prompt
+    from app.vocx.loader import build_vox_config
+    from app.vocx.speech import stt as vocx_stt
+
+    # Flags OFF → glossary/examples leave the prompt; priming prompt becomes None.
+    monkeypatch.setenv("VOCX_EXTRACT_GLOSSARY", "false")
+    monkeypatch.setenv("VOCX_EXTRACT_FEW_SHOT", "false")
+    monkeypatch.setenv("VOCX_EXTRACT_STRUCTURED", "false")
+    monkeypatch.setenv("VOCX_STT_PRIMING", "false")
+    monkeypatch.setenv("VOCX_STT_BACKEND", "stub")
+    get_settings.cache_clear()
+    cfg = build_vox_config(get_settings())
+    assert cfg["intelligence"] == {"stt_priming": False, "glossary": False,
+                                   "few_shot": False, "structured_output": False}
+    sp = build_system_prompt(cfg)
+    assert "EVAM DOMAIN GLOSSARY" not in sp and "WORKED EXAMPLES" not in sp
+
+    seen = {}
+
+    class _Rec(vocx_stt.StubTranscriber):
+        def transcribe(self, audio, language=None, prompt=None):
+            seen["prompt"] = prompt
+            return super().transcribe(audio, language)
+
+    monkeypatch.setattr(vocx_stt, "build_transcriber",
+                        lambda config: _Rec("Met the EcoSoch Solar team."))
+    app = create_app()
+    async with await _client(app) as c:
+        r = await c.post("/v1/capture_audio?rm=Priya", content=b"RIFFfake",
+                         headers={"Content-Type": "audio/wav"})
+    assert r.status_code == 200, r.text
+    assert seen["prompt"] is None                    # priming disabled
+
+    # Flags back ON (defaults) → everything returns.
+    for var in ("VOCX_EXTRACT_GLOSSARY", "VOCX_EXTRACT_FEW_SHOT",
+                "VOCX_EXTRACT_STRUCTURED", "VOCX_STT_PRIMING"):
+        monkeypatch.delenv(var)
+    get_settings.cache_clear()
+    cfg = build_vox_config(get_settings())
+    sp = build_system_prompt(cfg)
+    assert "EVAM DOMAIN GLOSSARY" in sp and "WORKED EXAMPLES" in sp

@@ -193,6 +193,20 @@ services:
       - "8001:8000"   # direct gateway access for dev
     restart: unless-stopped
 
+  # STT — the dedicated speech-to-text service (faster-whisper behind an
+  # OpenAI-compatible endpoint). ONE shared model instance, baked into the image at
+  # build time (HF_HUB_OFFLINE at runtime — no huggingface.co dependency when serving).
+  # Internal-only: no host port, no gateway route; VocX is the consumer.
+  stt:
+    build:
+      context: ../..
+      dockerfile: services/stt/Dockerfile
+      # args: { STT_MODEL_SIZE: medium }   # accuracy over speed — rebuild to change
+    environment:
+      STT_API_KEYS: "${STT_API_KEY:-compose-stt-key}"
+      STT_LOG_JSON: "true"
+    restart: unless-stopped
+
   # VocX — voice-based field touchpoint capture; writes interactions to the Register via
   # the SDK (source "VocX", capture-id idempotency = exactly-once). Individually deployable.
   vocx:
@@ -202,6 +216,7 @@ services:
     depends_on:
       - register
       - minio
+      - stt
     environment:
       VOCX_REGISTER_BASE_URL: "http://register:8000"
       VOCX_REGISTER_API_KEY: "${SVC_VOX_KEY:-compose-svc-vox}"   # named svc_vox principal
@@ -226,9 +241,11 @@ services:
       # The OAuth redirect as the BROWSER reaches it — add this exact URL in Google
       # Cloud Console. Through the edge: https://<host>:8443/vocx/v1/auth/callback
       VOCX_OAUTH_REDIRECT_URI: "${VOCX_REDIRECT_URI:-https://localhost:8443/vocx/v1/auth/callback}"
-      # faster-whisper is baked into the image; the model (small, CPU int8 — tune in
-      # app/vocx/config.json) downloads once onto the volume. api|stub also available.
-      VOCX_STT_BACKEND: "${VOCX_STT_BACKEND:-faster_whisper}"
+      # Transcription is delegated to the dedicated STT service (backend "api"); the
+      # in-process faster_whisper backend remains an opt-in fallback (vocx [stt] extra).
+      VOCX_STT_BACKEND: "${VOCX_STT_BACKEND:-api}"
+      VOCX_STT_API_URL: "http://stt:8000/v1/audio/transcriptions"
+      VOCX_STT_API_KEY: "${STT_API_KEY:-compose-stt-key}"
       # Recorded audio: bytes in MinIO (same platform rule as Register documents), the
       # s3://bucket/key reference rides on the committed interaction. An S3 failure
       # degrades to the volume — a recording is never discarded. Retention: >0 becomes a
@@ -241,6 +258,11 @@ services:
       VOCX_S3_ACCESS_KEY_ID: "prism"
       VOCX_S3_SECRET_ACCESS_KEY: "prism-secret"
       VOCX_AUDIO_RETENTION_DAYS: "${VOCX_AUDIO_RETENTION_DAYS:-0}"
+      # Intelligence features (Batch 1) — each independently switchable; defaults ON.
+      VOCX_STT_PRIMING: "${VOCX_STT_PRIMING:-true}"
+      VOCX_EXTRACT_GLOSSARY: "${VOCX_EXTRACT_GLOSSARY:-true}"
+      VOCX_EXTRACT_FEW_SHOT: "${VOCX_EXTRACT_FEW_SHOT:-true}"
+      VOCX_EXTRACT_STRUCTURED: "${VOCX_EXTRACT_STRUCTURED:-true}"
       # TEMPORARY dev test console at https://<host>:8443/vocx/v1/dev-ui (record →
       # preview → commit → reports in a browser). Dev default ON; the prod-posture
       # overlay pins it OFF. VOCX_DEV_UI=false here turns it off in dev too.
