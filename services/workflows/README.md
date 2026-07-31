@@ -111,6 +111,43 @@ helm upgrade --install workflows deploy/helm/prism/charts/workflows \
 A managed Temporal (Temporal Cloud) works the same way — point
 `WORKFLOWS_TEMPORAL_ADDRESS` at it and skip the bundled server entirely.
 
+## Production foundation (Release 1)
+
+Every human-in-the-loop workflow shares one operational contract:
+
+* **Run control** — `POST /v1/workflows/{id}/control` with `{"action": "cancel" | "return"
+  | "resubmit", "by": ..., "note": ...}`. The action is persisted as an immutable control
+  record in the Register **before** the run is signalled; the workflow verifies that record
+  (fail-closed) before acting, exactly like decisions — a raw Temporal signal can neither
+  cancel nor resume anything. `return` parks the run as *ReturnedForInformation*; `resubmit`
+  restores it and **restarts its SLA clock**; `cancel` ends it as *Cancelled*.
+* **Business vs technical status** — the `state` query (also embedded in
+  `GET /v1/workflows/{id}`) answers `business_status` (AwaitingDecision /
+  ReturnedForInformation / Cancelled / Sanctioned / …) separately from the technical
+  `technical_stage` ("Verifying committee decision", …). Dashboards never infer one from
+  the other.
+* **SLA timers** — while a run waits on a human it emits `sla_reminder` every
+  `sla_reminder_hours` (default 24) and a single `sla_escalation` after
+  `sla_escalation_hours` (default 72); `0` disables either. Events always land in the
+  structured log; set `WORKFLOWS_OPS_WEBHOOK_URL` to also POST them as JSON (Slack / Teams /
+  any receiver) — best-effort with bounded retry, never load-bearing.
+* **Payload encryption** — set `WORKFLOWS_PAYLOAD_ENCRYPTION_KEY` (base64url, 32 bytes:
+  `python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`)
+  and every workflow input/argument/result is AES-256-GCM ciphertext at rest in Temporal.
+  Set it on the worker AND the orchestrator. Rotation: see `app/codec.py`.
+* **Metrics** — set `WORKFLOWS_METRICS_BIND_ADDRESS=0.0.0.0:9464` on the worker for a
+  Prometheus scrape endpoint (task latencies, failures, slot usage).
+* **Search attributes** — set `WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED=true` to stamp each run
+  with `PrismBusinessStatus` + `PrismSubject` for Temporal UI/CLI filtering. Register them
+  first (once per cluster):
+
+      temporal operator search-attribute create --name PrismBusinessStatus --type Keyword
+      temporal operator search-attribute create --name PrismSubject --type Keyword
+
+* **Long waits** — decision windows survive history limits: the run continues-as-new
+  carrying its elapsed window (`resumed_elapsed_hours`), so a 14-day committee wait never
+  hits Temporal's history cap.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |

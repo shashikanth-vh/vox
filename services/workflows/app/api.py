@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -37,6 +38,7 @@ from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.exceptions import TemporalError
 from temporalio.service import RPCError
 
+from app.codec import build_data_converter
 from app.config import get_settings
 from app.types import (
     AdvayaHandoffInput,
@@ -131,6 +133,17 @@ class DecisionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     by: str = Field(max_length=200)
     note: str | None = None
+
+
+class ControlIn(BaseModel):
+    """A run-control action on a waiting workflow. ``cancel`` ends the run; ``return`` parks
+    it as ReturnedForInformation (the deciders want more from the requester); ``resubmit``
+    puts it back to AwaitingDecision and RESTARTS its SLA clock."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(pattern="^(cancel|return|resubmit)$")
+    by: str = Field(max_length=200)
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class LeadQualificationIn(BaseModel):
@@ -284,7 +297,8 @@ def create_app() -> FastAPI:
         # One Temporal client per process; connecting lazily on first request would hide
         # a bad TEMPORAL_ADDRESS until traffic arrives — fail loud at startup instead.
         app.state.temporal = await Client.connect(
-            settings.temporal_address, namespace=settings.temporal_namespace)
+            settings.temporal_address, namespace=settings.temporal_namespace,
+            data_converter=build_data_converter(settings.payload_encryption_key))
         app.state.http = httpx.AsyncClient(timeout=10.0)
         app.state.oidc = (
             build_verifier(
@@ -422,7 +436,10 @@ def create_app() -> FastAPI:
         memo = {"initiator": (caller.email or requested_by or ""), "tenant": caller.tenant,
                 "lead_id": payload.lead_id}
         handle = await start(request, LeadConversionWorkflow,
-                             LeadConversionInput(caller=caller, **payload.model_dump()),
+                             LeadConversionInput(
+                                 caller=caller,
+                                 emit_search_attributes=settings.search_attributes_enabled,
+                                 **payload.model_dump()),
                              wf_id, restart_if_closed=True, memo=memo)
         wf_id = handle.id  # may be the #n retry id if a prior attempt had closed
         return ORJSONResponse(status_code=202, content={
@@ -879,6 +896,10 @@ def create_app() -> FastAPI:
         wf_id = f"{id_prefix}-{_tenant_slug(caller.tenant)}-{id_suffix}"
         memo = {"initiator": (caller.email or requested_by or ""), "tenant": caller.tenant,
                 **extra_memo}
+        import dataclasses as _dc
+        if "emit_search_attributes" in {f.name for f in _dc.fields(arg_cls)}:
+            arg_fields.setdefault("emit_search_attributes",
+                                  settings.search_attributes_enabled)
         handle = await start(request, workflow_cls, arg_cls(caller=caller, **arg_fields), wf_id,
                              restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={
@@ -1232,6 +1253,68 @@ def create_app() -> FastAPI:
             return _problem(503, "Delivery failed", f"Signal delivery failed: {exc}")
         return {"workflow_id": workflow_id, "document_received": payload.name}
 
+    _CONTROL_OUTCOME = {"cancel": "Cancelled", "return": "ReturnedForInformation",
+                        "resubmit": "Resubmitted"}
+
+    @app.post("/v1/workflows/{workflow_id}/control", tags=["Workflows"],
+              summary="Cancel / return-for-information / resubmit a waiting run")
+    async def control_workflow(workflow_id: str, payload: ControlIn, request: Request,
+                               x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                               ) -> Any:
+        """The lifecycle controls every real approval flow needs. Same trust posture as a
+        decision: verified identity, tenant binding, and the action is PERSISTED as an
+        immutable control record BEFORE the workflow is signalled — the signal is only a
+        wake-up, and the run verifies the record (fail-closed) before acting on it."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        acted_by, err = await _verified_email(request, payload.by)
+        if err is not None:
+            return err
+        if (resp := _wf_tenant_denied(request, workflow_id)) is not None:
+            return resp
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict",
+                            f"This run is {desc.status.name if desc.status else 'closed'} — "
+                            "run-control applies only to a waiting run.")
+        # WHO may control a run: the INITIATOR (they asked; they may withdraw or resubmit)
+        # or an approver-role holder for this vertical (they may also send it back for
+        # information). Enforced only under the production identity posture, like reads.
+        if _auth_enforced():
+            scope_err = await _status_scope_denied(request, workflow_id, desc, acted_by)
+            if scope_err is not None:
+                return scope_err
+        outcome = _CONTROL_OUTCOME[payload.action]
+        caller, _verified = _caller_context(request, acted_by)
+        # Durable first: one immutable record per control action (a fresh reference each
+        # time — a run can be returned and resubmitted more than once).
+        ref = f"{workflow_id}:control:{uuid.uuid4().hex[:12]}"
+        _rec, err = await _persist_decision(
+            request, ref, outcome, acted_by, payload.note, caller, None,
+            extra={"kind": "control", "run_id": desc.run_id})
+        if err is not None:
+            return err
+        try:
+            await handle.signal("control", args=[outcome, ref])
+        except RPCError as exc:
+            # The record is durable; the run may have closed in the race window. Truthful
+            # answer: recorded, not delivered — the reconciler/status read tells the rest.
+            log.warning("control_signal_failed", extra={"workflow": workflow_id,
+                                                        "action": outcome,
+                                                        "error": exc.message})
+            return _problem(409, "Conflict",
+                            "The control action was recorded but the run closed before it "
+                            "could be delivered.")
+        log.info("run_control", extra={"workflow": workflow_id, "action": outcome,
+                                       "by": acted_by})
+        return {"workflow_id": workflow_id, "action": outcome, "by": acted_by,
+                "control_ref": ref}
+
     @app.get("/v1/workflows/{workflow_id}", tags=["Workflows"],
              summary="A run's live status (execution state + in-workflow stage)")
     async def describe(workflow_id: str, request: Request,
@@ -1275,6 +1358,12 @@ def create_app() -> FastAPI:
         if desc.status == WorkflowExecutionStatus.RUNNING:
             try:
                 out["stage"] = await handle.query("status")
+            except (RPCError, TemporalError):
+                pass
+            # Business status and technical stage, SEPARATELY (workflows that expose the
+            # richer `state` query; older workflow types simply omit it).
+            try:
+                out["state"] = await handle.query("state")
             except (RPCError, TemporalError):
                 pass
         elif desc.status == WorkflowExecutionStatus.COMPLETED:

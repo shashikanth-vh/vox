@@ -99,6 +99,7 @@ def _biz_activities():
     return [activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.mark_lead_note, activities.verify_committee_decision,
             activities.verify_facility_decisions,
+            activities.verify_control, activities.emit_operational_event,
             activities.find_lines_for_deal, activities.update_fields,
             activities.prepare_cpcs_checklist, activities.create_handover_package,
             activities.record_advaya_handoff]
@@ -273,6 +274,88 @@ async def test_facility_specific_decisions_partially_sanction(mock_register):
     assert "sanction_letter" not in kinds_b
     # The deal still records the sanction basics; its funnel stage is untouched.
     assert mock_register.state.deals[did]["stage"] == "In Pipeline"
+
+
+async def test_verified_cancel_control_ends_a_waiting_run(mock_register):
+    """A cancel that is DURABLY RECORDED (the orchestrator's persist-before-signal) ends the
+    waiting run as Cancelled; a control signal with NO record is a spoof and is ignored."""
+    env = await _env()
+    from temporalio.worker import Worker
+
+    did = uuid.uuid4().hex
+    lid = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                        "stage": "Data Awaited"}
+
+    async with env:
+        tq = "biz-tq"
+        async with Worker(env.client, task_queue=tq,
+                          workflows=[DealStructuringWorkflow], activities=_biz_activities()):
+            wf_id = f"struct-{did}"
+            handle = await env.client.start_workflow(
+                DealStructuringWorkflow.run,
+                DealStructuringInput(deal_id=did, requested_by="rm@evamfinance.com"),
+                id=wf_id, task_queue=tq)
+            # A SPOOFED control (no durable record) must be ignored — the run keeps waiting.
+            await handle.signal(DealStructuringWorkflow.control,
+                                args=["Cancelled", f"{wf_id}:control:forged"])
+            state = await handle.query(DealStructuringWorkflow.state)
+            assert state["business_status"] == "AwaitingDecision"
+            # The REAL thing: record first (as the orchestrator does), then signal.
+            ref = f"{wf_id}:control:{uuid.uuid4().hex[:12]}"
+            mock_register.state.decisions[ref] = {
+                "id": uuid.uuid4().hex, "workflow_id": ref, "decision": "Cancelled",
+                "decided_by": "rm@evamfinance.com", "note": "client withdrew"}
+            await handle.signal(DealStructuringWorkflow.control, args=["Cancelled", ref])
+            result = await handle.result()
+
+    assert result.status == "Cancelled"
+    assert result.decided_by == "rm@evamfinance.com"
+    assert result.note == "client withdrew"
+    # No sanction/rejection ever touched the line.
+    assert mock_register.state.lending[lid]["stage"] in ("Data Awaited", "Diligence",
+                                                         "Note Circulated")
+
+
+async def test_return_for_information_then_resubmit_then_decide(mock_register):
+    """Return-for-information parks the run (business status flips; the run KEEPS waiting),
+    resubmit restores it, and a committee decision afterwards completes normally."""
+    env = await _env()
+    from temporalio.worker import Worker
+
+    did = uuid.uuid4().hex
+    lid = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                        "stage": "Data Awaited"}
+
+    async with env:
+        tq = "biz-tq"
+        async with Worker(env.client, task_queue=tq,
+                          workflows=[DealStructuringWorkflow], activities=_biz_activities()):
+            wf_id = f"struct-{did}"
+            handle = await env.client.start_workflow(
+                DealStructuringWorkflow.run,
+                DealStructuringInput(deal_id=did, requested_by="rm@evamfinance.com",
+                                     product_type="Term Loan", rm="asha"),
+                id=wf_id, task_queue=tq)
+            for action in ("ReturnedForInformation", "Resubmitted"):
+                ref = f"{wf_id}:control:{uuid.uuid4().hex[:12]}"
+                mock_register.state.decisions[ref] = {
+                    "id": uuid.uuid4().hex, "workflow_id": ref, "decision": action,
+                    "decided_by": "chair@evamfinance.com", "note": None}
+                await handle.signal(DealStructuringWorkflow.control, args=[action, ref])
+                state = await handle.query(DealStructuringWorkflow.state)
+                expected = ("ReturnedForInformation" if action == "ReturnedForInformation"
+                            else "AwaitingDecision")
+                assert state["business_status"] == expected
+            # The loop ends the way it should: with a decision.
+            _seed_committee(mock_register, wf_id, did, "Approved", lending_ids=[lid])
+            await handle.signal(DealStructuringWorkflow.committee_decision, "")
+            result = await handle.result()
+
+    assert result.status == "Sanctioned"
 
 
 async def test_deal_structuring_ignores_a_spoofed_signal_without_a_record(mock_register):

@@ -3636,13 +3636,13 @@
             "title": "Committee Reference"
           },
           "decision": {
-            "pattern": "^(Approved|Rejected)$",
+            "pattern": "^(Approved|Rejected|Cancelled|ReturnedForInformation|Resubmitted)$",
             "title": "Decision",
             "type": "string"
           },
           "kind": {
             "default": "lead_conversion",
-            "pattern": "^(lead_conversion|committee)$",
+            "pattern": "^(lead_conversion|committee|control)$",
             "title": "Kind",
             "type": "string"
           },

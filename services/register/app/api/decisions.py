@@ -72,12 +72,17 @@ _COMMITTEE_AUTHORITY = {"Credit Head", "Management", "Admin"}
 class DecisionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workflow_id: str = Field(max_length=200)
-    decision: str = Field(pattern="^(Approved|Rejected)$")
+    # Business decisions are Approved/Rejected; CONTROL records (kind="control") capture the
+    # run-lifecycle actions — cancel, return-for-information, resubmit — with the same
+    # durability and single-winner semantics, so every human action on a run has an
+    # immutable, subject-bound audit record the workflow can verify.
+    decision: str = Field(pattern="^(Approved|Rejected|Cancelled|ReturnedForInformation|Resubmitted)$")
     lead_id: str | None = Field(default=None, max_length=64)
     note: str | None = None
-    # ``kind`` distinguishes a lead-conversion decision from a governance (Credit Committee) one;
-    # a committee decision binds to a subject and requires committee authority.
-    kind: str = Field(default="lead_conversion", pattern="^(lead_conversion|committee)$")
+    # ``kind`` distinguishes a lead-conversion decision from a governance (Credit Committee)
+    # one and from a run-control record; a committee decision binds to a subject and requires
+    # committee authority.
+    kind: str = Field(default="lead_conversion", pattern="^(lead_conversion|committee|control)$")
     subject_type: str | None = Field(default=None, max_length=40)
     subject_id: str | None = Field(default=None, max_length=64)
     run_id: str | None = Field(default=None, max_length=200)
@@ -153,6 +158,14 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
             raise ForbiddenError(
                 "Recording a Credit Committee decision requires committee authority "
                 f"(one of {sorted(_COMMITTEE_AUTHORITY)}).")
+    # Control records and business outcomes must not masquerade as one another: the value
+    # space is disjoint by kind, so a spoofed "control" write can never mint an approval and
+    # a business decision can never be replayed as a cancellation.
+    control_outcomes = {"Cancelled", "ReturnedForInformation", "Resubmitted"}
+    if (payload.kind == "control") != (payload.decision in control_outcomes):
+        raise ValidationAppError(
+            "kind='control' requires a control outcome (Cancelled / ReturnedForInformation / "
+            "Resubmitted), and control outcomes are valid ONLY with kind='control'.")
     # effective_* are dict[str, Access]; store the access NAMES (JSON-friendly, and what the
     # worker feeds back into a delegated context).
     ops = {k: v.name for k, v in (approver.effective_operations or {}).items()}
@@ -178,11 +191,13 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
     if won_id is not None:
         # TRANSACTIONAL OUTBOX: create the delivery row in the SAME transaction as the decision,
         # so an accepted decision always has a durable "deliver me" record (pending, due now).
-        await ctx.session.execute(
-            pg_insert(WorkflowDecisionOutbox)
-            .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,
-                    decision=payload.decision, status="pending", created_by=ctx.actor)
-            .on_conflict_do_nothing(constraint="workflow_decision_outbox_tenant_wf"))
+        # A CONTROL record is an audit anchor, not an appliable outcome — no delivery row.
+        if payload.kind != "control":
+            await ctx.session.execute(
+                pg_insert(WorkflowDecisionOutbox)
+                .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,
+                        decision=payload.decision, status="pending", created_by=ctx.actor)
+                .on_conflict_do_nothing(constraint="workflow_decision_outbox_tenant_wf"))
         row = (await ctx.session.execute(
             select(WorkflowDecision).where(WorkflowDecision.id == won_id))).scalar_one()
         return _serialize(row)
@@ -195,11 +210,12 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
         # Idempotent replay of the SAME decision → return the original, unchanged. ENSURE an
         # outbox row exists too, so a decision recorded before the outbox existed (or one whose
         # row was somehow lost) becomes deliverable on the next replay.
-        await ctx.session.execute(
-            pg_insert(WorkflowDecisionOutbox)
-            .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,
-                    decision=payload.decision, status="pending", created_by=ctx.actor)
-            .on_conflict_do_nothing(constraint="workflow_decision_outbox_tenant_wf"))
+        if payload.kind != "control":
+            await ctx.session.execute(
+                pg_insert(WorkflowDecisionOutbox)
+                .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,
+                        decision=payload.decision, status="pending", created_by=ctx.actor)
+                .on_conflict_do_nothing(constraint="workflow_decision_outbox_tenant_wf"))
         return _serialize(existing)
     # The OPPOSITE decision already won — reject, even if the workflow has since completed.
     raise ConflictError(

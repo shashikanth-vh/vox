@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Release-1 workflow foundation (increment 1).** Every waiting run now has the
+  operational controls real usage needs, all spoof-proof (persist-before-signal + in-run
+  verification, same trust posture as decisions): `POST /v1/workflows/{id}/control` for
+  **cancel / return-for-information / resubmit** (each action an immutable Register control
+  record; resubmit restarts the SLA clock); **SLA reminders + one-time escalation** while a
+  run waits (defaults 24 h/72 h, per-request tunable, `0` = off) emitted to the structured
+  log and optionally to `WORKFLOWS_OPS_WEBHOOK_URL` (best-effort, bounded retry); the
+  **business status is separated from the technical stage** (`state` query + status
+  endpoint); **payload encryption** (AES-256-GCM codec, key-rotation aware) for everything
+  at rest in Temporal; worker **Prometheus metrics**; opt-in **per-run search attributes**
+  (`PrismBusinessStatus`/`PrismSubject`); and **continue-as-new** so long decision windows
+  survive history limits. All feature-flagged with safe defaults; compose + Helm wired.
+
+
 - **Committee approval is FACILITY-SPECIFIC.** `POST /v1/workflows/{id}/committee-decision`
   now takes either `facilities` (one outcome per lending line — approve/reject + its own
   note/conditions; must cover exactly the deal's lines, no gaps/unknowns/duplicates) or the

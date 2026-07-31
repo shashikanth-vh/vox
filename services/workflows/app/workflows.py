@@ -25,7 +25,7 @@ from datetime import timedelta
 from typing import Any
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
+from temporalio.common import RetryPolicy, SearchAttributeKey
 from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
@@ -73,6 +73,93 @@ _DURABLE = RetryPolicy(
 # No schedule_to_close cap: retries are GENUINELY unbounded (bounded only by the workflow's
 # own execution timeout), so an accepted decision is never dropped because a Register outage
 # outlasted an arbitrary window. Each attempt is still bounded (start_to_close).
+# ------------------------------------------------------------------------------------------- #
+# Release-1 foundation: run-control, SLA tracking and search attributes — shared by every
+# human-in-the-loop workflow. Everything here is DETERMINISTIC (pure state + workflow.now());
+# all IO goes through activities.
+# ------------------------------------------------------------------------------------------- #
+
+# Per-run search attributes for the Temporal UI/CLI. OPT-IN (input.emit_search_attributes):
+# they must be registered on the server first — see services/workflows/README.md.
+_SA_BUSINESS_STATUS = SearchAttributeKey.for_keyword("PrismBusinessStatus")
+_SA_SUBJECT = SearchAttributeKey.for_keyword("PrismSubject")
+
+
+class _Foundation:
+    """The shared run-control + SLA state machine for a decision-waiting workflow.
+
+    * ``controls`` — the UNTRUSTED queue of (action, control_ref) signals; each is verified
+      against the durable control record before it has any effect (same spoof-proof pattern
+      as decisions).
+    * ``business_status`` — what the RUN means to the business (AwaitingDecision /
+      ReturnedForInformation / Cancelled / …); the workflow's technical stage stays separate.
+    * SLA bookkeeping — reminder count + escalation flag; the clock RESETS on resubmit.
+    """
+
+    def __init__(self) -> None:
+        self.controls: list[tuple[str, str]] = []
+        self.business_status = "AwaitingDecision"
+        self.cancelled_by: str | None = None
+        self.cancel_note: str | None = None
+        self.reminders_sent = 0
+        self.escalated = False
+
+    def state(self, technical_stage: str) -> dict:
+        return {"business_status": self.business_status, "technical_stage": technical_stage,
+                "reminders_sent": self.reminders_sent, "escalated": self.escalated}
+
+    def next_wakeup(self, waited: timedelta, remaining: timedelta,
+                    reminder_hours: float, escalation_hours: float) -> timedelta:
+        """The next moment anything is due: the decision deadline, the next SLA reminder, or
+        the escalation point — whichever comes first (never <= 0)."""
+        wake = remaining
+        if reminder_hours > 0:
+            due = timedelta(hours=reminder_hours * (self.reminders_sent + 1)) - waited
+            if due > timedelta(0):
+                wake = min(wake, due)
+        if escalation_hours > 0 and not self.escalated:
+            due = timedelta(hours=escalation_hours) - waited
+            if due > timedelta(0):
+                wake = min(wake, due)
+        return max(wake, timedelta(seconds=1))
+
+    def due_sla_event(self, waited: timedelta, reminder_hours: float,
+                      escalation_hours: float) -> str | None:
+        """Which SLA event is due NOW (escalation outranks a reminder), updating the
+        bookkeeping. None = nothing due."""
+        if (escalation_hours > 0 and not self.escalated
+                and waited >= timedelta(hours=escalation_hours)):
+            self.escalated = True
+            return "sla_escalation"
+        if (reminder_hours > 0
+                and waited >= timedelta(hours=reminder_hours * (self.reminders_sent + 1))):
+            self.reminders_sent += 1
+            return "sla_reminder"
+        return None
+
+
+async def _emit_ops(event: str, detail: dict) -> None:
+    """Raise an operational event (log + optional webhook). BEST-EFFORT by design: ops
+    visibility must never take a business workflow down, so failures are swallowed after the
+    activity's own bounded retry."""
+    try:
+        await workflow.execute_activity(
+            activities.emit_operational_event, args=[event, detail],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=2))
+    except Exception:  # noqa: BLE001 — ops emission is never load-bearing
+        workflow.logger.warning("ops_event_failed", extra={"event": event})
+
+
+def _upsert_search(enabled: bool, business_status: str, subject: str) -> None:
+    """Reflect the run's business status into Temporal search attributes (when the
+    deployment registered them) so ops can filter runs in the UI/CLI."""
+    if enabled:
+        workflow.upsert_search_attributes([
+            _SA_BUSINESS_STATUS.value_set(business_status),
+            _SA_SUBJECT.value_set(subject)])
+
+
 _DURABLE_IO: dict[str, Any] = {
     "start_to_close_timeout": timedelta(seconds=30),
     "retry_policy": _DURABLE,
@@ -213,6 +300,7 @@ class LeadConversionWorkflow:
         # could discard a valid decision or let a later spoofed one clobber a real one.
         self._pending: list[tuple] = []
         self._stage = "Pending"
+        self._fnd = _Foundation()
 
     @workflow.signal
     def approve(self, by: str, note: str | None = None,
@@ -226,9 +314,22 @@ class LeadConversionWorkflow:
         if self._decision is None:
             self._pending.append(("Rejected", by, note, approval_token, decision_ref))
 
+    @workflow.signal
+    def control(self, action: str, control_ref: str = "") -> None:
+        """Run-control (cancel / return / resubmit). UNTRUSTED like every signal: queued
+        here, verified against the durable control record before it does anything."""
+        if self._decision is None:
+            self._fnd.controls.append((action, control_ref))
+
     @workflow.query
     def status(self) -> str:
         return self._stage
+
+    @workflow.query
+    def state(self) -> dict:
+        """BUSINESS status and TECHNICAL stage, separately — dashboards should never have
+        to infer one from the other."""
+        return self._fnd.state(self._stage)
 
     @workflow.run
     async def run(self, inp: LeadConversionInput) -> LeadConversionResult:
@@ -246,16 +347,74 @@ class LeadConversionWorkflow:
         # finalise a fake rejection nor DoS a pending approval). The workflow can sleep here
         # for days and survive worker restarts.
         total = timedelta(hours=inp.approval_timeout_hours)
-        start = workflow.now()
+        start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
+                       f"Lead:{inp.lead_id}")
         while self._decision is None:
-            remaining = total - (workflow.now() - start)
+            waited = workflow.now() - start
+            remaining = total - waited
             if remaining <= timedelta(0):
                 break
+            # SLA: fire whatever is due before sleeping again (escalation outranks reminder).
+            if (due := self._fnd.due_sla_event(
+                    waited, inp.sla_reminder_hours, inp.sla_escalation_hours)) is not None:
+                await _emit_ops(due, {
+                    "subject": f"Lead:{inp.lead_id}", "requested_by": inp.requested_by,
+                    "business_status": self._fnd.business_status,
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                continue
+            # History pressure (very long waits): carry the elapsed window across the reset.
+            if workflow.info().is_continue_as_new_suggested():
+                import dataclasses
+                workflow.continue_as_new(dataclasses.replace(
+                    inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
             try:
                 await workflow.wait_condition(
-                    lambda: bool(self._pending), timeout=remaining)
+                    lambda: bool(self._pending) or bool(self._fnd.controls),
+                    timeout=self._fnd.next_wakeup(waited, remaining,
+                                                  inp.sla_reminder_hours,
+                                                  inp.sla_escalation_hours))
             except asyncio.TimeoutError:
-                break
+                continue
+            # Run-control first: a verified cancel ends the run; return/resubmit flip the
+            # business status (and resubmit restarts the SLA clock).
+            while self._fnd.controls and self._decision is None:
+                action, ref = self._fnd.controls.pop(0)
+                self._stage = "Verifying control"
+                v = await workflow.execute_activity(
+                    activities.verify_control, args=[ref, inp.caller], **_DURABLE_IO)
+                self._stage = "Pending"
+                if not v.get("valid"):
+                    continue                      # spoofed / unrecorded — ignore
+                verified_action = v["action"]
+                if verified_action == "Cancelled":
+                    self._fnd.business_status = "Cancelled"
+                    self._fnd.cancelled_by = v.get("by")
+                    self._fnd.cancel_note = v.get("note")
+                elif verified_action == "ReturnedForInformation":
+                    self._fnd.business_status = "ReturnedForInformation"
+                elif verified_action == "Resubmitted":
+                    self._fnd.business_status = "AwaitingDecision"
+                    start = workflow.now()        # the decision window restarts, fully
+                    self._fnd.reminders_sent = 0
+                    self._fnd.escalated = False
+                _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
+                               f"Lead:{inp.lead_id}")
+                await _emit_ops("run_control", {
+                    "subject": f"Lead:{inp.lead_id}", "action": verified_action,
+                    "by": v.get("by"), "note": v.get("note")})
+            if self._fnd.business_status == "Cancelled":
+                self._stage = "Cancelled"
+                await workflow.execute_activity(
+                    activities.mark_lead_note,
+                    args=[inp.lead_id,
+                          f"Conversion request cancelled by {self._fnd.cancelled_by}: "
+                          f"{self._fnd.cancel_note or 'no note'} (workflow {wf_id}).",
+                          None], **_DURABLE_IO)
+                return LeadConversionResult(workflow_id=wf_id, lead_id=inp.lead_id,
+                                            status="Cancelled",
+                                            decided_by=self._fnd.cancelled_by,
+                                            decision_note=self._fnd.cancel_note)
             # Drain the queue in ARRIVAL order; the first signal that verifies wins.
             while self._pending and self._decision is None:
                 kind, by, note, token, decision_ref = self._pending.pop(0)
@@ -283,6 +442,11 @@ class LeadConversionWorkflow:
 
         if self._decision is None:
             self._stage = "TimedOut"
+            self._fnd.business_status = "TimedOut"
+            _upsert_search(inp.emit_search_attributes, "TimedOut", f"Lead:{inp.lead_id}")
+            await _emit_ops("decision_timeout", {
+                "subject": f"Lead:{inp.lead_id}", "requested_by": inp.requested_by,
+                "window_hours": inp.approval_timeout_hours})
             # No verified decider on a timeout → record as the system (service) actor, not the
             # requester. Idempotent + durable so a retry never double-appends and an outage
             # never drops the outcome.
@@ -295,6 +459,8 @@ class LeadConversionWorkflow:
 
         if self._decision == "Rejected":
             self._stage = "Rejected"
+            self._fnd.business_status = "Rejected"
+            _upsert_search(inp.emit_search_attributes, "Rejected", f"Lead:{inp.lead_id}")
             # Attributed to the VERIFIED rejecter (self._approver), never the original
             # requester. Idempotent + durable.
             await workflow.execute_activity(
@@ -328,6 +494,8 @@ class LeadConversionWorkflow:
         deal = {"id": applied["deal_id"]}
 
         self._stage = "Approved"
+        self._fnd.business_status = "Approved"
+        _upsert_search(inp.emit_search_attributes, "Approved", f"Lead:{inp.lead_id}")
         return LeadConversionResult(
             workflow_id=wf_id, lead_id=inp.lead_id, status="Approved",
             decided_by=self._decided_by, decision_note=self._note,
@@ -413,6 +581,7 @@ class DealStructuringWorkflow:
     def __init__(self) -> None:
         self._notified = False
         self._stage = "Structuring"
+        self._fnd = _Foundation()
 
     @workflow.signal
     def committee_decision(self, decision_ref: str = "") -> None:
@@ -422,9 +591,21 @@ class DealStructuringWorkflow:
         # is ignored on purpose.
         self._notified = True
 
+    @workflow.signal
+    def control(self, action: str, control_ref: str = "") -> None:
+        """Run-control (cancel / return / resubmit). UNTRUSTED like every signal: queued
+        here, verified against the durable control record before it does anything."""
+        self._fnd.controls.append((action, control_ref))
+
     @workflow.query
     def status(self) -> str:
         return self._stage
+
+    @workflow.query
+    def state(self) -> dict:
+        """BUSINESS status and TECHNICAL stage, separately — dashboards should never have
+        to infer one from the other."""
+        return self._fnd.state(self._stage)
 
     @workflow.run
     async def run(self, inp: DealStructuringInput) -> DealStructuringResult:
@@ -475,18 +656,70 @@ class DealStructuringWorkflow:
         #       A spoofed/direct signal (no record, or a record for another subject) is ignored and
         #       the run keeps waiting — the outcome is NEVER taken from the signal.
         self._stage = "Awaiting committee decision"
+        subject = f"Deal:{inp.deal_id}"
         total = timedelta(hours=inp.decision_timeout_hours)
-        start = workflow.now()
+        start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
         verified: dict[str, Any] | None = None
         facility_outcomes: dict[str, dict[str, Any]] = {}
         while verified is None:
-            remaining = total - (workflow.now() - start)
+            waited = workflow.now() - start
+            remaining = total - waited
             if remaining <= timedelta(0):
                 break
+            if (due := self._fnd.due_sla_event(
+                    waited, inp.sla_reminder_hours, inp.sla_escalation_hours)) is not None:
+                await _emit_ops(due, {
+                    "subject": subject, "requested_by": inp.requested_by,
+                    "business_status": self._fnd.business_status,
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                continue
+            if workflow.info().is_continue_as_new_suggested():
+                import dataclasses
+                workflow.continue_as_new(dataclasses.replace(
+                    inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
             try:
-                await workflow.wait_condition(lambda: self._notified, timeout=remaining)
+                await workflow.wait_condition(
+                    lambda: self._notified or bool(self._fnd.controls),
+                    timeout=self._fnd.next_wakeup(waited, remaining,
+                                                  inp.sla_reminder_hours,
+                                                  inp.sla_escalation_hours))
             except asyncio.TimeoutError:
-                break
+                continue
+            # Run-control first (verified against the durable control record, fail-closed).
+            while self._fnd.controls:
+                action, ref = self._fnd.controls.pop(0)
+                self._stage = "Verifying control"
+                v = await workflow.execute_activity(
+                    activities.verify_control, args=[ref, caller], **_DURABLE_IO)
+                self._stage = "Awaiting committee decision"
+                if not v.get("valid"):
+                    continue
+                verified_action = v["action"]
+                if verified_action == "Cancelled":
+                    self._fnd.business_status = "Cancelled"
+                    self._fnd.cancelled_by = v.get("by")
+                    self._fnd.cancel_note = v.get("note")
+                elif verified_action == "ReturnedForInformation":
+                    self._fnd.business_status = "ReturnedForInformation"
+                elif verified_action == "Resubmitted":
+                    self._fnd.business_status = "AwaitingDecision"
+                    start = workflow.now()
+                    self._fnd.reminders_sent = 0
+                    self._fnd.escalated = False
+                _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
+                await _emit_ops("run_control", {
+                    "subject": subject, "action": verified_action,
+                    "by": v.get("by"), "note": v.get("note")})
+            if self._fnd.business_status == "Cancelled":
+                self._stage = "Cancelled"
+                return DealStructuringResult(
+                    workflow_id=wf_id, deal_id=inp.deal_id, status="Cancelled",
+                    decided_by=self._fnd.cancelled_by,
+                    stage=lines[0].get("stage"), evidence_ids=evidence_ids,
+                    note=self._fnd.cancel_note)
+            if not self._notified:
+                continue
             self._notified = False
             self._stage = "Verifying committee decision"
             v = await workflow.execute_activity(
@@ -508,6 +741,11 @@ class DealStructuringWorkflow:
 
         if verified is None:
             self._stage = "TimedOut"
+            self._fnd.business_status = "TimedOut"
+            _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
+            await _emit_ops("decision_timeout", {
+                "subject": subject, "requested_by": inp.requested_by,
+                "window_hours": inp.decision_timeout_hours})
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="TimedOut",
                 stage=lines[0].get("stage"), evidence_ids=evidence_ids,
@@ -569,6 +807,8 @@ class DealStructuringWorkflow:
         sanctioned = [lid for lid, o in line_outcomes.items() if o == "Sanctioned"]
         if not sanctioned:
             self._stage = "Rejected"
+            self._fnd.business_status = "Rejected"
+            _upsert_search(inp.emit_search_attributes, "Rejected", subject)
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
                 decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids,
@@ -586,6 +826,8 @@ class DealStructuringWorkflow:
 
         status = "Sanctioned" if len(sanctioned) == len(line_outcomes) else "PartiallySanctioned"
         self._stage = status
+        self._fnd.business_status = status
+        _upsert_search(inp.emit_search_attributes, status, subject)
         return DealStructuringResult(
             workflow_id=wf_id, deal_id=inp.deal_id, status=status,
             decided_by=decided_by, stage="Sanctioned",

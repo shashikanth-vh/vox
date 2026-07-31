@@ -160,6 +160,19 @@ class LeadConversionInput:
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
     schema_version: int = 1
+    # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
+    # SLA reminders while the run waits on a human: every N hours an operational event
+    # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"
+    # event fires. Delivery = structured log + optional ops webhook (see config).
+    sla_reminder_hours: float = 24.0
+    sla_escalation_hours: float = 72.0
+    # Set by the orchestrator from settings: upsert Temporal search attributes for this run
+    # (requires server-side registration — see README). Never set this from user input.
+    emit_search_attributes: bool = False
+    # Set ONLY by continue-as-new: how much of the decision window this run already spent
+    # before continuing, so the timeout keeps counting across history resets.
+    resumed_elapsed_hours: float = 0.0
+
     # Auto-reject if nobody decides within this window.
     approval_timeout_hours: int = 24 * 7
 
@@ -245,6 +258,19 @@ class DealStructuringInput:
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
     schema_version: int = 1
+    # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
+    # SLA reminders while the run waits on a human: every N hours an operational event
+    # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"
+    # event fires. Delivery = structured log + optional ops webhook (see config).
+    sla_reminder_hours: float = 24.0
+    sla_escalation_hours: float = 72.0
+    # Set by the orchestrator from settings: upsert Temporal search attributes for this run
+    # (requires server-side registration — see README). Never set this from user input.
+    emit_search_attributes: bool = False
+    # Set ONLY by continue-as-new: how much of the decision window this run already spent
+    # before continuing, so the timeout keeps counting across history resets.
+    resumed_elapsed_hours: float = 0.0
+
 
 
 @dataclass

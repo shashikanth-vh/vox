@@ -49,6 +49,17 @@ spec:
               value: {{ .Values.temporal.taskQueue | quote }}
             - name: WORKFLOWS_REGISTER_BASE_URL
               value: {{ .Values.register.baseUrl | quote }}
+            # Release-1 workflow foundation (safe/off defaults; see values.foundation).
+            - name: WORKFLOWS_OPS_WEBHOOK_URL
+              value: {{ .Values.foundation.opsWebhookUrl | quote }}
+            - name: WORKFLOWS_PAYLOAD_ENCRYPTION_KEY
+              value: {{ .Values.foundation.payloadEncryptionKey | quote }}
+            - name: WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED
+              value: {{ .Values.foundation.searchAttributesEnabled | quote }}
+            - name: WORKFLOWS_METRICS_BIND_ADDRESS
+              value: {{ .Values.foundation.metricsBindAddress | quote }}
+            - name: WORKFLOWS_WORKER_BUILD_ID
+              value: {{ .Values.foundation.workerBuildId | quote }}
             - name: WORKFLOWS_REGISTER_TENANT
               value: {{ .Values.register.tenant | quote }}
             - name: WORKFLOWS_REGISTER_API_KEY

@@ -15,6 +15,21 @@ temporal:
   namespace: default
   taskQueue: prism-workflows
 
+# Release-1 workflow foundation (all optional; safe/off defaults).
+foundation:
+  # Ops events (SLA reminders / escalations / run-control) also POST here when set —
+  # Slack/Teams/webhook receiver. Empty = structured log only.
+  opsWebhookUrl: ""
+  # base64url 32-byte key -> AES-256-GCM encryption of workflow payloads at rest in
+  # Temporal. Prefer an existingSecret in production.
+  payloadEncryptionKey: ""
+  # Per-run search attributes (PrismBusinessStatus / PrismSubject). Register them on the
+  # Temporal server before enabling — see services/workflows/README.md.
+  searchAttributesEnabled: false
+  # Prometheus scrape endpoint for the WORKER's SDK metrics, e.g. "0.0.0.0:9464". "" = off.
+  metricsBindAddress: ""
+  workerBuildId: ""
+
 register:
   baseUrl: http://prism-register        # the Register Service (umbrella release)
   tenant: EVAM

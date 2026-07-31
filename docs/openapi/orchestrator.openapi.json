@@ -151,6 +151,40 @@
         "title": "CommitteeDecisionIn",
         "type": "object"
       },
+      "ControlIn": {
+        "additionalProperties": false,
+        "description": "A run-control action on a waiting workflow. ``cancel`` ends the run; ``return`` parks\nit as ReturnedForInformation (the deciders want more from the requester); ``resubmit``\nputs it back to AwaitingDecision and RESTARTS its SLA clock.",
+        "properties": {
+          "action": {
+            "pattern": "^(cancel|return|resubmit)$",
+            "title": "Action",
+            "type": "string"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "action",
+          "by"
+        ],
+        "title": "ControlIn",
+        "type": "object"
+      },
       "CpcsApproveIn": {
         "additionalProperties": false,
         "properties": {
@@ -1822,6 +1856,75 @@
           }
         },
         "summary": "Record the Credit Committee decision (durable) and signal the workflow",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/control": {
+      "post": {
+        "description": "The lifecycle controls every real approval flow needs. Same trust posture as a\ndecision: verified identity, tenant binding, and the action is PERSISTED as an\nimmutable control record BEFORE the workflow is signalled \u2014 the signal is only a\nwake-up, and the run verifies the record (fail-closed) before acting on it.",
+        "operationId": "control_workflow_v1_workflows__workflow_id__control_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Control Workflow V1 Workflows  Workflow Id  Control Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel / return-for-information / resubmit a waiting run",
         "tags": [
           "Workflows"
         ]

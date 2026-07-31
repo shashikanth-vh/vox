@@ -523,6 +523,71 @@ async def verify_committee_decision(deal_id: str,
 
 
 @activity.defn
+async def verify_control(control_ref: str,
+                         caller: CallerContext | None = None) -> dict[str, Any]:
+    """Verify a run-control signal (cancel / return-for-information / resubmit) against the
+    DURABLE control record the orchestrator persisted BEFORE signalling.
+
+    The signal itself is untrusted (anyone with Temporal access could send one); the record
+    is not — it can only be written through the Register's service-principal endpoint with a
+    verified human identity. FAIL CLOSED: no record, a record for a different run, or a
+    non-control outcome → ``valid=False`` and the workflow ignores the wake-up."""
+    from evam_register_client.errors import NotFoundError
+    wf_id = str(activity.info().workflow_id)
+    if not control_ref.startswith(f"{wf_id}:control:"):
+        return {"valid": False, "reason": "control reference is not bound to this run"}
+    async with _client(caller) as reg:
+        try:
+            rec = await reg.get_decision(control_ref, request_id=wf_id)
+        except NotFoundError:
+            return {"valid": False, "reason": "no control record for this reference"}
+    action = rec.get("decision")
+    if action not in ("Cancelled", "ReturnedForInformation", "Resubmitted"):
+        return {"valid": False, "reason": "referenced record is not a control record"}
+    activity.logger.info("control_verified", extra={"workflow": wf_id, "action": action,
+                                                    "by": rec.get("decided_by")})
+    return {"valid": True, "action": action, "by": rec.get("decided_by"),
+            "note": rec.get("note")}
+
+
+@activity.defn
+async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str, Any]:
+    """Emit an operational event (SLA reminder, escalation, control action, business
+    milestone) for the humans who run PRISM.
+
+    Always lands in the structured log (the ops baseline every deployment has). When
+    ``WORKFLOWS_OPS_WEBHOOK_URL`` is set, the event is ALSO posted as JSON to it — Slack,
+    Teams, PagerDuty, or any receiver — with a short bounded retry. Delivery is deliberately
+    BEST-EFFORT: an unreachable webhook logs a warning and returns delivered=False; it never
+    fails the workflow that raised the event (increment 7 replaces this seam with the full
+    notification service)."""
+    import asyncio as _asyncio
+
+    import httpx
+
+    s = get_settings()
+    wf_id = str(activity.info().workflow_id)
+    payload = {"event": event, "workflow_id": wf_id, **detail}
+    activity.logger.info("operational_event", extra={"ops": payload})
+    if not s.ops_webhook_url:
+        return {"delivered": False, "channel": "log"}
+    last_error = ""
+    for attempt in range(1 + max(0, s.ops_webhook_retries)):
+        try:
+            async with httpx.AsyncClient(timeout=s.ops_webhook_timeout_s) as client:
+                r = await client.post(s.ops_webhook_url, json=payload)
+            if r.status_code < 300:
+                return {"delivered": True, "channel": "webhook"}
+            last_error = f"HTTP {r.status_code}"
+        except httpx.HTTPError as exc:
+            last_error = str(exc)
+        await _asyncio.sleep(min(2.0 * (attempt + 1), 5.0))
+    activity.logger.warning("operational_event_undelivered",
+                            extra={"ops": payload, "error": last_error})
+    return {"delivered": False, "channel": "webhook", "error": last_error}
+
+
+@activity.defn
 async def verify_facility_decisions(line_ids: list[str],
                                     caller: CallerContext | None = None) -> dict[str, Any]:
     """Read the PER-FACILITY committee outcomes the orchestrator persisted under

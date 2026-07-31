@@ -54,6 +54,33 @@ class Settings(BaseServiceSettings):
     access_url: str = ""             # e.g. http://prism-access — for role checks
     access_api_key: str = "dev-local-key"
 
+    # ------------------------------------------------------------------ #
+    # Release-1 workflow-foundation feature flags. Every one defaults to  #
+    # its safe/off posture so existing deployments change nothing until   #
+    # an operator opts in.                                                #
+    # ------------------------------------------------------------------ #
+    # Operational events (SLA reminders, escalations, control actions) are always written to
+    # the structured log; when this URL is set they are ALSO posted as JSON to it (Slack /
+    # Teams / any webhook receiver). Delivery is best-effort with bounded retry — an
+    # unreachable webhook never fails a workflow.
+    ops_webhook_url: str = ""
+    ops_webhook_timeout_s: float = 5.0
+    ops_webhook_retries: int = 2
+    # Sensitive-payload encryption at rest in Temporal: base64url 32-byte key → AES-256-GCM
+    # PayloadCodec on every workflow input/result/activity argument. Empty = plaintext (dev).
+    payload_encryption_key: str = ""
+    # Prometheus scrape endpoint for the WORKER's Temporal SDK metrics (task latencies,
+    # failures, cache). Empty = metrics off. e.g. "0.0.0.0:9464".
+    metrics_bind_address: str = ""
+    # Upsert per-run search attributes (PrismBusinessStatus / PrismSubject) so ops can filter
+    # runs in the Temporal UI/CLI. Requires the attributes to be REGISTERED on the server
+    # first (see services/workflows/README.md) — hence opt-in.
+    search_attributes_enabled: bool = False
+    # Worker build identity. Setting a build id stamps runs; enabling versioning additionally
+    # routes tasks only to compatible workers (requires server-side rules — see README).
+    worker_build_id: str = ""
+    use_worker_versioning: bool = False
+
     # Production switch. When true, the requester of a conversion and the approver/rejecter
     # MUST present a verified OIDC token — the orchestrator refuses to trust a
     # caller-supplied identity string. Leave false only for local dev without an IdP.

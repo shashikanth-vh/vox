@@ -5638,7 +5638,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"workflow_id\": \"sample\",\n  \"decision\": \"REPLACE-to-match-^(Approved|Rejected)\",\n  \"lead_id\": \"sample\",\n  \"note\": \"sample\",\n  \"kind\": \"REPLACE-to-match-^(lead_conversion|co\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\"\n}",
+                  "raw": "{\n  \"workflow_id\": \"sample\",\n  \"decision\": \"REPLACE-to-match-^(Approved|Rejected|\",\n  \"lead_id\": \"sample\",\n  \"note\": \"sample\",\n  \"kind\": \"REPLACE-to-match-^(lead_conversion|co\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9278,7 +9278,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (14 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (15 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Workflows",
@@ -9863,6 +9863,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"facilities\": [\n    {\n      \"lending_id\": \"sample\",\n      \"approved\": false,\n      \"note\": \"sample\"\n    }\n  ],\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/control \u2014 Cancel / return-for-information / resubmit a waiting run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/control",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "control"
+                  ]
+                },
+                "description": "The lifecycle controls every real approval flow needs. Same trust posture as a\ndecision: verified identity, tenant binding, and the action is PERSISTED as an\nimmutable control record BEFORE the workflow is signalled \u2014 the signal is only a\nwake-up, and the run verifies the record (fail-closed) before acting on it.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"action\": \"REPLACE-to-match-^(cancel|return|resu\",\n  \"by\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

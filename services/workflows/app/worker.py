@@ -9,9 +9,11 @@ import asyncio
 
 from evam_backend_core.logging import configure_logging, get_logger
 from temporalio.client import Client
+from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
 from temporalio.worker import Worker
 
 from app import activities
+from app.codec import build_data_converter
 from app.config import get_settings
 from app.workflows import (
     AdvayaHandoffWorkflow,
@@ -30,10 +32,28 @@ log = get_logger("workflows")
 async def main() -> None:
     s = get_settings()
     configure_logging(s.log_level, json_logs=s.log_json and not s.is_local)
-    client = await Client.connect(s.temporal_address, namespace=s.temporal_namespace)
+    # SDK metrics: with a bind address set, the worker exposes a Prometheus scrape endpoint
+    # (task/activity latencies, failures, slot usage, cache) — the operational dashboard's
+    # data source. Off by default.
+    runtime = None
+    if s.metrics_bind_address:
+        runtime = Runtime(telemetry=TelemetryConfig(
+            metrics=PrometheusConfig(bind_address=s.metrics_bind_address)))
+    client = await Client.connect(
+        s.temporal_address, namespace=s.temporal_namespace,
+        data_converter=build_data_converter(s.payload_encryption_key),
+        runtime=runtime)
+    # Worker build identity: stamping runs with the build that processed them is the basis
+    # for safe worker upgrades; full versioned task routing additionally needs server-side
+    # rules (see README).
+    versioning_kwargs: dict = {}
+    if s.worker_build_id:
+        versioning_kwargs = {"build_id": s.worker_build_id,
+                             "use_worker_versioning": s.use_worker_versioning}
     worker = Worker(
         client,
         task_queue=s.task_queue,
+        **versioning_kwargs,
         workflows=[IngestInteractionWorkflow, VoxTouchpointWorkflow,
                    LeadConversionWorkflow, LeadQualificationWorkflow,
                    DealStructuringWorkflow, DocumentCollectionWorkflow,
@@ -63,6 +83,9 @@ async def main() -> None:
             activities.prepare_cpcs_checklist,   # authoritative CP/CS checklist (maker)
             activities.create_handover_package,   # durable handover package + stage advance
             activities.record_advaya_handoff,   # future-Advaya hook (not on the handover path)
+            # Release-1 foundation: run-control verification + operational events.
+            activities.verify_control,
+            activities.emit_operational_event,
         ],
     )
     log.info("worker_started",

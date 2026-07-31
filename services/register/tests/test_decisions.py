@@ -449,3 +449,36 @@ async def test_advaya_handoff_is_single_winner_and_reads_back(wf_client):
     assert bad.status_code == 409, bad.text
     got = await wf_client.get(f"/v1/internal/advaya-handoffs/{hk}")
     assert got.status_code == 200 and got.json()["acknowledgement_id"] == "ACK-1"
+
+
+async def test_control_records_are_kind_bound_and_create_no_delivery(wf_client):
+    """Run-control records (cancel / return / resubmit) share the decision store's
+    durability and immutability but are AUDIT anchors, not appliable outcomes: the value
+    space is disjoint by kind (no control write can mint an approval and vice versa) and no
+    conversion-delivery outbox row is created for them."""
+    ref = f"{WF}:control:abc123"
+    r = await wf_client.post(
+        "/v1/internal/decisions",
+        json={"workflow_id": ref, "decision": "Cancelled", "kind": "control",
+              "note": "client withdrew"},
+        headers={"X-Internal-Context": _ctx()})
+    assert r.status_code == 201, r.text
+    assert r.json()["decision"] == "Cancelled"
+    # Readable back for the workflow's fail-closed verification…
+    got = await wf_client.get(f"/v1/internal/decisions/{ref}")
+    assert got.status_code == 200 and got.json()["decision"] == "Cancelled"
+    # …but nothing to deliver: the outbox is untouched.
+    stats = (await wf_client.get("/v1/internal/decisions/deliveries/stats")).json()
+    assert stats["pending"] == 0
+
+    # The kind/value spaces are DISJOINT, both ways.
+    bad = await wf_client.post(
+        "/v1/internal/decisions",
+        json={"workflow_id": f"{WF}:control:x", "decision": "Approved", "kind": "control"},
+        headers={"X-Internal-Context": _ctx()})
+    assert bad.status_code == 422, bad.text
+    bad = await wf_client.post(
+        "/v1/internal/decisions",
+        json={"workflow_id": f"{WF}:c2", "decision": "Cancelled"},
+        headers={"X-Internal-Context": _ctx()})
+    assert bad.status_code == 422, bad.text
