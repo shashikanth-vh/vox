@@ -184,7 +184,7 @@ class AdvayaHandoverIn(BaseModel):
     """MAKER prepares the Advaya handover of a Lending line that is 'Ready for Disbursement'.
     Requires senior credit authority (Credit Head / Management / Admin). The workflow prepares the
     durable handover package (authoritative amounts + package digest generated server-side); a
-    DIFFERENT checker must then approve it to advance the line to 'Handed Over to Advaya'."""
+    DIFFERENT checker must then approve it to advance the line to 'Disbursed'."""
 
     model_config = ConfigDict(extra="forbid")
     lending_id: str

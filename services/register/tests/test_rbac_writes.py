@@ -245,7 +245,7 @@ async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
         "subject_type": "Lead", "subject_id": lead["id"], "field": "status",
         "to_value": "Converted"}, headers=BD_HEAD)
     assert cr.status_code == 422, cr.text
-    # A lending line can't be PATCHed into the locked 'Handed Over to Advaya' state by a non-lock
+    # A lending line can't be PATCHed into the locked 'Disbursed' state by a non-lock
     # role (BDRM), even assigned — that's Credit Head / Admin / Management only. Walk it (ordered
     # pipeline) to 'Ready for Disbursement' first — the stage from which handover is reachable — so
     # the row-lock, not the sequencing rule, is what refuses the BDRM.
@@ -302,7 +302,9 @@ async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
                 "/v1/evidence",
                 json={"subject_type": "Lending", "subject_id": lend["id"],
                       "evidence_kind": "executed_agreement", "reference": "ea/1",
-                      "sha256": "b" * 64, "workflow_id": "wf", "run_id": "run"},
+                      # Cite the committee decision seeded at the Sanctioned hop — the workflow
+                      # must RESOLVE to a decision for this subject; an invented id is refused.
+                      "sha256": "b" * 64, "workflow_id": wf, "run_id": "run-1"},
                 headers=ADMIN)).status_code == 201
         body = {"stage": stage}
         if stage == "Ready for Disbursement":
@@ -311,7 +313,7 @@ async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
         assert (await client.patch(f"/v1/lending/{lend['id']}",
                                    json=body)).status_code == 200
     r = await client.patch(f"/v1/lending/{lend['id']}",
-                           json={"stage": "Handed Over to Advaya"}, headers=BDRM)
+                           json={"stage": "Disbursed"}, headers=BDRM)
     assert r.status_code == 403, r.text
 
 

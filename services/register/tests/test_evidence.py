@@ -1,8 +1,9 @@
 """Evidence-based lifecycle gates.
 
 Ordered transitions prove sequence; mandatory fields prove shape; an evidence gate proves the
-real-world governance WORK happened. A Deal/Lending line may reach the sanction milestone only once
-the Credit Committee approval AND the sanction letter are on file as IMMUTABLE evidence — enforced
+real-world governance WORK happened. A LENDING line may reach the sanction milestone only once
+the Credit Committee approval AND the sanction letter are on file as IMMUTABLE evidence (the
+deal-level credit stage is deprecated — every credit gate keys on the lending line) — enforced
 by the shared policy engine for humans and services alike, bypassable only via an audited senior
 break-glass. Runs against real Postgres + the migration."""
 
@@ -30,16 +31,18 @@ async def _entity(client) -> str:  # noqa: ANN001
     return r.json()["id"]
 
 
-async def _deal_at_note_circulated(client) -> str:  # noqa: ANN001
+async def _line_at_note_circulated(client) -> str:  # noqa: ANN001
+    """A LENDING line walked to the committee stage — the subject every credit-evidence gate
+    keys on (a deal's stage is the commercial funnel and carries no evidence gates)."""
     eid = await _entity(client)
-    did = (await client.post("/v1/deals", json={"entity_id": eid})).json()["id"]
-    for stage in ("Diligence", "Note Circulated"):
-        assert (await client.patch(f"/v1/deals/{did}",
-                                   json={"stage": stage})).status_code == 200
-    return did
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    assert (await client.patch(f"/v1/lending/{lid}",
+                               json={"stage": "Note Circulated"})).status_code == 200
+    return lid
 
 
-_TABLE_OF = {"Deal": "deals", "Lending": "lending_tracker"}
+_TABLE_OF = {"Lending": "lending_tracker"}
 
 _DECISION_INSERT_COLS = (
     "INSERT INTO workflow_decisions "
@@ -50,7 +53,6 @@ _DECISION_INSERT_COLS = (
 _TAIL = " WHERE id = CAST(:sid AS uuid)"
 # Literal per-table statements (the table name is never interpolated from input).
 _DECISION_INSERT_SQL = {
-    "Deal": _DECISION_INSERT_COLS + "deals" + _TAIL,          # noqa: S608
     "Lending": _DECISION_INSERT_COLS + "lending_tracker" + _TAIL,   # noqa: S608
 }
 
@@ -103,14 +105,14 @@ async def _attach(client, subject_type, subject_id, kind, headers=ADMIN,  # noqa
     return await client.post("/v1/evidence", json=body, headers=headers)
 
 
-_SANCTION_BODY = {"stage": "Sanctioned", "product_type": "Term Loan", "rm": "asha"}
+_SANCTION_BODY = {"stage": "Sanctioned", "rm": "asha"}
 
 
 async def test_sanction_is_blocked_without_governance_evidence(client):
-    """A deal that has satisfied the ordered pipeline AND the mandatory fields STILL cannot reach
+    """A lending line that has satisfied the ordered pipeline STILL cannot reach
     Sanctioned until the committee-approval + sanction-letter evidence is on file."""
-    did = await _deal_at_note_circulated(client)
-    blocked = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    did = await _line_at_note_circulated(client)
+    blocked = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert blocked.status_code == 422, blocked.text
     assert "evidence" in blocked.text.lower()
     assert "credit_committee_approval" in blocked.text and "sanction_letter" in blocked.text
@@ -118,9 +120,9 @@ async def test_sanction_is_blocked_without_governance_evidence(client):
 
 async def test_partial_evidence_still_blocks_sanction(client):
     """BOTH required kinds are needed — one on its own is not enough."""
-    did = await _deal_at_note_circulated(client)
-    assert (await _attach(client, "Deal", did, "credit_committee_approval")).status_code == 201
-    blocked = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    did = await _line_at_note_circulated(client)
+    assert (await _attach(client, "Lending", did, "credit_committee_approval")).status_code == 201
+    blocked = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert blocked.status_code == 422, blocked.text
     assert "sanction_letter" in blocked.text
     # The still-missing kind is named; the one already present is not demanded again.
@@ -129,11 +131,11 @@ async def test_partial_evidence_still_blocks_sanction(client):
 
 async def test_sanction_allowed_once_all_evidence_is_on_file(client):
     """With both immutable evidence records attached, the sanction transition is accepted."""
-    did = await _deal_at_note_circulated(client)
-    assert (await _attach(client, "Deal", did, "credit_committee_approval",
+    did = await _line_at_note_circulated(client)
+    assert (await _attach(client, "Lending", did, "credit_committee_approval",
                           sha256="a" * 64)).status_code == 201
-    assert (await _attach(client, "Deal", did, "sanction_letter")).status_code == 201
-    ok = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    assert (await _attach(client, "Lending", did, "sanction_letter")).status_code == 201
+    ok = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert ok.status_code == 200, ok.text
     assert ok.json()["stage"] == "Sanctioned"
 
@@ -141,9 +143,9 @@ async def test_sanction_allowed_once_all_evidence_is_on_file(client):
 async def test_evidence_gate_binds_machine_callers_too(client):
     """The gate is not a role check — a machine/service caller (no user context) is equally bound;
     the evidence must exist regardless of who advances the stage."""
-    did = await _deal_at_note_circulated(client)
+    did = await _line_at_note_circulated(client)
     # No headers → machine caller. Still refused without evidence.
-    blocked = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    blocked = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert blocked.status_code == 422 and "evidence" in blocked.text.lower()
 
 
@@ -154,22 +156,22 @@ async def test_break_glass_requires_senior_authority_and_is_audited(client):
     from sqlalchemy import text
 
     from app.db.session import get_sessionmaker
-    did = await _deal_at_note_circulated(client)
+    did = await _line_at_note_circulated(client)
     bg = "X-Evidence-Break-Glass"
 
     # A machine caller supplying the header has no senior identity → refused (403).
-    svc = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY,
+    svc = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY,
                              headers={bg: "urgent, letter pending"})
     assert svc.status_code == 403, svc.text
 
     # A non-senior human (RM, even with FULL scope) → refused.
     rm = {"X-User-Email": "rm@evamfinance.com", "X-User-Roles": "RM", "X-Authz-Decision": "FULL",
           bg: "urgent"}
-    assert (await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY,
+    assert (await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY,
                                headers=rm)).status_code == 403
 
     # Management with a justification → allowed, and audited.
-    ok = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY,
+    ok = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY,
                             headers={**MGMT, bg: "board pre-cleared; letter issues tomorrow"})
     assert ok.status_code == 200, ok.text
     assert ok.json()["stage"] == "Sanctioned"
@@ -189,10 +191,10 @@ async def test_break_glass_without_a_real_gap_does_not_forge_an_audit(client):
     from sqlalchemy import text
 
     from app.db.session import get_sessionmaker
-    did = await _deal_at_note_circulated(client)
-    await _attach(client, "Deal", did, "credit_committee_approval")
-    await _attach(client, "Deal", did, "sanction_letter")
-    ok = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY,
+    did = await _line_at_note_circulated(client)
+    await _attach(client, "Lending", did, "credit_committee_approval")
+    await _attach(client, "Lending", did, "sanction_letter")
+    ok = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY,
                             headers={**ADMIN, "X-Evidence-Break-Glass": "unnecessary"})
     assert ok.status_code == 200, ok.text
     sm = get_sessionmaker()
@@ -210,8 +212,8 @@ async def test_evidence_is_immutable_at_the_database(client):
     from sqlalchemy.exc import DBAPIError
 
     from app.db.session import get_sessionmaker
-    did = await _deal_at_note_circulated(client)
-    r = await _attach(client, "Deal", did, "credit_committee_approval")
+    did = await _line_at_note_circulated(client)
+    r = await _attach(client, "Lending", did, "credit_committee_approval")
     ev_id = r.json()["id"]
     sm = get_sessionmaker()
     async with sm() as s:
@@ -228,13 +230,13 @@ async def test_evidence_is_immutable_at_the_database(client):
 async def test_attaching_evidence_requires_an_identified_principal(client):
     """Attaching evidence asserts a governance fact — an anonymous (unnamed-key, no-user) caller may
     not; an Admin may, and it is listed back."""
-    did = await _deal_at_note_circulated(client)
-    anon = await _attach(client, "Deal", did, "credit_committee_approval", headers={})
+    did = await _line_at_note_circulated(client)
+    anon = await _attach(client, "Lending", did, "credit_committee_approval", headers={})
     assert anon.status_code == 403, anon.text
-    ok = await _attach(client, "Deal", did, "credit_committee_approval")
+    ok = await _attach(client, "Lending", did, "credit_committee_approval")
     assert ok.status_code == 201, ok.text
     listed = await client.get("/v1/evidence",
-                              params={"subject_type": "Deal", "subject_id": did}, headers=ADMIN)
+                              params={"subject_type": "Lending", "subject_id": did}, headers=ADMIN)
     assert listed.status_code == 200
     kinds = [e["evidence_kind"] for e in listed.json()["items"]]
     assert "credit_committee_approval" in kinds
@@ -247,22 +249,22 @@ async def test_committee_and_sanction_evidence_need_the_credit_authority(client)
     """The core trust fix: committee-approval / sanction-letter evidence is reserved to the credit
     authority (Credit Head / Management / Admin) and the workflow service. An ordinary identified
     principal — an RM or an Analyst — CANNOT manufacture it, even though they can otherwise operate
-    on the deal. Without this, anyone able to advance the deal could satisfy the sanction gate."""
-    did = await _deal_at_note_circulated(client)
+    on the line. Without this, anyone able to advance the line could satisfy the sanction gate."""
+    did = await _line_at_note_circulated(client)
     for kind in ("credit_committee_approval", "sanction_letter"):
-        assert (await _attach(client, "Deal", did, kind, headers=RM)).status_code == 403
-        assert (await _attach(client, "Deal", did, kind, headers=ANALYST)).status_code == 403
+        assert (await _attach(client, "Lending", did, kind, headers=RM)).status_code == 403
+        assert (await _attach(client, "Lending", did, kind, headers=ANALYST)).status_code == 403
     # The credit authority may.
-    ok = await _attach(client, "Deal", did, "credit_committee_approval", headers=CREDIT_HEAD)
+    ok = await _attach(client, "Lending", did, "credit_committee_approval", headers=CREDIT_HEAD)
     assert ok.status_code == 201, ok.text
 
 
 async def test_unknown_evidence_kind_is_rejected(client):
     """Evidence kinds are a controlled vocabulary — an arbitrary string is refused (no self-minted
     'kinds' that a future gate might trust)."""
-    did = await _deal_at_note_circulated(client)
+    did = await _line_at_note_circulated(client)
     r = await client.post("/v1/evidence",
-                          json={"subject_type": "Deal", "subject_id": did,
+                          json={"subject_type": "Lending", "subject_id": did,
                                 "evidence_kind": "totally_made_up", "reference": "x/1"},
                           headers=ADMIN)
     assert r.status_code == 422 and "controlled vocabulary" in r.text.lower()
@@ -281,9 +283,9 @@ async def test_evidence_kind_must_match_subject_type(client):
 async def test_committee_evidence_needs_a_digest_and_a_decision_ref(client):
     """A committee/sanction record must carry an integrity digest AND cite a committee decision — a
     free-typed record is not enough."""
-    did = await _deal_at_note_circulated(client)
-    wf = await _seed_committee_decision("Deal", did)
-    base = {"subject_type": "Deal", "subject_id": did,
+    did = await _line_at_note_circulated(client)
+    wf = await _seed_committee_decision("Lending", did)
+    base = {"subject_type": "Lending", "subject_id": did,
             "evidence_kind": "credit_committee_approval", "reference": "c/1"}
     # Missing sha256 (decision cited).
     r1 = await client.post("/v1/evidence", json={**base, "decision_ref": wf}, headers=ADMIN)
@@ -297,29 +299,29 @@ async def test_committee_provenance_is_verified_not_asserted(client):
     """The core Round-L fix: committee/sanction provenance is VERIFIED against the durable decision,
     not merely recorded. Invented, mismatched, rejected and cross-subject decisions are all
     refused; only a genuine Approved committee decision for THIS subject works."""
-    did = await _deal_at_note_circulated(client)
-    body = {"subject_type": "Deal", "subject_id": did,
+    did = await _line_at_note_circulated(client)
+    body = {"subject_type": "Lending", "subject_id": did,
             "evidence_kind": "credit_committee_approval", "reference": "c/1", "sha256": "a" * 64}
     # (1) Invented decision_ref → refused.
     r = await client.post("/v1/evidence", json={**body, "decision_ref": "does-not-exist"},
                           headers=ADMIN)
     assert r.status_code == 422 and "does not resolve" in r.text.lower()
     # (2) A REJECTED committee decision cannot back an APPROVAL record.
-    wf_rej = await _seed_committee_decision("Deal", did, outcome="Rejected")
+    wf_rej = await _seed_committee_decision("Lending", did, outcome="Rejected")
     r = await client.post("/v1/evidence", json={**body, "decision_ref": wf_rej}, headers=ADMIN)
     assert r.status_code == 422 and "not 'approved'" in r.text.lower()
     # (3) A decision for a DIFFERENT subject cannot be reused here.
-    other = await _deal_at_note_circulated(client)
-    wf_other = await _seed_committee_decision("Deal", other)
+    other = await _line_at_note_circulated(client)
+    wf_other = await _seed_committee_decision("Lending", other)
     r = await client.post("/v1/evidence", json={**body, "decision_ref": wf_other}, headers=ADMIN)
     assert r.status_code == 422 and "different subject" in r.text.lower()
     # (4) A decision NOT recorded by committee authority is refused.
-    wf_bd = await _seed_committee_decision("Deal", did, roles=("BD Head",))
+    wf_bd = await _seed_committee_decision("Lending", did, roles=("BD Head",))
     r = await client.post("/v1/evidence", json={**body, "decision_ref": wf_bd}, headers=ADMIN)
     assert r.status_code == 422 and "committee authority" in r.text.lower()
     # (5) A genuine Approved committee decision for this subject → accepted; and it is one-to-one:
     #     the same decision cannot back a second approval record (409).
-    wf_ok = await _seed_committee_decision("Deal", did)
+    wf_ok = await _seed_committee_decision("Lending", did)
     ok = await client.post("/v1/evidence", json={**body, "decision_ref": wf_ok}, headers=ADMIN)
     assert ok.status_code == 201, ok.text
     # The evidence's provenance is COPIED from the decision, not the caller.
@@ -332,7 +334,7 @@ async def test_committee_provenance_is_verified_not_asserted(client):
 async def test_evidence_requires_an_existing_subject(client):
     """No evidence for a phantom record — the subject must actually exist."""
     r = await client.post("/v1/evidence",
-                          json={"subject_type": "Deal", "subject_id": str(uuid.uuid4()),
+                          json={"subject_type": "Lending", "subject_id": str(uuid.uuid4()),
                                 "evidence_kind": "document:kyc", "reference": "d/1"},
                           headers=ADMIN)
     assert r.status_code == 404, r.text
@@ -340,9 +342,9 @@ async def test_evidence_requires_an_existing_subject(client):
 
 async def test_scoped_authority_cannot_attach_out_of_scope(client):
     """A SCOPED authority (a BDRM filing document evidence) may only attach to a subject in their
-    scope — an unrelated deal is refused."""
-    did = await _deal_at_note_circulated(client)          # created by the default (service) client
-    r = await _attach(client, "Deal", did, "document:kyc", headers=RM)
+    scope — an unrelated lending line is refused."""
+    did = await _line_at_note_circulated(client)          # created by the default (service) client
+    r = await _attach(client, "Lending", did, "document:kyc", headers=RM)
     assert r.status_code == 403 and "scope" in r.text.lower()
 
 
@@ -350,26 +352,26 @@ async def test_revoked_evidence_no_longer_satisfies_the_gate(client):
     """Immutable but not immutably-TRUSTED: a mistaken committee approval can be REVOKED (an
     append-only status), after which the sanction gate stops accepting it — and re-supplying valid
     evidence restores it. History is preserved throughout."""
-    did = await _deal_at_note_circulated(client)
-    ca = await _attach(client, "Deal", did, "credit_committee_approval")
-    await _attach(client, "Deal", did, "sanction_letter")
+    did = await _line_at_note_circulated(client)
+    ca = await _attach(client, "Lending", did, "credit_committee_approval")
+    await _attach(client, "Lending", did, "sanction_letter")
     ca_id = ca.json()["id"]
     # Revoke the committee approval → the gate should now refuse the sanction again.
     rev = await client.post(f"/v1/evidence/{ca_id}/revoke",
                             json={"status": "Invalidated", "reason": "attached in error"},
                             headers=ADMIN)
     assert rev.status_code == 200, rev.text
-    blocked = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    blocked = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert blocked.status_code == 422 and "credit_committee_approval" in blocked.text
     # The revoked row is still on file (history preserved) but marked invalid.
     listed = (await client.get("/v1/evidence",
-                               params={"subject_type": "Deal", "subject_id": did},
+                               params={"subject_type": "Lending", "subject_id": did},
                                headers=ADMIN)).json()["items"]
     ca_row = next(e for e in listed if e["id"] == ca_id)
     assert ca_row["valid"] is False
     # Re-attach a fresh, valid committee approval → the gate is satisfied again.
-    await _attach(client, "Deal", did, "credit_committee_approval", reference="committee/RE-1")
-    ok = await client.patch(f"/v1/deals/{did}", json=_SANCTION_BODY)
+    await _attach(client, "Lending", did, "credit_committee_approval", reference="committee/RE-1")
+    ok = await client.patch(f"/v1/lending/{did}", json=_SANCTION_BODY)
     assert ok.status_code == 200, ok.text
 
 
@@ -380,24 +382,24 @@ async def test_supersession_must_match_subject_and_kind(client):
     """A superseding row must have the SAME subject and evidence_kind as the row it replaces — so a
     scoped document authority cannot 'supersede' (and thereby invalidate) committee evidence it has
     no authority over."""
-    did = await _deal_at_note_circulated(client)
-    ca = await _attach(client, "Deal", did, "credit_committee_approval")
+    did = await _line_at_note_circulated(client)
+    ca = await _attach(client, "Lending", did, "credit_committee_approval")
     ca_id = ca.json()["id"]
     # A document-evidence attach that names the committee approval as supersedes_id → refused.
-    bad = await _attach(client, "Deal", did, "document:kyc", supersedes_id=ca_id)
+    bad = await _attach(client, "Lending", did, "document:kyc", supersedes_id=ca_id)
     assert bad.status_code == 422 and "same subject and evidence_kind" in bad.text.lower()
     # The committee evidence is untouched (still valid).
     listed = (await client.get("/v1/evidence",
-                               params={"subject_type": "Deal", "subject_id": did},
+                               params={"subject_type": "Lending", "subject_id": did},
                                headers=ADMIN)).json()["items"]
     assert next(e for e in listed if e["id"] == ca_id)["valid"] is True
 
 
 async def test_revocation_enforces_subject_scope(client):
     """Revocation repeats the subject-scope check — a scoped document authority cannot revoke
-    evidence on a deal outside their scope just by knowing its id."""
-    did = await _deal_at_note_circulated(client)
-    ev = await _attach(client, "Deal", did, "document:kyc")     # attached by Admin (in scope)
+    evidence on a lending line outside their scope just by knowing its id."""
+    did = await _line_at_note_circulated(client)
+    ev = await _attach(client, "Lending", did, "document:kyc")     # attached by Admin (in scope)
     ev_id = ev.json()["id"]
     denied = await client.post(f"/v1/evidence/{ev_id}/revoke",
                                json={"status": "Revoked", "reason": "x"}, headers=RM)
@@ -407,10 +409,10 @@ async def test_revocation_enforces_subject_scope(client):
 async def test_listing_enforces_subject_scope(client):
     """Listing a subject's evidence requires subject-level read authority — an out-of-scope scoped
     principal is refused (not merely any identified same-tenant caller)."""
-    did = await _deal_at_note_circulated(client)
-    await _attach(client, "Deal", did, "document:kyc")
+    did = await _line_at_note_circulated(client)
+    await _attach(client, "Lending", did, "document:kyc")
     denied = await client.get("/v1/evidence",
-                              params={"subject_type": "Deal", "subject_id": did}, headers=RM)
+                              params={"subject_type": "Lending", "subject_id": did}, headers=RM)
     assert denied.status_code == 403 and "scope" in denied.text.lower()
 
 
@@ -491,8 +493,8 @@ async def test_advaya_acknowledgement_digest_must_match_the_handoff(client, _adv
 async def test_evidence_cannot_be_revoked_twice(client):
     """The status ledger rejects a repeated/contradictory terminal status — one terminal status per
     evidence row."""
-    did = await _deal_at_note_circulated(client)
-    ev = await _attach(client, "Deal", did, "document:kyc")
+    did = await _line_at_note_circulated(client)
+    ev = await _attach(client, "Lending", did, "document:kyc")
     ev_id = ev.json()["id"]
     first = await client.post(f"/v1/evidence/{ev_id}/revoke",
                               json={"status": "Revoked", "reason": "one"}, headers=ADMIN)

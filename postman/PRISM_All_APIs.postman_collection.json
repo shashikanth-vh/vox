@@ -978,7 +978,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"sample\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1139,7 +1139,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"sample\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10100,7 +10100,7 @@
       ]
     },
     {
-      "name": "VocX  (19 requests \u00b7 {{baseUrl}}/vocx)",
+      "name": "VocX  (21 requests \u00b7 {{baseUrl}}/vocx)",
       "item": [
         {
           "name": "Touchpoints",
@@ -10725,6 +10725,42 @@
               }
             },
             {
+              "name": "GET /vocx/v1/reports/print \u2014 Print-ready HTML of a report (browser print \u2192 PDF)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/print",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "print"
+                  ]
+                }
+              }
+            },
+            {
               "name": "POST /vocx/v1/reports/save \u2014 Save/update a pending report",
               "request": {
                 "method": "POST",
@@ -10756,6 +10792,41 @@
                     "v1",
                     "reports",
                     "save"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/suggest \u2014 Company typeahead: ranked matches or new-company signal",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/suggest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "suggest"
                   ]
                 }
               }

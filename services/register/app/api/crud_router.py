@@ -280,6 +280,8 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
             raise ForbiddenError(
                 "An evidence break-glass is reserved to a designated senior authority "
                 "(Admin or Management).")
+        from app.authz.revalidate import revalidate_sensitive
+        await revalidate_sensitive(ctx, "approve_stage_change")
         break_glass = True
         bg_reason = break_glass_justification.strip()
 
@@ -661,8 +663,10 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             # RBAC: "Delete a row — Admin ONLY" (checked whenever a user context is
             # present; machine-to-machine behaviour follows REGISTER_ENFORCE_RBAC).
             from app.authz import enforce_operation
+            from app.authz.revalidate import revalidate_sensitive
 
             enforce_operation(ctx.user, "delete_row")
+            await revalidate_sensitive(ctx, "delete_row")
             expected = expected_version if expected_version is not None else _parse_if_match(if_match)
             await repo.soft_delete(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, expected_version=expected
@@ -677,8 +681,10 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         ) -> Any:
             # RBAC: restoring a soft-deleted row mirrors the delete gate (Admin-only).
             from app.authz import enforce_operation
+            from app.authz.revalidate import revalidate_sensitive
 
             enforce_operation(ctx.user, "delete_row")
+            await revalidate_sensitive(ctx, "delete_row")
             obj = await repo.restore(ctx.session, ctx.tenant_id, obj_id, ctx.actor)
             return spec.read_schema.model_validate(obj)
 

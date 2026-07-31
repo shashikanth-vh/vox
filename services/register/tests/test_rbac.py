@@ -338,6 +338,7 @@ async def test_transactional_lead_convert(client: AsyncClient):
     after = (await client.get(f"/v1/leads/{lead['id']}")).json()
     assert after["status"] == "Converted" and after["converted_deal_id"] == body["deal_id"]
     deal = (await client.get(f"/v1/deals/{body['deal_id']}")).json()
-    assert deal["is_lending"] and deal["is_syndication"] and deal["stage"] == "Data Awaited"
+    # The deal enters the COMMERCIAL funnel; credit starts on the lending line.
+    assert deal["is_lending"] and deal["is_syndication"] and deal["stage"] == "In Pipeline"
     again = await client.post(f"/v1/leads/{lead['id']}/convert", json={"is_lending": True})
     assert again.status_code == 409

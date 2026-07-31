@@ -77,6 +77,15 @@ class ForbiddenError(AppError):
     title = "Not permitted for this tenant"
 
 
+class ServiceUnavailableError(AppError):
+    """A required upstream authority (e.g. Access, for sensitive-operation online
+    revalidation) cannot answer — the caller fails CLOSED rather than degrading."""
+
+    status_code = 503
+    error_type = "service_unavailable"
+    title = "Required upstream authority unavailable"
+
+
 def _payload(status: int, error_type: str, title: str, detail: str, **extra: Any) -> dict:
     body = {
         "error": {

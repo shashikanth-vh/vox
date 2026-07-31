@@ -263,4 +263,5 @@ async def test_lead_conversion_signal_approval(stack):
     assert converted["status"] == "Converted"
     assert converted["converted_deal_id"] == result["deal_id"]
     deal = (await reg.get(f"/v1/deals/{result['deal_id']}")).json()
-    assert deal["is_lending"] is True and deal["stage"] == "Data Awaited"
+    # An approved conversion enters the COMMERCIAL funnel; credit starts on the lending line.
+    assert deal["is_lending"] is True and deal["stage"] == "In Pipeline"

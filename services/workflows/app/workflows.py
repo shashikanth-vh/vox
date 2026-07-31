@@ -400,12 +400,15 @@ class LeadQualificationWorkflow:
 
 @workflow.defn
 class DealStructuringWorkflow:
-    """Structure a deal to the sanction milestone. Walk the ordered pipeline (→ Diligence → Note
-    Circulated), circulate the credit note, then wait for the Credit Committee's decision (a signal).
-    On approval, FILE the committee-approval + sanction-letter evidence and advance the deal to
-    'Sanctioned' — a transition the Register's evidence gate accepts ONLY because that evidence is
-    now on file. A hand-rolled PATCH to 'Sanctioned' is refused all the same, so the workflow is
-    the ONLY way the milestone is reached."""
+    """Structure a deal's LENDING FACILITY to the sanction milestone. The deal itself carries only
+    the COMMERCIAL funnel (its `stage` is never touched here); every credit transition runs on the
+    deal's lending tracker line(s): walk each line up the ordered pipeline (→ Diligence → Note
+    Circulated), circulate the credit note as Lending evidence, then wait for the Credit
+    Committee's decision (a signal). On approval, FILE the committee-approval + sanction-letter
+    evidence per line (citing the per-line subject-bound decision the orchestrator recorded) and
+    advance the line to 'Sanctioned' — a transition the Register's evidence gate accepts ONLY
+    because that evidence is now on file. A hand-rolled PATCH to 'Sanctioned' is refused all the
+    same, so the workflow is the ONLY way the milestone is reached."""
 
     def __init__(self) -> None:
         self._notified = False
@@ -428,27 +431,44 @@ class DealStructuringWorkflow:
         wf_id = workflow.info().workflow_id
         caller = inp.caller
 
-        # -- 1. Walk the ordered pipeline to the committee stage (Note Circulated). Each hop goes
-        #       through the Register's policy-enforcing API, so sequencing is enforced. Idempotent.
-        deal = await workflow.execute_activity(
-            activities.get_resource, args=["deals", inp.deal_id, caller], **_IO)
-        for stage in ("Diligence", "Note Circulated"):
-            if _stage_before(deal.get("stage"), stage):
-                self._stage = f"Advancing to {stage}"
-                deal = await workflow.execute_activity(
-                    activities.advance_stage,
-                    args=["deals", inp.deal_id, "stage", stage, None, caller], **_IO)
+        # -- 0. Credit execution runs on the deal's LENDING line(s) — a deal with none has nothing
+        #       to structure. Fail clearly up front rather than wait for a committee decision that
+        #       could sanction nothing.
+        lines = await workflow.execute_activity(
+            activities.find_lines_for_deal, args=["lending", inp.deal_id, caller], **_IO)
+        if not lines:
+            self._stage = "NoLendingLine"
+            return DealStructuringResult(
+                workflow_id=wf_id, deal_id=inp.deal_id, status="NoLendingLine",
+                note="This deal has no lending tracker line. Create the facility line first — "
+                     "credit structuring and sanction run on the lending record, not the deal.")
 
-        # -- 2. Circulate the structured credit note as evidence (the structuring artefact).
+        # -- 1. Walk each line up the ordered pipeline to the committee stage (Note Circulated).
+        #       Each hop goes through the Register's policy-enforcing API, so sequencing is
+        #       enforced. Idempotent.
+        for i, line in enumerate(lines):
+            line_id = str(line.get("id"))
+            for stage in ("Diligence", "Note Circulated"):
+                if _stage_before(line.get("stage"), stage):
+                    self._stage = f"Advancing to {stage}"
+                    line = await workflow.execute_activity(
+                        activities.advance_stage,
+                        args=["lending", line_id, "stage", stage, None, caller], **_IO)
+            lines[i] = line
+
+        # -- 2. Circulate the structured credit note as evidence (the structuring artefact),
+        #       filed against each lending line — the subject the committee will decide on.
         evidence_ids: list = []
         if inp.credit_note_reference:
             self._stage = "Circulating credit note"
-            note_ev = await workflow.execute_activity(
-                activities.attach_evidence,
-                args=["Deal", inp.deal_id, "credit_note", inp.credit_note_reference,
-                      None, "Structured credit note circulated to committee", caller],
-                **_DURABLE_IO)
-            evidence_ids.append(note_ev.get("id"))
+            for line in lines:
+                note_ev = await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["Lending", str(line.get("id")), "credit_note",
+                          inp.credit_note_reference, None,
+                          "Structured credit note circulated to committee", caller],
+                    **_DURABLE_IO)
+                evidence_ids.append(note_ev.get("id"))
 
         # -- 3. Wait durably for the Credit Committee decision, VERIFYING each wake-up against the
         #       AUTHORITATIVE record the orchestrator persisted (fresh-authorized, single-winner).
@@ -479,7 +499,7 @@ class DealStructuringWorkflow:
             self._stage = "TimedOut"
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="TimedOut",
-                stage=deal.get("stage"), evidence_ids=evidence_ids,
+                stage=lines[0].get("stage"), evidence_ids=evidence_ids,
                 note="No committee decision within the window.")
 
         # Everything below is derived from the VERIFIED record — not the signal.
@@ -488,56 +508,36 @@ class DealStructuringWorkflow:
         note = verified.get("note")
         committee_ref = verified.get("committee_reference") or f"committee/{wf_id}"
         sanction_ref = verified.get("sanction_letter_reference") or f"sanction/{wf_id}"
-        decision_ref = wf_id   # the evidence cites the decision keyed on this workflow id
 
         if outcome == "Rejected":
+            # The rejection lands on each LENDING line: file the committee-rejection evidence
+            # (citing the per-line subject-bound decision) and move the line to 'Rejected'. The
+            # deal's commercial funnel is the RM's call (a rejected facility may be re-worked or
+            # the deal closed) — the workflow never touches it.
             self._stage = "Rejected"
-            await workflow.execute_activity(
-                activities.attach_evidence,
-                args=["Deal", inp.deal_id, "credit_committee_rejection", committee_ref,
-                      None, note or "Committee rejected", caller, decision_ref],
-                **_DURABLE_IO)
-            await workflow.execute_activity(
-                activities.advance_stage,
-                args=["deals", inp.deal_id, "stage", "Rejected", None, caller], **_DURABLE_IO)
+            for line in lines:
+                line_id = str(line.get("id"))
+                line_ref = f"{wf_id}:lending:{line_id}"
+                await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["Lending", line_id, "credit_committee_rejection", committee_ref,
+                          None, note or "Committee rejected", caller, line_ref],
+                    **_DURABLE_IO)
+                await workflow.execute_activity(
+                    activities.advance_stage,
+                    args=["lending", line_id, "stage", "Rejected", None, caller], **_DURABLE_IO)
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
                 decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids, note=note)
 
-        # -- 4. Approved → FILE the sanction evidence (committee approval + sanction letter), each
-        #       VERIFIED by the Register against the same authoritative decision, BEFORE advancing.
+        # -- 4. Approved → per line: FILE the sanction evidence (committee approval + sanction
+        #       letter), each VERIFIED by the Register against the per-line subject-bound decision
+        #       the orchestrator recorded under "{wf_id}:lending:{line_id}" with the committee's
+        #       own authority, THEN advance the line to 'Sanctioned' — a transition its evidence
+        #       gate accepts only because that evidence is now on file.
         self._stage = "Filing sanction evidence"
-        for kind, ref in (("credit_committee_approval", committee_ref),
-                          ("sanction_letter", sanction_ref)):
-            ev = await workflow.execute_activity(
-                activities.attach_evidence,
-                args=["Deal", inp.deal_id, kind, ref, None, note, caller, decision_ref],
-                **_DURABLE_IO)
-            evidence_ids.append(ev.get("id"))
-
-        # -- 5. Advance to Sanctioned WITH the mandatory fields (durable: reconcile through outages).
-        self._stage = "Sanctioning"
-        extra = {k: v for k, v in
-                 {"product_type": inp.product_type, "rm": inp.rm}.items() if v is not None}
-        sanctioned = await workflow.execute_activity(
-            activities.advance_stage,
-            args=["deals", inp.deal_id, "stage", "Sanctioned", extra, caller], **_DURABLE_IO)
-
-        # -- 6. The same committee decision sanctions the deal's LENDING FACILITY. The Register
-        #       gates Lending's 'Sanctioned' on evidence filed against the LENDING subject, and a
-        #       decision is bound to its subject — so each line cites the per-line decision the
-        #       orchestrator recorded under "{wf_id}:lending:{line_id}" with the committee's own
-        #       authority. Without this the lending line could never leave 'Note Circulated', and
-        #       CP/CS + the Advaya handover would be unreachable.
-        self._stage = "Sanctioning lending facility"
-        for line in await workflow.execute_activity(
-                activities.find_lines_for_deal, args=["lending", inp.deal_id, caller], **_IO):
+        for line in lines:
             line_id = str(line.get("id"))
-            for st in ("Diligence", "Note Circulated"):
-                if _stage_before(line.get("stage"), st):
-                    line = await workflow.execute_activity(
-                        activities.advance_stage,
-                        args=["lending", line_id, "stage", st, None, caller], **_IO)
             line_ref = f"{wf_id}:lending:{line_id}"
             for kind, ref in (("credit_committee_approval", committee_ref),
                               ("sanction_letter", sanction_ref)):
@@ -546,19 +546,29 @@ class DealStructuringWorkflow:
                     args=["Lending", line_id, kind, ref, None, note, caller, line_ref],
                     **_DURABLE_IO)
                 evidence_ids.append(ev.get("id"))
-            # The deal's `extra` carries product_type, which is a DEAL field — LendingUpdate is
-            # extra="forbid", so reusing it here is a 422. Send only fields the lending line
-            # actually has.
+            self._stage = "Sanctioning lending facility"
+            # product_type is a DEAL field — LendingUpdate is extra="forbid", so send only
+            # fields the lending line actually has.
             line_extra = {k: v for k, v in {"rm": inp.rm}.items() if v is not None}
             await workflow.execute_activity(
                 activities.advance_stage,
                 args=["lending", line_id, "stage", "Sanctioned", line_extra or None, caller],
                 **_DURABLE_IO)
 
+        # -- 5. Record the sanction basics on the DEAL as plain data (product_type/rm carried on
+        #       the structuring request). This is NOT a lifecycle change — the deal's stage is the
+        #       commercial funnel, owned by the RM, and the workflow never moves it.
+        deal_fields = {k: v for k, v in
+                       {"product_type": inp.product_type, "rm": inp.rm}.items() if v is not None}
+        if deal_fields:
+            await workflow.execute_activity(
+                activities.update_fields,
+                args=["deals", inp.deal_id, deal_fields, caller], **_DURABLE_IO)
+
         self._stage = "Sanctioned"
         return DealStructuringResult(
             workflow_id=wf_id, deal_id=inp.deal_id, status="Sanctioned",
-            decided_by=decided_by, stage=sanctioned.get("stage"),
+            decided_by=decided_by, stage="Sanctioned",
             evidence_ids=evidence_ids, note=note)
 
 
@@ -648,7 +658,7 @@ class AdvayaHandoffWorkflow:
     """PREPARE the Advaya handover — phase one of a two-person maker-checker.
 
     PRISM does NOT disburse the loan itself: there is no Advaya integration, so the terminal is
-    'Handed Over to Advaya'. This workflow (the MAKER's action) creates the durable handover PACKAGE
+    'Disbursed'. This workflow (the MAKER's action) creates the durable handover PACKAGE
     in a **Prepared** state via ``POST /v1/internal/handover-packages``: the Register loads the
     Lending row server-side, confirms it is 'Ready for Disbursement', re-verifies the CP/CS +
     executed-document evidence, reconciles the executed-document refs + CP/CS checklist version,
@@ -727,14 +737,15 @@ class CpcsChecklistWorkflow:
                  "cp_cs_completion can be filed.")
 
 
-# Ordered position of a Deal/Lending pipeline stage, for "is X before Y" checks in structuring.
+# Ordered position of a LENDING credit-pipeline stage, for "is X before Y" checks in
+# structuring. (A deal's own stage is the commercial funnel and is never walked here.)
 _DEAL_ORDER = ["Data Awaited", "Diligence", "Note Circulated", "Sanctioned",
-               "CP/CS Completed", "Ready for Disbursement", "Handed Over to Advaya",
+               "CP/CS Completed", "Ready for Disbursement", "Disbursed",
                "Disbursement Pending"]
 
 
 def _stage_before(current: str | None, target: str) -> bool:
-    """True when ``current`` is earlier than ``target`` in the deal pipeline (so a forward hop is
+    """True when ``current`` is earlier than ``target`` in the credit pipeline (so a forward hop is
     needed). Unknown/None current → treat as earliest (advance). Off-track stages (On Hold /
     Rejected) are not ordered — never auto-advanced from here."""
     if current == target:

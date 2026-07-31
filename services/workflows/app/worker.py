@@ -58,6 +58,7 @@ async def main() -> None:
             activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.verify_committee_decision,
             activities.find_lines_for_deal,       # a deal's product lines (sanction fan-out)
+            activities.update_fields,             # plain data update, no lifecycle change
             activities.prepare_cpcs_checklist,   # authoritative CP/CS checklist (maker)
             activities.create_handover_package,   # durable handover package + stage advance
             activities.record_advaya_handoff,   # future-Advaya hook (not on the handover path)

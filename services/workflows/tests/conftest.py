@@ -253,7 +253,7 @@ def build_mock() -> FastAPI:
         pkg["status"] = "HandedOver"
         row = app.state.lending.get(lid)
         if row is not None:
-            app.state.lending[lid] = {**row, "stage": "Handed Over to Advaya"}
+            app.state.lending[lid] = {**row, "stage": "Disbursed"}
         return pkg
 
     app.state.cpcs = {}   # checklist id -> record
@@ -295,6 +295,13 @@ def build_mock() -> FastAPI:
         app.state.handoffs[hk] = row
         return row
 
+    @app.get("/v1/lending")
+    async def list_lending(request: Request):
+        deal_id = request.query_params.get("deal_id")
+        rows = [r for r in app.state.lending.values()
+                if deal_id is None or r.get("deal_id") == deal_id]
+        return {"items": rows, "next_cursor": None}
+
     @app.get("/v1/lending/{lid}")
     async def get_lending(lid: str):
         return app.state.lending[lid]
@@ -303,6 +310,17 @@ def build_mock() -> FastAPI:
     async def patch_lending(lid: str, request: Request):
         body = await request.json()
         row = app.state.lending[lid]
+        # Mirror the Register: 'Sanctioned' requires the committee approval + sanction letter on
+        # file for THIS line (the deal-level credit stage is deprecated — the gate keys on Lending).
+        if body.get("stage") == "Sanctioned" and row.get("stage") != "Sanctioned":
+            kinds = {e["evidence_kind"] for e in app.state.evidence
+                     if e["subject_type"] == "Lending" and e["subject_id"] == lid}
+            missing = {"credit_committee_approval", "sanction_letter"} - kinds
+            if missing:
+                return JSONResponse(
+                    {"error": {"type": "validation", "title": "evidence required", "status": 422,
+                               "detail": f"missing evidence: {sorted(missing)}",
+                               "request_id": None}}, status_code=422)
         # Mirror the Register: 'CP/CS Completed' requires CP/CS + executed agreement.
         if body.get("stage") == "CP/CS Completed" and row.get("stage") != "CP/CS Completed":
             kinds = {e["evidence_kind"] for e in app.state.evidence

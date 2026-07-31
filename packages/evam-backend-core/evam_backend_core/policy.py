@@ -63,10 +63,9 @@ def stage_field_of(subject_type: str) -> str | None:
 # A resource may not move to that value until each field is present (in the change or the row).
 # Seeded conservatively for the flows that exist; workflow rounds extend their product lines.
 MANDATORY_FOR_STAGE: dict[str, dict[str, list[str]]] = {
-    "Deal": {
-        # A deal cannot advance out of intake without the basics its later stages depend on.
-        "Sanctioned": ["product_type", "rm"],
-    },
+    # A Deal's stage is the COMMERCIAL funnel — no credit-governance data gates apply to it.
+    # (The former Deal→Sanctioned mandate moved with the sanction itself to the Lending line;
+    # the structuring workflow still records product_type/rm on the deal as plain data.)
     "Lending": {
         # A facility cannot be marked ready for disbursement without recording the PROPOSED drawdown
         # amount and date — these are fixed here and carried into the Advaya handover package. The
@@ -74,7 +73,7 @@ MANDATORY_FOR_STAGE: dict[str, dict[str, list[str]]] = {
         # (a future Advaya integration), never asserted by PRISM on its own.
         "Ready for Disbursement": ["proposed_disbursement_amount", "proposed_disbursement_date"],
         # Still required at handover (already on the row by now).
-        "Handed Over to Advaya": ["proposed_disbursement_amount", "proposed_disbursement_date"],
+        "Disbursed": ["proposed_disbursement_amount", "proposed_disbursement_date"],
     },
 }
 
@@ -82,9 +81,11 @@ MANDATORY_FOR_STAGE: dict[str, dict[str, list[str]]] = {
 # subject → field → stage-value → {allowed roles}. Absent (field, stage) → unconstrained here
 # (other RBAC gates still apply). Admin is always permitted (it is the break-glass role).
 FIELD_LOCKS: dict[str, dict[str, dict[str, set[str]]]] = {
-    "Deal": {
-        # Once a deal is Sanctioned, reassigning its relationship manager is a senior action
-        # (the sanction was granted against that RM's ownership) — Management or Admin only.
+    "Lending": {
+        # Once the facility is Sanctioned, reassigning its relationship manager is a senior
+        # action (the sanction was granted against that RM's ownership) — Management or Admin
+        # only. (This lock lived on the deal's credit stage before that stage was deprecated;
+        # it moved to the lending line with the rest of the sanction governance.)
         "rm": {"Sanctioned": {"Management"}},
     },
     "Syndication": {
@@ -115,27 +116,25 @@ _ADMIN = "Admin"
 # subject_type → stage-value → [required evidence kinds]. Seeded for the sensitive milestones that
 # exist today; each workflow round extends its product line (appraisal, CIPHER, sanction, Advaya…).
 EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
-    # SANCTION is the platform's most sensitive credit milestone. A deal / lending line may not
+    # SANCTION is the platform's most sensitive credit milestone. A lending line may not
     # reach 'Sanctioned' until BOTH the Credit Committee's recorded approval AND the issued sanction
     # letter are on file as immutable evidence — closing the "the graph let you type the word
     # 'Sanctioned' without the committee ever meeting" gap. The map is keyed on the REAL pipeline
     # stage values (see rbac.STAGE_VOCAB); each later workflow round extends its product line
     # (CP/CS + executed agreement before 'CP/CS Completed', a verified Advaya acknowledgement
-    # before 'Disbursement Pending', CIPHER, …).
-    "Deal": {
-        "Sanctioned": ["credit_committee_approval", "sanction_letter"],
-    },
+    # before 'Disbursement Pending', CIPHER, …). A DEAL carries no evidence gates: its stage is
+    # the commercial funnel, and all credit governance lives on the lending line.
     "Lending": {
         "Sanctioned": ["credit_committee_approval", "sanction_letter"],
         # A facility reaches 'CP/CS Completed' only once the things PRISM controls are on file: the
         # conditions precedent / subsequent (proven by an APPROVED CP/CS checklist — the
         # cp_cs_completion evidence is minted from it, not caller-attached) and the executed facility
-        # agreement. From there the terminal (current product scope) is 'Handed Over to Advaya'.
+        # agreement. From there the terminal (current product scope) is 'Disbursed'.
         "CP/CS Completed": ["cp_cs_completion", "executed_agreement"],
-        # The onward 'Accepted by Advaya' → 'Disbursement Pending' → 'Disbursed' states and their
-        # advaya_acknowledgement gate exist ONLY under a future Advaya integration; they are added
-        # to the vocabulary/gates when that integration mode is enabled, so nothing can reach them
-        # today and the loan never self-disburses.
+        # 'Disbursed' itself carries no evidence gate here: interactively it is reached through
+        # the senior-locked maker-checker handover approval, and the dormant
+        # advaya_acknowledgement kind (future Advaya integration) would add downstream
+        # verification when that mode is enabled.
     },
 }
 

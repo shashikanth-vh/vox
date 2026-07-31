@@ -19,7 +19,7 @@ Three changes, one milestone:
 
 * ``advaya_handover_packages`` — the durable, immutable snapshot of a handover. A trigger blocks
   DELETE and every UPDATE except a one-time set of the (initially NULL) manual ``advaya_reference``.
-  Created transactionally with the advance to 'Handed Over to Advaya'.
+  Created transactionally with the advance to 'Disbursed'.
 
 All tenant-scoped with fail-closed RLS, matching the existing governance tables.
 """

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -237,6 +237,15 @@ class LeadRead(ReadModel):
 # --------------------------------------------------------------------------- #
 # Deals
 # --------------------------------------------------------------------------- #
+# THE Deal stage — the ORIGINATION-FUNNEL vocabulary (rbac.DEAL_FUNNEL_STAGES) as a typed
+# alias, so an unknown value 422s at the schema, mirroring the lifecycle screens. A deal
+# carries NO credit lifecycle: credit execution (and its evidence/maker-checker governance)
+# lives on the lending tracker line. The deprecated deal-level credit stage is parked in
+# the DB as credit_stage_legacy and deliberately absent from these API models.
+DealFunnelStage = Literal["New Inquiry", "In Screening", "In Pipeline", "On Hold",
+                          "Screened Out", "Closed Won", "Closed Lost"]
+
+
 class DealCreate(CreateModel):
     deal_no: str | None = Field(default=None, max_length=40)
     entity_id: uuid.UUID
@@ -247,7 +256,7 @@ class DealCreate(CreateModel):
     is_asset_mon: bool = False
     rm: str | None = Field(default=None, max_length=120)
     analyst: str | None = Field(default=None, max_length=120)
-    stage: str | None = Field(default=None, max_length=60)
+    stage: DealFunnelStage | None = None
     temperature: str | None = Field(default=None, max_length=10)
     source: str | None = Field(default=None, max_length=40)
     source_detail: str | None = Field(default=None, max_length=200)
@@ -270,7 +279,7 @@ class DealUpdate(UpdateModel):
     is_asset_mon: bool | None = None
     rm: str | None = Field(default=None, max_length=120)
     analyst: str | None = Field(default=None, max_length=120)
-    stage: str | None = Field(default=None, max_length=60)
+    stage: DealFunnelStage | None = None
     temperature: str | None = Field(default=None, max_length=10)
     source: str | None = Field(default=None, max_length=40)
     source_detail: str | None = Field(default=None, max_length=200)

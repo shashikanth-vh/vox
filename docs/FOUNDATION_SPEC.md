@@ -78,27 +78,35 @@ Entry: `Active | On Hold | Dropped`. Graph: `Active↔On Hold`, `Active/On Hold�
 `Dropped→Active`. `Converted` is **terminal and reachable only via `/convert`** (never a bare
 PATCH — for humans or machines).
 
-### Deal / Lending (`stage`) — the credit pipeline
+### Deal (`stage`) — the COMMERCIAL origination funnel
+Entry: `New Inquiry | In Screening | In Pipeline | On Hold` (terminals are outcomes, never a birth
+state). Graph: forward one step (`New Inquiry → In Screening → In Pipeline → Closed Won/Closed
+Lost`), back one step for rework, `On Hold` ↔ any working stage, `Screened Out` re-openable to
+`In Screening`; the CLOSED terminals are final. **A deal carries NO credit lifecycle** — the
+funnel measures origination, and every credit control below runs on the LENDING line (this is
+the release baseline schema; there is no deal-level credit-stage column).
+
+### Lending (`stage`) — the credit pipeline
 Entry: `Data Awaited | Diligence`.
 ```
 Data Awaited → Diligence → Note Circulated → Sanctioned → CP/CS Completed →
-    Ready for Disbursement → Handed Over to Advaya   (TERMINAL for the current product scope)
+    Ready for Disbursement → Disbursed   (TERMINAL for the current product scope)
              ↘ (refer-back one step) ↖              (On Hold ↔ from any working stage)
 Rejected ← from Data Awaited/Diligence/Note Circulated ;  Rejected → Data Awaited/Diligence
 ```
-`Handed Over to Advaya` is PRISM's TERMINAL: the last state it can assert on its own authority (there
+`Disbursed` is PRISM's TERMINAL: the last state it can assert on its own authority (there
 is no Advaya integration; see §11). The onward disbursement states (`Accepted by Advaya` →
 `Disbursement Pending` → `Disbursed`) exist ONLY under a future Advaya integration and enter the
 vocabulary only when that mode is enabled — so PRISM never self-disburses.
 
 Governance stages and their gates (see §5, §6):
-- **Sanctioned** — mandatory fields `product_type, rm` (Deal) ; requires evidence
+- **Sanctioned** — on the LENDING line ; requires evidence
   `credit_committee_approval` + `sanction_letter`.
 - **CP/CS Completed** (Lending) — requires evidence `cp_cs_completion` (minted from an APPROVED
   maker-checker CP/CS checklist, §6) + `executed_agreement`.
 - **Ready for Disbursement** (Lending) — mandatory fields `proposed_disbursement_amount,
   proposed_disbursement_date` ; row-locked (Credit Head/Management/Admin only).
-- **Handed Over to Advaya** (Lending) — row-locked (Credit Head/Management/Admin only). Entered by
+- **Disbursed** (Lending) — row-locked (Credit Head/Management/Admin only). Entered by
   the handover operation, which creates the durable, immutable handover PACKAGE and advances the
   stage transactionally (§11). PRISM's terminal.
 
@@ -124,8 +132,33 @@ Rules that bind **every** transition:
 
 ## 3. RBAC, tenant & record-level authorization — **FROZEN**
 
-Authoritative matrix: `evam_backend_core/rbac.py` — `ROLES`, `VIEW_ACCESS`, `OPERATIONS`,
-`SERVICE_GRANTS`, `ASSIGNMENT_AUTHORITY`, `APPROVER_FOR_SUBJECT`, `WRITE/CREATE_OPERATION_FOR_SUBJECT`.
+**Authority model (release 1).** ATLAS (`ATLAS_RBAC_v3.1.xlsx`) is the approved
+DESIGN-TIME policy. **PostgreSQL (`access_grants`) is the RUNTIME authority for human
+access**: Access resolves it once per user, the Gateway issues a short-lived SIGNED
+authorization context (claims: issuer/audience, iat/exp, kid, tenant, identity, roles,
+live effective matrices, `matrix_version`, `policy_version`, revocation `epoch`,
+method+path binding), and downstream services verify and enforce THAT context. Code
+retains the non-editable pieces: the catalog (`rbac_catalog.py`, incl. `POLICY_VERSION`),
+service-principal capabilities (`service_policy.py`), lifecycle policy (`lifecycle.py`)
+and the evaluation algorithms. The compiled baseline in `rbac.py` is a versioned
+reference for the EXPLICIT seed (`python -m app.seed`) and the DRIFT REPORT
+(`--check` / `GET /v1/access/drift`) — it never decides a production request. Grants
+carry provenance (`baseline` vs `override`); every governance change (role
+grant/revoke, (de)activation, cell edit, seed) lands on the append-only `access_audit`
+trail stamped with the policy version.
+
+**Revocation window.** The signed context is an authorization CREDENTIAL: its TTL
+(gateway default 120s; resolve cache 60s, last-known-good bounded at 300s then FAIL
+CLOSED) is the deliberate revocation window. Role changes and deactivation bump the
+user's `epoch`. SENSITIVE operations — delete/restore, assignment changes, governed
+imports, evidence break-glass (and the orchestrator's decisions, which fresh-authorize
+already) — additionally revalidate ONLINE against Access when
+`REGISTER_ONLINE_REVALIDATION` is on (the production posture): user still active,
+operation still granted, epoch unchanged; Access unreachable → 503, fail closed.
+
+Compiled matrix: `evam_backend_core/rbac.py` — `VIEW_ACCESS`, `OPERATIONS`,
+`ASSIGNMENT_AUTHORITY`, `APPROVER_FOR_SUBJECT`, `WRITE/CREATE_OPERATION_FOR_SUBJECT`
+(+ re-exported catalog/service/lifecycle modules).
 Engine: `services/register/app/authz/` (`enforce_operation`, `view_access`, `build_scope`,
 `row_in_scope`, `can_write_row`). Access levels: `FULL | SCOPED | READ | APPROVE | NONE`.
 
@@ -148,8 +181,8 @@ Tests: `test_rbac*.py`, `test_lead_scoping.py`, `test_rls.py`, `test_internal_co
 
 Authoritative: `policy.FIELD_LOCKS` (edit-at-stage) + `rbac.ROW_LOCKS` (move-into-locked-value).
 - Row locks: Lead→`Converted` (Admin/BD Head/Management), Lending→`Ready for Disbursement` /
-  `Handed Over to Advaya` (Admin/Credit Head/Management).
-- Field locks: Deal `rm` frozen at `Sanctioned` (Management); Syndication `amount_cr` frozen at
+  `Disbursed` (Admin/Credit Head/Management).
+- Field locks: Lending `rm` frozen at `Sanctioned` (Management); Syndication `amount_cr` frozen at
   `Sanctioned` (Syn Head/Management). Admin is always break-glass. Machine callers (`roles=None`)
   are bound by their service allowlist, not these role locks.
 
@@ -157,9 +190,9 @@ Authoritative: `policy.FIELD_LOCKS` (edit-at-stage) + `rbac.ROW_LOCKS` (move-int
 
 ## 5. Mandatory fields to enter a stage — **FROZEN**
 
-Authoritative: `policy.MANDATORY_FOR_STAGE`. Deal `Sanctioned`→`{product_type, rm}`; Lending
+Authoritative: `policy.MANDATORY_FOR_STAGE`. Lending
 `Ready for Disbursement`→`{proposed_disbursement_amount, proposed_disbursement_date}` (also required
-at `Handed Over to Advaya`). The ACTUAL `disbursed_amount`/`disbursement_date` are reserved for a
+at `Disbursed`). The ACTUAL `disbursed_amount`/`disbursement_date` are reserved for a
 real disbursement confirmation (future Advaya integration). Checked against the row **merged** with the
 change, so a field already present satisfies it. Every workflow round extends its product line here.
 
@@ -194,11 +227,11 @@ Contract:
 Registered kinds today: `credit_committee_approval`, `credit_committee_rejection`,
 `sanction_letter`, `executed_agreement`, `cp_cs_completion`, `advaya_acknowledgement`,
 `credit_note`, `lead_qualification(_failed)`.
-Gates today: Deal/Lending `Sanctioned` → committee approval + sanction letter; Lending
+Gates today: Lending `Sanctioned` → committee approval + sanction letter; Lending
 `CP/CS Completed` → **`cp_cs_completion` (minted from an APPROVED maker-checker CP/CS checklist —
 `cp_cs_checklists`, verified in `evidence.py::_verify_cpcs_checklist`, no longer caller-attached) +
 `executed_agreement`**. The onward `advaya_acknowledgement` gate exists only under a future Advaya
-integration (§11 — so PRISM rests at `Handed Over to Advaya` and never self-disburses).
+integration (§11 — so PRISM rests at `Disbursed` and never self-disburses).
 **⚠ GAP** — kinds/gates for OCR maker-checker, CIPHER, CMA, fraud review, and the
 qualification→conversion gate are **not yet wired**; syndication/asset-monetisation have no evidence
 gate. Real document digests (vs. hashing the reference) — GAP. Matrix: *Deal execution /
@@ -291,13 +324,13 @@ Authoritative: `services/workflows/app/workflows.py`, `activities.py`.
 
 Advaya is the downstream disbursement / loan-management system. PRISM owns
 origination→sanction→CP/CS and **hands the facility OVER to Advaya**. There is **no Advaya
-integration planned at this time**, so PRISM's honest TERMINAL is `Handed Over to Advaya`: the last
+integration planned at this time**, so PRISM's honest TERMINAL is `Disbursed`: the last
 state it can assert on its own authority. PRISM does **not** mark a loan disbursed on its own — the
 `advaya_handoffs` record + verified-ack machinery below is retained, **dormant**, as the ready hook
 for a future integration.
 
 Frozen contract:
-- **Ownership boundary.** PRISM is the system of record up to and including `Handed Over to Advaya`;
+- **Ownership boundary.** PRISM is the system of record up to and including `Disbursed`;
   Advaya owns disbursement and post-disbursement servicing. PRISM never marks a loan disbursed on its
   own authority.
 - **The durable handover PACKAGE + two-phase maker-checker.** Advancing the stage alone would prove
@@ -338,7 +371,7 @@ Frozen contract:
   `Accepted` `advaya_handoffs` record (immutable, single-winner, migration 0015) with a matching
   payload digest (`evidence.py::_verify_advaya_handoff`), and gates `Disbursement Pending`.
 - **`AdvayaHandoffWorkflow`** performs the handover via the package endpoint — **no Advaya call, no
-  fabricated acknowledgement**. It stops at `Handed Over to Advaya`.
+  fabricated acknowledgement**. It stops at `Disbursed`.
 - **⚠ NOT PLANNED — the actual Advaya round-trip** (real handoff call, ack ingestion, the
   `Disbursement Pending` advance, and the handoff TIMEOUT branch) is deferred until an Advaya
   integration is scheduled. Matrix: *Disbursement → Advaya handoff workflow*.
@@ -363,4 +396,4 @@ default-off dormant acknowledgement path are implemented and tested** (`test_han
 | 8 | Reconciliation | `core/reconciliation.py` | read paths + recon API | test_import | ✅ |
 | 9 | Audit/outbox | `audit_log`, decision outbox | all governed writes | test_decisions | ✅ (event bus ⚠) |
 | 10 | Workflow idempotency | `workflows.py` | Temporal + idem keys | test_workflow, test_vox_e2e | ✅ (committee + conversion signals verified) |
-| 11 | Advaya boundary | §11 + `handover.py` + `advaya_handover_packages` | durable package + authenticated handover op; terminal = Handed Over to Advaya; ack path default-off | test_handover, test_cpcs | ✅ handover+package+disabled dormant path (real integration not planned) |
+| 11 | Advaya boundary | §11 + `handover.py` + `advaya_handover_packages` | durable package + authenticated handover op; terminal = Disbursed; ack path default-off | test_handover, test_cpcs | ✅ handover+package+disabled dormant path (real integration not planned) |

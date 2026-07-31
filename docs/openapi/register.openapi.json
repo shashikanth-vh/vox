@@ -3008,7 +3008,15 @@
           "stage": {
             "anyOf": [
               {
-                "maxLength": 60,
+                "enum": [
+                  "New Inquiry",
+                  "In Screening",
+                  "In Pipeline",
+                  "On Hold",
+                  "Screened Out",
+                  "Closed Won",
+                  "Closed Lost"
+                ],
                 "type": "string"
               },
               {
@@ -3579,7 +3587,15 @@
           "stage": {
             "anyOf": [
               {
-                "maxLength": 60,
+                "enum": [
+                  "New Inquiry",
+                  "In Screening",
+                  "In Pipeline",
+                  "On Hold",
+                  "Screened Out",
+                  "Closed Won",
+                  "Closed Lost"
+                ],
                 "type": "string"
               },
               {

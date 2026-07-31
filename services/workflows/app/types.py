@@ -236,7 +236,7 @@ class DealStructuringInput:
 class DealStructuringResult:
     workflow_id: str
     deal_id: str
-    status: str                     # Sanctioned / Rejected / TimedOut
+    status: str                     # Sanctioned / Rejected / TimedOut / NoLendingLine / NoLendingLine
     decided_by: str | None = None
     stage: str | None = None
     evidence_ids: list = field(default_factory=list)
@@ -283,7 +283,7 @@ class DocumentCollectionResult:
 class AdvayaHandoffInput:
     """Hand a Lending line that is 'Ready for Disbursement' OVER to Advaya. The workflow creates the
     durable, immutable handover PACKAGE (authoritative amounts read server-side) and advances the
-    line to 'Handed Over to Advaya' — PRISM's terminal. The amounts are NOT taken from here; only the
+    line to 'Disbursed' — PRISM's terminal. The amounts are NOT taken from here; only the
     handover metadata is. A real future integration would additionally record the acknowledgement."""
 
     lending_id: str

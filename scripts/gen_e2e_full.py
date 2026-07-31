@@ -9,7 +9,7 @@ Postman therefore presents NO backend api key at all; the gateway injects each u
 
 All three product lines reach their terminal state:
 
-    Lending      → Handed Over to Advaya   (via the committee decision + CP/CS + handover)
+    Lending      → Disbursed   (via the committee decision + CP/CS + handover)
     Syndication  → Disbursed
     Asset Mon.   → Closed
 
@@ -407,8 +407,9 @@ F.append(("05 · LENDING ▸ Sanctioned via Temporal (deal-structuring + committ
                "console.log('workflow:', JSON.stringify(b));",
                "pm.test('workflow started', () => pm.expect(b.workflow_id).to.be.a('string'));",
                "pm.environment.set('structWorkflowId', b.workflow_id);"],
-        desc="Walks the deal to 'Note Circulated', files the credit note, then WAITS for the "
-             "committee. Workflow id is struct-{tenant}-{deal_id}."),
+        desc="Walks the LENDING line to 'Note Circulated', files the credit note against it, "
+             "then WAITS for the committee. The deal's own stage is the commercial funnel and is "
+             "never touched. Workflow id is struct-{tenant}-{deal_id}."),
     req("POST /orchestrator/v1/workflows/{id}/committee-decision — the human decision", "POST",
         ORC, "/v1/workflows/{{structWorkflowId}}/committee-decision", headers=_MAKER,
         body={"approved": True, "by": "{{makerEmail}}",
@@ -420,13 +421,17 @@ F.append(("05 · LENDING ▸ Sanctioned via Temporal (deal-structuring + committ
              "lending line (keyed {workflow_id}:lending:{line_id}) using THIS human's committee "
              "authority — which the workflow, a service principal, could never supply. The signal "
              "is only a wake-up; the run re-reads the authoritative record."),
-    poll("WAIT · poll the DEAL until Sanctioned", "/v1/deals/{{dealId}}",
-         "DEAL", "stage", "Sanctioned"),
     poll("WAIT · poll the LENDING line until Sanctioned", "/v1/lending/{{lendingId}}",
          "LENDING", "stage", "Sanctioned"),
-    req("GET /v1/deals/{id} — the DEAL is Sanctioned", "GET", REG, "/v1/deals/{{dealId}}",
-        tests=[OK, "pm.test('deal Sanctioned', () => "
-                   "pm.expect(pm.response.json().stage).to.eql('Sanctioned'));"]),
+    req("GET /v1/deals/{id} — the DEAL stays in the commercial funnel", "GET", REG,
+        "/v1/deals/{{dealId}}",
+        tests=[OK, "const d = pm.response.json();",
+               "pm.test('deal stage is the funnel (In Pipeline), never a credit value', () => "
+               "pm.expect(d.stage).to.eql('In Pipeline'));",
+               "pm.test('sanction basics recorded on the deal as data', () => "
+               "pm.expect(d.product_type).to.eql('Term Loan'));"],
+        desc="The deal's stage is the ORIGINATION FUNNEL — sanctioning its facility does not "
+             "move it. The structuring input's product_type/rm land on the deal as plain data."),
     req("GET /v1/lending/{id} — the LENDING line is Sanctioned", "GET", REG,
         "/v1/lending/{{lendingId}}",
         tests=[OK, "pm.test('lending Sanctioned', () => "
@@ -500,7 +505,7 @@ F.append(("06 · LENDING ▸ CP/CS Completed (maker → checker)", [
           "CP/CS Completed", extra={"remarks": "E2E: CP/CS complete, agreement executed."}),
 ]))
 
-F.append(("07 · LENDING ▸ Handed Over to Advaya  (TERMINAL)", [
+F.append(("07 · LENDING ▸ Disbursed  (TERMINAL)", [
     stage("PATCH lending — → Ready for Disbursement", "/v1/lending/{{lendingId}}", "stage",
           "Ready for Disbursement",
           extra={"proposed_disbursement_amount": 45.0,
@@ -524,8 +529,8 @@ F.append(("07 · LENDING ▸ Handed Over to Advaya  (TERMINAL)", [
         tests=[OK],
         desc="Freezes the package and advances the stage in one transaction."),
     req("GET /v1/lending/{id} — LENDING COMPLETE", "GET", REG, "/v1/lending/{{lendingId}}",
-        tests=[OK, "pm.test('LENDING terminal = Handed Over to Advaya', () => "
-                   "pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));",
+        tests=[OK, "pm.test('LENDING terminal = Disbursed', () => "
+                   "pm.expect(pm.response.json().stage).to.eql('Disbursed'));",
                "console.log('LENDING =', pm.response.json().stage);"]),
 ]))
 
@@ -586,9 +591,9 @@ F.append(("10 · Financials & documents", [
 ]))
 
 F.append(("11 · Final verification — all three lines terminal", [
-    req("GET /v1/lending/{id} — Handed Over to Advaya", "GET", REG, "/v1/lending/{{lendingId}}",
+    req("GET /v1/lending/{id} — Disbursed", "GET", REG, "/v1/lending/{{lendingId}}",
         tests=[OK, "pm.test('LENDING complete', () => "
-                   "pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));"]),
+                   "pm.expect(pm.response.json().stage).to.eql('Disbursed'));"]),
     req("GET /v1/syndication/{id} — Disbursed", "GET", REG, "/v1/syndication/{{syndicationId}}",
         tests=[OK, "pm.test('SYNDICATION complete', () => "
                    "pm.expect(pm.response.json().status).to.eql('Disbursed'));"]),
@@ -630,7 +635,7 @@ col = {"info": {
         "`/orchestrator` → the workflow plane, anything else → the Register. **Postman sends no "
         "backend api key** — the gateway strips it and injects each upstream's own.\\n\\n"
         "All three product lines reach their terminal state:\\n"
-        "* **Lending** → `Handed Over to Advaya`\\n"
+        "* **Lending** → `Disbursed`\\n"
         "* **Syndication** → `Disbursed`\\n"
         "* **Asset monetisation** → `Closed`\\n\\n"
         "### The sanction goes through Temporal\\n"
@@ -643,7 +648,7 @@ col = {"info": {
         "Full stack up (`docker compose up -d --build`, including `temporal`, `workflows`, "
         "`orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification "
         "OFF in Postman for the self-signed cert.\\n\\n"
-        "**Temporal is asynchronous:** if folder 05's 'deal is Sanctioned' check races the run, "
+        "**Temporal is asynchronous:** if folder 05's 'lending is Sanctioned' check races the run, "
         "re-send the status request and then the two GETs.\\n\\n"
         "Four requests MUST fail (unknown filter, lead→Converted, hand-typed `Sanctioned`) — "
         "their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",

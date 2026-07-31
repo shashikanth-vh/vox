@@ -1,4 +1,4 @@
-"""Business-lifecycle workflows: Lead Qualification → Deal Structuring → Document Collection, and
+"""Business-lifecycle workflows: Lead Qualification → Deal Structuring (on the LENDING line) → Document Collection, and
 the activities they orchestrate.
 
 Two layers:
@@ -56,30 +56,31 @@ async def test_attach_evidence_is_idempotent(mock_register):
 
 async def test_advance_stage_is_evidence_gated_for_sanction(mock_register):
     """The activity advances through the Register's normal API, so the Register's evidence gate
-    applies: a deal cannot be advanced to Sanctioned until the committee + sanction evidence is on
-    file — and once it is, the advance succeeds."""
+    applies: a LENDING line cannot be advanced to Sanctioned until the committee + sanction
+    evidence is on file for that line — and once it is, the advance succeeds. (The deal-level
+    credit stage is deprecated; the gate keys on the lending line.)"""
     from evam_register_client.errors import RegisterError
 
     env = ActivityEnvironment()
-    did = uuid.uuid4().hex
-    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "Note Circulated"}
+    lid = uuid.uuid4().hex
+    mock_register.state.lending[lid] = {"id": lid, "version": 1, "stage": "Note Circulated"}
 
     # No evidence yet → the gate refuses the sanction advance.
     with pytest.raises(RegisterError):
-        await env.run(activities.advance_stage, "deals", did, "stage", "Sanctioned",
-                      {"product_type": "Term Loan", "rm": "asha"}, None)
-    assert mock_register.state.deals[did]["stage"] == "Note Circulated"
+        await env.run(activities.advance_stage, "lending", lid, "stage", "Sanctioned",
+                      {"rm": "asha"}, None)
+    assert mock_register.state.lending[lid]["stage"] == "Note Circulated"
 
     # File both required evidence kinds (each backed by a verified committee decision), then the
     # same advance is accepted.
     mock_register.state.committee["dec-1"] = {
-        "workflow_id": "dec-1", "decision": "Approved", "subject_type": "Deal",
-        "subject_id": did, "roles": ["Credit Head"]}
+        "workflow_id": "dec-1", "decision": "Approved", "subject_type": "Lending",
+        "subject_id": lid, "roles": ["Credit Head"]}
     for kind in ("credit_committee_approval", "sanction_letter"):
-        await env.run(activities.attach_evidence, "Deal", did, kind, f"{kind}/DOC",
+        await env.run(activities.attach_evidence, "Lending", lid, kind, f"{kind}/DOC",
                       None, None, None, "dec-1")
-    out = await env.run(activities.advance_stage, "deals", did, "stage", "Sanctioned",
-                        {"product_type": "Term Loan", "rm": "asha"}, None)
+    out = await env.run(activities.advance_stage, "lending", lid, "stage", "Sanctioned",
+                        {"rm": "asha"}, None)
     assert out["stage"] == "Sanctioned"
 
 
@@ -97,6 +98,7 @@ async def _env():
 def _biz_activities():
     return [activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.mark_lead_note, activities.verify_committee_decision,
+            activities.find_lines_for_deal, activities.update_fields,
             activities.prepare_cpcs_checklist, activities.create_handover_package,
             activities.record_advaya_handoff]
 
@@ -123,14 +125,25 @@ async def test_cpcs_checklist_workflow_prepares_checklist(mock_register):
     assert result.checklist_id in mock_register.state.cpcs
 
 
-def _seed_committee(mock_register, wf_id, did, decision="Approved", **extra):  # noqa: ANN001
+def _seed_committee(mock_register, wf_id, did, decision="Approved",  # noqa: ANN001
+                    lending_ids=(), **extra):
     """Stand in for the orchestrator's persist-before-signal: the AUTHORITATIVE committee decision
-    the workflow will read + verify (the workflow NEVER trusts the signal payload)."""
+    the workflow will read + verify (the workflow NEVER trusts the signal payload) — plus the
+    per-line SUBJECT-BOUND decisions (keyed "{wf_id}:lending:{line_id}") the orchestrator records
+    so the Lending-scoped evidence can verify."""
     mock_register.state.committee[wf_id] = {
         "id": uuid.uuid4().hex, "workflow_id": wf_id, "decision": decision,
         "subject_type": "Deal", "subject_id": did, "decided_by": "chair@evamfinance.com",
         "roles": ["Credit Head"], "committee_reference": "committee/MIN-9",
         "sanction_letter_reference": "sanction/SL-9", "note": "committee note", **extra}
+    for lid in lending_ids:
+        key = f"{wf_id}:lending:{lid}"
+        mock_register.state.committee[key] = {
+            "id": uuid.uuid4().hex, "workflow_id": key, "decision": decision,
+            "subject_type": "Lending", "subject_id": lid,
+            "decided_by": "chair@evamfinance.com", "roles": ["Credit Head"],
+            "committee_reference": "committee/MIN-9",
+            "sanction_letter_reference": "sanction/SL-9", "note": "committee note"}
 
 
 async def test_deal_structuring_files_evidence_then_sanctions(mock_register):
@@ -141,7 +154,10 @@ async def test_deal_structuring_files_evidence_then_sanctions(mock_register):
     from temporalio.worker import Worker
 
     did = uuid.uuid4().hex
-    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "Data Awaited"}
+    lid = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                        "stage": "Data Awaited"}
 
     async with env:
         tq = "biz-tq"
@@ -154,16 +170,21 @@ async def test_deal_structuring_files_evidence_then_sanctions(mock_register):
                                      product_type="Term Loan", rm="asha",
                                      credit_note_reference="note/CN-1"),
                 id=wf_id, task_queue=tq)
-            # Orchestrator would persist the decision, THEN signal. The signal is a wake-up only.
-            _seed_committee(mock_register, wf_id, did, "Approved")
+            # Orchestrator would persist the decision (deal + per-line), THEN signal.
+            _seed_committee(mock_register, wf_id, did, "Approved", lending_ids=[lid])
             await handle.signal(DealStructuringWorkflow.committee_decision, "")
             result = await handle.result()
 
     assert result.status == "Sanctioned"
     assert result.decided_by == "chair@evamfinance.com"       # from the record, not the signal
-    assert mock_register.state.deals[did]["stage"] == "Sanctioned"
+    # The LENDING line is sanctioned; the deal's stage is the commercial funnel — untouched.
+    assert mock_register.state.lending[lid]["stage"] == "Sanctioned"
+    assert mock_register.state.deals[did]["stage"] == "In Pipeline"
+    # The sanction basics land on the deal as plain data.
+    assert mock_register.state.deals[did]["product_type"] == "Term Loan"
+    assert mock_register.state.deals[did]["rm"] == "asha"
     kinds = {e["evidence_kind"] for e in mock_register.state.evidence
-             if e["subject_id"] == did}
+             if e["subject_type"] == "Lending" and e["subject_id"] == lid}
     assert {"credit_committee_approval", "sanction_letter", "credit_note"} <= kinds
 
 
@@ -172,7 +193,10 @@ async def test_deal_structuring_rejection_does_not_sanction(mock_register):
     from temporalio.worker import Worker
 
     did = uuid.uuid4().hex
-    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "Diligence"}
+    lid = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                        "stage": "Diligence"}
 
     async with env:
         tq = "biz-tq2"
@@ -184,13 +208,15 @@ async def test_deal_structuring_rejection_does_not_sanction(mock_register):
                 DealStructuringInput(deal_id=did, requested_by="rm@evamfinance.com",
                                      product_type="Term Loan", rm="asha"),
                 id=wf_id, task_queue=tq)
-            _seed_committee(mock_register, wf_id, did, "Rejected")
+            _seed_committee(mock_register, wf_id, did, "Rejected", lending_ids=[lid])
             await handle.signal(DealStructuringWorkflow.committee_decision, "")
             result = await handle.result()
 
     assert result.status == "Rejected"
-    assert mock_register.state.deals[did]["stage"] == "Rejected"
-    kinds = {e["evidence_kind"] for e in mock_register.state.evidence if e["subject_id"] == did}
+    # The LENDING line carries the rejection; the deal's funnel is the RM's call — untouched.
+    assert mock_register.state.lending[lid]["stage"] == "Rejected"
+    assert mock_register.state.deals[did]["stage"] == "In Pipeline"
+    kinds = {e["evidence_kind"] for e in mock_register.state.evidence if e["subject_id"] == lid}
     assert "sanction_letter" not in kinds        # nothing sanctioned
     assert "credit_committee_rejection" in kinds
 
@@ -203,7 +229,10 @@ async def test_deal_structuring_ignores_a_spoofed_signal_without_a_record(mock_r
     from temporalio.worker import Worker
 
     did = uuid.uuid4().hex
-    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "Diligence"}
+    lid = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+    mock_register.state.lending[lid] = {"id": lid, "deal_id": did, "version": 1,
+                                        "stage": "Diligence"}
 
     async with env:
         tq = "biz-tq3"
@@ -221,9 +250,33 @@ async def test_deal_structuring_ignores_a_spoofed_signal_without_a_record(mock_r
             result = await handle.result()
 
     assert result.status == "TimedOut"
-    assert mock_register.state.deals[did]["stage"] != "Sanctioned"
-    kinds = {e["evidence_kind"] for e in mock_register.state.evidence if e["subject_id"] == did}
+    assert mock_register.state.lending[lid]["stage"] != "Sanctioned"
+    kinds = {e["evidence_kind"] for e in mock_register.state.evidence if e["subject_id"] == lid}
     assert "credit_committee_approval" not in kinds and "sanction_letter" not in kinds
+
+
+async def test_deal_structuring_fails_clearly_without_a_lending_line(mock_register):
+    """Credit structuring runs on the lending record — a deal with no lending line has nothing to
+    structure, and the run says so instead of waiting for a committee that could sanction
+    nothing."""
+    env = await _env()
+    from temporalio.worker import Worker
+
+    did = uuid.uuid4().hex
+    mock_register.state.deals[did] = {"id": did, "version": 1, "stage": "In Pipeline"}
+
+    async with env:
+        tq = "biz-tq4"
+        async with Worker(env.client, task_queue=tq,
+                          workflows=[DealStructuringWorkflow], activities=_biz_activities()):
+            result = await env.client.execute_workflow(
+                DealStructuringWorkflow.run,
+                DealStructuringInput(deal_id=did, requested_by="rm@evamfinance.com"),
+                id=f"struct-noline-{did}", task_queue=tq)
+
+    assert result.status == "NoLendingLine"
+    assert "lending" in (result.note or "").lower()
+    assert mock_register.state.deals[did]["stage"] == "In Pipeline"
 
 
 async def test_lead_qualification_records_evidence(mock_register):

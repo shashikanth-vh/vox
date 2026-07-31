@@ -28,7 +28,7 @@ def _mini_mis() -> bytes:
                "Lending?", "Syndication?", "Asset Mon?", "Stage", "Date Received",
                "Contact Person", "Contact Phone", "Remarks"])
     ws.append(["ANV Web Ventures Private Limited", "EV", "TG", "DSA", "Get Vantage", "Hot",
-               "Shubh Dave", "Yes", "Yes", "No", "CP/CS Completed", None, "", "", "in process"])
+               "Shubh Dave", "Yes", "Yes", "No", "In Pipeline", None, "", "", "in process"])
 
     ws = wb.create_sheet("Lending Tracker")
     ws.append(["Company Name", "Lending Amount (₹ Cr)", "RM", "Credit Analyst", "Stage",
@@ -142,7 +142,7 @@ async def test_company_suffix_variants_canonicalise_to_one_entity(client: AsyncC
     ws.append(["Helios Power Private Limited", "Shubh Dave", "Solar"])
     ws = wb.create_sheet("Deals")
     ws.append(["Company Name", "RM", "Lending?", "Syndication?", "Asset Mon?", "Stage"])
-    ws.append(["Helios Power Pvt Ltd", "Shubh Dave", "Yes", "No", "No", "Diligence"])
+    ws.append(["Helios Power Pvt Ltd", "Shubh Dave", "Yes", "No", "No", "In Screening"])
     ws = wb.create_sheet("Lending Tracker")
     ws.append(["Company Name", "Lending Amount (₹ Cr)", "RM"])
     ws.append(["Helios Power Ltd", 5.0, "Shubh Dave"])
@@ -633,13 +633,15 @@ async def test_import_writes_initial_history_for_every_product_line(client, tmp_
     leads.append(["AllLines Co", "Solar - EPC"])
     deals = wb.create_sheet("Deals")
     deals.append(["Company Name", "Stage"])
-    deals.append(["AllLines Co", "CP/CS Completed"])
+    deals.append(["AllLines Co", "In Pipeline"])
     lend = wb.create_sheet("Lending Tracker")
     lend.append(["Company Name", "Stage"])
     lend.append(["AllLines Co", "Note Circulated"])
     syn = wb.create_sheet("Syndication")
-    syn.append(["Company Name", "Deal Status"])
-    syn.append(["AllLines Co", "IM Circulated"])
+    # The per-bank Status column drives the tracker's pipeline position (the coarse
+    # Deal Status only overlays the Dropped/Disbursed terminals).
+    syn.append(["Company Name", "Deal Status", "Bank", "Status"])
+    syn.append(["AllLines Co", "Deal Live", "Axis Finance", "IM Circulated"])
     am = wb.create_sheet("Asset Mon")
     am.append(["Company Name", "Status"])
     am.append(["AllLines Co", "NBO Received"])
@@ -652,7 +654,7 @@ async def test_import_writes_initial_history_for_every_product_line(client, tmp_
     assert r.status_code == 200, r.text
 
     deal = (await client.get("/v1/deals", params={"with_total": True})).json()["items"][0]
-    assert deal["stage_history"][-1]["from"] is None and deal["stage_history"][-1]["to"] == "CP/CS Completed"
+    assert deal["stage_history"][-1]["from"] is None and deal["stage_history"][-1]["to"] == "In Pipeline"
     assert deal["stage_history"][-1]["source"] == "xlsx-import"
     lend = (await client.get("/v1/lending", params={"with_total": True})).json()["items"][0]
     assert lend["stage_history"][-1]["to"] == "Note Circulated"
@@ -663,9 +665,10 @@ async def test_import_writes_initial_history_for_every_product_line(client, tmp_
 
 
 async def test_legacy_stage_labels_map_to_new_vocabulary(client, tmp_path):
-    """Legacy ATLAS 'Documentation' / 'Disbursed' lending labels map to the current vocabulary
-    ('CP/CS Completed' / 'Handed Over to Advaya'); a legacy 'Disbursed' row's recorded amount/date
-    become the proposed drawdown, so it is not quarantined for a missing proposed amount."""
+    """Legacy ATLAS 'Documentation' maps to 'CP/CS Completed'; 'Disbursed' imports VERBATIM,
+    with its recorded amount/date becoming the proposed drawdown, so it is not quarantined for
+    a missing proposed amount. A credit word on the DEALS sheet, by contrast, quarantines —
+    the deal's stage is the funnel."""
     from openpyxl import Workbook
     wb = Workbook()
     wb.remove(wb.active)
@@ -674,6 +677,8 @@ async def test_legacy_stage_labels_map_to_new_vocabulary(client, tmp_path):
     leads.append(["LegacyCo", "Solar - EPC"])
     deals = wb.create_sheet("Deals")
     deals.append(["Company Name", "Stage"])
+    # A credit-lifecycle word on the DEALS sheet is no longer deal vocabulary (the deal's stage
+    # is the funnel) — this row must QUARANTINE by name, while the lending row still maps.
     deals.append(["LegacyCo", "Documentation"])
     lend = wb.create_sheet("Lending Tracker")
     lend.append(["Company Name", "Stage", "Disbursed Amount (₹ Cr)", "Disbursement Date"])
@@ -687,8 +692,138 @@ async def test_legacy_stage_labels_map_to_new_vocabulary(client, tmp_path):
     assert r.status_code == 200, r.text
     assert r.json()["counts"]["lending_tracker"] == 1
 
-    deal = (await client.get("/v1/deals", params={"with_total": True})).json()["items"][0]
-    assert deal["stage"] == "CP/CS Completed"
+    # The deal row was quarantined (credit words live on the Lending Tracker sheet now)…
+    assert any(q["sheet"] == "Deals" and q["value"] == "Documentation"
+               for q in r.json()["report"]["quarantined"])
+    assert (await client.get("/v1/deals", params={"with_total": True})).json()["total"] == 0
+    # …while the lending row still maps through the legacy-label aliases.
     row = (await client.get("/v1/lending", params={"with_total": True})).json()["items"][0]
-    assert row["stage"] == "Handed Over to Advaya"
+    assert row["stage"] == "Disbursed"
     assert float(row["proposed_disbursement_amount"]) == 7.5
+
+
+async def test_disbursed_without_disbursement_columns_derives_and_never_drops(client, tmp_path):
+    """The live MIS Lending Tracker has NO disbursement columns — a 'Disbursed' facility carries
+    only the facility amount and the stage-updated date. Those are DERIVED into the mandatory
+    proposed amount/date (reported in the response's `derived` list) so the row imports; and a
+    Disbursed row missing even those is a real exposure that imports FLAGGED for reconciliation
+    instead of being dropped (the zero-omission rule)."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    leads = wb.create_sheet("Leads")
+    leads.append(["Company Name", "Sector"])
+    leads.append(["MisShape Co", "Solar - EPC"])
+    leads.append(["BareDisb Co", "Solar - EPC"])
+    lend = wb.create_sheet("Lending Tracker")
+    # The real sheet's exact columns: no disbursement, no proposed columns.
+    lend.append(["Company Name", "Lending Amount (₹ Cr)", "RM", "Credit Analyst", "Stage",
+                 "Stage Updated", "Remarks"])
+    lend.append(["MisShape Co", 1.15, "Shubh Dave", "AT", "Disbursed", "2026-06-03", "Disbursed"])
+    # …and one with not even an amount/date to derive from.
+    lend.append(["BareDisb Co", None, "Shubh Dave", "AT", "Disbursed", None, "no data"])
+    p = tmp_path / "mis_shape.xlsx"
+    wb.save(p)
+    with open(p, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "mis shape"},
+                              files={"file": ("mis_shape.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # BOTH rows imported — nothing quarantined on the Lending sheet.
+    assert body["counts"]["lending_tracker"] == 2
+    assert not any(q["sheet"] == "Lending Tracker" for q in body["report"]["quarantined"])
+    # The derivations are reported, never silent.
+    der = {(d["company"], d["field"]): d for d in body["report"]["derived"]}
+    assert der[("MisShape Co", "proposed_disbursement_amount")]["from_column"] == "Lending Amount (₹ Cr)"
+    assert der[("MisShape Co", "proposed_disbursement_date")]["from_column"] == "Stage Updated"
+    rows = {x["remarks"]: x for x in (await client.get(
+        "/v1/lending", params={"with_total": True, "include_reconciliation": True},
+        headers=_ADMIN)).json()["items"]}
+    ok_row = rows["Disbursed"]
+    assert ok_row["stage"] == "Disbursed"
+    assert float(ok_row["proposed_disbursement_amount"]) == 1.15
+    assert ok_row["proposed_disbursement_date"] == "2026-06-03"
+    # The bare row imported FLAGGED (reconciliation Required), listed in the report.
+    bare = rows["no data"]
+    assert bare["reconciliation_status"] == "Required"
+    assert any(x["company"] == "BareDisb Co" and "proposed_disbursement_amount" in x["missing"]
+               for x in body["report"]["reconciliation"])
+
+
+async def test_multiple_asset_mandates_per_company_all_import(client, tmp_path):
+    """The MIS lists SEVERAL asset-sale mandates for one company (e.g. a 58MW sale, a 100MW
+    land advisory and a dropped project). Each sheet row is its own asset_monetisation record —
+    never blended into one row per company — and a merge re-import matches the company's rows
+    in sheet order (updating in place, no duplicates)."""
+    from openpyxl import Workbook
+
+    def _wb(status_row2):  # noqa: ANN001
+        wb = Workbook()
+        wb.remove(wb.active)
+        leads = wb.create_sheet("Leads")
+        leads.append(["Company Name", "Sector"])
+        leads.append(["MultiAsset Co", "Solar - EPC"])
+        am = wb.create_sheet("Asset Mon")
+        am.append(["Company Name", "Size (MW)", "Deal Type", "Status", "Notes"])
+        am.append(["MultiAsset Co", 58, "Capital Market", "In Discussion", "Solar+BESS sale"])
+        am.append(["MultiAsset Co", 100, "Project Advisory", status_row2, "land advisory"])
+        am.append(["MultiAsset Co", 60, "Capital Market", "Dropped", "Mahagenco project"])
+        p2 = tmp_path / "multi_asset.xlsx"
+        wb.save(p2)
+        return p2
+
+    with open(_wb("Teaser Prepared"), "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "multi-asset"},
+                              files={"file": ("ma.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    assert r.json()["counts"]["asset_monetisation"] == 3
+    rows = (await client.get("/v1/asset-monetisation",
+                             params={"with_total": True})).json()["items"]
+    assert len(rows) == 3
+    by_size = {float(x["size_mw"]): x for x in rows}
+    assert by_size[58.0]["status"] == "In Discussion"
+    assert by_size[100.0]["deal_type"] == "Project Advisory"
+    assert by_size[60.0]["status"] == "Dropped"
+
+    # Merge re-import with the 2nd mandate advanced → SAME three rows (in-order match), the
+    # 2nd one updated, history recording the move.
+    with open(_wb("Teaser Shared"), "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "merge", "reason": "refresh"},
+                              files={"file": ("ma.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    c = r.json()["counts"]
+    assert c["asset_monetisation"] == 0 and c["asset_monetisation_updated"] == 3
+    rows = (await client.get("/v1/asset-monetisation",
+                             params={"with_total": True})).json()["items"]
+    assert len(rows) == 3
+    adv = next(x for x in rows if float(x["size_mw"]) == 100.0)
+    assert adv["status"] == "Teaser Shared"
+    assert adv["status_history"][-1]["from"] == "Teaser Prepared"
+
+
+async def test_multiple_lending_facilities_per_company_all_import(client, tmp_path):
+    """A company holding TWO facilities gets two lending lines — one per sheet row."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    leads = wb.create_sheet("Leads")
+    leads.append(["Company Name", "Sector"])
+    leads.append(["TwoLoans Co", "Solar - EPC"])
+    lend = wb.create_sheet("Lending Tracker")
+    lend.append(["Company Name", "Lending Amount (₹ Cr)", "Stage"])
+    lend.append(["TwoLoans Co", 5.0, "Diligence"])
+    lend.append(["TwoLoans Co", 12.0, "Data Awaited"])
+    p2 = tmp_path / "two_loans.xlsx"
+    wb.save(p2)
+    with open(p2, "rb") as fh:
+        r = await client.post("/v1/import/atlas-xlsx",
+                              params={"mode": "replace", "reason": "two loans"},
+                              files={"file": ("tl.xlsx", fh.read())})
+    assert r.status_code == 200, r.text
+    assert r.json()["counts"]["lending_tracker"] == 2
+    rows = (await client.get("/v1/lending", params={"with_total": True})).json()["items"]
+    assert {float(x["amount_cr"]) for x in rows} == {5.0, 12.0}
+    assert {x["stage"] for x in rows} == {"Diligence", "Data Awaited"}

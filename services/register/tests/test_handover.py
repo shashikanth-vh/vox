@@ -69,7 +69,9 @@ async def _ready_lending(client, eid) -> str:  # noqa: ANN001
         if ref:
             body["decision_ref"] = ref
         else:
-            body |= {"workflow_id": "wf", "run_id": "run"}
+            # The cited workflow must RESOLVE to a decision recorded for this subject —
+            # cite the committee decision seeded above (an invented id is refused).
+            body |= {"workflow_id": wf, "run_id": "run-1"}
         assert (await client.post("/v1/evidence", json=body, headers=ADMIN)).status_code == 201
     assert (await client.patch(
         f"/v1/lending/{lid}",
@@ -116,7 +118,7 @@ async def test_two_phase_maker_checker_and_package_integrity(client):
     assert appr.status_code == 200, appr.text
     assert appr.json()["status"] == "HandedOver"
     assert appr.json()["approved_by"] == "ch@evamfinance.com"
-    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Handed Over to Advaya"
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Disbursed"
 
     # The download returns the GENERATED document; its digest self-verifies server-side.
     dl = await client.post(f"/v1/lending/{lid}/handover-package/download")

@@ -216,7 +216,7 @@ def upgrade() -> None:
         is_asset_mon boolean NOT NULL DEFAULT false,
         rm varchar(120),
         analyst varchar(120),
-        stage varchar(60),
+        stage varchar(30),
         temperature varchar(10),
         source varchar(40),
         source_detail varchar(200),
@@ -232,6 +232,9 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_deals_tenant_entity ON deals (tenant_id, entity_id);")
     op.execute("CREATE INDEX ix_deals_entity_fk ON deals (entity_id);")
     op.execute("CREATE INDEX ix_deals_code ON deals (tenant_id, code);")
+    # deals.stage is the COMMERCIAL origination funnel (rbac.DEAL_FUNNEL_STAGES) — the deal's
+    # ONLY lifecycle; the bank/NBFC credit pipeline lives on lending_tracker.stage.
+    op.execute("CREATE INDEX ix_deals_stage ON deals (tenant_id, stage);")
 
     # --- leads -----------------------------------------------------------
     _table("leads", """

@@ -64,12 +64,14 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY;")
         # Drop any prior policy (0001 created *_tenant_isolation on a subset).
         op.execute(f"DROP POLICY IF EXISTS {tbl}_tenant_isolation ON {tbl};")
-        # Fail-CLOSED: no NULL escape. Unset GUC → current_setting(...) is NULL →
+        # Fail-CLOSED: no NULL escape. Unset GUC → current_setting(...) is NULL (or '' when a
+        # pooled session's transaction-local set_config reverted — NULLIF folds that to NULL
+        # instead of erroring the cast) →
         # tenant_id = NULL is NULL (never true) → zero rows / rejected writes.
         op.execute(f"""
             CREATE POLICY {tbl}_tenant_isolation ON {tbl}
-            USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
-            WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+            USING (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+            WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
         """)
         if force:
             op.execute(f"ALTER TABLE {tbl} FORCE ROW LEVEL SECURITY;")
@@ -82,11 +84,11 @@ def upgrade() -> None:
         CREATE POLICY audit_log_tenant_isolation ON audit_log
         USING (
             tenant_id IS NULL
-            OR tenant_id = current_setting('app.current_tenant', true)::uuid
+            OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
         )
         WITH CHECK (
             tenant_id IS NULL
-            OR tenant_id = current_setting('app.current_tenant', true)::uuid
+            OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
         );
     """)
     if force:
@@ -137,11 +139,11 @@ def downgrade() -> None:
                 CREATE POLICY {tbl}_tenant_isolation ON {tbl}
                 USING (
                     current_setting('app.current_tenant', true) IS NULL
-                    OR tenant_id = current_setting('app.current_tenant', true)::uuid
+                    OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
                 )
                 WITH CHECK (
                     current_setting('app.current_tenant', true) IS NULL
-                    OR tenant_id = current_setting('app.current_tenant', true)::uuid
+                    OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
                 );
             """)
         else:

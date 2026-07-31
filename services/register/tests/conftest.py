@@ -44,7 +44,13 @@ _ROOT = os.path.dirname(os.path.dirname(__file__))
 
 @pytest.fixture(scope="session", autouse=True)
 def _migrate() -> None:
-    """Build the schema once per session using the real migration."""
+    """Build the schema once per session using the real migration.
+
+    REGISTER_TESTS_NO_DB=1 skips it — for running the PURE-function tests
+    (normalisation, policy math) in environments without Postgres. DB-backed
+    tests will then fail on connection, which is the honest outcome."""
+    if os.environ.get("REGISTER_TESTS_NO_DB"):
+        return
     env = {**os.environ}
     subprocess.run(["alembic", "downgrade", "base"], check=False, env=env,
                    capture_output=True, cwd=_ROOT)

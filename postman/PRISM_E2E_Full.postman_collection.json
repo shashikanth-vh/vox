@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PRISM \u00b7 E2E FULL (via NGINX, with Temporal)",
-    "description": "Every request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`. The edge forwards everything to the gateway, which routes by prefix: `/access` \u2192 Access, `/orchestrator` \u2192 the workflow plane, anything else \u2192 the Register. **Postman sends no backend api key** \u2014 the gateway strips it and injects each upstream's own.\\n\\nAll three product lines reach their terminal state:\\n* **Lending** \u2192 `Handed Over to Advaya`\\n* **Syndication** \u2192 `Disbursed`\\n* **Asset monetisation** \u2192 `Closed`\\n\\n### The sanction goes through Temporal\\n`Sanctioned` cannot be typed (folder 05 proves it). Instead: start a deal-structuring workflow, then send the committee decision. The orchestrator durably records a subject-bound decision for the deal AND for each lending line \u2014 carrying the deciding human's committee authority \u2014 and the workflow files the Lending-scoped evidence before advancing the line.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification OFF in Postman for the self-signed cert.\\n\\n**Temporal is asynchronous:** if folder 05's 'deal is Sanctioned' check races the run, re-send the status request and then the two GETs.\\n\\nFour requests MUST fail (unknown filter, lead\u2192Converted, hand-typed `Sanctioned`) \u2014 their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",
+    "description": "Every request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`. The edge forwards everything to the gateway, which routes by prefix: `/access` \u2192 Access, `/orchestrator` \u2192 the workflow plane, anything else \u2192 the Register. **Postman sends no backend api key** \u2014 the gateway strips it and injects each upstream's own.\\n\\nAll three product lines reach their terminal state:\\n* **Lending** \u2192 `Handed Over to Advaya`\\n* **Syndication** \u2192 `Disbursed`\\n* **Asset monetisation** \u2192 `Closed`\\n\\n### The sanction goes through Temporal\\n`Sanctioned` cannot be typed (folder 05 proves it). Instead: start a deal-structuring workflow, then send the committee decision. The orchestrator durably records a subject-bound decision for the deal AND for each lending line \u2014 carrying the deciding human's committee authority \u2014 and the workflow files the Lending-scoped evidence before advancing the line.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification OFF in Postman for the self-signed cert.\\n\\n**Temporal is asynchronous:** if folder 05's 'lending is Sanctioned' check races the run, re-send the status request and then the two GETs.\\n\\nFour requests MUST fail (unknown filter, lead\u2192Converted, hand-typed `Sanctioned`) \u2014 their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1969,7 +1969,7 @@
                 "deal-structurings"
               ]
             },
-            "description": "Walks the deal to 'Note Circulated', files the credit note, then WAITS for the committee. Workflow id is struct-{tenant}-{deal_id}.",
+            "description": "Walks the LENDING line to 'Note Circulated', files the credit note against it, then WAITS for the committee. The deal's own stage is the commercial funnel and is never touched. Workflow id is struct-{tenant}-{deal_id}.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"deal_id\": \"{{dealId}}\",\n  \"requested_by\": \"{{makerEmail}}\",\n  \"product_type\": \"Term Loan\",\n  \"rm\": \"E2E Priya Nair\",\n  \"credit_note_reference\": \"CN/ECOSOCH/{{runSuffix}}\",\n  \"decision_timeout_hours\": 24\n}",
@@ -2059,82 +2059,6 @@
           ]
         },
         {
-          "name": "WAIT \u00b7 poll the DEAL until Sanctioned",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/deals/{{dealId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "deals",
-                "{{dealId}}"
-              ]
-            },
-            "description": "Polls the REGISTER, not the orchestrator status endpoint (which needs a verified bearer and 401s on a dev header). Re-runs itself until the workflow settles \u2014 Collection Runner only."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Temporal settles asynchronously \u2014 pause ~1.5s before polling.",
-                  "const t = Date.now(); while (Date.now() - t < 1500) { /* spin */ }"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const max = 15;",
-                  "const key = 'poll_DEAL';",
-                  "let n = Number(pm.environment.get(key) || 0);",
-                  "const cur = pm.response.json().stage;",
-                  "console.log('poll ' + n + ' :: DEAL = ' + cur);",
-                  "if (cur === 'Sanctioned') {",
-                  "  pm.environment.unset(key);",
-                  "  pm.test('DEAL reached Sanctioned', () => pm.expect(cur).to.eql('Sanctioned'));",
-                  "} else if (n < max) {",
-                  "  pm.environment.set(key, n + 1);",
-                  "  postman.setNextRequest('WAIT \u00b7 poll the DEAL until Sanctioned');",
-                  "} else {",
-                  "  pm.environment.unset(key);",
-                  "  pm.test('DEAL reached Sanctioned within ' + max + ' polls (got ' + cur + ')', () => pm.expect(cur).to.eql('Sanctioned'));",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "WAIT \u00b7 poll the LENDING line until Sanctioned",
           "request": {
             "method": "GET",
@@ -2211,7 +2135,7 @@
           ]
         },
         {
-          "name": "GET /v1/deals/{id} \u2014 the DEAL is Sanctioned",
+          "name": "GET /v1/deals/{id} \u2014 the DEAL stays in the commercial funnel",
           "request": {
             "method": "GET",
             "header": [
@@ -2246,7 +2170,8 @@
                 "deals",
                 "{{dealId}}"
               ]
-            }
+            },
+            "description": "The deal's stage is the ORIGINATION FUNNEL \u2014 sanctioning its facility does not move it. The structuring input's product_type/rm land on the deal as plain data."
           },
           "event": [
             {
@@ -2255,7 +2180,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.test('deal Sanctioned', () => pm.expect(pm.response.json().stage).to.eql('Sanctioned'));"
+                  "const d = pm.response.json();",
+                  "pm.test('deal stage is the funnel (In Pipeline), never a credit value', () => pm.expect(d.stage).to.eql('In Pipeline'));",
+                  "pm.test('sanction basics recorded on the deal as data', () => pm.expect(d.product_type).to.eql('Term Loan'));"
                 ]
               }
             }

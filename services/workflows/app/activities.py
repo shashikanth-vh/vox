@@ -405,7 +405,10 @@ async def create_deal(inp: LeadConversionInput, entity_id: str,
             "is_asset_mon": inp.is_asset_mon,
             "rm": inp.rm,
             "analyst": inp.analyst,
-            "stage": "Data Awaited",
+            # The deal's stage is the COMMERCIAL funnel: an approved conversion enters at
+            # 'In Pipeline'. Credit execution lives on the lending line (created separately
+            # at 'Data Awaited').
+            "stage": "In Pipeline",
             "source": "RM",
             "source_detail": f"Converted from lead {inp.lead_id}",
             "remarks": inp.note,
@@ -537,6 +540,22 @@ async def advance_stage(resource: str, obj_id: str, stage_field: str, stage_valu
                                 request_id=activity.info().workflow_id)
 
 
+
+@activity.defn
+async def update_fields(resource: str, obj_id: str, fields: dict[str, Any],
+                        caller: CallerContext | None = None) -> dict[str, Any]:
+    """A plain, policy-enforced field update with NO lifecycle change (e.g. recording
+    product_type/rm on the deal when its lending line is sanctioned). Idempotent: values
+    already equal on the row are skipped, and an empty remainder is a no-op read."""
+    async with _client(caller) as reg:
+        row = await reg.get(resource, obj_id, request_id=activity.info().workflow_id)
+        body = {k: v for k, v in fields.items() if v is not None and row.get(k) != v}
+        if not body:
+            return row
+        return await reg.update(resource, obj_id, body,
+                                request_id=activity.info().workflow_id)
+
+
 @activity.defn
 async def find_lines_for_deal(resource: str, deal_id: str,
                               caller: CallerContext | None = None) -> list[dict[str, Any]]:
@@ -570,7 +589,7 @@ async def prepare_cpcs_checklist(lending_id: str, payload: dict[str, Any],
 async def create_handover_package(lending_id: str, package: dict[str, Any],
                                   caller: CallerContext | None = None) -> dict[str, Any]:
     """Create the durable, immutable Advaya handover PACKAGE in the Register and advance the line to
-    'Handed Over to Advaya' — TRANSACTIONALLY, so the stage moves only after the snapshot is durably
+    'Disbursed' — TRANSACTIONALLY, so the stage moves only after the snapshot is durably
     written. Authoritative amounts (facility, proposed drawdown) are read from the Lending row
     server-side; ``package`` carries only the handover metadata (executed-doc refs, package
     ref/digest, CP/CS checklist version, delivery method/recipient, initiator/approver, note).
@@ -591,7 +610,7 @@ async def record_advaya_handoff(handoff_key: str, lending_id: str, payload_sha25
     This is the FUTURE-Advaya-integration hook: when a real Advaya round-trip exists, its accepted
     response is recorded here and the ``advaya_acknowledgement`` evidence is VERIFIED against it
     before a line may reach 'Disbursement Pending'. It is NOT called on the current handover path
-    (PRISM stops at 'Handed Over to Advaya' — no Advaya call, no fabricated acceptance). Idempotent:
+    (PRISM stops at 'Disbursed' — no Advaya call, no fabricated acceptance). Idempotent:
     a replay of the same outcome returns the original; a contradictory one is refused (409)."""
     info = activity.info()
     async with _client(caller) as reg:

@@ -31,15 +31,11 @@ async def _deal(client, eid) -> str:  # noqa: ANN001
     return r.json()["id"]
 
 
-_SUBJECT_OF_KIND = {"deals": "Deal", "lending": "Lending"}
-_DECISION_TABLE = {"deals": "deals", "lending": "lending_tracker"}
+# Sanction evidence applies to LENDING only — a deal's stage is the commercial funnel and
+# carries no credit governance (the deal-level credit stage is deprecated).
+_SUBJECT_OF_KIND = {"lending": "Lending"}
+_DECISION_TABLE = {"lending": "lending_tracker"}
 _DECISION_SQL = {
-    "deals": ("INSERT INTO workflow_decisions (workflow_id, decision, subject_type, subject_id, "
-              "run_id, decided_by, decided_by_id, roles, tenant_id) "
-              "SELECT :wf, 'Approved', :st, CAST(:sid AS varchar), 'run-1', "
-              "'ch@evamfinance.com', 'u-1', "
-              "CAST('[\"Credit Head\"]' AS jsonb), tenant_id FROM deals "  # noqa: S608
-              "WHERE id = CAST(:sid AS uuid)"),
     "lending": ("INSERT INTO workflow_decisions (workflow_id, decision, subject_type, subject_id, "
                 "run_id, decided_by, decided_by_id, roles, tenant_id) "
                 "SELECT :wf, 'Approved', :st, CAST(:sid AS varchar), 'run-1', "
@@ -50,7 +46,7 @@ _DECISION_SQL = {
 
 
 async def _attach_sanction_evidence(client, kind, oid):  # noqa: ANN001
-    """Sanctioning is evidence-gated: a Deal/Lending line may reach 'Sanctioned' only once the
+    """Sanctioning is evidence-gated: a Lending line may reach 'Sanctioned' only once the
     Credit Committee approval AND the sanction letter are on file — each VERIFIED against a durable,
     committee-authority decision. Seed that decision, then attach both records citing it."""
     import uuid as _uuid
@@ -97,11 +93,23 @@ async def _attach_cpcs_evidence(client, kind, oid):  # noqa: ANN001
         json={"subject_type": subject, "subject_id": str(oid), "evidence_kind": "cp_cs_completion",
               "reference": "cpcs/1", "sha256": "a" * 64, "decision_ref": cid}, headers=ADMIN)
     assert ev.status_code == 201, ev.text
+    # executed_agreement must cite a workflow that RESOLVES to a decision recorded for this
+    # subject (an invented id is refused) — seed one, exactly as the orchestrator would have.
+    import uuid as _uuid
+
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    wf = f"docs-{_uuid.uuid4().hex[:12]}"
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text(_DECISION_SQL[kind]), {"wf": wf, "st": subject, "sid": str(oid)})
+        await s.commit()
     ev2 = await client.post(
         "/v1/evidence",
         json={"subject_type": subject, "subject_id": str(oid),
               "evidence_kind": "executed_agreement", "reference": "ea/1", "sha256": "a" * 64,
-              "workflow_id": "wf", "run_id": "run"}, headers=ADMIN)
+              "workflow_id": wf, "run_id": "run-1"}, headers=ADMIN)
     assert ev2.status_code == 201, ev2.text
 
 
@@ -129,10 +137,10 @@ async def test_direct_patch_cannot_skip_pipeline_stages(client):
     eid = await _entity(client)
     lid = (await client.post("/v1/lending",
                              json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
-    # Diligence → Handed Over to Advaya skips Note Circulated / Sanctioned / CP/CS Completed /
+    # Diligence → Disbursed skips Note Circulated / Sanctioned / CP/CS Completed /
     # Ready for Disbursement → refused.
     r = await client.patch(f"/v1/lending/{lid}",
-                           json={"stage": "Handed Over to Advaya",
+                           json={"stage": "Disbursed",
                                  "proposed_disbursement_amount": 5,
                                  "proposed_disbursement_date": "2026-01-01"})
     assert r.status_code == 422, r.text
@@ -145,46 +153,46 @@ async def test_direct_patch_cannot_skip_pipeline_stages(client):
     assert back.status_code == 200, back.text
 
 
-async def test_mandatory_fields_block_stage_advance(client):
+async def test_deal_stage_is_the_commercial_funnel(client):
+    """A deal's stage speaks ONLY the origination funnel: a credit-lifecycle word is an unknown
+    value, the first set obeys the entry allowlist, movement is ordered, terminals are final."""
     eid = await _entity(client)
     did = await _deal(client, eid)
-    await _advance(client, "deals", did, ["Diligence", "Note Circulated"])
-    # Advancing a deal to Sanctioned without product_type + rm is refused (422).
+    # A credit word is no longer deal vocabulary (credit lives on the lending line) — the funnel
+    # Literal rejects it at the schema (422).
     r = await client.patch(f"/v1/deals/{did}", json={"stage": "Sanctioned"})
     assert r.status_code == 422, r.text
-    assert "required" in r.text.lower() and "rm" in r.text.lower()
-    # With the required fields but no sanction evidence on file, the evidence gate refuses it.
-    no_ev = await client.patch(f"/v1/deals/{did}",
-                               json={"stage": "Sanctioned", "product_type": "Term Loan",
-                                     "rm": "asha"})
-    assert no_ev.status_code == 422 and "evidence" in no_ev.text.lower()
-    # Supplying the required fields AND the sanction evidence → allowed.
-    await _attach_sanction_evidence(client, "deals", did)
-    ok = await client.patch(f"/v1/deals/{did}",
-                            json={"stage": "Sanctioned", "product_type": "Term Loan",
-                                  "rm": "asha"})
-    assert ok.status_code == 200, ok.text
-    assert ok.json()["stage"] == "Sanctioned"
+    # NULL → a terminal is not a birth state (the entry allowlist governs the first set too).
+    r = await client.patch(f"/v1/deals/{did}", json={"stage": "Closed Won"})
+    assert r.status_code == 422, r.text
+    # The funnel walks in order to a win…
+    for fs in ("New Inquiry", "In Screening", "In Pipeline", "Closed Won"):
+        r = await client.patch(f"/v1/deals/{did}", json={"stage": fs})
+        assert r.status_code == 200, f"{fs}: {r.text}"
+    # …and a CLOSED terminal is final (a revived opportunity is a new deal).
+    r = await client.patch(f"/v1/deals/{did}", json={"stage": "In Pipeline"})
+    assert r.status_code == 422, r.text
+    assert "may not move" in r.text.lower()
 
 
 async def test_field_lock_restricts_who_may_edit_at_a_stage(client):
+    """The sanctioned-RM lock lives on the LENDING line (it moved there with the rest of the
+    sanction governance when the deal-level credit stage was deprecated)."""
     eid = await _entity(client)
-    did = await _deal(client, eid)
-    await _advance(client, "deals", did, ["Diligence", "Note Circulated"])
-    await _attach_sanction_evidence(client, "deals", did)
-    await client.patch(f"/v1/deals/{did}",
-                       json={"stage": "Sanctioned", "product_type": "Term Loan", "rm": "asha"})
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    await _advance(client, "lending", lid, ["Note Circulated", "Sanctioned"], rm="asha")
     # A user context that passes scope (FULL) but is only an RM may NOT reassign rm at Sanctioned.
     rm_headers = {"X-User-Email": "rm@evamfinance.com", "X-User-Roles": "RM",
                   "X-Authz-Decision": "FULL"}
-    denied = await client.patch(f"/v1/deals/{did}", json={"rm": "someone-else"},
+    denied = await client.patch(f"/v1/lending/{lid}", json={"rm": "someone-else"},
                                 headers=rm_headers)
     assert denied.status_code == 403, denied.text
     assert "locked at stage" in denied.text.lower()
     # Management may.
     mgmt_headers = {"X-User-Email": "md@evamfinance.com", "X-User-Roles": "Management",
                     "X-Authz-Decision": "FULL"}
-    allowed = await client.patch(f"/v1/deals/{did}", json={"rm": "new-rm"}, headers=mgmt_headers)
+    allowed = await client.patch(f"/v1/lending/{lid}", json={"rm": "new-rm"}, headers=mgmt_headers)
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["rm"] == "new-rm"
 
@@ -212,10 +220,10 @@ async def test_mandatory_fields_enforced_on_the_real_lending_route(client):
               "proposed_disbursement_date": "2026-01-15"})
     assert ready.status_code == 200, ready.text
     # Handover to Advaya is PRISM's TERMINAL — reachable from 'Ready for Disbursement'.
-    ok = await client.patch(f"/v1/lending/{lid}", json={"stage": "Handed Over to Advaya"})
+    ok = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"})
     assert ok.status_code == 200, ok.text
-    assert ok.json()["stage"] == "Handed Over to Advaya"
-    # There is no self-disbursement onward: 'Handed Over to Advaya' only off-ramps to 'On Hold'
+    assert ok.json()["stage"] == "Disbursed"
+    # There is no self-disbursement onward: 'Disbursed' only off-ramps to 'On Hold'
     # (the onward disbursement states exist only under a future Advaya integration).
     onward = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursement Pending"})
     assert onward.status_code == 422 and "unknown value" in onward.text.lower()
@@ -254,9 +262,9 @@ async def test_creation_is_restricted_to_genuine_entry_stages(client):
     stage (Note Circulated / IM Circulated) or a governance/terminal outcome."""
     eid = await _entity(client)
     refused = [
-        ("/v1/deals", {"entity_id": eid, "stage": "Sanctioned"}),
-        ("/v1/deals", {"entity_id": eid, "stage": "Note Circulated"}),
-        ("/v1/lending", {"entity_id": eid, "stage": "Handed Over to Advaya"}),
+        ("/v1/deals", {"entity_id": eid, "stage": "Closed Won"}),
+        ("/v1/deals", {"entity_id": eid, "stage": "Screened Out"}),
+        ("/v1/lending", {"entity_id": eid, "stage": "Disbursed"}),
         ("/v1/lending", {"entity_id": eid, "stage": "Ready for Disbursement"}),
         ("/v1/syndication", {"entity_id": eid, "status": "Sanctioned"}),
         ("/v1/syndication", {"entity_id": eid, "status": "IM Circulated"}),
@@ -268,7 +276,7 @@ async def test_creation_is_restricted_to_genuine_entry_stages(client):
         assert r.status_code == 422, f"{path} should refuse a non-entry initial state: {r.text}"
     # …but a genuine entry stage is accepted for each line.
     for path, body in [
-        ("/v1/deals", {"entity_id": eid, "stage": "Diligence"}),
+        ("/v1/deals", {"entity_id": eid, "stage": "In Screening"}),
         ("/v1/lending", {"entity_id": eid, "stage": "Data Awaited"}),
         ("/v1/syndication", {"entity_id": eid, "status": "Deal Sourced"}),
         ("/v1/asset-monetisation", {"entity_id": eid, "status": "Teaser Prepared"}),
@@ -281,7 +289,7 @@ async def test_creation_applies_mandatory_fields_when_a_stage_is_supplied(client
     """Creating a line directly in a non-entry/governance stage is refused (it must be reached
     through the pipeline) — proving creation runs the SAME check_write authority as a PATCH."""
     eid = await _entity(client)
-    r = await client.post("/v1/lending", json={"entity_id": eid, "stage": "Handed Over to Advaya",
+    r = await client.post("/v1/lending", json={"entity_id": eid, "stage": "Disbursed",
                                                "proposed_disbursement_amount": 5,
                                                "proposed_disbursement_date": "2026-01-01"})
     assert r.status_code == 422, r.text
@@ -310,21 +318,21 @@ async def test_approval_cannot_bypass_mandatory_fields_lending(client):
     assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "CP/CS Completed"
 
 
-async def test_approval_cannot_bypass_mandatory_fields_deal(client):
-    """A change request approving Deal → Sanctioned must be refused when product_type/rm are not
-    already on the row — mandatory fields bind the approver (even Admin)."""
+async def test_approval_cannot_bypass_funnel_order_deal(client):
+    """A change request approving a funnel JUMP (New Inquiry → Closed Won) must be refused —
+    the approval path runs the SAME transition graph a direct PATCH does."""
     eid = await _entity(client)
     did = await _deal(client, eid)
-    await _advance(client, "deals", did, ["Diligence", "Note Circulated"])
+    await client.patch(f"/v1/deals/{did}", json={"stage": "New Inquiry"})
     cr = await client.post("/v1/requests", json={
         "subject_type": "Deal", "subject_id": did, "field": "stage",
-        "to_value": "Sanctioned"}, headers=BD_HEAD)
+        "to_value": "Closed Won"}, headers=BD_HEAD)
     assert cr.status_code == 201, cr.text
     decided = await client.post(f"/v1/requests/{cr.json()['id']}/approve", json={},
                                 headers=BD_HEAD)
     assert decided.status_code == 409, decided.text
-    assert "product_type" in decided.text or "rm" in decided.text
-    assert (await client.get(f"/v1/deals/{did}")).json()["stage"] != "Sanctioned"
+    assert "may not move" in decided.text.lower()
+    assert (await client.get(f"/v1/deals/{did}")).json()["stage"] == "New Inquiry"
 
 
 # --------------------------------------------------------------------------- #
@@ -337,7 +345,9 @@ async def test_stage_vocab_matches_the_authoritative_reference_dropdowns():
 
     from app.seed.refdata import REF_VALUES
     assert STAGE_VOCAB["Lending"][1] == frozenset(REF_VALUES["Lending Stage"])
-    assert STAGE_VOCAB["Deal"][1] == frozenset(REF_VALUES["Lending Stage"])
+    from evam_backend_core.rbac import DEAL_FUNNEL_STAGES
+    assert STAGE_VOCAB["Deal"][1] == frozenset(DEAL_FUNNEL_STAGES)
+    assert frozenset(DEAL_FUNNEL_STAGES) == frozenset(REF_VALUES["Deal Funnel Stage"])
     assert STAGE_VOCAB["Syndication"][1] == frozenset(REF_VALUES["Status of Proposal"])
     assert STAGE_VOCAB["AssetMonetisation"][1] == frozenset(REF_VALUES["Asset Mon Status"])
 

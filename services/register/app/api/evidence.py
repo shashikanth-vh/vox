@@ -282,7 +282,7 @@ async def attach_evidence(payload: EvidenceIn,
             raise ValidationAppError(
                 "advaya_acknowledgement is disabled: there is no Advaya integration "
                 "(REGISTER_ADVAYA_INTEGRATION_ENABLED is off). The current terminal is "
-                "'Handed Over to Advaya'.")
+                "'Disbursed'.")
         # VERIFY against an Accepted Advaya-handoff record (matching payload digest), and generate
         # provenance from it — so it can't be manufactured with invented values.
         handoff = await _verify_advaya_handoff(ctx, payload)

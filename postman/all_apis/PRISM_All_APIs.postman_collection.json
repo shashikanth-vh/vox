@@ -978,7 +978,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"sample\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1139,7 +1139,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"sample\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10100,7 +10100,7 @@
       ]
     },
     {
-      "name": "VocX  (1 requests \u00b7 {{baseUrl}}/vocx)",
+      "name": "VocX  (21 requests \u00b7 {{baseUrl}}/vocx)",
       "item": [
         {
           "name": "Touchpoints",
@@ -10150,6 +10150,719 @@
                       "language": "json"
                     }
                   }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "VOX",
+          "item": [
+            {
+              "name": "GET /vocx/v1/audio \u2014 Playback for an archived recording (presigned URL / bytes)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/audio",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "audio"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/auth/callback \u2014 OAuth redirect target (exempted at the gateway)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/auth/callback",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "auth",
+                    "callback"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/auth/start \u2014 Begin per-RM Google OAuth (browser)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/auth/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "auth",
+                    "start"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/auth/status \u2014 Is this RM's Google connected?",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/auth/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "auth",
+                    "status"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/calendar/test \u2014 Prove which Google calendar VocX writes to",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/calendar/test",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "calendar",
+                    "test"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/capabilities \u2014 What this deployment can do right now",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/capabilities",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "capabilities"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/capture \u2014 Preview a typed/inline-audio capture (never writes)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/capture",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "capture"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/capture_audio \u2014 Raw audio \u2192 archive + STT \u2192 preview",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/capture_audio",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "capture_audio"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/commit \u2014 Execute an approved capture (idempotent by capture_id)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/commit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "commit"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/entity \u2014 One entity + its interactions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/entity",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "entity"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/facets \u2014 Facet counts under the same filters",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/facets",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "facets"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/interaction_types \u2014 Interaction-type vocabulary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/interaction_types",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "interaction_types"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/interactions \u2014 Search the interaction log",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/interactions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "interactions"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/reports \u2014 The RM's report list (drafts \u2192 ready \u2192 committed)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/reports/delete \u2014 Delete a report",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/delete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "delete"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/reports/get \u2014 One report document",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/get",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "get"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/reports/print \u2014 Print-ready HTML of a report (browser print \u2192 PDF)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/print",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "print"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/reports/save \u2014 Save/update a pending report",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/save",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "save"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/suggest \u2014 Company typeahead: ranked matches or new-company signal",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/suggest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "suggest"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /vocx/v1/template_fill \u2014 Haiku fills a template's fields from the transcript",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/template_fill",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "template_fill"
+                  ]
                 }
               }
             }

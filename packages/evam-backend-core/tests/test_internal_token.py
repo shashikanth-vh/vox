@@ -62,3 +62,22 @@ def test_verify_exp_false_accepts_expired_but_still_checks_signature():
     # A wrong key is still rejected even with expiry off.
     with pytest.raises(InternalTokenError):
         verify_internal_context(old, verify_key="the-wrong-key", verify_exp=False)
+
+
+def test_token_carries_policy_version_epoch_and_kid():
+    """Release-one claims: the signed context is a short-lived authorization credential
+    naming the policy version it was resolved under, the caller's revocation epoch, and
+    the signing-key id (rotation support). All three round-trip; old tokens without them
+    still verify (defaults)."""
+    from evam_backend_core.internal_token import mint_internal_context, verify_internal_context
+
+    tok = mint_internal_context(
+        signing_key="s" * 32, tenant="EVAM", email="rm@evamfinance.com", user_id="u-1",
+        roles=["BDRM"], policy_version="3.1", epoch=7, kid="primary")
+    ic = verify_internal_context(tok, verify_key="s" * 32)
+    assert ic.policy_version == "3.1" and ic.epoch == 7 and ic.kid == "primary"
+
+    legacy = mint_internal_context(
+        signing_key="s" * 32, tenant="EVAM", email="rm@evamfinance.com", user_id="u-1")
+    ic2 = verify_internal_context(legacy, verify_key="s" * 32)
+    assert ic2.policy_version is None and ic2.epoch == 0

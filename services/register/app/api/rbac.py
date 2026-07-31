@@ -94,6 +94,8 @@ async def create_assignment(payload: s.AssignmentCreate,
         # enforce_rbac. This removes the old blanket "any machine may create a Lead/BDRM"
         # carve-out — only the vetted capture/workflow services can.
         authz.enforce_operation(None, "add_employee_assign_role")
+    from app.authz.revalidate import revalidate_sensitive
+    await revalidate_sensitive(ctx, "add_employee_assign_role")
 
     # Subject (the line) must exist.
     if await load_subject(ctx.session, ctx.tenant_id, stype, data["subject_id"]) is None:
@@ -175,6 +177,8 @@ async def end_assignment(assignment_id: uuid.UUID,
         raise ForbiddenError(
             f"Role(s) {sorted(ctx.user.roles)} may not end a "
             f"{obj.assignment_role} assignment on a {obj.subject_type} line.")
+    from app.authz.revalidate import revalidate_sensitive
+    await revalidate_sensitive(ctx, "add_employee_assign_role")
     if ctx.user is None:
         # A machine caller ending an assignment must clear the assignment operation
         # (honours enforce_rbac) — it was previously unchecked.
@@ -534,7 +538,10 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "is_syndication": payload.is_syndication,
         "is_asset_mon": payload.is_asset_mon,
         "rm": payload.rm, "analyst": payload.analyst,
-        "stage": "Data Awaited", "source": "RM",
+        # An approved conversion is a committed opportunity with live product lines — it enters
+        # the COMMERCIAL funnel at 'In Pipeline'. Credit execution starts on the lending line
+        # (created below at 'Data Awaited'), never on the deal.
+        "stage": "In Pipeline", "source": "RM",
         "source_detail": source_detail, "remarks": payload.note,
     })
     line_ids: dict[str, Any] = {}

@@ -20,7 +20,7 @@ from app.db.base import RegisterBase
 
 class AdvayaHandoverPackage(RegisterBase):
     """The durable, immutable HANDOVER PACKAGE — the authoritative snapshot of exactly what PRISM
-    handed over to Advaya. Created transactionally with the advance to 'Handed Over to Advaya' (the
+    handed over to Advaya. Created transactionally with the advance to 'Disbursed' (the
     stage moves ONLY after this snapshot is committed), so the record proves WHAT was handed over,
     not merely that someone changed the stage.
 

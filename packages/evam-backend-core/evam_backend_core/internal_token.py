@@ -51,6 +51,15 @@ class InternalContext:
     matrix_version: int = 0
     # The gateway's binary decision for THIS request's mapped route, if any.
     decision: str | None = None
+    # The approved ATLAS policy version the grants were resolved under (rbac_catalog
+    # .POLICY_VERSION at mint time) and the user's revocation epoch (bumped by Access on any
+    # role change / deactivation) — so every authorization decision can answer "under which
+    # policy?", and a fresh online revalidation can reject a context minted before a
+    # revocation.
+    policy_version: str | None = None
+    epoch: int = 0
+    # Signing-key id — supports key rotation (verifiers may pin/log the kid).
+    kid: str | None = None
     # Request binding: the token is minted for ONE request and is only valid for that
     # method + path (+ the operation it was decided against), so it cannot be replayed
     # against a different route during its short validity.
@@ -82,6 +91,9 @@ def mint_internal_context(
     algorithm: str = "HS256",
     ttl_seconds: int = 120,
     now: int | None = None,
+    policy_version: str | None = None,
+    epoch: int = 0,
+    kid: str | None = None,
 ) -> str:
     """Mint a signed internal-context token. ``signing_key`` is the shared secret (HS256)
     or the PEM private key (RS256). ``now`` is injectable for tests."""
@@ -107,8 +119,11 @@ def mint_internal_context(
         "method": method,
         "path": path,
         "operation": operation,
+        "policy_version": policy_version,
+        "epoch": epoch,
     }
-    return jwt.encode(claims, signing_key, algorithm=algorithm)
+    headers = {"kid": kid} if kid else None
+    return jwt.encode(claims, signing_key, algorithm=algorithm, headers=headers)
 
 
 def verify_internal_context(
@@ -146,6 +161,11 @@ def verify_internal_context(
     except jwt.PyJWTError as exc:
         raise InternalTokenError(f"Invalid internal context token: {exc}") from exc
 
+    try:
+        kid = jwt.get_unverified_header(token).get("kid")
+    except jwt.PyJWTError:
+        kid = None
+
     email = claims.get("email")
     tenant = claims.get("tenant")
     uid = claims.get("uid")
@@ -165,4 +185,7 @@ def verify_internal_context(
         method=claims.get("method"),
         path=claims.get("path"),
         operation=claims.get("operation"),
+        policy_version=claims.get("policy_version"),
+        epoch=int(claims.get("epoch", 0)),
+        kid=kid,
     )

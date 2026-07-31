@@ -80,7 +80,11 @@ class Deal(RegisterBase):
 
     rm: Mapped[str | None] = mapped_column(String(120))
     analyst: Mapped[str | None] = mapped_column(String(120))
-    stage: Mapped[str | None] = mapped_column(String(60))
+    # THE deal stage — the ORIGINATION FUNNEL, verbatim MIS vocabulary (New Inquiry / In
+    # Screening / In Pipeline / On Hold / Screened Out / Closed Won / Closed Lost; see rbac
+    # DEAL_FUNNEL_STAGES). A deal carries no credit lifecycle: the bank/NBFC pipeline is
+    # governed on the LENDING TRACKER line.
+    stage: Mapped[str | None] = mapped_column(String(30))
     # Append-only stage history (parity with the other trackers), so import-driven Deal stage
     # changes are recorded, not silently overwritten.
     stage_history: Mapped[list | None] = mapped_column(JSONB)

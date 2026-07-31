@@ -54,6 +54,8 @@ async def import_atlas_xlsx(
     from app.authz import enforce_operation
 
     enforce_operation(ctx.user, "backup_restore")
+    from app.authz.revalidate import revalidate_sensitive
+    await revalidate_sensitive(ctx, "backup_restore")
     if not reason.strip():
         raise ValidationAppError("A non-empty reason is required to run a governed import.")
     name = (file.filename or "").lower()
@@ -71,6 +73,8 @@ async def import_atlas_xlsx(
     quarantined = report.get("quarantined", [])
     reconciliation = report.get("reconciliation", [])
     history_changes = report.get("history_changes", [])
+    translated = report.get("translated", [])
+    derived = report.get("derived", [])
 
     # Immutable governance evidence + LINEAGE: WHO imported WHAT (filename + checksum = batch id),
     # in WHICH mode, WHY, under which ticket — with the accepted counts, the quarantined (skipped)
@@ -84,6 +88,8 @@ async def import_atlas_xlsx(
                  "ticket": ticket, "retain_incomplete": retain_incomplete, "counts": counts,
                  "quarantined_count": len(quarantined), "quarantined": quarantined,
                  "reconciliation_count": len(reconciliation), "reconciliation": reconciliation,
+                 "translated_count": len(translated), "translated": translated,
+                 "derived_count": len(derived), "derived": derived,
                  "history_change_count": len(history_changes),
                  "history_changes": history_changes}))
 
@@ -92,5 +98,11 @@ async def import_atlas_xlsx(
             "report": {"quarantined": quarantined, "quarantined_count": len(quarantined),
                        "reconciliation": reconciliation,
                        "reconciliation_count": len(reconciliation),
+                       # What normalisation did: canonical-wording translations and the
+                       # column-level derivations (e.g. a Disbursed row's proposed amount/date
+                       # from Lending Amount / Stage Updated) — the Excel is never silently
+                       # rewritten.
+                       "translated": translated, "translated_count": len(translated),
+                       "derived": derived, "derived_count": len(derived),
                        "history_changes": history_changes,
                        "history_change_count": len(history_changes)}}

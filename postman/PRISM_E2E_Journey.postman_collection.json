@@ -1,0 +1,3021 @@
+{
+  "info": {
+    "name": "PRISM \u00b7 E2E Journey (sequential)",
+    "description": "A HARDCODED, ORDERED walk through one full deal \u2014 run it with **Run collection** and every step asserts itself.\n\nuser + roles \u2192 client \u2192 lead \u2192 interaction \u2192 convert (deal + lending + syndication + asset monetisation) \u2192 pipelines \u2192 financials \u2192 decision + evidence \u2192 Sanctioned \u2192 verification.\n\n**Re-runnable:** the first request stamps `runSuffix` from the clock, and every unique key (entity code, CIN, user e-mails, references) includes it \u2014 so a second run does not collide on `UNIQUE(tenant_id, code)`.\n\n**Negative tests are features.** Several requests MUST fail (skipping a stage, sanctioning without evidence, a stale `If-Match`, an unknown filter, editing a lead's status straight to Converted). Those tests pass when the platform refuses \u2014 a 2xx there is a control failure, not a success.\n\nEverything runs through the NGINX edge (`baseUrl`) except user provisioning, which talks to the Access service directly (`accessUrl`) because the gateway does not prefix-route it.\n\nThe orchestrator/Temporal plane is deliberately NOT exercised here; CP/CS and the Advaya handover need its maker-checker pair (see the Orchestrator collection).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 \u00b7 Health & run setup",
+      "item": [
+        {
+          "name": "GET /healthz (through the edge)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            },
+            "description": "Confirms TLS + edge + gateway + Register are all up before anything is written."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One suffix per run \u2014 keeps codes/emails unique so the journey can be re-run.",
+                  "pm.environment.set('runSuffix', String(Date.now()).slice(-6));",
+                  "console.log('run suffix =', pm.environment.get('runSuffix'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('register reachable via NGINX', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/ref (dropdown vocabulary)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/ref",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "ref"
+              ]
+            },
+            "description": "Every hardcoded Sector/Stage/Type below comes from this vocabulary."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('reference data seeded', () => pm.expect(Object.keys(pm.response.json()).length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 \u00b7 Users & roles (Access service)",
+      "item": [
+        {
+          "name": "POST /v1/users \u2014 BDRM (the deal owner)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "The RM who will own the lead. BDRM is SCOPED on leads/deals \u2014 their own book only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"e2e.bdrm.{{runSuffix}}@evamfinance.com\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"short_name\": \"Priya\",\n  \"phone\": \"+91-9800000001\",\n  \"is_active\": true,\n  \"roles\": [\n    \"BDRM\",\n    \"Syn RM\",\n    \"AM RM\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('bdrmUserId', pm.response.json().id);",
+                  "console.log('bdrmUserId =', pm.environment.get('bdrmUserId'));",
+                  "pm.test('holds every role /convert will verify', () => ['BDRM','Syn RM','AM RM'].forEach(r => pm.expect(pm.response.json().roles).to.include(r)));",
+                  "pm.environment.set('bdrmEmail', pm.response.json().email);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/users \u2014 Credit Head (maker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Senior credit authority (CP/CS + handover) AND the lending line's Deal Analyst.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"e2e.credit.maker.{{runSuffix}}@evamfinance.com\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Credit Head\",\n    \"Deal Analyst\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('makerUserId', pm.response.json().id);",
+                  "console.log('makerUserId =', pm.environment.get('makerUserId'));",
+                  "pm.environment.set('makerEmail', pm.response.json().email);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/users \u2014 Management (checker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "A DIFFERENT person \u2014 maker-checker requires it; self-approval is refused.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"e2e.checker.{{runSuffix}}@evamfinance.com\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Management\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('checkerUserId', pm.response.json().id);",
+                  "console.log('checkerUserId =', pm.environment.get('checkerUserId'));",
+                  "pm.environment.set('checkerEmail', pm.response.json().email);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/resolve \u2014 the BDRM's effective matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/resolve?email={{bdrmEmail}}",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "resolve?email={{bdrmEmail}}"
+              ]
+            },
+            "description": "Proves the RBAC matrix the gateway will enforce for this user."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const b = pm.response.json();",
+                  "pm.test('leads view is SCOPED for a BDRM', () => pm.expect(b.views.leads).to.eql('SCOPED'));",
+                  "pm.test('may add a lead', () => pm.expect(b.operations.add_lead).to.eql('FULL'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Priya Nair (RM on record)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "description": "`full_name` must EXACTLY equal the `rm` string sent to /convert \u2014 the Register looks it up in the people table, tenant-scoped and not-deleted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Nair\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"RM\",\n  \"email\": \"e2e.bdrm.{{runSuffix}}@evamfinance.com\",\n  \"phone\": \"+91-9800000001\",\n  \"geography\": \"Karnataka\",\n  \"sectors\": \"Solar - Developer; BESS / Energy Storage\",\n  \"started_on\": \"2024-06-01\",\n  \"inactive\": false,\n  \"notes\": \"E2E: relationship manager.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('rmPersonId', pm.response.json().id);",
+                  "console.log('rmPersonId =', pm.environment.get('rmPersonId'));",
+                  "pm.test('full_name is what /convert matches on', () => pm.expect(pm.response.json().full_name).to.eql('E2E Priya Nair'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Arun Menon (Analyst on record)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arun Menon\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Analyst\",\n  \"email\": \"e2e.credit.maker.{{runSuffix}}@evamfinance.com\",\n  \"geography\": \"Karnataka\",\n  \"sectors\": \"Solar - Developer\",\n  \"started_on\": \"2023-04-01\",\n  \"inactive\": false,\n  \"notes\": \"E2E: credit analyst.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('analystPersonId', pm.response.json().id);",
+                  "console.log('analystPersonId =', pm.environment.get('analystPersonId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/people?q= \u2014 both are on record",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people?q=E2E&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people?q=E2E&limit=10"
+              ]
+            },
+            "description": "If this fails, folder 04's /convert will 422 with \"not a person on record\"."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const names = pm.response.json().items.map(p => p.full_name);",
+                  "pm.test('RM on record', () => pm.expect(names).to.include('E2E Priya Nair'));",
+                  "pm.test('Analyst on record', () => pm.expect(names).to.include('E2E Arun Menon'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 \u00b7 Client (Entity)",
+      "item": [
+        {
+          "name": "POST /v1/entities \u2014 create the client",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities"
+              ]
+            },
+            "description": "UNIQUE(tenant_id, code) \u2014 the run suffix keeps re-runs from colliding.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ECOSOCH-{{runSuffix}}\",\n  \"legal_name\": \"EcoSoch Solar Private Limited\",\n  \"display_name\": \"EcoSoch Solar\",\n  \"entity_type\": \"Company\",\n  \"sector\": \"Solar - Developer\",\n  \"sub_sector\": \"C&I Rooftop + Open Access\",\n  \"lens\": \"Mitigation\",\n  \"register_status\": \"Pipeline\",\n  \"state\": \"Karnataka\",\n  \"location\": \"Bengaluru, Karnataka\",\n  \"cin\": \"U40106KA2015PTC{{runSuffix}}\",\n  \"pan\": \"AABCE1234F\",\n  \"gstin\": \"29AABCE1234F1Z5\",\n  \"notes\": \"E2E journey \\u2014 150 MW C&I solar developer.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('entityId', pm.response.json().id);",
+                  "console.log('entityId =', pm.environment.get('entityId'));",
+                  "pm.test('code echoed', () => pm.expect(pm.response.json().code).to.eql('ECOSOCH-' + pm.environment.get('runSuffix')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/entities/{id} \u2014 read it back",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{entityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{entityId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('version starts at 1', () => pm.expect(pm.response.json().version).to.eql(1));",
+                  "pm.environment.set('entityVersion', pm.response.json().version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/entities?q= \u2014 keyset search finds it",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities?q=EcoSoch&limit=10&with_total=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities?q=EcoSoch&limit=10&with_total=true"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const b = pm.response.json();",
+                  "pm.test('paged envelope', () => pm.expect(b).to.have.keys(['items','count','next_cursor','total']));",
+                  "pm.test('our client is listed', () => pm.expect(b.items.map(r => r.id)).to.include(pm.environment.get('entityId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/entities?bogus_filter=x \u2014 unknown filter REFUSED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities?bogus_filter=x",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities?bogus_filter=x"
+              ]
+            },
+            "description": "Fail-closed filtering: an unrecognised query param is rejected, never ignored."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 \u00b7 Lead, ownership & interaction",
+      "item": [
+        {
+          "name": "POST /v1/leads \u2014 open the lead (Active)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads"
+              ]
+            },
+            "description": "INITIAL_STATUS allows only Active / On Hold / Dropped at creation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": \"EcoSoch Solar Private Limited\",\n  \"entity_id\": \"{{entityId}}\",\n  \"status\": \"Active\",\n  \"sector\": \"Solar - Developer\",\n  \"lens\": \"Mitigation\",\n  \"source\": \"RM\",\n  \"source_name\": \"E2E Priya Nair\",\n  \"temperature\": \"Warm\",\n  \"rm\": \"E2E Priya Nair\",\n  \"contact\": \"Ravi Kulkarni\",\n  \"designation\": \"Director \\u2014 Finance\",\n  \"phone\": \"+91-9800000010\",\n  \"next_action\": \"Collect audited FY25 financials\",\n  \"next_action_date\": \"2026-04-15\",\n  \"notes\": \"Captured in the field; 45 Cr term loan for a 150 MW pipeline.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('leadId', pm.response.json().id);",
+                  "console.log('leadId =', pm.environment.get('leadId'));",
+                  "pm.test('lifecycle starts Active', () => pm.expect(pm.response.json().status).to.eql('Active'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/assignments \u2014 make the BDRM the owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "assignments"
+              ]
+            },
+            "description": "A real LineAssignment \u2014 this is what makes the RM's SCOPED reads/writes cover it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{bdrmUserId}}\",\n  \"subject_type\": \"Lead\",\n  \"subject_id\": \"{{leadId}}\",\n  \"assignment_role\": \"BDRM\",\n  \"note\": \"E2E: primary owner.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('assignmentId', pm.response.json().id);",
+                  "console.log('assignmentId =', pm.environment.get('assignmentId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/leads/{id}/interactions \u2014 log the meeting",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"interaction_type\": \"In-Person Meeting\",\n  \"occurred_at\": \"2026-03-31T10:30:00Z\",\n  \"summary\": \"Site walkthrough + term sheet discussion (150 MW, 45 Cr, 18m tenor).\",\n  \"notes\": \"Met the promoter at the Tumkur site. Sanction letter target: Q2.\",\n  \"direction\": \"Outbound\",\n  \"source\": \"PRISM-E2E\",\n  \"contact_name\": \"Ravi Kulkarni\",\n  \"attendees\": [\n    \"Ravi Kulkarni\",\n    \"E2E Priya Nair\"\n  ],\n  \"location\": \"Tumkur site, Karnataka\",\n  \"performed_by\": \"E2E Priya Nair\",\n  \"outcome\": \"Positive \\u2014 proceed to diligence\",\n  \"next_action\": \"Collect audited financials FY25\",\n  \"next_action_date\": \"2026-04-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('interactionId', pm.response.json().id);",
+                  "console.log('interactionId =', pm.environment.get('interactionId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/leads/{id}/interactions \u2014 timeline",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}/interactions?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}",
+                "interactions?limit=50"
+              ]
+            },
+            "description": "NOTE: nested timelines take `limit` but have NO cursor \u2014 capped at 1000."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('timeline has our interaction', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /v1/leads/{id} \u2014 Active \u2192 Converted DIRECTLY is refused",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Converted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/403/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 \u00b7 Convert lead \u2192 deal + product lines",
+      "item": [
+        {
+          "name": "POST /v1/leads/{id}/convert \u2014 atomic conversion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}/convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}",
+                "convert"
+              ]
+            },
+            "description": "Conversion is transactional ON PURPOSE: deal + product lines commit together, so a converted lead can never exist without its lines. Direct status editing is refused (see the previous request) precisely to force this path.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_lending\": true,\n  \"is_syndication\": true,\n  \"is_asset_mon\": true,\n  \"product_type\": \"Term Loan\",\n  \"amount_cr\": 45.0,\n  \"rm\": \"E2E Priya Nair\",\n  \"rm_id\": \"{{bdrmUserId}}\",\n  \"analyst\": \"E2E Arun Menon\",\n  \"analyst_id\": \"{{makerUserId}}\",\n  \"approved_by\": \"{{checkerEmail}}\",\n  \"note\": \"E2E: convert with all three product lines.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const b = pm.response.json();",
+                  "console.log('convert result', JSON.stringify(b));",
+                  "// The result carries the new deal + the lines it created.",
+                  "const deal = b.deal_id || (b.deal && b.deal.id);",
+                  "pm.test('a deal was created', () => pm.expect(deal).to.be.a('string'));",
+                  "pm.environment.set('dealId', deal);",
+                  "const pick = (k) => b[k + '_id'] || (b[k] && b[k].id) ||",
+                  "  (b.lines && b.lines[k] && b.lines[k].id);",
+                  "['lending','syndication','asset_monetisation'].forEach(k => {",
+                  "  const v = pick(k); if (v) pm.environment.set(k + 'IdRaw', v); });",
+                  "if (pm.environment.get('lendingIdRaw'))",
+                  "  pm.environment.set('lendingId', pm.environment.get('lendingIdRaw'));",
+                  "if (pm.environment.get('syndicationIdRaw'))",
+                  "  pm.environment.set('syndicationId', pm.environment.get('syndicationIdRaw'));",
+                  "if (pm.environment.get('asset_monetisationIdRaw'))",
+                  "  pm.environment.set('amId', pm.environment.get('asset_monetisationIdRaw'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending?entity_id= \u2014 resolve the lending line",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending?entity_id={{entityId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending?entity_id={{entityId}}&limit=5"
+              ]
+            },
+            "description": "Belt-and-braces: works whether or not the convert response inlines the line ids."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('lending line exists', () => pm.expect(items.length).to.be.above(0));",
+                  "pm.environment.set('lendingId', items[0].id);",
+                  "pm.environment.set('lendingVersion', items[0].version);",
+                  "pm.test('starts pre-sanction', () => pm.expect(items[0].stage).to.be.oneOf(['Data Awaited','Diligence']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/syndication?entity_id=",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication?entity_id={{entityId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication?entity_id={{entityId}}&limit=5"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('syndication line exists', () => pm.expect(items.length).to.be.above(0));",
+                  "pm.environment.set('syndicationId', items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/asset-monetisation?entity_id=",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation?entity_id={{entityId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation?entity_id={{entityId}}&limit=5"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('AM line exists', () => pm.expect(items.length).to.be.above(0));",
+                  "pm.environment.set('amId', items[0].id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 \u00b7 Lending pipeline (to the evidence gate)",
+      "item": [
+        {
+          "name": "PATCH lending \u2014 \u2192 Diligence",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Diligence\",\n  \"remarks\": \"E2E: diligence started.\",\n  \"amount_cr\": 45.0,\n  \"rm\": \"E2E Priya Nair\",\n  \"analyst\": \"E2E Arun Menon\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('stage = Diligence', () => pm.expect(pm.response.json().stage).to.eql('Diligence'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 Note Circulated",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Note Circulated\",\n  \"remarks\": \"E2E: credit note circulated to committee.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('stage = Note Circulated', () => pm.expect(pm.response.json().stage).to.eql('Note Circulated'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 Ready for Disbursement SKIPS a stage \u2192 refused",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Ready for Disbursement\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 Sanctioned WITHOUT evidence \u2192 refused",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Sanctioned\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/403/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 still Note Circulated",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "THE POINT OF THIS FOLDER: 'Sanctioned' is unreachable by typing it. It needs credit_committee_approval + sanction_letter evidence on file (policy.EVIDENCE_FOR_STAGE). Folder 09 records those properly."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('gate held the line', () => pm.expect(pm.response.json().stage).to.eql('Note Circulated'));",
+                  "pm.environment.set('lendingVersion', pm.response.json().version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending with a STALE If-Match \u2192 409",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\""
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Optimistic locking: the row is past version 1 by now, so this must conflict.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remarks\": \"E2E: stale-version write must lose.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (409/412)', () => pm.expect(pm.response.code).to.be.oneOf([409, 412]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 \u00b7 Syndication pipeline",
+      "item": [
+        {
+          "name": "POST /v1/syndication/{id}/lenders \u2014 invite a lender",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}/lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}",
+                "lenders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lender_name\": \"Green Bridge Capital\",\n  \"is_existing\": false,\n  \"status\": \"Approached\",\n  \"since\": \"2026-03-31\",\n  \"note\": \"E2E: first co-lender approached.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('synLenderId', pm.response.json().id);",
+                  "console.log('synLenderId =', pm.environment.get('synLenderId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 Docs Pending",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Docs Pending\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = Docs Pending', () => pm.expect(pm.response.json().status).to.eql('Docs Pending'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 IM in Prep",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IM in Prep\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = IM in Prep', () => pm.expect(pm.response.json().status).to.eql('IM in Prep'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 IM Circulated",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IM Circulated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = IM Circulated', () => pm.expect(pm.response.json().status).to.eql('IM Circulated'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 Queries Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Queries Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = Queries Received', () => pm.expect(pm.response.json().status).to.eql('Queries Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 IP Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IP Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = IP Received', () => pm.expect(pm.response.json().status).to.eql('IP Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH syndication \u2014 \u2192 Disbursed SKIPPING Sanctioned \u2192 refused",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Disbursed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/syndication/{id}/lenders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}/lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}",
+                "lenders"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('lender is on the mandate', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 \u00b7 Asset monetisation pipeline",
+      "item": [
+        {
+          "name": "PATCH AM \u2014 \u2192 Teaser Shared",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Teaser Shared\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = Teaser Shared', () => pm.expect(pm.response.json().status).to.eql('Teaser Shared'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH AM \u2014 \u2192 In Discussion",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"In Discussion\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = In Discussion', () => pm.expect(pm.response.json().status).to.eql('In Discussion'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH AM \u2014 \u2192 NBO Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"NBO Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = NBO Received', () => pm.expect(pm.response.json().status).to.eql('NBO Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH AM \u2014 \u2192 BO Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BO Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = BO Received', () => pm.expect(pm.response.json().status).to.eql('BO Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH AM \u2014 \u2192 SPA / Documentation",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SPA / Documentation\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = SPA / Documentation', () => pm.expect(pm.response.json().status).to.eql('SPA / Documentation'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH AM \u2014 \u2192 Closed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Closed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status = Closed', () => pm.expect(pm.response.json().status).to.eql('Closed'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 \u00b7 Financials & documents",
+      "item": [
+        {
+          "name": "POST /v1/financials \u2014 FY25 audited",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"statement_type\": \"Audited\",\n  \"period_end\": \"2026-03-31\",\n  \"period_start\": \"2025-04-01\",\n  \"fiscal_year\": \"FY2025-26\",\n  \"period_type\": \"Annual\",\n  \"currency\": \"INR\",\n  \"scale\": \"Crore\",\n  \"is_audited\": true,\n  \"is_consolidated\": false,\n  \"revenue\": 128.4,\n  \"ebitda\": 21.7,\n  \"pat\": 9.3,\n  \"net_worth\": 64.2,\n  \"total_debt\": 55.0,\n  \"dscr\": 1.62,\n  \"provenance\": \"E2E: audited FY25 pack.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('financialId', pm.response.json().id);",
+                  "console.log('financialId =', pm.environment.get('financialId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/financials/history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials/history?entity_id={{entityId}}&statement_type=Audited",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials",
+                "history?entity_id={{entityId}}&statement_type=Audited"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/documents \u2014 register the sanction letter reference",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"doc_type\": \"Sanction Letter\",\n  \"title\": \"Sanction letter \\u2014 EcoSoch Solar 45 Cr\",\n  \"storage_uri\": \"s3://prism-e2e/SL-ECOSOCH-{{runSuffix}}.pdf\",\n  \"original_filename\": \"SL-ECOSOCH-{{runSuffix}}.pdf\",\n  \"content_type\": \"application/pdf\",\n  \"status\": \"Received\",\n  \"uploaded_by\": \"E2E Arun Menon\",\n  \"notes\": \"E2E: reference-only registration (no binary upload).\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "if (pm.response.code < 300 && pm.response.json().id) pm.environment.set('documentId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 \u00b7 Governance \u2014 decision \u2192 evidence \u2192 Sanctioned",
+      "item": [
+        {
+          "name": "POST /v1/internal/decisions \u2014 durable committee decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/decisions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "decisions"
+              ]
+            },
+            "description": "Evidence of kind credit_committee_approval / sanction_letter is VERIFIED against a recorded decision (verify_source='committee') \u2014 a caller cannot simply assert it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workflow_id\": \"e2e-committee-{{runSuffix}}\",\n  \"decision\": \"Approved\",\n  \"kind\": \"credit_committee\",\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"committee_reference\": \"CC/2026/{{runSuffix}}\",\n  \"sanction_letter_reference\": \"SL/ECOSOCH/{{runSuffix}}\",\n  \"note\": \"E2E: credit committee approved 45 Cr.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.environment.set('decisionWorkflowId', 'e2e-committee-' + pm.environment.get('runSuffix'));",
+                  "if (pm.response.json().id) pm.environment.set('decisionId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/evidence \u2014 credit_committee_approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"evidence_kind\": \"credit_committee_approval\",\n  \"reference\": \"CC/2026/{{runSuffix}}\",\n  \"workflow_id\": \"e2e-committee-{{runSuffix}}\",\n  \"decision_ref\": \"e2e-committee-{{runSuffix}}\",\n  \"note\": \"E2E: committee minutes.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/evidence \u2014 sanction_letter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"evidence_kind\": \"sanction_letter\",\n  \"reference\": \"SL/ECOSOCH/{{runSuffix}}\",\n  \"workflow_id\": \"e2e-committee-{{runSuffix}}\",\n  \"decision_ref\": \"e2e-committee-{{runSuffix}}\",\n  \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n  \"note\": \"E2E: issued sanction letter.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/evidence \u2014 both kinds on file",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence?subject_type=Lending&subject_id={{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence?subject_type=Lending&subject_id={{lendingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const kinds = (pm.response.json().items || pm.response.json()).map(e => e.evidence_kind);",
+                  "console.log('evidence on file:', kinds.join(', '));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 Sanctioned (now permitted)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Sanctioned\",\n  \"amount_cr\": 45.0,\n  \"sanction_date\": \"2026-03-31\",\n  \"remarks\": \"E2E: sanctioned by committee CC/2026.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('stage = Sanctioned', () => pm.expect(pm.response.json().stage).to.eql('Sanctioned'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 confirm Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Contrast with folder 05: identical request, opposite outcome \u2014 the difference is recorded evidence, not permission."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('sanctioned only WITH evidence', () => pm.expect(pm.response.json().stage).to.eql('Sanctioned'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 CP/CS Completed still refused (needs an APPROVED checklist)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"CP/CS Completed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/403/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 422]));",
+                  "pm.test('and explains why', () => pm.expect(pm.response.text()).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 \u00b7 Verification & audit",
+      "item": [
+        {
+          "name": "GET /v1/entities/{id}/dossier \u2014 the whole relationship",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{entityId}}/dossier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{entityId}}",
+                "dossier"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('dossier keys:', Object.keys(pm.response.json()).join(', '));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/audit \u2014 the trail for this lending line",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/audit?resource_type=lending&resource_id={{lendingId}}&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "audit?resource_type=lending&resource_id={{lendingId}}&limit=100"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('every write was audited', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/export/counts \u2014 row counts per table",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/export/counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "export",
+                "counts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('counts:', JSON.stringify(pm.response.json()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/authz/check \u2014 can the BDRM edit this lending line?",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{bdrmEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/authz/check?operation=edit_lending_line&subject_type=Lending&subject_id={{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "authz",
+                "check?operation=edit_lending_line&subject_type=Lending&subject_id={{lendingId}}"
+              ]
+            },
+            "description": "Asks the platform to explain its own decision for the RM \u2014 useful when a UI unexpectedly gets a 403."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "console.log('decision:', JSON.stringify(pm.response.json()));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

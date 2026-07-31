@@ -152,6 +152,11 @@ _COMPANY_TABLES = {
 # Directory / reference tables any authenticated user may already read → exported whole.
 _DIRECTORY_TABLES = {"people", "counterparties", "document_checklist", "ref_values"}
 
+# Columns withheld from every export. deals.credit_stage_legacy is the DEPRECATED pre-migration
+# deal-level credit stage — parked for audit until its removal migration; the deal's business
+# stage is the funnel (the `stage` column), and credit lifecycles live on the tracker tables.
+_HIDDEN_COLUMNS: dict[str, frozenset[str]] = {"deals": frozenset({"credit_stage_legacy"})}
+
 
 async def _export_scope(ctx: RequestContext):  # noqa: ANN202
     from app.authz import scope as scope_mod
@@ -267,12 +272,14 @@ async def export_excel(
         cond = _scope_condition(name, table, scope) if restricted else None
         cond = _with_recon(cond, table, allow_recon)
         ws = wb.create_sheet(title=name[:31])
-        cols = [c.name for c in table.columns]
+        hidden = _HIDDEN_COLUMNS.get(name, frozenset())
+        keep = [i for i, c in enumerate(table.columns) if c.name not in hidden]
+        cols = [c.name for i, c in enumerate(table.columns) if i in set(keep)]
         ws.append(cols)  # header row
         result = await ctx.session.stream(
             _rows_query(table, ctx.tenant_id, include_deleted, cond))
         async for row in result:
-            ws.append([_xl(v) for v in row])
+            ws.append([_xl(row[i]) for i in keep])
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -308,10 +315,11 @@ async def export_json(
         cond = _scope_condition(name, table, scope) if restricted else None
         cond = _with_recon(cond, table, allow_recon)
         rows: list[dict] = []
+        hidden = _HIDDEN_COLUMNS.get(name, frozenset())
         result = await ctx.session.stream(
             _rows_query(table, ctx.tenant_id, include_deleted, cond))
         async for row in result:
-            rows.append({k: _json(v) for k, v in row._mapping.items()})
+            rows.append({k: _json(v) for k, v in row._mapping.items() if k not in hidden})
         out["tables"][name] = rows
     return ORJSONResponse(out)
 

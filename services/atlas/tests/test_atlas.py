@@ -63,7 +63,7 @@ async def test_dashboard_reflects_created_rows(atlas, register_direct):
     ent = (await register_direct.post("/v1/entities", json={
         "code": code, "legal_name": f"Atlas Test Co {code} Pvt Ltd"})).json()
     deal = (await register_direct.post("/v1/deals", json={
-        "entity_id": ent["id"], "product_type": "Term Loan", "stage": "Diligence",
+        "entity_id": ent["id"], "product_type": "Term Loan", "stage": "In Pipeline",
         "is_lending": True})).json()
     lend = (await register_direct.post("/v1/lending", json={
         "entity_id": ent["id"], "deal_id": deal["id"], "amount_cr": 25,

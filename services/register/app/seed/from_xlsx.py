@@ -7,7 +7,7 @@ so the Register mirrors the real spreadsheet. Sheet → table mapping:
     Deals            → deals            (Lending?/Syndication?/Asset Mon? → the 3 flags)
     Lending Tracker  → lending_tracker
     Syndication      → syndication_tracker (one per company) + syndication_lenders (per bank)
-    Asset Mon        → asset_monetisation
+    Asset Mon        → asset_monetisation (one row per MANDATE — a company may have several)
     Mandate Tracker  → syndication_tracker.mandate_status (per company)
 
 Every distinct Company Name across all sheets becomes one entity (entity-centric). Distinct
@@ -24,6 +24,7 @@ import re
 import uuid
 from collections.abc import Callable
 from datetime import date, datetime
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 
@@ -98,16 +99,59 @@ def _yes(v) -> bool:
 
 # Legacy ATLAS-era credit-pipeline stage labels → PRISM's current vocabulary. Historical
 # spreadsheets used 'Documentation' (the CP/CS phase) and 'Disbursed' (the terminal). PRISM renamed
-# the milestones and — with no Advaya integration — its terminal is 'Handed Over to Advaya', so a
+# the milestones and — with no Advaya integration — its terminal is 'Disbursed', so a
 # historical 'Disbursed' loan maps there (its recorded amount/date become the proposed drawdown).
 _LEGACY_CREDIT_STAGE: dict[str, str] = {
     "Documentation": "CP/CS Completed",
-    "Disbursed": "Handed Over to Advaya",
 }
 
 
 def _map_credit_stage(v: str | None) -> str | None:
     return _LEGACY_CREDIT_STAGE.get(v, v) if v is not None else v
+
+
+# Wording variants observed in the live MIS — canonicalised (and REPORTED as
+# translations) rather than quarantined. Keys are lowercase/space-collapsed.
+_WORDING_ALIASES: dict[str, dict[str, str]] = {
+    "Syndication": {
+        "ip received": "IP Received",
+        "im under preparation": "IM in Prep",
+        "im sent": "IM Circulated",
+        "final sanction received": "Sanctioned",
+    },
+}
+
+
+def _canon_value(subject_type: str, value: str | None) -> str | None:
+    """Case/whitespace-insensitive canonical form of a lifecycle value, plus the curated
+    wording aliases above. Unknown values return UNCHANGED — the screening step then
+    quarantines them with a named reason (the fail-closed default for future drift)."""
+    if value is None:
+        return None
+    key = " ".join(str(value).split()).lower()
+    alias = _WORDING_ALIASES.get(subject_type, {}).get(key)
+    if alias is not None:
+        return alias
+    from evam_backend_core.rbac import STAGE_VOCAB as _SV
+    rule = _SV.get(subject_type)
+    if rule:
+        for canonical in rule[1]:
+            if canonical.lower() == key:
+                return canonical
+    return value
+
+
+def _canon_funnel(value: str | None) -> str | None:
+    """The Deals sheet's ORIGINATION-FUNNEL vocabulary (rbac.DEAL_FUNNEL_STAGES),
+    matched case/whitespace-insensitively; None when the value is not a funnel term."""
+    if value is None:
+        return None
+    from evam_backend_core.rbac import DEAL_FUNNEL_STAGES
+    key = " ".join(str(value).split()).lower()
+    for canonical in DEAL_FUNNEL_STAGES:
+        if canonical.lower() == key:
+            return canonical
+    return None
 
 
 # Corporate suffix words peeled from the tail of a company name so that legal-form
@@ -215,16 +259,41 @@ async def import_workbook(
     pending_recon: list[tuple] = []
 
     def _jsonable(v):  # noqa: ANN001
-        return v.isoformat() if hasattr(v, "isoformat") else v
+        # Reconciliation snapshots go into a JSONB column via json.dumps — every non-primitive
+        # the row can carry must be coerced (a raw UUID/Decimal 500s the whole import).
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
 
-    def _screen(subject_type: str, value, sheet: str, company, row_fields: dict) -> tuple[str, list]:
+    translated: list[dict] = report.setdefault("translated", [])
+    derived: list[dict] = report.setdefault("derived", [])
+
+    def _c(subject_type: str, sheet: str, company, value):
+        """Canonicalize a lifecycle value (case/whitespace + curated wording aliases) and
+        RECORD the translation in the report when it changed — the Excel stays the source
+        of truth, and the report shows exactly what normalisation did."""
+        out = _canon_value(subject_type, value)
+        if value is not None and out != value:
+            translated.append({"sheet": sheet, "company": company,
+                               "from": value, "to": out, "batch_id": batch_id})
+        return out
+
+    def _screen(subject_type: str, value, sheet: str, company, row_fields: dict,
+                force_retain: bool = False) -> tuple[str, list]:
         """Screen a row's lifecycle value. Returns (verdict, missing):
         * ``("skip", [])``   — quarantine (an UNKNOWN value, or a known stage missing mandatory data
           when ``retain_incomplete`` is False): the SAME state the interactive API rejects.
         * ``("ok", [])``     — import cleanly.
         * ``("retain", [...])`` — a known stage missing mandatory data, imported under the historical
           override: the caller must flag the record reconciliation_status=Required and open a
-          reconciliation item listing the missing fields. A NULL value is always ("ok", [])."""
+          reconciliation item listing the missing fields. A NULL value is always ("ok", []).
+        ``force_retain`` upgrades the missing-mandatory skip to a retain even when the run did not
+        opt into retain_incomplete — for rows that represent a REAL exposure (a disbursed facility)
+        which the business rule says may never be dropped. Unknown values still skip."""
         if value is None:
             return "ok", []
         field, vocab = STAGE_VOCAB[subject_type]
@@ -237,7 +306,7 @@ async def import_workbook(
         missing = [f for f in required if row_fields.get(f) in (None, "")]
         if not missing:
             return "ok", []
-        if not retain_incomplete:
+        if not retain_incomplete and not force_retain:
             quarantined.append({"sheet": sheet, "company": company, "field": field, "value": value,
                                 "missing": missing, "batch_id": batch_id,
                                 "reason": f"missing mandatory data for {value!r}"})
@@ -503,14 +572,28 @@ async def import_workbook(
         entity = eid(nm)
         if entity is None:
             continue
+        # The MIS Deals sheet speaks the ORIGINATION FUNNEL (New Inquiry / In Screening /
+        # In Pipeline / Screened Out / Closed Won / Closed Lost / On Hold) — and since the
+        # two-layer migration that funnel IS the deal's stage. A deal carries no credit
+        # lifecycle: credit values belong on the Lending Tracker sheet, so a non-funnel
+        # value here quarantines with a named reason (fail-closed; the sheet's vocabulary
+        # drifted or a credit value landed on the wrong sheet).
+        raw_stage = _s(r.get("Stage"))
+        funnel = _canon_funnel(raw_stage)
+        if funnel is not None and funnel != raw_stage:
+            translated.append({"sheet": "Deals", "company": nm,
+                               "from": raw_stage, "to": funnel, "batch_id": batch_id})
         fields = {
             "is_lending": _yes(r.get("Lending?")), "is_syndication": _yes(r.get("Syndication?")),
             "is_asset_mon": _yes(r.get("Asset Mon?")), "rm": _s(r.get("RM")),
-            "stage": _map_credit_stage(_s(r.get("Stage"))), "temperature": _s(r.get("Status")),
+            "stage": funnel, "temperature": _s(r.get("Status")),
             "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),
             "date_received": _date(r.get("Date Received")), "remarks": _s(r.get("Remarks")),
         }
-        verdict, missing = _screen("Deal", fields["stage"], "Deals", nm, fields)
+        # _screen against STAGE_VOCAB["Deal"] (the funnel): a canonical funnel value passes;
+        # anything else (e.g. a credit-lifecycle word) quarantines by name.
+        verdict, missing = _screen("Deal", funnel if funnel is not None else raw_stage,
+                                   "Deals", nm, fields)
         if verdict == "skip":
             continue
         existing = deal_obj_by_entity.get(entity)
@@ -561,17 +644,25 @@ async def import_workbook(
                     return candidate
         return used, _next
 
-    # --- lending tracker (upsert by entity) -----------------------------
+    # --- lending tracker (one line PER SHEET ROW) -----------------------
+    # A company may hold more than one facility. Every sheet row is its own line; a merge
+    # re-import matches a company's rows in SHEET ORDER (1st sheet row updates its 1st
+    # line, …), creating any extras — distinct facilities are never blended into one row.
     existing_lending = (
         await session.execute(
             select(LendingTracker).where(LendingTracker.tenant_id == tenant_id,
-                                         LendingTracker.deleted_at.is_(None)))
+                                         LendingTracker.deleted_at.is_(None))
+            # tracker_no is handed out sequentially at creation, so it preserves the original
+            # sheet order even when created_at ties within one import batch (id is random).
+            .order_by(LendingTracker.created_at, LendingTracker.tracker_no,
+                      LendingTracker.id))
     ).scalars().all()
-    lend_by_entity: dict[uuid.UUID, LendingTracker] = {}
+    lend_by_entity: dict[uuid.UUID, list[LendingTracker]] = {}
     for lt in existing_lending:
         if lt.entity_id is not None:
-            lend_by_entity.setdefault(lt.entity_id, lt)
+            lend_by_entity.setdefault(lt.entity_id, []).append(lt)
     _, next_lending_no = await _tracker_no_pool(LendingTracker, "L")
+    lend_row_ix: dict[uuid.UUID, int] = {}
     n_new = n_upd = 0
     for r in lending:
         nm = company_of(r)
@@ -583,25 +674,52 @@ async def import_workbook(
         disb_date = _date(r.get("Disbursement Date"))
         prop_amt = _float(r.get("Proposed Disbursement Amount (₹ Cr)"))
         prop_date = _date(r.get("Proposed Disbursement Date"))
-        # A legacy 'Disbursed' row carries no separate proposed column — its recorded disbursement
-        # amount/date ARE the proposed drawdown for the mapped 'Handed Over to Advaya' terminal.
+        # A 'Disbursed' row's mandatory proposed amount/date are derived from what the sheet
+        # actually carries, in order of fidelity: an explicit proposed column, the recorded
+        # disbursement columns, and finally the facility amount + the stage-updated date (the
+        # live MIS has no disbursement columns at all — those two ARE its record of the
+        # drawdown). Every fallback derivation is REPORTED, never silent.
         if raw_stage == "Disbursed":
             prop_amt = prop_amt if prop_amt is not None else disb_amt
             prop_date = prop_date if prop_date is not None else disb_date
+            if prop_amt is None:
+                amt = _float(r.get("Lending Amount (₹ Cr)"))
+                if amt is not None:
+                    prop_amt = amt
+                    derived.append({"sheet": "Lending Tracker", "company": nm,
+                                    "field": "proposed_disbursement_amount",
+                                    "from_column": "Lending Amount (₹ Cr)", "value": amt,
+                                    "batch_id": batch_id})
+            if prop_date is None:
+                dt = _date(r.get("Stage Updated"))
+                if dt is not None:
+                    prop_date = dt
+                    derived.append({"sheet": "Lending Tracker", "company": nm,
+                                    "field": "proposed_disbursement_date",
+                                    "from_column": "Stage Updated", "value": dt.isoformat(),
+                                    "batch_id": batch_id})
         fields = {
             "deal_id": deal_by_entity.get(entity),
             "amount_cr": _float(r.get("Lending Amount (₹ Cr)")), "rm": _s(r.get("RM")),
-            "analyst": _s(r.get("Credit Analyst")), "stage": _map_credit_stage(raw_stage),
+            "analyst": _s(r.get("Credit Analyst")),
+            "stage": _map_credit_stage(_c("Lending", "Lending Tracker", nm, raw_stage)),
             "stage_updated_at": _date(r.get("Stage Updated")),
             "sanction_date": _date(r.get("Sanction Date")),
             "proposed_disbursement_amount": prop_amt, "proposed_disbursement_date": prop_date,
             "disbursed_amount": disb_amt, "disbursement_date": disb_date,
             "remarks": _s(r.get("Remarks")),
         }
-        verdict, missing = _screen("Lending", fields["stage"], "Lending Tracker", nm, fields)
+        # force_retain: a facility the sheet says is DISBURSED is a real exposure — if the
+        # mandatory drawdown data cannot even be derived, it imports FLAGGED for
+        # reconciliation rather than being dropped (zero-omission rule).
+        verdict, missing = _screen("Lending", fields["stage"], "Lending Tracker", nm, fields,
+                                   force_retain=(fields["stage"] == "Disbursed"))
         if verdict == "skip":
             continue
-        existing = lend_by_entity.get(entity)
+        lx = lend_row_ix.get(entity, 0)
+        lend_row_ix[entity] = lx + 1
+        llst = lend_by_entity.setdefault(entity, [])
+        existing = llst[lx] if lx < len(llst) else None
         if existing is None:
             lt = LendingTracker(tenant_id=tenant_id, tracker_no=next_lending_no(),
                                 entity_id=entity, created_by="xlsx-import",
@@ -609,7 +727,7 @@ async def import_workbook(
             _note_stage_change(lt, "stage_history", "stage", None, fields["stage"],
                                "Lending Tracker")
             session.add(lt)
-            lend_by_entity[entity] = lt
+            llst.append(lt)
             n_new += 1
             obj = lt
         else:
@@ -659,7 +777,20 @@ async def import_workbook(
         entity = eid(nm)
         if entity is None:
             continue
-        syn_status = _s(r.get("Deal Status"))
+        # v4 semantics: the per-bank "Status" column carries the REAL pipeline position
+        # (IM Circulated / Queries Received / IP Received / …); "Deal Status" is a
+        # coarse lifecycle overlay (Deal Live / Deal Dropped / Deal Closed). The tracker
+        # takes the bank status (canonicalised), with the overlay forcing terminals:
+        # Dropped → Dropped, Closed → Disbursed (syndication's completed terminal). A
+        # live deal with no per-bank status enters at Deal Sourced.
+        deal_status_raw = _s(r.get("Deal Status"))
+        bank_status = _c("Syndication", "Syndication", nm, _s(r.get("Status")))
+        overlay_key = " ".join((deal_status_raw or "").split()).lower()
+        overlay = {"deal dropped": "Dropped", "deal closed": "Disbursed"}.get(overlay_key)
+        if overlay:
+            translated.append({"sheet": "Syndication", "company": nm,
+                               "from": deal_status_raw, "to": overlay, "batch_id": batch_id})
+        syn_status = overlay or bank_status or ("Deal Sourced" if deal_status_raw else None)
         verdict, missing = _screen("Syndication", syn_status, "Syndication", nm, {})
         if verdict == "skip":
             continue
@@ -692,24 +823,31 @@ async def import_workbook(
                 note = f"[Accepted by client: {accepted}] " + (note or "")
             session.add(SyndicationLender(
                 tenant_id=tenant_id, syndication_id=tr.id, lender_name=bank,
-                counterparty_id=cp_id_by.get(bank.lower()), status=_s(r.get("Status")),
+                counterparty_id=cp_id_by.get(bank.lower()), status=bank_status,
                 note=note, created_by="xlsx-import", updated_by="xlsx-import",
             ))
             n_lender += 1
     counts["syndication_tracker"] = n_syn
     counts["syndication_lenders"] = n_lender
 
-    # --- asset monetisation (upsert by entity) --------------------------
+    # --- asset monetisation (one row PER MANDATE) -----------------------
+    # A company may be selling SEVERAL assets at once (the MIS lists e.g. a 58MW
+    # Solar+BESS sale, a 100MW land advisory and a dropped 60MW project for ONE company).
+    # Every sheet row is its own record; a merge re-import matches a company's rows in
+    # SHEET ORDER, creating any extras — distinct mandates are never blended into one row.
     existing_am = (
         await session.execute(
             select(AssetMonetisation).where(AssetMonetisation.tenant_id == tenant_id,
-                                            AssetMonetisation.deleted_at.is_(None)))
+                                            AssetMonetisation.deleted_at.is_(None))
+            .order_by(AssetMonetisation.created_at, AssetMonetisation.tracker_no,
+                      AssetMonetisation.id))
     ).scalars().all()
-    am_by_entity: dict[uuid.UUID, AssetMonetisation] = {}
+    am_by_entity: dict[uuid.UUID, list[AssetMonetisation]] = {}
     for a in existing_am:
         if a.entity_id is not None:
-            am_by_entity.setdefault(a.entity_id, a)
+            am_by_entity.setdefault(a.entity_id, []).append(a)
     _, next_am_no = await _tracker_no_pool(AssetMonetisation, "A")
+    am_row_ix: dict[uuid.UUID, int] = {}
     n_new = n_upd = 0
     for r in am:
         nm = company_of(r)
@@ -722,20 +860,24 @@ async def import_workbook(
             "indicative_value_cr": _float(r.get("Indicative Value (₹ Cr)")),
             "size_mw": _float(r.get("Size (MW)")), "nature": _s(r.get("Nature")),
             "deal_type": _s(r.get("Deal Type")), "investor": _s(r.get("Investor")),
-            "investor_type": _s(r.get("Investor Type")), "status": _s(r.get("Status")),
+            "investor_type": _s(r.get("Investor Type")),
+            "status": _c("AssetMonetisation", "Asset Mon", nm, _s(r.get("Status"))),
             "teaser_date": _date(r.get("Date Teaser Shared")), "notes": notes or None,
         }
         verdict, missing = _screen("AssetMonetisation", fields["status"], "Asset Mon", nm, fields)
         if verdict == "skip":
             continue
-        existing = am_by_entity.get(entity)
+        ax = am_row_ix.get(entity, 0)
+        am_row_ix[entity] = ax + 1
+        alst = am_by_entity.setdefault(entity, [])
+        existing = alst[ax] if ax < len(alst) else None
         if existing is None:
             a = AssetMonetisation(tenant_id=tenant_id, tracker_no=next_am_no(),
                                   entity_id=entity, created_by="xlsx-import",
                                   updated_by="xlsx-import", **fields)
             _note_stage_change(a, "status_history", "status", None, fields["status"], "Asset Mon")
             session.add(a)
-            am_by_entity[entity] = a
+            alst.append(a)
             n_new += 1
             obj = a
         else:

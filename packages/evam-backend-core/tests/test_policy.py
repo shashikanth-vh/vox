@@ -7,40 +7,50 @@ from evam_backend_core import policy
 
 
 def test_mandatory_field_error_blocks_advance_until_required_fields_present():
-    # Deal → Sanctioned requires product_type + rm; product_type present → only rm missing.
-    err = policy.mandatory_field_error("Deal", "Sanctioned", {"product_type": "Term Loan"})
-    assert err and "rm" in err and "product_type" not in err
+    # Lending → Ready for Disbursement requires the proposed amount + date; amount present →
+    # only the date missing. (The former Deal→Sanctioned mandate moved to the Lending line with
+    # the rest of the sanction governance — a deal's stage is the commercial funnel.)
+    err = policy.mandatory_field_error("Lending", "Ready for Disbursement",
+                                       {"proposed_disbursement_amount": 5})
+    assert err and "proposed_disbursement_date" in err and "amount" not in (err.split("required")[0])
     # Both present (merged from row + change) → passes.
     assert policy.mandatory_field_error(
-        "Deal", "Sanctioned", {"product_type": "Term Loan", "rm": "asha"}) is None
-    # Empty string / empty list count as missing.
+        "Lending", "Ready for Disbursement",
+        {"proposed_disbursement_amount": 5, "proposed_disbursement_date": "2026-01-01"}) is None
+    # Empty string counts as missing.
     assert policy.mandatory_field_error(
-        "Deal", "Sanctioned", {"product_type": "", "rm": "asha"}) is not None
+        "Lending", "Ready for Disbursement",
+        {"proposed_disbursement_amount": "", "proposed_disbursement_date": "2026-01-01"}) is not None
 
 
 def test_mandatory_field_error_is_noop_without_a_rule():
-    assert policy.mandatory_field_error("Deal", "Data Awaited", {"anything": 1}) is None
+    assert policy.mandatory_field_error("Lending", "Data Awaited", {"anything": 1}) is None
     assert policy.mandatory_field_error("Lead", "Active", {}) is None
+    # A Deal has NO mandatory-data gates at all — its stage is the funnel.
+    assert policy.mandatory_field_error("Deal", "Closed Won", {}) is None
     assert policy.mandatory_field_error("Deal", None, {}) is None
 
 
 def test_field_lock_error_blocks_locked_field_for_wrong_role():
-    # rm is locked at Sanctioned to Management (or Admin).
-    err = policy.field_lock_error("Deal", "Sanctioned", roles=["RM"], changed_fields=["rm"])
+    # rm is locked at the LENDING line's Sanctioned to Management (or Admin) — the lock moved
+    # there from the deprecated deal-level credit stage.
+    err = policy.field_lock_error("Lending", "Sanctioned", roles=["RM"], changed_fields=["rm"])
     assert err and "rm" in err
     # Management may edit it.
-    assert policy.field_lock_error("Deal", "Sanctioned", ["Management"], ["rm"]) is None
+    assert policy.field_lock_error("Lending", "Sanctioned", ["Management"], ["rm"]) is None
     # Admin is always break-glass.
-    assert policy.field_lock_error("Deal", "Sanctioned", ["Admin"], ["rm"]) is None
+    assert policy.field_lock_error("Lending", "Sanctioned", ["Admin"], ["rm"]) is None
 
 
 def test_field_lock_error_is_noop_when_field_or_stage_unlocked():
     # rm is only locked at Sanctioned, not earlier stages.
-    assert policy.field_lock_error("Deal", "Data Awaited", ["RM"], ["rm"]) is None
+    assert policy.field_lock_error("Lending", "Data Awaited", ["RM"], ["rm"]) is None
     # A field with no lock rule is unconstrained here.
-    assert policy.field_lock_error("Deal", "Sanctioned", ["RM"], ["remarks"]) is None
+    assert policy.field_lock_error("Lending", "Sanctioned", ["RM"], ["remarks"]) is None
     # No stage → nothing to enforce.
-    assert policy.field_lock_error("Deal", None, ["RM"], ["rm"]) is None
+    assert policy.field_lock_error("Lending", None, ["RM"], ["rm"]) is None
+    # A Deal (funnel) has no field locks at all.
+    assert policy.field_lock_error("Deal", "Closed Won", ["RM"], ["rm"]) is None
 
 
 def test_stage_field_uses_the_registers_real_subject_names():
@@ -66,9 +76,10 @@ def test_transition_and_initial_status_are_reexported():
 def test_creation_is_restricted_to_genuine_entry_stages():
     # Only a genuine ENTRY stage may be set at birth; every later/working/governance state is
     # reached by stepping the ordered graph, never asserted at creation.
-    assert policy.initial_status_error("Deal", {"stage": "Sanctioned"}) is not None
-    assert policy.initial_status_error("Deal", {"stage": "Note Circulated"}) is not None  # too late
-    assert policy.initial_status_error("Lending", {"stage": "Handed Over to Advaya"}) is not None
+    assert policy.initial_status_error("Deal", {"stage": "Closed Won"}) is not None   # an outcome
+    assert policy.initial_status_error("Deal", {"stage": "Screened Out"}) is not None  # an outcome
+    assert policy.initial_status_error("Deal", {"stage": "Sanctioned"}) is not None    # not funnel vocab
+    assert policy.initial_status_error("Lending", {"stage": "Disbursed"}) is not None
     assert policy.initial_status_error("Lending", {"stage": "CP/CS Completed"}) is not None  # too late
     assert policy.initial_status_error("Syndication", {"status": "IM Circulated"}) is not None  # late
     assert policy.initial_status_error("Syndication", {"status": "IP Received"}) is not None
@@ -78,6 +89,7 @@ def test_creation_is_restricted_to_genuine_entry_stages():
     assert policy.initial_status_error("Lending", {"stage": "Data Awaited"}) is None
     assert policy.initial_status_error("Lending", {"stage": "Diligence"}) is None
     assert policy.initial_status_error("Syndication", {"status": "IM in Prep"}) is None
+    assert policy.initial_status_error("Deal", {"stage": "In Pipeline"}) is None  # funnel entry
     assert policy.initial_status_error("Deal", {"rm": "asha"}) is None
 
 
@@ -102,15 +114,23 @@ def test_transition_graph_enforces_ordered_sequencing():
     assert policy.transition_error("Lending", "stage", "Diligence", "Note Circulated") is None
     assert policy.transition_error("Lending", "stage", "Note Circulated", "Diligence") is None
     # …but SKIPPING gates is rejected — no jumping Diligence → Sanctioned or Data Awaited →
-    # Handed Over to Advaya.
+    # Disbursed.
     assert policy.transition_error("Lending", "stage", "Diligence", "Sanctioned") is not None
-    assert policy.transition_error("Lending", "stage", "Data Awaited", "Handed Over to Advaya") is not None
+    assert policy.transition_error("Lending", "stage", "Data Awaited", "Disbursed") is not None
     assert policy.transition_error("Syndication", "status", "Deal Sourced", "Disbursed") is not None
     assert policy.transition_error("AssetMonetisation", "status", "Teaser Prepared",
                                    "SPA / Documentation") is not None
     # A TERMINAL/committed state still cannot be silently reversed.
-    assert policy.transition_error("Lending", "stage", "Handed Over to Advaya", "Diligence") is not None
+    assert policy.transition_error("Lending", "stage", "Disbursed", "Diligence") is not None
     assert policy.transition_error("Syndication", "status", "Withdrawn", "Deal Sourced") is not None
+    # The DEAL funnel is ordered too: one step forward / back, no jumping to a win, re-openable
+    # Screened Out, and final Closed terminals.
+    assert policy.transition_error("Deal", "stage", "New Inquiry", "In Screening") is None
+    assert policy.transition_error("Deal", "stage", "In Pipeline", "Closed Won") is None
+    assert policy.transition_error("Deal", "stage", "New Inquiry", "Closed Won") is not None
+    assert policy.transition_error("Deal", "stage", "Screened Out", "In Screening") is None
+    assert policy.transition_error("Deal", "stage", "Closed Won", "In Pipeline") is not None
+    assert policy.transition_error("Deal", "stage", "Closed Lost", "In Pipeline") is not None
 
 
 def test_null_source_first_set_obeys_the_entry_allowlist():
@@ -126,7 +146,7 @@ def test_null_source_first_set_obeys_the_entry_allowlist():
 
 def test_check_write_is_the_single_authority_across_paths():
     # Creation: a reserved state is refused (validation).
-    v = policy.check_write("Lending", current={}, changes={"stage": "Handed Over to Advaya"},
+    v = policy.check_write("Lending", current={}, changes={"stage": "Disbursed"},
                            roles=["Credit Head"], is_creation=True)
     assert v is not None and v.kind == "validation"
     # Update into a mandatory stage without the required fields → validation error. 'Ready for
@@ -154,6 +174,6 @@ def test_check_write_is_the_single_authority_across_paths():
     # A machine caller (roles=None) skips role-based locks but still obeys lifecycle rules.
     assert policy.check_write("Syndication", current={"status": "Sanctioned"},
                               changes={"amount_cr": 9}, roles=None) is None
-    v = policy.check_write("Lending", current={}, changes={"stage": "Handed Over to Advaya"},
+    v = policy.check_write("Lending", current={}, changes={"stage": "Disbursed"},
                            roles=None, is_creation=True)
     assert v is not None and v.kind == "validation"

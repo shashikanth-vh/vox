@@ -27,9 +27,15 @@ REF_VALUES: dict[str, list[str]] = {
     "Register Status": ["Pipeline", "Sanctioned", "Rejected", "Market Intelligence"],
     "Entity Type": ["Company", "Promoter", "Director", "Related Party"],
     "Person Role": ["Admin", "Management", "RM", "Analyst", "Ops"],
+    # The Deal ORIGINATION-FUNNEL vocabulary (verbatim Evam MIS terms) — a separate
+    # dimension from the credit pipeline below; see rbac.DEAL_FUNNEL_STAGES.
+    "Deal Funnel Stage": [
+        "New Inquiry", "In Screening", "In Pipeline", "On Hold",
+        "Screened Out", "Closed Won", "Closed Lost",
+    ],
     "Lending Stage": [
         "Data Awaited", "Diligence", "Note Circulated", "Sanctioned",
-        "CP/CS Completed", "Ready for Disbursement", "Handed Over to Advaya",
+        "CP/CS Completed", "Ready for Disbursement", "Disbursed",
         "Rejected", "On Hold",
     ],
     "Status of Proposal": [
@@ -80,7 +86,7 @@ REF_VALUES: dict[str, list[str]] = {
     # Generic + role pickers the ATLAS UI expects from /v1/ref (RM/Analyst can also be
     # served live from /v1/people?role=…; both are supported).
     "Yes/No": ["Yes", "No"],
-    "Terminal (Lending)": ["Handed Over to Advaya", "Rejected", "On Hold"],
+    "Terminal (Lending)": ["Disbursed", "Rejected", "On Hold"],
     "RM": ["Chetan", "Shubh"],
     "Analyst": ["Archana", "Prateek", "Bhavana", "Nirmala", "Grishma"],
     # Backing for the new financials / covenant fields.

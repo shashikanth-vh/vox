@@ -17,7 +17,7 @@ Two phases, distinct authenticated identities, package integrity verified server
 * **Approve** (`POST /v1/internal/handover-packages/{lending_id}/approve`, ``approve_advaya_handover``).
   A DIFFERENT CHECKER (authenticated) approves. The Register requires the checker's user id to differ
   from the maker's, records the approver from context, sets the package 'HandedOver' (freezing it),
-  and ONLY THEN advances the Lending line to 'Handed Over to Advaya' — all in one transaction.
+  and ONLY THEN advances the Lending line to 'Disbursed' — all in one transaction.
 
     GET  /v1/lending/{id}/handover-package           read it (workspace / audit timeline)
     POST /v1/lending/{id}/handover-package/download   the generated package document + digest
@@ -51,7 +51,7 @@ from app.models.trackers import LendingTracker
 router = api_router()
 
 _READY = "Ready for Disbursement"
-_HANDED_OVER = "Handed Over to Advaya"
+_HANDED_OVER = "Disbursed"
 _REQUIRED_EVIDENCE = {"cp_cs_completion", "executed_agreement"}
 
 
