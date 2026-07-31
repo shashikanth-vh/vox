@@ -89,7 +89,13 @@
 <script>
 const base = new URL('.', location.href);           // …/vocx/v1/
 const api = p => new URL(p, base).toString();
-const j = r => r.json();
+const j = async r => {
+  const text = await r.text();
+  let body; try { body = JSON.parse(text); } catch { body = null; }
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (text || r.statusText).slice(0, 400));
+  if (body === null) throw new Error('non-JSON response: ' + text.slice(0, 200));
+  return body;
+};
 let preview = null, chosen = null, mediaRec = null, chunks = [];
 
 async function caps() {
