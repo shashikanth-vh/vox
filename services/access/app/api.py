@@ -100,6 +100,8 @@ async def create_user(payload: UserCreate, ctx: RequestContext = Depends(get_con
         ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=obj.id, role=r,
                                  granted_by=ctx.actor, created_by=ctx.actor,
                                  updated_by=ctx.actor))
+    mx.audit(ctx.session, ctx.tenant_id, ctx.actor, "user.create", item=obj.email,
+             detail={"roles": list(dict.fromkeys(roles))})
     await ctx.session.flush()
     await ctx.session.refresh(obj)
     return await _user_read(ctx, obj)
@@ -134,9 +136,17 @@ async def update_user(user_id: uuid.UUID, payload: UserUpdate,
                       ctx: RequestContext = Depends(get_context)) -> Any:
     require_governance(ctx, "edit user")
     obj = await _get_user(ctx, user_id)
+    was_active = obj.is_active
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(obj, k, v)
     obj.updated_by = ctx.actor
+    if obj.is_active != was_active:
+        # (De)activation is a revocation event: bump the epoch so previously issued
+        # signed contexts fail sensitive-operation revalidation immediately.
+        obj.permissions_epoch += 1
+        mx.audit(ctx.session, ctx.tenant_id, ctx.actor,
+                 "user.deactivate" if was_active else "user.reactivate", item=obj.email,
+                 detail={"epoch": obj.permissions_epoch})
     await ctx.session.flush()
     await ctx.session.refresh(obj)
     return await _user_read(ctx, obj)
@@ -153,7 +163,11 @@ async def grant_role(user_id: uuid.UUID, payload: RoleGrant,
         raise ConflictError(f"User already holds role '{role}'.")
     ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user_id, role=role,
                              granted_by=ctx.actor, created_by=ctx.actor, updated_by=ctx.actor))
+    obj.permissions_epoch += 1
+    mx.audit(ctx.session, ctx.tenant_id, ctx.actor, "role.grant", item=obj.email,
+             detail={"role": role, "epoch": obj.permissions_epoch})
     await ctx.session.flush()
+    await ctx.session.refresh(obj)   # the epoch UPDATE touched onupdate columns
     return await _user_read(ctx, obj)
 
 
@@ -174,7 +188,11 @@ async def revoke_role(user_id: uuid.UUID, role: str,
         raise NotFoundError(f"User does not hold role '{role}'.")
     row.deleted_at = datetime.now(UTC)
     row.updated_by = ctx.actor
+    obj.permissions_epoch += 1
+    mx.audit(ctx.session, ctx.tenant_id, ctx.actor, "role.revoke", item=obj.email,
+             detail={"role": role, "epoch": obj.permissions_epoch})
     await ctx.session.flush()
+    await ctx.session.refresh(obj)   # the epoch UPDATE touched onupdate columns
     return await _user_read(ctx, obj)
 
 
@@ -248,7 +266,7 @@ async def _resolve(ctx: RequestContext, email: str) -> ResolveRead:
     return ResolveRead(id=user.id, email=user.email, full_name=user.full_name,
                        is_active=user.is_active, roles=sorted(roles),
                        views=views, operations=operations, version=version,
-                       reports=reports)
+                       epoch=user.permissions_epoch, reports=reports)
 
 
 @router.get("/v1/resolve", response_model=ResolveRead, tags=["Resolve"],
@@ -256,6 +274,14 @@ async def _resolve(ctx: RequestContext, email: str) -> ResolveRead:
 async def resolve(email: str = Query(...),
                   ctx: RequestContext = Depends(get_context)) -> Any:
     return await _resolve(ctx, email)
+
+
+@router.get("/v1/access/drift", tags=["Access Matrix"],
+            summary="Compare the live matrix against the approved compiled baseline — "
+                    "report only, Admin-only, no writes")
+async def access_drift(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    require_admin(ctx, "read access drift")
+    return await mx.drift_report(ctx.session, ctx.tenant_id)
 
 
 @router.get("/v1/access/version", tags=["Resolve"],

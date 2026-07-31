@@ -27,6 +27,9 @@ class ResolvedUser:
     operations: dict[str, str]
     version: int
     fetched_at: float
+    # The user's revocation epoch from Access (bumped on any role change / deactivation) —
+    # carried into the signed context so sensitive-operation revalidation can compare.
+    epoch: int = 0
     # Transitive subordinates from the Access service — forwarded to the Register
     # as the basis of a Head's TEAM scope.
     reports: list[dict] = field(default_factory=list)
@@ -59,7 +62,11 @@ class Resolver:
                 timeout=10.0,
             )
         except httpx.HTTPError as exc:
-            if cached is not None:
+            # Last-known-good is a BOUNDED degraded mode, not a policy source: past
+            # cache_max_stale_s the gateway fails closed rather than serving ever-staler
+            # grants through an Access outage.
+            if cached is not None and (
+                    time.monotonic() - cached.fetched_at) < settings.cache_max_stale_s:
                 log.warning("access unreachable — serving last-known-good for %s", email)
                 return cached
             raise AccessUnavailableError(str(exc)) from exc
@@ -67,7 +74,8 @@ class Resolver:
             self._cache.pop(key, None)
             raise UserDeniedError(email)
         if resp.status_code >= 400:
-            if cached is not None:
+            if cached is not None and (
+                    time.monotonic() - cached.fetched_at) < settings.cache_max_stale_s:
                 return cached
             raise AccessUnavailableError(f"access /resolve returned {resp.status_code}")
         body = resp.json()
@@ -75,6 +83,7 @@ class Resolver:
             id=body["id"], email=body["email"], roles=body["roles"],
             views=body["views"], operations=body["operations"],
             version=body["version"], fetched_at=time.monotonic(),
+            epoch=int(body.get("epoch", 0)),
             reports=body.get("reports", []),
         )
         self._cache[key] = resolved

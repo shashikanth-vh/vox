@@ -58,6 +58,11 @@ config:
   logLevel: INFO
   logJson: true
   cacheTtlS: "60"
+  # Hard bound on the last-known-good resolve cache: past this the gateway FAILS CLOSED
+  # through an Access outage instead of serving ever-staler grants.
+  cacheMaxStaleS: "300"
+  # Signing-key id stamped into each internal-context token (rotation support).
+  internalSigningKid: "primary"
   defaultTenantCode: EVAM
 
 service:

@@ -127,3 +127,43 @@ async def verify_assignee(tenant_code: str, user_id: str, assignment_role: str,
 
 def _reset_cache() -> None:  # test hook
     _CACHE.clear()
+
+
+async def revalidate_operation(tenant_code: str, email: str, operation: str,
+                               token_epoch: int | None = None) -> str | None:
+    """SENSITIVE-OPERATION online revalidation: re-resolve the caller against Access LIVE
+    (no cache) and require (a) the user still active, (b) ``operation`` still granted, and
+    (c) the revocation epoch unchanged since the signed context was minted — so a role
+    revocation or deactivation takes effect immediately for the operations that matter
+    most, regardless of any token still being within its TTL.
+
+    Returns a problem string (→ 403) when the caller no longer qualifies; None when the
+    action may proceed. Raises :class:`AccessUnavailableError` when Access cannot answer —
+    the caller MUST fail closed (503), never fall back to the static matrix."""
+    settings = get_settings()
+    if not settings.access_url:
+        raise AccessUnavailableError("online revalidation requires REGISTER_ACCESS_URL")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{settings.access_url.rstrip('/')}/v1/resolve",
+                params={"email": email},
+                headers={"X-API-Key": settings.access_api_key, "X-Tenant": tenant_code},
+            )
+    except httpx.HTTPError as exc:
+        raise AccessUnavailableError(str(exc)) from exc
+    if resp.status_code == 404:
+        return f"user '{email}' no longer exists or is inactive."
+    if resp.status_code >= 400:
+        raise AccessUnavailableError(f"access /resolve returned {resp.status_code}")
+    body = resp.json()
+    if not body.get("is_active", False):
+        return f"user '{email}' has been deactivated."
+    level = str(body.get("operations", {}).get(operation, "NONE"))
+    if level in ("", "NONE"):
+        return f"operation '{operation}' is no longer granted to '{email}'."
+    fresh_epoch = int(body.get("epoch", 0))
+    if token_epoch is not None and fresh_epoch > token_epoch:
+        return ("authorization changed since sign-in (revocation epoch advanced) — "
+                "retry the request to obtain a fresh context.")
+    return None

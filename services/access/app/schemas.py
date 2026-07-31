@@ -76,5 +76,8 @@ class ResolveRead(BaseModel):
     views: dict[str, str]
     operations: dict[str, str]
     version: int
+    # The user's revocation epoch — bumped on any role change / (de)activation; carried in
+    # the signed context and compared by sensitive-operation revalidation.
+    epoch: int = 0
     # Transitive subordinates (id + email) — a Head's team, for Register team scope.
     reports: list[dict] = []

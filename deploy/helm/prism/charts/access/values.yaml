@@ -31,6 +31,9 @@ gatewaySharedSecret: ""
 config:
   environment: prod
   logLevel: INFO
+  # Production authority model: the container start never writes grants (drift report
+  # only); seeding is the explicit versioned command `python -m app.seed`.
+  autoSeed: "false"
   logJson: true
   defaultTenantCode: EVAM
   userEmailDomain: evamfinance.com

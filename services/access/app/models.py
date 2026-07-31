@@ -62,6 +62,11 @@ class User(RecordBase):
     phone: Mapped[str | None] = mapped_column(String(30))
     notes: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict | None] = mapped_column(JSONB)
+    # REVOCATION EPOCH — bumped on every role grant/revoke and (de)activation. Carried in
+    # the signed authorization context; a sensitive-operation revalidation that re-resolves
+    # the user rejects a context minted under an older epoch.
+    permissions_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0,
+                                                   server_default="0")
 
 
 class UserRole(RecordBase):
@@ -93,6 +98,11 @@ class AccessGrant(RecordBase):
     item: Mapped[str] = mapped_column(String(60), nullable=False)   # e.g. "lending", "delete_row"
     role: Mapped[str] = mapped_column(String(30), nullable=False)   # catalogue role
     access: Mapped[str] = mapped_column(String(12), nullable=False)  # NONE/READ/SCOPED/FULL/APPROVE
+    # PROVENANCE — 'baseline' (seeded from the approved compiled matrix, provenance-tagged
+    # with its policy version) or 'override' (edited at runtime by an Admin). Keeps "what we
+    # approved" and "what we changed since" separable forever.
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="baseline",
+                                        server_default="baseline")
 
 
 class MatrixVersion(Base, TimestampMixin):
@@ -103,6 +113,28 @@ class MatrixVersion(Base, TimestampMixin):
     tenant_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1,
                                          server_default="1")
+
+
+class AccessAudit(Base, TimestampMixin):
+    """IMMUTABLE audit event for every authorization-governance change: role grants and
+    revocations, user (de)activation, matrix-cell edits, seeds. Append-only — so every
+    later authorization decision can answer who acted, under which tenant and policy
+    version, and which baseline/overrides produced the permission."""
+
+    __tablename__ = "access_audit"
+    __table_args__ = (
+        Index("ix_access_audit_tenant_time", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    action: Mapped[str] = mapped_column(String(60), nullable=False)   # e.g. role.grant
+    item: Mapped[str | None] = mapped_column(String(200))             # user email / cell
+    detail: Mapped[dict | None] = mapped_column(JSONB)
+    policy_version: Mapped[str | None] = mapped_column(String(20))
 
 
 # Timestamp type is referenced for Alembic autogenerate completeness.

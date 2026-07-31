@@ -115,3 +115,70 @@ async def test_management_governs_users_and_resolve_reports(client: AsyncClient)
     r = await client.post("/v1/users", headers={"X-User-Email": "junior2@evamfinance.com"},
                           json={"email": "nope@evamfinance.com", "full_name": "Nope"})
     assert r.status_code == 403
+
+
+async def test_revocation_epoch_bumps_on_role_and_activation_changes(client: AsyncClient):
+    """The revocation epoch advances on every role grant/revoke and (de)activation — the
+    signal sensitive-operation revalidation compares against a signed context's claim."""
+    r = await client.post("/v1/users", headers=ADMIN, json={
+        "email": "epoch@evamfinance.com", "full_name": "Epoch Test", "roles": ["BDRM"]})
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    e0 = (await client.get("/v1/resolve", params={"email": "epoch@evamfinance.com"},
+                           headers=ADMIN)).json()["epoch"]
+    # Grant → epoch advances.
+    assert (await client.post(f"/v1/users/{uid}/roles", headers=ADMIN,
+                              json={"role": "Syn RM"})).status_code == 201
+    e1 = (await client.get("/v1/resolve", params={"email": "epoch@evamfinance.com"},
+                           headers=ADMIN)).json()["epoch"]
+    assert e1 > e0
+    # Revoke → advances again.
+    assert (await client.delete(f"/v1/users/{uid}/roles/Syn RM",
+                                headers=ADMIN)).status_code == 200
+    e2 = (await client.get("/v1/resolve", params={"email": "epoch@evamfinance.com"},
+                           headers=ADMIN)).json()["epoch"]
+    assert e2 > e1
+    # Deactivation bumps too (resolve then 404s — the strongest revocation).
+    assert (await client.patch(f"/v1/users/{uid}", headers=ADMIN,
+                               json={"is_active": False})).status_code == 200
+    r = await client.get("/v1/resolve", params={"email": "epoch@evamfinance.com"},
+                         headers=ADMIN)
+    assert r.status_code == 404
+
+
+async def test_matrix_edit_records_override_provenance_and_audit(client: AsyncClient):
+    """An Admin cell edit flips the cell's provenance to 'override', the drift report names
+    it (still listing the approved baseline value), and an immutable audit event exists."""
+    r = await client.patch("/v1/access", headers=ADMIN, json={
+        "kind": "operation", "item": "add_lead", "role": "Syn RM", "access": "SCOPED"})
+    assert r.status_code == 200, r.text
+    drift = (await client.get("/v1/access/drift", headers=ADMIN)).json()
+    assert drift["policy_version"] == "3.1" and drift["fingerprint"]
+    assert drift["in_sync"] is False
+    cell = next(c for c in drift["differing_cells"]
+                if c["item"] == "add_lead" and c["role"] == "Syn RM")
+    assert cell["origin"] == "override" and cell["live"] == "SCOPED"
+    # The governance change is on the immutable audit trail, stamped with the policy version.
+    from evam_backend_core.db.session import get_sessionmaker
+    from sqlalchemy import text as _text
+    sm = get_sessionmaker()
+    async with sm() as s:
+        row = (await s.execute(_text(
+            "SELECT actor, policy_version, detail->>'to' FROM access_audit "
+            "WHERE action='matrix.edit' AND item='operation:add_lead:Syn RM' "
+            "ORDER BY created_at DESC LIMIT 1"))).first()
+        assert row is not None and row[1] == "3.1" and row[2] == "SCOPED"
+        # Append-only: the DB trigger refuses tampering.
+        import pytest as _pytest
+        from sqlalchemy.exc import DBAPIError
+        with _pytest.raises(DBAPIError):
+            await s.execute(_text("DELETE FROM access_audit"))
+        await s.rollback()
+
+
+async def test_drift_endpoint_admin_only(client: AsyncClient):
+    await client.post("/v1/users", headers=ADMIN, json={
+        "email": "plainrm@evamfinance.com", "full_name": "Plain RM", "roles": ["BDRM"]})
+    r = await client.get("/v1/access/drift",
+                         headers={"X-User-Email": "plainrm@evamfinance.com"})
+    assert r.status_code == 403

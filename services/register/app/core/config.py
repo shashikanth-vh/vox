@@ -53,7 +53,7 @@ class Settings(BaseServiceSettings):
     idempotency_ttl_hours: int = 48
 
     # ---- Advaya integration (DEFAULT OFF) --------------------------------
-    # PRISM's terminal for the current product scope is 'Handed Over to Advaya'; there is no Advaya
+    # PRISM's terminal for the current product scope is 'Disbursed'; there is no Advaya
     # integration. When (and only when) a real acknowledgement channel exists, set this on to
     # re-enable the dormant path: the internal advaya-handoffs router is registered, the workflow
     # service is granted attach_advaya_evidence, and the onward disbursement states/gate become
@@ -99,6 +99,11 @@ class Settings(BaseServiceSettings):
     access_url: str = ""
     access_api_key: str = "dev-local-key"
     access_verify_ttl_s: float = 30.0
+    # ONLINE REVALIDATION for SENSITIVE operations (delete/restore, assignments, imports,
+    # evidence break-glass): before acting, re-resolve the caller against Access LIVE and
+    # require the operation still granted AND the revocation epoch unchanged. Fails CLOSED
+    # (503) when Access is unreachable. Off in dev; ON in the production posture.
+    online_revalidation: bool = False
 
     # ---- Documents (Data Register) --------------------------------------
     # Max size (bytes) of a document kept INLINE in Postgres via ``content_base64``.

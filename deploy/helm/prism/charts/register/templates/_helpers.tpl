@@ -168,6 +168,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 # refuse machine callers without a user context. On by default in the umbrella.
 - name: REGISTER_ENFORCE_RBAC
   value: {{ .Values.enforceRbac | quote }}
+# Sensitive operations (delete/restore, assignments, governed imports, break-glass)
+# revalidate the caller ONLINE against Access before acting; fails closed (503) when
+# Access cannot answer. On in the umbrella's production posture.
+- name: REGISTER_ONLINE_REVALIDATION
+  value: {{ .Values.onlineRevalidation | quote }}
 # Object storage (document bytes) — only wired when the backend is "s3".
 - name: REGISTER_STORAGE_BACKEND
   value: {{ .Values.storage.backend | quote }}

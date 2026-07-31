@@ -15,8 +15,16 @@ run_migrate() {
 }
 
 run_seed() {
-  echo "[entrypoint] seeding tenant + access matrix + admin user..."
-  python -m app.seed
+  # Production posture sets ACCESS_AUTO_SEED=false: seeding then happens ONLY through the
+  # explicit versioned command (python -m app.seed); the container start prints the drift
+  # report instead of writing.
+  if [ "${ACCESS_AUTO_SEED:-true}" = "true" ]; then
+    echo "[entrypoint] seeding tenant + access matrix + admin user..."
+    python -m app.seed
+  else
+    echo "[entrypoint] auto-seed disabled (ACCESS_AUTO_SEED=false) — drift report only:"
+    python -m app.seed --check || true
+  fi
 }
 
 run_serve() {

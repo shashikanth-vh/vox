@@ -77,7 +77,7 @@ Legend: ✅ done · ◑ partial · ✗ not started · — n/a.
 | `Ready for Disbursement` = proposed drawdown fields + row-lock | ✅ | — | ✅ | — | ✅ | ✅ | ✗ | ✅ | ✅ |
 | **Durable, immutable handover PACKAGE; stage advances only after snapshot** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ◑ | ✅ | ✅ |
 | **Authenticated handover op (`POST /v1/workflows/advaya-handover`, Credit Head/Mgmt)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ◑ | ✅ | ✅ |
-| **`Handed Over to Advaya` = terminal (no self-disburse)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✗ | ✅ | ✅ |
+| **`Disbursed` = terminal (no self-disburse)** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✗ | ✅ | ✅ |
 | **Dormant Advaya ack path DISABLED by default (flag + no router + no grant + startup guard)** | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✗ | ✅ | ✅ |
 | Advaya ack VERIFIED vs handoff record — enabled only under integration flag | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✗ | ✅ | ✅ |
 | Legacy import mapping (Documentation/Disbursed → new vocabulary) | ✅ | — | — | — | ✅ | — | — | ✅ | ✅ |
@@ -147,7 +147,7 @@ Legend: ✅ done · ◑ partial · ✗ not started · — n/a.
 Deliver ONE real loan start→finish, including reject/correct/retry:
 `VOX/Manual → Company+Lead → Qualification → Deal Structuring → Document Collection → OCR+Maker-Checker
 → CIPHER → Fraud/Pulse → Credit Committee → Sanction → CP/CS Completed → Ready for Disbursement →
-Handed Over to Advaya` (PRISM's honest terminal; `Disbursement Pending` + Monitoring require a future
+Disbursed` (PRISM's honest terminal; `Disbursement Pending` + Monitoring require a future
 Advaya integration).
 Ordered work (dependency-first):
 1. Freeze Engagement model + Advaya boundary contract (Foundation Spec §1, §11).

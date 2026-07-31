@@ -44,6 +44,8 @@ spec:
               value: {{ .Values.config.logLevel | quote }}
             - name: ACCESS_LOG_JSON
               value: {{ .Values.config.logJson | quote }}
+            - name: ACCESS_AUTO_SEED
+              value: {{ .Values.config.autoSeed | quote }}
             - name: ACCESS_DEFAULT_TENANT_CODE
               value: {{ .Values.config.defaultTenantCode | quote }}
             - name: ACCESS_USER_EMAIL_DOMAIN

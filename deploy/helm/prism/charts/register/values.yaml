@@ -137,6 +137,7 @@ apiKeys:
 
 # Shared secret proving identity headers came via the gateway. Empty = dev-trust.
 enforceRbac: false     # umbrella turns this on; standalone installs choose
+onlineRevalidation: false  # umbrella prod posture turns this on (requires accessUrl)
 gatewaySharedSecret: ""
 # Separate admin credential for tenant administration (X-Admin-Key). Empty = compat
 # (shared key + a forwarded Admin identity). Rendered into the chart Secret when set.

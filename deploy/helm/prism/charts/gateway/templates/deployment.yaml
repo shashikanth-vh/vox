@@ -41,6 +41,10 @@ spec:
               value: {{ .Values.config.logJson | quote }}
             - name: GATEWAY_CACHE_TTL_S
               value: {{ .Values.config.cacheTtlS | quote }}
+            - name: GATEWAY_CACHE_MAX_STALE_S
+              value: {{ .Values.config.cacheMaxStaleS | quote }}
+            - name: GATEWAY_INTERNAL_SIGNING_KID
+              value: {{ .Values.config.internalSigningKid | quote }}
             - name: GATEWAY_DEFAULT_TENANT_CODE
               value: {{ .Values.config.defaultTenantCode | quote }}
             - name: GATEWAY_REGISTER_URL

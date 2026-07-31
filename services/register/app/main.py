@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
     ]
     # The DORMANT Advaya acknowledgement path (internal handoff record) is registered ONLY under an
     # enabled Advaya integration (default off). Without it, the acknowledgement endpoint does not
-    # exist and 'Disbursement Pending' is unreachable — PRISM stops at 'Handed Over to Advaya'.
+    # exist and 'Disbursement Pending' is unreachable — PRISM stops at 'Disbursed'.
     if settings.advaya_integration_enabled:
         routers.insert(6, advaya_router)
     app = create_service_app(

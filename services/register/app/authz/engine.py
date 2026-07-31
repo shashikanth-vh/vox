@@ -59,6 +59,9 @@ class UserContext:
     # the static matrix (dev / legacy header propagation).
     effective_operations: dict[str, Access] = field(default_factory=dict)
     effective_views: dict[str, Access] = field(default_factory=dict)
+    # Revocation epoch from the SIGNED context (0 for legacy/dev identities) — compared by
+    # sensitive-operation online revalidation against a fresh Access resolve.
+    epoch: int = 0
 
     @property
     def is_admin(self) -> bool:
@@ -115,6 +118,7 @@ def user_context_from_internal(ic) -> UserContext:  # noqa: ANN001
         report_emails=[x.strip().lower() for x in ic.report_emails if x.strip()],
         effective_operations={k: _to_access(v) for k, v in ic.effective_operations.items()},
         effective_views={k: _to_access(v) for k, v in ic.effective_views.items()},
+        epoch=ic.epoch,
     )
 
 

@@ -96,6 +96,7 @@ atlas:
 # ---- The Register: RBAC + fail-closed RLS + separate admin + service principals -
 register:
   enforceRbac: true
+  onlineRevalidation: true
   config:
     enforceRls: true
   database:

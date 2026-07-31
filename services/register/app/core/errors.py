@@ -7,6 +7,7 @@ from evam_backend_core.errors import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    ServiceUnavailableError,
     UnauthorizedError,
     ValidationAppError,
     VersionConflictError,
@@ -14,6 +15,7 @@ from evam_backend_core.errors import (
 )
 
 __all__ = [
-    "AppError", "ConflictError", "ForbiddenError", "NotFoundError", "UnauthorizedError",
-    "ValidationAppError", "VersionConflictError", "register_exception_handlers",
+    "AppError", "ConflictError", "ForbiddenError", "NotFoundError",
+    "ServiceUnavailableError", "UnauthorizedError", "ValidationAppError",
+    "VersionConflictError", "register_exception_handlers",
 ]

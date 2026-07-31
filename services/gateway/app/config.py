@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Facts cache: how long a /resolve answer is reused before re-fetching. 0 = always
     # re-resolve (tests). The gateway serves last-known-good if Access is briefly down.
     cache_ttl_s: float = 60.0
+    # HARD staleness bound for the last-known-good answer: past this age the gateway FAILS
+    # CLOSED (503) instead of serving ever-staler grants through an Access outage. Together
+    # with the token TTL this defines the platform's deliberate revocation window.
+    cache_max_stale_s: float = 300.0
 
     # Shared secret stamped on forwarded identity headers so the Register can verify
     # they came from the gateway. Empty = dev mode (Register trusts headers as sent).
@@ -68,6 +72,9 @@ class Settings(BaseSettings):
     internal_signing_secret: str = ""
     internal_signing_algorithm: str = "HS256"
     internal_token_ttl_seconds: int = 120
+    # Signing-key id stamped into each token's header — names WHICH key signed it, so keys
+    # can be rotated (verifiers log/pin the kid) without ambiguity.
+    internal_signing_kid: str = "primary"
 
     # Verified identity (opt-in). Set the issuer to REQUIRE a valid bearer token and
     # derive the caller's e-mail from it instead of trusting X-User-Email — the

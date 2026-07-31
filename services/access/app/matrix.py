@@ -11,11 +11,12 @@ from __future__ import annotations
 import uuid
 
 from evam_backend_core.errors import ForbiddenError, ValidationAppError
-from evam_backend_core.rbac import OPERATIONS, ROLES, VIEW_ACCESS, Access
+from evam_backend_core.rbac import OPERATIONS, ROLES, VIEW_ACCESS, Access, policy_fingerprint
+from evam_backend_core.rbac_catalog import POLICY_VERSION
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AccessGrant, MatrixVersion
+from app.models import AccessAudit, AccessGrant, MatrixVersion
 
 ACCESS_LEVELS = {a.name for a in Access}
 
@@ -46,7 +47,7 @@ async def seed_matrix(session: AsyncSession, tenant_id: uuid.UUID) -> int:
                 if (kind, item, role) in existing:
                     continue
                 session.add(AccessGrant(tenant_id=tenant_id, kind=kind, item=item,
-                                        role=role, access=access.name,
+                                        role=role, access=access.name, origin="baseline",
                                         created_by="seed", updated_by="seed"))
                 added += 1
     ver = (
@@ -54,6 +55,9 @@ async def seed_matrix(session: AsyncSession, tenant_id: uuid.UUID) -> int:
     ).scalar_one_or_none()
     if ver is None:
         session.add(MatrixVersion(tenant_id=tenant_id, version=1))
+    if added:
+        audit(session, tenant_id, "seed", "matrix.seed", item=None,
+              detail={"cells_added": added, "fingerprint": policy_fingerprint()})
     await session.flush()
     return added
 
@@ -114,14 +118,65 @@ async def set_grant(
         ))
     ).scalar_one_or_none()
     if row is None:
+        before = None
         session.add(AccessGrant(tenant_id=tenant_id, kind=kind, item=item, role=role,
-                                access=access, created_by=actor, updated_by=actor))
+                                access=access, origin="override",
+                                created_by=actor, updated_by=actor))
     else:
+        before = row.access
         row.access = access
+        row.origin = "override"
         row.updated_by = actor
         row.deleted_at = None
+    audit(session, tenant_id, actor, "matrix.edit", item=f"{kind}:{item}:{role}",
+          detail={"from": before, "to": access})
     await session.execute(
         update(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id)
         .values(version=MatrixVersion.version + 1)
     )
     await session.flush()
+
+
+def audit(session: AsyncSession, tenant_id: uuid.UUID, actor: str, action: str,
+          *, item: str | None, detail: dict | None = None) -> None:
+    """Append one immutable governance-audit event, stamped with the policy version."""
+    session.add(AccessAudit(tenant_id=tenant_id, actor=actor, action=action, item=item,
+                            detail=detail, policy_version=POLICY_VERSION))
+
+
+async def drift_report(session: AsyncSession, tenant_id: uuid.UUID) -> dict:
+    """Compare the LIVE matrix against the approved compiled baseline — REPORT ONLY, no
+    writes. Deployment runs this (``python -m app.seed --check``) to prove the database
+    still reflects the approved ATLAS version plus known overrides."""
+    live, version = await compiled_matrix(session, tenant_id)
+    rows = (
+        await session.execute(select(AccessGrant).where(
+            AccessGrant.tenant_id == tenant_id, AccessGrant.deleted_at.is_(None)))
+    ).scalars().all()
+    origin_of = {(g.kind, g.item, g.role): g.origin for g in rows}
+    missing: list[dict] = []
+    differing: list[dict] = []
+    unknown: list[dict] = []
+    for kind, matrix in (("view", VIEW_ACCESS), ("operation", OPERATIONS)):
+        for item, row in matrix.items():
+            for role, access in row.items():
+                got = live.get(kind, {}).get(item, {}).get(role)
+                if got is None:
+                    missing.append({"kind": kind, "item": item, "role": role,
+                                    "baseline": access.name})
+                elif got != access.name:
+                    differing.append({"kind": kind, "item": item, "role": role,
+                                      "baseline": access.name, "live": got,
+                                      "origin": origin_of.get((kind, item, role), "?")})
+    for kind, items in live.items():
+        known: dict = VIEW_ACCESS if kind == "view" else OPERATIONS
+        for item, live_row in items.items():
+            for role in live_row:
+                if item not in known or role not in known.get(item, {}):
+                    unknown.append({"kind": kind, "item": item, "role": role})
+    return {"policy_version": POLICY_VERSION, "fingerprint": policy_fingerprint(),
+            "matrix_version": version,
+            "in_sync": not (missing or differing or unknown),
+            "missing_baseline_cells": missing,
+            "differing_cells": differing,
+            "unknown_cells": unknown}
