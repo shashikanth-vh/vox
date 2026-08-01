@@ -395,6 +395,28 @@ F.append(("02 · Client (Entity) — the company master row", [
 ]))
 
 F.append(("03 · VOX ▸ the field capture creates the lead + interaction", [
+    req("WAIT — orchestrator ready (Temporal up)", "GET", ORC, "/readyz",
+        headers=_ADMIN, pre=_SPIN,
+        tests=["const max = 40;",
+               "const key = 'poll_orc_ready';",
+               "let n = Number(pm.environment.get(key) || 0);",
+               "if (pm.response.code === 200) {",
+               "  pm.environment.unset(key);",
+               "  pm.test('orchestrator ready (Temporal reachable)', () => "
+               "pm.expect(pm.response.code).to.eql(200));",
+               "} else if (n < max) {",
+               "  pm.environment.set(key, n + 1);",
+               "  postman.setNextRequest('WAIT — orchestrator ready (Temporal up)');",
+               "} else {",
+               "  pm.environment.unset(key);",
+               "  pm.test('orchestrator ready within ' + max + ' polls', () => "
+               "pm.expect(pm.response.code).to.eql(200));",
+               "}"],
+        desc="A cold stack (after `down -v`) takes up to a minute for Temporal to "
+             "initialise its store and the worker to start polling — a VOX capture "
+             "fired into that window dies with a 500. This request re-runs itself "
+             "until the orchestrator reports ready, so the journey never lands on a "
+             "cold workflow plane. Collection Runner only."),
     req("POST /orchestrator/v1/workflows/vox-touchpoints?wait=true — RM's field capture",
         "POST", ORC, "/v1/workflows/vox-touchpoints?wait=true", headers=_RM,
         body={"capture_id": "e2e-{{runSuffix}}", "entity_id": "{{entityId}}",
@@ -432,7 +454,8 @@ F.append(("03 · VOX ▸ the field capture creates the lead + interaction", [
                "  pm.expect(l.rm).to.eql('E2E Priya Nair'); });"]),
     req("PATCH /v1/leads/{id} — the RM updates the lead", "PATCH", REG,
         "/v1/leads/{{leadId}}", headers=_RM,
-        body={"temperature": "Hot", "expected_amount_cr": 45.0,
+        body={"temperature": "Hot",
+              "next_action": "Take the ₹45 Cr ask to credit committee",
               "notes": "Term sheet accepted verbally; targeting credit committee this month."},
         tests=[OK, "pm.test('RM updated own lead (scoped write)', () => "
                    "pm.expect(pm.response.json().temperature).to.eql('Hot'));"],
