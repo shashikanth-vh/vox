@@ -196,6 +196,16 @@ def create_app() -> FastAPI:
                          admin_key: str | None = None) -> dict[str, str]:
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() not in _SKIP_REQUEST_HEADERS}
+        # A tokenless "Bearer " (Postman dev posture resolves {{token}} to empty; some
+        # SDKs do the same) is not an identity — and httpx refuses to send a header
+        # value with trailing whitespace, which would turn the whole request into a
+        # 502 at the forward step. Normalise: strip, and drop a bare scheme entirely.
+        auth = (headers.get("authorization") or "").strip()
+        if "authorization" in headers:
+            if not auth or auth.lower() in ("bearer", "basic"):
+                del headers["authorization"]
+            else:
+                headers["authorization"] = auth
         # Inject the SCOPED service credential for the chosen upstream. The client's own
         # key was stripped above (_SKIP_REQUEST_HEADERS); each backend accepts only its own
         # key, so a leaked edge token can never be replayed against the data plane.

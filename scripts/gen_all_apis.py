@@ -179,6 +179,16 @@ def main() -> None:
             "requires an environment: select 'PRISM — All APIs' (or the E2E environments, "
             "which share the same variables).",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+        # Dev posture leaves {{adminToken}} empty, resolving Authorization to a bare
+        # "Bearer " — no identity, and an illegal (whitespace-tailed) header value for the
+        # gateway's upstream client, which would 502 every request. Strip it client-side
+        # whenever it carries no token; with a real token it rides through untouched.
+        "event": [{"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+            "const a = pm.request.headers.find(h => h.key.toLowerCase() === 'authorization' && !h.disabled);",
+            "if (a && /^\\s*(Bearer|Basic)?\\s*$/i.test(pm.variables.replaceIn(a.value))) {",
+            "    pm.request.headers.remove(a.key);",
+            "}",
+        ]}}],
         "item": folders}
     OUT.mkdir(exist_ok=True)
     with open(OUT / "PRISM_All_APIs.postman_collection.json", "w") as fh:

@@ -99,3 +99,18 @@ async def test_client_key_is_stripped_and_upstream_key_injected(gw, access_direc
     gateway, proving the strip+inject path end to end.)"""
     r = await gw.post("/v1/entities", json={"code": "ROUTE1", "legal_name": "Route One"})
     assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_tokenless_bearer_is_dropped_not_a_502(gw):
+    """Postman's dev posture resolves 'Bearer {{token}}' to 'Bearer ' — no identity, and
+    a header value the upstream HTTP client refuses to SEND (trailing whitespace), which
+    used to turn every proxied request into 502 'Illegal header value'. The gateway must
+    treat a tokenless scheme as absent and forward cleanly. A real token still rides."""
+    for auth in ("Bearer ", "Bearer", "  "):
+        r = await gw.get("/v1/ref", headers={"Authorization": auth})
+        assert r.status_code == 200, (auth, r.status_code, r.text)
+    # A non-empty (even if unverifiable-here) credential is preserved, not stripped:
+    # dev posture has no OIDC verifier, so it must simply not break the request.
+    r = await gw.get("/v1/ref", headers={"Authorization": "Bearer not-a-real-token"})
+    assert r.status_code == 200, r.text

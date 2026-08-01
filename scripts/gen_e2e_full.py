@@ -1121,6 +1121,16 @@ col = {"info": {
         "Several requests MUST fail (self-approvals, hand-typed milestones, blocked closure, "
         "maker validating their own document) — their tests pass on refusal.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+    # Dev posture: the token variables are EMPTY, so "Bearer {{adminToken}}" resolves to a
+    # bare "Bearer " — which is not an identity and (trailing space) is an illegal header
+    # value for the gateway's upstream client, turning every request into a 502. Drop the
+    # header client-side whenever it carries no token; with a real token it rides as-is.
+    "event": [{"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+        "const a = pm.request.headers.find(h => h.key.toLowerCase() === 'authorization' && !h.disabled);",
+        "if (a && /^\\s*(Bearer|Basic)?\\s*$/i.test(pm.variables.replaceIn(a.value))) {",
+        "    pm.request.headers.remove(a.key);",
+        "}",
+    ]}}],
     "item": [{"name": n, "item": i} for n, i in F]}
 
 env = {"name": "PRISM — Full (via NGINX)", "values": [

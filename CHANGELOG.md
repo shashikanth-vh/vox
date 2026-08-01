@@ -6,6 +6,21 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Fixed: 502 "Illegal header value b'Bearer '" on every gateway-lane Postman request
+  in the dev posture.** Root cause: the E2E/All-APIs collections send
+  `Authorization: Bearer {{adminToken}}` and the token variables are EMPTY until you run
+  the Dex sign-in folder — Postman resolves that to a bare `Bearer ` (trailing space),
+  which the gateway's upstream HTTP client refuses to transmit, so the proxy hop itself
+  failed before reaching Access/Register. Fixed on both sides: (1) the gateway now
+  normalises the forwarded `Authorization` — strips whitespace and DROPS a tokenless
+  scheme entirely (a bare `Bearer`/`Basic` is not an identity; dev header-trust then
+  applies exactly as designed, and a real token still rides through untouched) — covered
+  by a new e2e test through the real 3-service stack; (2) both regenerated collections
+  (`PRISM_E2E_Full`, `PRISM_All_APIs`) carry a collection-level pre-request script that
+  removes a tokenless Authorization header client-side, so the fix works against
+  already-deployed gateways without a rebuild. Re-import the collection JSONs (or
+  rebuild the gateway image) and folder 01 onwards runs clean.
+
 - **VocX: "schedule followup meeting next Monday 11am" now fills NEXT MEETING.** Two
   fixes in `services/vocx/app/vocx/core/extract.py`. (1) The AI path now tells the
   model the WEEKDAY of the capture timestamp ("2026-08-01 (a Saturday)") — resolving

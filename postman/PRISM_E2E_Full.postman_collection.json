@@ -4,6 +4,20 @@
     "description": "**The complete PRISM-native journey \u2014 everything the Excel tracker used to hold, start to finish, approvals included.**\\n\\nEvery request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`; the edge forwards to the gateway which routes by prefix (`/access`, `/orchestrator`, Register). Postman presents no backend key. The clearly-marked **MACHINE LANE** requests go direct to the Register with the workflow service key \u2014 in production the monitors/notifier/Advaya make those calls, shown here so the demo is deterministic.\\n\\n### The chapters\\n1. **VOX capture** creates the company touchpoint: lead + owner assignment + full-fidelity interaction + follow-up, in one durable run.\\n2. The **RM updates the lead**, qualification is filed as evidence, and conversion is a **request \u2192 APPROVE** flow (an RM's self-approval is refused).\\n3. The **committee approves conditionally** through Temporal (per-facility decisions, conditions + 90-day validity, sanction-expiry monitor armed).\\n4. **CP/CS goes both ways**: the checker RETURNS v1 with reasons, v2 is approved, and only that mints the completion evidence. The **handover approval** disburses; tranches reconcile to the rupee.\\n5. **Syndication and Asset Monetisation** run their mandate workflows: versioned IM/teaser evidence, lender/buyer tracking, authority-checked decisions, allocation, gated terminals.\\n6. **Documents** are validated maker\u2260checker, expire on their real dates, and are replaced with the chain kept. **Calendar** events complete and freeze.\\n7. A **covenant breach** opens its EWS case in the same transaction; the case is worked, escalated and closed with authority; the breach is **waived** only against a recorded, time-boxed senior decision.\\n8. The **deal closes** only when nothing is owed (open-item validated), and finally \u2014\\n9. **`GET /v1/export/excel`** \u2014 the workbook. Every sheet is a register the journey filled. The spreadsheet is now an OUTPUT, not the system.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), SSL verification OFF in Postman, and `registerDirectUrl` reachable (default `http://localhost:8000`) for the machine lane. Run **in order** with the Collection Runner; WAIT requests poll themselves until Temporal settles.\\n\\nSeveral requests MUST fail (self-approvals, hand-typed milestones, blocked closure, maker validating their own document) \u2014 their tests pass on refusal.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const a = pm.request.headers.find(h => h.key.toLowerCase() === 'authorization' && !h.disabled);",
+          "if (a && /^\\s*(Bearer|Basic)?\\s*$/i.test(pm.variables.replaceIn(a.value))) {",
+          "    pm.request.headers.remove(a.key);",
+          "}"
+        ]
+      }
+    }
+  ],
   "item": [
     {
       "name": "00 \u00b7 Health & run setup",

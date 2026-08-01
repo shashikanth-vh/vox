@@ -4,6 +4,20 @@
     "description": "Every REST endpoint of every backend service, generated from the LIVE OpenAPI of each app. One front door: NGINX terminates TLS on :8443 and the gateway routes by prefix (/access, /orchestrator, /atlas, /vocx, /pulse, else Register). Bodies are TYPE-correct scaffolding \u2014 replace values before sending. Sending requires an environment: select 'PRISM \u2014 All APIs' (or the E2E environments, which share the same variables).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const a = pm.request.headers.find(h => h.key.toLowerCase() === 'authorization' && !h.disabled);",
+          "if (a && /^\\s*(Bearer|Basic)?\\s*$/i.test(pm.variables.replaceIn(a.value))) {",
+          "    pm.request.headers.remove(a.key);",
+          "}"
+        ]
+      }
+    }
+  ],
   "item": [
     {
       "name": "Register  (224 requests \u00b7 {{baseUrl}}/)",
