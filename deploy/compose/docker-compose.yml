@@ -522,6 +522,12 @@ services:
       # Defaults for POST /v1/internal/monitors/document-expiry (per-tenant monitor).
       WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS: "${WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS:-24}"
       WORKFLOWS_DOC_EXPIRY_WARN_DAYS: "${WORKFLOWS_DOC_EXPIRY_WARN_DAYS:-7}"
+      # --- Increment 8: covenant monitor + EWS case SLAs ---
+      WORKFLOWS_COVENANT_INTERVAL_HOURS: "${WORKFLOWS_COVENANT_INTERVAL_HOURS:-24}"
+      WORKFLOWS_COVENANT_HORIZON_DAYS: "${WORKFLOWS_COVENANT_HORIZON_DAYS:-30}"
+      WORKFLOWS_EWS_ASSIGN_SLA_HOURS: "${WORKFLOWS_EWS_ASSIGN_SLA_HOURS:-24}"
+      WORKFLOWS_EWS_INVESTIGATION_SLA_HOURS: "${WORKFLOWS_EWS_INVESTIGATION_SLA_HOURS:-72}"
+      WORKFLOWS_EWS_ESCALATED_REMINDER_HOURS: "${WORKFLOWS_EWS_ESCALATED_REMINDER_HOURS:-48}"
     # No host port: the orchestrator API is reachable ONLY through the gateway
     # (edge → /orchestrator/...), so workflow starts pass the RBAC gate first.
     restart: unless-stopped

@@ -408,6 +408,29 @@ class AsyncRegisterClient:
             "POST", "/v1/internal/documents/expiry-sweep",
             json={"warn_days": warn_days, "limit": limit}, request_id=request_id))
 
+    # -- Covenants + EWS (increment 8) ------------------------------------
+    async def run_covenant_sweep(self, *, horizon_days: int = 30, limit: int = 500,
+                                 request_id: str | None = None) -> dict:
+        """Run the covenant sweep: generate the schedule's due observations (idempotent),
+        mark newly-overdue submissions, and expire lapsed waivers (each reported once).
+        Returns ``{generated, overdue: [...], waivers_expired: [...]}``."""
+        return await self._send(_Plan(
+            "POST", "/v1/internal/covenants/run-sweep",
+            json={"horizon_days": horizon_days, "limit": limit},
+            request_id=request_id))
+
+    async def auto_escalate_ews(self, case_id: str, reason: str, *,
+                                workflow_id: str | None = None,
+                                request_id: str | None = None) -> dict:
+        """Escalate an EWS case whose investigation SLA lapsed (service plumbing;
+        idempotent — an already-escalated or closed case is returned unchanged)."""
+        body: dict[str, Any] = {"reason": reason}
+        if workflow_id:
+            body["workflow_id"] = workflow_id
+        return await self._send(_Plan(
+            "POST", f"/v1/internal/ews-cases/{case_id}/auto-escalate", json=body,
+            request_id=request_id))
+
     async def redrive_delivery(self, workflow_id: str, *, reason: str,
                                ticket: str | None = None,
                                extra_headers: dict[str, str] | None = None,

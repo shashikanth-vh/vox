@@ -9,6 +9,104 @@
       "name": "Internal",
       "item": [
         {
+          "name": "POST /v1/internal/monitors/covenants",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/internal/monitors/covenants",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "monitors",
+                "covenants"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"horizon_days\": 1,\n  \"interval_hours\": 1.0,\n  \"notify\": [\n    \"sample notify\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/internal/monitors/covenants/stop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/internal/monitors/covenants/stop",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "monitors",
+                "covenants",
+                "stop"
+              ]
+            }
+          }
+        },
+        {
           "name": "POST /v1/internal/monitors/document-expiry",
           "request": {
             "method": "POST",
@@ -485,6 +583,60 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"collection_timeout_hours\": 1,\n  \"requested_by\": \"sample requested_by\",\n  \"required_documents\": [\n    \"sample required_documents\"\n  ],\n  \"subject_id\": \"{{id}}\",\n  \"subject_type\": \"sample subject_type\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/ews-cases",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/ews-cases",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "ews-cases"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assign_sla_hours\": 1.0,\n  \"case_id\": \"{{id}}\",\n  \"escalated_reminder_hours\": 1.0,\n  \"investigation_sla_hours\": 1.0,\n  \"notify\": [\n    \"sample notify\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1297,6 +1449,48 @@
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/{{{workflowId}}}/ews-sync",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/ews-sync",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "ews-sync"
+              ]
             }
           }
         },

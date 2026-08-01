@@ -459,6 +459,77 @@ class DocumentExpiryResult:
 
 
 @dataclass
+class CovenantMonitorInput:
+    """The tenant-wide covenant clock (increment 8): a long-running loop that runs the
+    Register's covenant sweep — generating each schedule's due observations (idempotent),
+    flagging newly-overdue submissions, and expiring lapsed waivers (which re-opens the
+    breach + its EWS case). One run per tenant (``cov-monitor-{tenant}``)."""
+
+    interval_hours: float = 24.0
+    # How far ahead observations are generated from each covenant's schedule.
+    horizon_days: int = 30
+    # Ops recipients notified on overdue submissions and lapsed waivers.
+    notify: list = field(default_factory=list)
+    max_iterations: int = 180
+    emit_search_attributes: bool = False
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class CovenantMonitorResult:
+    """Returned only when the monitor is STOPPED (signal)."""
+
+    workflow_id: str
+    sweeps: int = 0
+    generated_total: int = 0
+    overdue_total: int = 0
+    waivers_expired_total: int = 0
+
+
+@dataclass
+class EwsCaseInput:
+    """One EWS case's clock (increment 8). The DURABLE case record in the Register is
+    the single source of truth — every wake-up re-reads it (a signal carries nothing
+    trusted). The run keeps the case honest against its SLAs:
+
+    * unassigned past ``assign_sla_hours``       → ops reminder (once)
+    * uninvestigated past ``investigation_sla_hours`` → AUTO-ESCALATED (service-audited)
+    * escalated with no closure                  → re-alert every ``escalated_reminder_hours``
+
+    The run ends when the case record reaches 'Closed'."""
+
+    case_id: str
+    entity_id: str = ""
+    severity: str = "Amber"
+    title: str = ""
+    assign_sla_hours: float = 24.0
+    investigation_sla_hours: float = 72.0
+    escalated_reminder_hours: float = 48.0
+    # Ops recipients (the case's opener/assignee are read from the record each wake).
+    notify: list = field(default_factory=list)
+    # Elapsed hours carried across continue-as-new so the SLA clock never resets.
+    resumed_elapsed_hours: float = 0.0
+    emit_search_attributes: bool = False
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class EwsCaseResult:
+    workflow_id: str
+    case_id: str
+    status: str                          # Closed
+    disposition: str | None = None
+    closed_by: str | None = None
+    auto_escalated: bool = False
+
+
+@dataclass
 class DocumentItem:
     """One required document in a collection checklist, with the reference + digest that will be
     filed as evidence once it is received."""

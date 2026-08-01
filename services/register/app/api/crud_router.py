@@ -266,6 +266,16 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
             "A lead is converted via POST /v1/leads/{id}/convert (which creates the deal "
             "and product lines atomically), not by setting status directly.")
 
+    # Closing a deal is never a bare stage edit either (increment 8): the closed
+    # terminals are reachable ONLY through POST /v1/deals/{id}/close, which validates
+    # the deal's OPEN ITEMS first — open EWS cases, un-excused covenant breaches,
+    # product lines mid-pipeline. (The close endpoint writes the stage via the
+    # repository directly, unaffected by this.)
+    if spec.subject_type == "Deal" and data.get("stage") in ("Closed Won", "Closed Lost"):
+        raise ValidationAppError(
+            "A deal is closed via POST /v1/deals/{id}/close (open-item validated, note "
+            "mandatory), not by setting the stage directly.")
+
     # The evidence kinds already on file for this record — the policy engine's evidence gate
     # checks them against what the target stage requires. Loaded once, for every caller.
     evidence = await ev.load_evidence_kinds(ctx, spec.subject_type, obj_id)

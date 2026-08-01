@@ -42,6 +42,7 @@ TENANT_TABLES = [
     "cp_cs_checklists",
     "advaya_handover_packages", "disbursement_tranches",
     "calendar_events", "notifications", "notification_deliveries",
+    "covenants", "ews_cases",
 ]
 
 # Append-only tables: rows are write-once, so the runtime role must NOT hold UPDATE/DELETE

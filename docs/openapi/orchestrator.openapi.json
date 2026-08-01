@@ -379,6 +379,47 @@
         "title": "ControlIn",
         "type": "object"
       },
+      "CovenantMonitorIn": {
+        "additionalProperties": false,
+        "description": "Start (or attach to) the tenant's covenant monitor. Overrides default to\ndeployment settings when omitted.",
+        "properties": {
+          "horizon_days": {
+            "anyOf": [
+              {
+                "maximum": 400.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon Days"
+          },
+          "interval_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 720.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Hours"
+          },
+          "notify": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notify",
+            "type": "array"
+          }
+        },
+        "title": "CovenantMonitorIn",
+        "type": "object"
+      },
       "CpcsApproveIn": {
         "additionalProperties": false,
         "properties": {
@@ -777,6 +818,69 @@
           "name"
         ],
         "title": "DocumentReceivedIn",
+        "type": "object"
+      },
+      "EwsCaseStartIn": {
+        "additionalProperties": false,
+        "description": "Attach a Temporal clock to an EWS case the Register already holds \u2014 the case\nrecord stays the single source of truth; the run keeps it honest against its SLAs.",
+        "properties": {
+          "assign_sla_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 720.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assign Sla Hours"
+          },
+          "case_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Case Id",
+            "type": "string"
+          },
+          "escalated_reminder_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 720.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalated Reminder Hours"
+          },
+          "investigation_sla_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1440.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investigation Sla Hours"
+          },
+          "notify": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notify",
+            "type": "array"
+          }
+        },
+        "required": [
+          "case_id"
+        ],
+        "title": "EwsCaseStartIn",
         "type": "object"
       },
       "FacilityDecision": {
@@ -1651,6 +1755,115 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/internal/monitors/covenants": {
+      "post": {
+        "description": "Idempotent per tenant (workflow id ``cov-monitor-{tenant}``): the recurring\ncovenant clock \u2014 generate due observations, flag overdue submissions, expire\nlapsed waivers \u2014 with one run keeping the whole schedule honest.",
+        "operationId": "start_covenant_monitor_v1_internal_monitors_covenants_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CovenantMonitorIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Start Covenant Monitor V1 Internal Monitors Covenants Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start (or attach to) this tenant's covenant monitor",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/v1/internal/monitors/covenants/stop": {
+      "post": {
+        "operationId": "stop_covenant_monitor_v1_internal_monitors_covenants_stop_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Stop Covenant Monitor V1 Internal Monitors Covenants Stop Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop this tenant's covenant monitor",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
     "/v1/internal/monitors/document-expiry": {
       "post": {
         "description": "Idempotent per tenant: the monitor's workflow id is ``doc-expiry-{tenant}``,\nso a second start attaches to the run already keeping the clock. Deploy-time\none-liner (compose/Helm post-start hook) or a manual ops action \u2014 either way the\ntenant ends up with exactly one monitor.",
@@ -2186,6 +2399,66 @@
           }
         },
         "summary": "Start a document-collection workflow (awaits document signals)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/ews-cases": {
+      "post": {
+        "description": "The Register's case record stays the single source of truth; this run keeps\nit honest against its SLAs (unassigned reminder \u2192 auto-escalation \u2192 escalated\nre-alerts) and completes when the record closes.",
+        "operationId": "start_ews_case_v1_workflows_ews_cases_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EwsCaseStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Start Ews Case V1 Workflows Ews Cases Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach the SLA clock to an EWS case (idempotent per case)",
         "tags": [
           "Workflows"
         ]
@@ -3174,6 +3447,65 @@
           }
         },
         "summary": "Signal that a required document was received",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/ews-sync": {
+      "post": {
+        "description": "Call after any register-side case action (assign / escalate / close) so the\nclock reacts immediately instead of on its next deadline. The signal carries\nNOTHING \u2014 the run re-reads the durable record, so a forged nudge is harmless.",
+        "operationId": "ews_sync_v1_workflows__workflow_id__ews_sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Ews Sync V1 Workflows  Workflow Id  Ews Sync Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Nudge an EWS case run to re-read its record now",
         "tags": [
           "Workflows"
         ]

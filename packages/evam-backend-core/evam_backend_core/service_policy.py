@@ -29,7 +29,10 @@ SERVICE_GRANTS: dict[str, set[str]] = {
                       # integration (default off), so the dormant acknowledgement path is not
                       # executable in a normal deployment.
                       "prepare_cpcs_checklist", "approve_cpcs_checklist",
-                      "record_handover_package", "approve_advaya_handover"},
+                      "record_handover_package", "approve_advaya_handover",
+                      # Covenant sweep (recurring generation / overdue / waiver expiry)
+                      # and EWS case plumbing (auto-escalation on a lapsed SLA).
+                      "manage_covenants", "manage_ews"},
     "svc_atlas":     set(),  # read-only BFF — no write operations
     # The gateway's OWN key is a pure delegation TRANSPORT: it carries no authority of its
     # own. Every gateway-forwarded request rides a signed USER context (production refuses

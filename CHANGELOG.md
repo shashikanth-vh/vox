@@ -6,6 +6,31 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Covenants, EWS, waivers, and deal closure (increment 8).** Covenant DEFINITIONS
+  (`/v1/covenants`: schedule + financial test + breach severity, credit-governed under
+  the new `manage_covenants` operation) project their observations into
+  `monitoring_reporting` through the recurring covenant sweep — one row per
+  covenant+period EVER (partial unique index), overdue submissions flagged once,
+  GRANTED waivers expiring once (breach live again + fresh EWS case + critical alert).
+  A result (`/v1/monitoring/{id}/result`) computes the breach from the definition and
+  auto-opens a DEDUPED EWS case in the same transaction; a waiver
+  (`/v1/monitoring/{id}/waive`) takes effect only against a durable `kind="waiver"`
+  decision — senior credit authority, subject-bound, mandatory validity window. **EWS
+  cases** (`ews_cases`, migration 0018): open (DB-deduped per trigger) → assign → note →
+  escalate (reasons mandatory) → close (disposition + note; an ESCALATED case closes
+  only with senior authority; Closed rows frozen by trigger), under the new `manage_ews`
+  operation (every RM desk can raise the flag on its own book). A per-case
+  `EwsCaseWorkflow` keeps the record honest against its SLA ladder — unassigned
+  reminder → AUTO-ESCALATION via the audited `system:sla` service route → escalated
+  re-alerts — and a per-tenant `CovenantMonitorWorkflow` runs the sweep on a clock.
+  **Deal closure is open-item validated**: `POST /v1/deals/{id}/close` refuses while
+  open EWS cases, un-excused covenant breaches, or mid-pipeline product lines remain
+  (`GET /open-items` lists them); the closed terminals are no longer reachable by a
+  bare stage PATCH. Policy version 3.4. Schema: migration 0018 (covenants, ews_cases,
+  covenant-period unique index) + waiver columns folded into 0001 — redeploy with
+  `docker compose down -v` and re-import.
+
+
 - **Calendar, notifications with retry, and document expiry (increment 7).** The
   increment-1 ops seam is now a real notification service: workflow events that name
   recipients (SLA reminders/escalations, decision timeouts, sanction + document

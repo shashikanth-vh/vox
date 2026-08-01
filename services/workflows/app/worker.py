@@ -20,10 +20,12 @@ from app.workflows import (
     AssetMonetisationWorkflow,
     SanctionExpiryMonitorWorkflow,
     SyndicationMandateWorkflow,
+    CovenantMonitorWorkflow,
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
     DocumentExpiryMonitorWorkflow,
+    EwsCaseWorkflow,
     IngestInteractionWorkflow,
     LeadConversionWorkflow,
     LeadQualificationWorkflow,
@@ -63,7 +65,8 @@ async def main() -> None:
                    DealStructuringWorkflow, DocumentCollectionWorkflow,
                    AdvayaHandoffWorkflow, CpcsChecklistWorkflow,
                    SanctionExpiryMonitorWorkflow, SyndicationMandateWorkflow,
-                   AssetMonetisationWorkflow, DocumentExpiryMonitorWorkflow],
+                   AssetMonetisationWorkflow, DocumentExpiryMonitorWorkflow,
+                   CovenantMonitorWorkflow, EwsCaseWorkflow],
         activities=[
             activities.write_interaction, activities.fetch_dossier,
             # VOX touchpoint set
@@ -98,6 +101,9 @@ async def main() -> None:
             # Increment 7: first-class calendar events + the document-expiry sweep.
             activities.create_calendar_event,
             activities.sweep_document_expiry,
+            # Increment 8: the covenant sweep + EWS SLA plumbing.
+            activities.sweep_covenants,
+            activities.auto_escalate_ews_case,
         ],
     )
     log.info("worker_started",

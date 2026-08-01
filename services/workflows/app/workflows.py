@@ -38,10 +38,14 @@ with workflow.unsafe.imports_passed_through():
         CpcsChecklistResult,
         DealStructuringInput,
         DealStructuringResult,
+        CovenantMonitorInput,
+        CovenantMonitorResult,
         DocumentCollectionInput,
         DocumentCollectionResult,
         DocumentExpiryInput,
         DocumentExpiryResult,
+        EwsCaseInput,
+        EwsCaseResult,
         IngestResult,
         InteractionInput,
         LeadConversionInput,
@@ -2046,6 +2050,212 @@ class DocumentExpiryMonitorWorkflow:
         return DocumentExpiryResult(workflow_id=wf_id, sweeps=sweeps,
                                     expired_total=expired_total,
                                     warned_total=warned_total)
+
+
+@workflow.defn
+class CovenantMonitorWorkflow:
+    """The tenant-wide covenant clock (increment 8). One run per tenant
+    (``cov-monitor-{tenant}``), looping forever:
+
+    sweep → the Register generates each schedule's due observations (idempotent per
+            covenant+period), flags newly-OVERDUE submissions (due + grace lapsed,
+            nothing filed), and expires lapsed waivers — which flips the breach LIVE
+            again and re-opens its EWS case
+          → every newly-overdue observation raises a warning (ops recipients)
+          → every lapsed waiver raises a CRITICAL alert
+          → sleep ``interval_hours`` (or until ``sweep_now``), continue-as-new.
+
+    The RECURRING path is the point: the same sweep, run forever, generates every
+    period exactly once and reports every lapse exactly once — the Register's partial
+    unique index and status flips make replays no-ops."""
+
+    def __init__(self) -> None:
+        self._stopped = False
+        self._sweep_now = False
+        self._last: dict[str, Any] = {}
+
+    @workflow.signal
+    def stop(self) -> None:
+        self._stopped = True
+
+    @workflow.signal
+    def sweep_now(self) -> None:
+        """Ops convenience: run the next sweep immediately instead of on the timer."""
+        self._sweep_now = True
+
+    @workflow.query
+    def state(self) -> dict:
+        return dict(self._last)
+
+    @workflow.run
+    async def run(self, inp: CovenantMonitorInput) -> CovenantMonitorResult:
+        wf_id = workflow.info().workflow_id
+        sweeps = generated_total = overdue_total = expired_total = 0
+        _upsert_search(inp.emit_search_attributes, "Monitoring",
+                       f"Covenants:{inp.caller.tenant or 'default'}")
+        while not self._stopped:
+            report = await workflow.execute_activity(
+                activities.sweep_covenants, args=[inp.horizon_days, inp.caller],
+                start_to_close_timeout=timedelta(minutes=2), retry_policy=_DURABLE)
+            sweeps += 1
+            overdue = list(report.get("overdue") or [])
+            expired = list(report.get("waivers_expired") or [])
+            generated_total += int(report.get("generated") or 0)
+            overdue_total += len(overdue)
+            expired_total += len(expired)
+            self._last = {"swept_on": report.get("swept_on"), "sweeps": sweeps,
+                          "generated": report.get("generated"),
+                          "overdue": len(overdue), "waivers_expired": len(expired)}
+            for obs in overdue:
+                await _emit_ops("covenant_overdue", {
+                    "subject": f"Monitoring:{obs.get('id')}",
+                    "covenant": obs.get("covenant_name"), "period": obs.get("period"),
+                    "due_date": obs.get("due_date"), "deal_id": obs.get("deal_id")},
+                    notify_to=list(inp.notify), severity="warning")
+            for obs in expired:
+                await _emit_ops("covenant_waiver_expired", {
+                    "subject": f"Monitoring:{obs.get('id')}",
+                    "covenant": obs.get("covenant_name"), "period": obs.get("period"),
+                    "deal_id": obs.get("deal_id")},
+                    notify_to=list(inp.notify), severity="critical")
+            if self._stopped:
+                break
+            self._sweep_now = False
+            try:
+                await workflow.wait_condition(
+                    lambda: self._stopped or self._sweep_now,
+                    timeout=timedelta(hours=inp.interval_hours))
+            except asyncio.TimeoutError:
+                pass
+            if not self._stopped and (sweeps >= inp.max_iterations
+                                      or workflow.info().is_continue_as_new_suggested()):
+                workflow.continue_as_new(inp)
+        return CovenantMonitorResult(workflow_id=wf_id, sweeps=sweeps,
+                                     generated_total=generated_total,
+                                     overdue_total=overdue_total,
+                                     waivers_expired_total=expired_total)
+
+
+@workflow.defn
+class EwsCaseWorkflow:
+    """One EWS case's clock (increment 8). The DURABLE case record in the Register is
+    the single source of truth: every wake-up RE-READS it — the ``case_updated`` signal
+    is only a nudge and carries nothing trusted, so a forged signal can at worst make
+    the run look at the real record sooner.
+
+    The run keeps the case honest against its SLAs:
+
+    * still unassigned past ``assign_sla_hours``            → ops reminder (once);
+    * not escalated past ``investigation_sla_hours``        → AUTO-ESCALATED through the
+      Register's audited service route (idempotent — a race with a human action is
+      harmless), with a critical alert;
+    * escalated but not closed                              → re-alert every
+      ``escalated_reminder_hours`` until someone with authority closes it.
+
+    The run completes when the record reaches 'Closed', returning the disposition."""
+
+    def __init__(self) -> None:
+        self._nudge = False
+        self._status = "Open"
+        self._reminded_unassigned = False
+        self._auto_escalated = False
+        self._escalation_reminders = 0
+
+    @workflow.signal
+    def case_updated(self) -> None:
+        """A register-side action happened — look at the record now."""
+        self._nudge = True
+
+    @workflow.query
+    def state(self) -> dict:
+        return {"case_status": self._status,
+                "reminded_unassigned": self._reminded_unassigned,
+                "auto_escalated": self._auto_escalated,
+                "escalation_reminders": self._escalation_reminders}
+
+    @workflow.run
+    async def run(self, inp: EwsCaseInput) -> EwsCaseResult:
+        wf_id = workflow.info().workflow_id
+        subject = f"EwsCase:{inp.case_id}"
+        start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        _upsert_search(inp.emit_search_attributes, "OpenCase", subject)
+        while True:
+            case = await workflow.execute_activity(
+                activities.get_resource, args=["ews-cases", inp.case_id, inp.caller],
+                **_DURABLE_IO)
+            self._status = str(case.get("status"))
+            recipients = [*inp.notify, case.get("assigned_to"), case.get("opened_by")]
+            if self._status == "Closed":
+                _upsert_search(inp.emit_search_attributes, "CaseClosed", subject)
+                return EwsCaseResult(
+                    workflow_id=wf_id, case_id=inp.case_id, status="Closed",
+                    disposition=case.get("disposition"),
+                    closed_by=case.get("closed_by"),
+                    auto_escalated=self._auto_escalated)
+            waited = workflow.now() - start
+
+            # --- the SLA ladder (each rung fires once; escalation re-alerts) -------
+            if (self._status == "Open" and not self._reminded_unassigned
+                    and inp.assign_sla_hours > 0
+                    and waited >= timedelta(hours=inp.assign_sla_hours)):
+                self._reminded_unassigned = True
+                await _emit_ops("ews_unassigned", {
+                    "subject": subject, "severity_flag": case.get("severity"),
+                    "title": case.get("title"),
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=recipients, severity="warning")
+            if (self._status in ("Open", "UnderInvestigation")
+                    and not self._auto_escalated and inp.investigation_sla_hours > 0
+                    and waited >= timedelta(hours=inp.investigation_sla_hours)):
+                self._auto_escalated = True
+                escalated = await workflow.execute_activity(
+                    activities.auto_escalate_ews_case,
+                    args=[inp.case_id,
+                          f"Investigation SLA ({inp.investigation_sla_hours}h) lapsed "
+                          f"with the case still {self._status}.", inp.caller],
+                    **_DURABLE_IO)
+                self._status = str(escalated.get("status"))
+                await _emit_ops("ews_auto_escalated", {
+                    "subject": subject, "severity_flag": case.get("severity"),
+                    "title": case.get("title"),
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=recipients, severity="critical")
+            if (self._status == "Escalated" and inp.escalated_reminder_hours > 0):
+                esc_wait = waited - timedelta(hours=inp.investigation_sla_hours)
+                due_reminders = int(esc_wait / timedelta(
+                    hours=inp.escalated_reminder_hours)) if esc_wait > timedelta(0) else 0
+                if due_reminders > self._escalation_reminders:
+                    self._escalation_reminders = due_reminders
+                    await _emit_ops("ews_escalation_pending", {
+                        "subject": subject, "severity_flag": case.get("severity"),
+                        "title": case.get("title"),
+                        "reminder": self._escalation_reminders,
+                        "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                        notify_to=recipients, severity="warning")
+
+            # --- sleep to the NEXT deadline (or a register-side nudge) -------------
+            candidates = []
+            if self._status == "Open" and not self._reminded_unassigned:
+                candidates.append(timedelta(hours=inp.assign_sla_hours) - waited)
+            if self._status in ("Open", "UnderInvestigation") and not self._auto_escalated:
+                candidates.append(timedelta(hours=inp.investigation_sla_hours) - waited)
+            if self._status == "Escalated" and inp.escalated_reminder_hours > 0:
+                nxt = (timedelta(hours=inp.investigation_sla_hours)
+                       + timedelta(hours=inp.escalated_reminder_hours
+                                   * (self._escalation_reminders + 1)))
+                candidates.append(nxt - waited)
+            wake = min([c for c in candidates if c > timedelta(0)],
+                       default=timedelta(hours=12))
+            if workflow.info().is_continue_as_new_suggested():
+                import dataclasses
+                workflow.continue_as_new(dataclasses.replace(
+                    inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
+            self._nudge = False
+            try:
+                await workflow.wait_condition(lambda: self._nudge,
+                                              timeout=max(wake, timedelta(seconds=1)))
+            except asyncio.TimeoutError:
+                pass
 
 
 # Ordered position of a LENDING credit-pipeline stage, for "is X before Y" checks in

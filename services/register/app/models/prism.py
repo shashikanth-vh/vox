@@ -177,4 +177,11 @@ class MonitoringReporting(RegisterBase):
     actual_value: Mapped[float | None] = mapped_column(Numeric(18, 4))
     breached: Mapped[bool | None] = mapped_column(Boolean)
     waiver_status: Mapped[str | None] = mapped_column(String(60))  # ref: Waiver Status
+    # A GRANTED waiver is time-boxed and decision-backed (increment 8): it cites the
+    # durable waiver decision (kind-checked, senior authority) and lapses on
+    # ``waiver_valid_until`` — the covenant sweep flips it to 'Expired' and the breach is
+    # live again. Set ONLY through the /waive endpoint and the sweep.
+    waiver_valid_until: Mapped[date | None] = mapped_column(Date)
+    waiver_decision_ref: Mapped[str | None] = mapped_column(String(200))
+    waiver_note: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict | None] = mapped_column(JSONB)

@@ -6,7 +6,7 @@
   },
   "item": [
     {
-      "name": "Register  (207 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (224 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -1247,6 +1247,290 @@
           ]
         },
         {
+          "name": "Covenants",
+          "item": [
+            {
+              "name": "POST /v1/covenants \u2014 Define a covenant (schedule + test)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/covenants",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "covenants"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"lending_id\": \"{{id}}\",\n  \"name\": \"sample\",\n  \"covenant_type\": \"REPLACE-to-match-^(Financial|Reportin\",\n  \"description\": \"sample\",\n  \"metric\": \"sample\",\n  \"operator\": \"REPLACE-to-match-^(>=|<=|>|<|=)$\",\n  \"threshold\": 1.0,\n  \"frequency\": \"REPLACE-to-match-^(OneTime|Monthly|Qu\",\n  \"first_due_on\": \"2026-01-31\",\n  \"grace_days\": 1,\n  \"breach_severity\": \"REPLACE-to-match-^(Amber|Red)$\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/covenants \u2014 A company's covenant register",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/covenants",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "covenants"
+                  ],
+                  "query": [
+                    {
+                      "key": "entity_id",
+                      "value": "{{id}}",
+                      "disabled": false
+                    },
+                    {
+                      "key": "deal_id",
+                      "value": "{{id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "active_only",
+                      "value": "False",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/covenants/{covenant_id} \u2014 One covenant",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/covenants/{{covenant_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "covenants",
+                    "{{covenant_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PATCH /v1/covenants/{covenant_id} \u2014 Amend a covenant (threshold / grace / severity / active)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/covenants/{{covenant_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "covenants",
+                    "{{covenant_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"sample\",\n  \"threshold\": 1.0,\n  \"grace_days\": 1,\n  \"breach_severity\": \"REPLACE-to-match-^(Amber|Red)$\",\n  \"is_active\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/monitoring/{monitoring_id}/result \u2014 Submit a covenant period's result (computes breach)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/monitoring/{{monitoring_id}}/result",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "monitoring",
+                    "{{monitoring_id}}",
+                    "result"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"actual_value\": 1.0,\n  \"submitted_on\": \"2026-01-31\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/monitoring/{monitoring_id}/waive \u2014 Apply a verified, time-boxed covenant waiver",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/monitoring/{{monitoring_id}}/waive",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "monitoring",
+                    "{{monitoring_id}}",
+                    "waive"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"decision_ref\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
           "name": "Deals",
           "item": [
             {
@@ -1358,6 +1642,91 @@
                       "value": "False",
                       "disabled": true
                     }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/deals/{deal_id}/close \u2014 Close a deal (open-item validated; note mandatory)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/deals/{{deal_id}}/close",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "deals",
+                    "{{deal_id}}",
+                    "close"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"outcome\": \"REPLACE-to-match-^(won|lost)$\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/deals/{deal_id}/open-items \u2014 What still blocks this deal's closure",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/deals/{{deal_id}}/open-items",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "deals",
+                    "{{deal_id}}",
+                    "open-items"
                   ]
                 }
               }
@@ -3610,6 +3979,355 @@
                     "documents",
                     "upload"
                   ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "EWS",
+          "item": [
+            {
+              "name": "POST /v1/ews-cases \u2014 Open an EWS case (idempotent per trigger source)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"source\": \"REPLACE-to-match-^(manual|intel|coven\",\n  \"source_ref\": \"sample\",\n  \"severity\": \"REPLACE-to-match-^(Amber|Red)$\",\n  \"title\": \"sample\",\n  \"summary\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/ews-cases \u2014 The EWS case register",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases"
+                  ],
+                  "query": [
+                    {
+                      "key": "entity_id",
+                      "value": "{{id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "deal_id",
+                      "value": "{{id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "severity",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "open_only",
+                      "value": "False",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/ews-cases/{case_id} \u2014 One EWS case",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases/{{case_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases",
+                    "{{case_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/ews-cases/{case_id}/assign \u2014 Assign an investigator (\u2192 UnderInvestigation)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases/{{case_id}}/assign",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases",
+                    "{{case_id}}",
+                    "assign"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"assignee\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/ews-cases/{case_id}/close \u2014 Close a case (disposition + note mandatory)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases/{{case_id}}/close",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases",
+                    "{{case_id}}",
+                    "close"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"disposition\": \"REPLACE-to-match-^(Resolved|Downgrade\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/ews-cases/{case_id}/escalate \u2014 Escalate a case (reasons mandatory)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases/{{case_id}}/escalate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases",
+                    "{{case_id}}",
+                    "escalate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/ews-cases/{case_id}/note \u2014 Append an investigation note",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/ews-cases/{{case_id}}/note",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "ews-cases",
+                    "{{case_id}}",
+                    "note"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             }
@@ -5935,6 +6653,55 @@
           "name": "Internal",
           "item": [
             {
+              "name": "POST /v1/internal/covenants/run-sweep \u2014 Covenant sweep: generate due observations, mark overdue, expire lapsed waivers (idempotent)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/covenants/run-sweep",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "covenants",
+                    "run-sweep"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"horizon_days\": 1,\n  \"limit\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/cpcs-checklists \u2014 Prepare / complete the CP/CS checklist (maker)",
               "request": {
                 "method": "POST",
@@ -6419,6 +7186,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"warn_days\": 1,\n  \"limit\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/ews-cases/{case_id}/auto-escalate \u2014 Service: escalate a case whose investigation SLA lapsed",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/ews-cases/{{case_id}}/auto-escalate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "ews-cases",
+                    "{{case_id}}",
+                    "auto-escalate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"sample\",\n  \"workflow_id\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10300,11 +11117,100 @@
       ]
     },
     {
-      "name": "Orchestrator  (31 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (35 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Internal",
           "item": [
+            {
+              "name": "POST /orchestrator/v1/internal/monitors/covenants \u2014 Start (or attach to) this tenant's covenant monitor",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/internal/monitors/covenants",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "internal",
+                    "monitors",
+                    "covenants"
+                  ]
+                },
+                "description": "Idempotent per tenant (workflow id ``cov-monitor-{tenant}``): the recurring\ncovenant clock \u2014 generate due observations, flag overdue submissions, expire\nlapsed waivers \u2014 with one run keeping the whole schedule honest.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"notify\": [\n    \"sample\"\n  ],\n  \"interval_hours\": 1.0,\n  \"horizon_days\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/internal/monitors/covenants/stop \u2014 Stop this tenant's covenant monitor",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/internal/monitors/covenants/stop",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "internal",
+                    "monitors",
+                    "covenants",
+                    "stop"
+                  ]
+                }
+              }
+            },
             {
               "name": "POST /orchestrator/v1/internal/monitors/document-expiry \u2014 Start (or attach to) this tenant's document-expiry monitor",
               "request": {
@@ -10738,6 +11644,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"subject_type\": \"REPLACE-to-match-^(Deal|Lending)$\",\n  \"subject_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"required_documents\": [\n    \"sample\"\n  ],\n  \"collection_timeout_hours\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/ews-cases \u2014 Attach the SLA clock to an EWS case (idempotent per case)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/ews-cases",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "ews-cases"
+                  ]
+                },
+                "description": "The Register's case record stays the single source of truth; this run keeps\nit honest against its SLAs (unassigned reminder \u2192 auto-escalation \u2192 escalated\nre-alerts) and completes when the record closes.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"case_id\": \"sample\",\n  \"notify\": [\n    \"sample\"\n  ],\n  \"assign_sla_hours\": 1.0,\n  \"investigation_sla_hours\": 1.0,\n  \"escalated_reminder_hours\": 1.0\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -11485,6 +12441,44 @@
                     }
                   }
                 }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/ews-sync \u2014 Nudge an EWS case run to re-read its record now",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/ews-sync",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "ews-sync"
+                  ]
+                },
+                "description": "Call after any register-side case action (assign / escalate / close) so the\nclock reacts immediately instead of on its next deadline. The signal carries\nNOTHING \u2014 the run re-reads the durable record, so a forged nudge is harmless."
               }
             },
             {

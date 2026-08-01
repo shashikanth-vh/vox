@@ -381,7 +381,8 @@ def upgrade() -> None:
         net_worth numeric(18,2),
         dscr numeric(8,3),
         data jsonb,
-        CONSTRAINT financials_unique_version UNIQUE (tenant_id, entity_id, statement_type, period_end, version_no)
+        CONSTRAINT financials_unique_version
+            UNIQUE (tenant_id, entity_id, statement_type, period_end, version_no)
     """)
     op.execute("CREATE INDEX ix_financials_entity ON financials (tenant_id, entity_id);")
     op.execute(
@@ -454,7 +455,8 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX ix_interactions_subject_time "
                "ON interactions (tenant_id, subject_type, subject_id, occurred_at);")
-    op.execute("CREATE INDEX ix_interactions_entity_time ON interactions (tenant_id, entity_id, occurred_at);")
+    op.execute("CREATE INDEX ix_interactions_entity_time "
+               "ON interactions (tenant_id, entity_id, occurred_at);")
     op.execute("CREATE INDEX ix_interactions_deal_time ON interactions (tenant_id, deal_id, occurred_at);")
     op.execute("CREATE INDEX ix_interactions_tenant_type ON interactions (tenant_id, interaction_type);")
     op.execute("CREATE INDEX ix_interactions_syn_lender ON interactions (tenant_id, syndication_lender_id);")
@@ -500,6 +502,9 @@ def upgrade() -> None:
         actual_value numeric(18,4),
         breached boolean,
         waiver_status varchar(60),
+        waiver_valid_until date,
+        waiver_decision_ref varchar(200),
+        waiver_note text,
         details jsonb
     """)
     op.execute("CREATE INDEX ix_monitoring_tenant_entity ON monitoring_reporting (tenant_id, entity_id);")

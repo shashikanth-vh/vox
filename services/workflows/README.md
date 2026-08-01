@@ -271,6 +271,38 @@ follow-ups a first-class calendar, and puts document validity on a clock.
   endpoints (maker≠checker, mandatory rejection reasons, superseded-chain replacement).
   `sweep_now` / `stop` signals give ops manual control.
 
+## Covenants, EWS & closure (Release 1, increment 8)
+
+* **The covenant clock** — `POST /v1/internal/monitors/covenants` starts ONE
+  `CovenantMonitorWorkflow` per tenant (id `cov-monitor-{tenant}`, idempotent). Every
+  `WORKFLOWS_COVENANT_INTERVAL_HOURS` it runs the Register's covenant sweep: each
+  covenant DEFINITION (`/v1/covenants` — the schedule + test, credit-governed) projects
+  its due observations into `monitoring_reporting` (one row per covenant+period, ever —
+  a partial unique index makes generation idempotent); submissions that lapse past
+  due + grace flip to **Overdue** (warned once); GRANTED waivers whose window lapses
+  flip to **Expired** — the breach is live again, a fresh EWS case opens, and a critical
+  alert goes out. Results (`POST /v1/monitoring/{id}/result`) compute the breach from
+  the definition's test; a breach auto-opens its (deduped) EWS case in the same
+  transaction. A **waiver** (`/v1/monitoring/{id}/waive`) takes effect only against a
+  durable `kind="waiver"` decision — senior credit authority, subject-bound, MANDATORY
+  validity window.
+* **The EWS case clock** — `POST /v1/workflows/ews-cases` attaches an `EwsCaseWorkflow`
+  to a case the Register holds (`/v1/ews-cases` — open/assign/note/escalate/close, with
+  DB-deduped triggers and frozen closures; closing an ESCALATED case is reserved to
+  senior credit authority). The run trusts only the DURABLE record: `/ews-sync` nudges
+  carry nothing. The SLA ladder: unassigned past `WORKFLOWS_EWS_ASSIGN_SLA_HOURS` →
+  reminder; uninvestigated past `WORKFLOWS_EWS_INVESTIGATION_SLA_HOURS` →
+  **auto-escalated** through the audited service route (`system:sla`); escalated with no
+  closure → re-alerts every `WORKFLOWS_EWS_ESCALATED_REMINDER_HOURS`. The run completes
+  when the record closes, returning the disposition.
+* **Deal closure with open-item validation** — `POST /v1/deals/{id}/close` (outcome
+  won|lost, note mandatory) refuses while the deal still owes answers: open EWS cases,
+  un-excused covenant breaches/overdue observations, or product lines mid-pipeline
+  (`GET /v1/deals/{id}/open-items` lists exactly what blocks). The closed terminals are
+  no longer reachable by a bare stage PATCH — closure goes through this validated path,
+  then the normal funnel policy. Facility-level servicing closure past 'Disbursed' is
+  outside the Release-1 product scope.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |
@@ -290,5 +322,7 @@ follow-ups a first-class calendar, and puts document validity on a clock.
 | `WORKFLOWS_NOTIFIER_MAX_ATTEMPTS` / `_BACKOFF_BASE_SECONDS` / `_BACKOFF_CAP_SECONDS` | `8` / `60` / `3600` | Retry → dead-letter policy |
 | `WORKFLOWS_CALENDAR_EVENTS_ENABLED` | `false` | VOX follow-ups create first-class calendar events |
 | `WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS` / `_WARN_DAYS` | `24` / `7` | Document-expiry monitor defaults |
+| `WORKFLOWS_COVENANT_INTERVAL_HOURS` / `_HORIZON_DAYS` | `24` / `30` | Covenant monitor cadence + generation horizon |
+| `WORKFLOWS_EWS_ASSIGN_SLA_HOURS` / `_INVESTIGATION_SLA_HOURS` / `_ESCALATED_REMINDER_HOURS` | `24` / `72` / `48` | EWS case SLA ladder |
 
 See [`BACKEND_STANDARDS.md`](../../BACKEND_STANDARDS.md) for the shared conventions.

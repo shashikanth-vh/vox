@@ -161,6 +161,15 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     "export_csv":                     _row("F F F F F F F F F F"),
     "backup_restore":                 _row("F - - - - - - - - -"),
     "run_news_scan":                  _row("F F F F F F F F F F"),
+    # Increment 8 — covenant governance + early-warning surveillance.
+    # Covenant DEFINITIONS (the schedule/thresholds) and covenant RESULTS are credit
+    # governance: Credit Head owns them, the Deal Analyst works them scoped, Admin/Mgmt
+    # oversee. RM desks neither define nor test covenants.
+    "manage_covenants":               _row("F F - - F S - - - -"),
+    # EWS cases: the credit desk owns surveillance (Credit Head FULL); every RM desk can
+    # OPEN and work a case on its own book (scoped) — a field RM spotting distress must
+    # never be blocked from raising the flag.
+    "manage_ews":                     _row("F F S S F S S S S S"),
 }
 
 # ---- Ownership Model sheet --------------------------------------------------------

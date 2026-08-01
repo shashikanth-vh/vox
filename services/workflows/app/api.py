@@ -45,10 +45,12 @@ from app.types import (
     SyndicationMandateInput,
     AdvayaHandoffInput,
     CallerContext,
+    CovenantMonitorInput,
     CpcsChecklistInput,
     DealStructuringInput,
     DocumentCollectionInput,
     DocumentExpiryInput,
+    EwsCaseInput,
     LeadConversionInput,
     LeadQualificationInput,
     VoxTouchpoint,
@@ -57,10 +59,12 @@ from app.workflows import (
     AssetMonetisationWorkflow,
     SyndicationMandateWorkflow,
     AdvayaHandoffWorkflow,
+    CovenantMonitorWorkflow,
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
     DocumentExpiryMonitorWorkflow,
+    EwsCaseWorkflow,
     LeadConversionWorkflow,
     LeadQualificationWorkflow,
     VoxTouchpointWorkflow,
@@ -432,6 +436,28 @@ class DocExpiryMonitorIn(BaseModel):
     warn_days: int | None = Field(default=None, ge=0, le=365)
 
 
+class CovenantMonitorIn(BaseModel):
+    """Start (or attach to) the tenant's covenant monitor. Overrides default to
+    deployment settings when omitted."""
+
+    model_config = ConfigDict(extra="forbid")
+    notify: list[str] = Field(default_factory=list)
+    interval_hours: float | None = Field(default=None, gt=0, le=24 * 30)
+    horizon_days: int | None = Field(default=None, ge=0, le=400)
+
+
+class EwsCaseStartIn(BaseModel):
+    """Attach a Temporal clock to an EWS case the Register already holds — the case
+    record stays the single source of truth; the run keeps it honest against its SLAs."""
+
+    model_config = ConfigDict(extra="forbid")
+    case_id: str = Field(min_length=1, max_length=64)
+    notify: list[str] = Field(default_factory=list)
+    assign_sla_hours: float | None = Field(default=None, gt=0, le=24 * 30)
+    investigation_sla_hours: float | None = Field(default=None, gt=0, le=24 * 60)
+    escalated_reminder_hours: float | None = Field(default=None, gt=0, le=24 * 30)
+
+
 def _problem(status: int, title: str, detail: str) -> ORJSONResponse:
     return ORJSONResponse(status_code=status, content={"error": {
         "type": title.lower().replace(" ", "_"), "title": title, "detail": detail}})
@@ -649,6 +675,104 @@ def create_app() -> FastAPI:
             return _problem(404, "Not found", f"No monitor for this tenant: {exc}")
         return ORJSONResponse(status_code=202,
                               content={"workflow_id": wf_id, "status": "stopping"})
+
+    @app.post("/v1/internal/monitors/covenants", status_code=202, tags=["Internal"],
+              summary="Start (or attach to) this tenant's covenant monitor")
+    async def start_covenant_monitor(
+            payload: CovenantMonitorIn, request: Request,
+            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        """Idempotent per tenant (workflow id ``cov-monitor-{tenant}``): the recurring
+        covenant clock — generate due observations, flag overdue submissions, expire
+        lapsed waivers — with one run keeping the whole schedule honest."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        caller, _verified = _caller_context(request)
+        wf_id = f"cov-monitor-{_tenant_slug(caller.tenant)}"
+        handle = await start(
+            request, CovenantMonitorWorkflow,
+            CovenantMonitorInput(
+                interval_hours=payload.interval_hours or settings.covenant_interval_hours,
+                horizon_days=(payload.horizon_days if payload.horizon_days is not None
+                              else settings.covenant_horizon_days),
+                notify=payload.notify,
+                emit_search_attributes=settings.search_attributes_enabled,
+                caller=caller),
+            wf_id, memo={"initiator": (caller.email or ""), "tenant": caller.tenant})
+        return ORJSONResponse(status_code=202, content={
+            "workflow_id": handle.id, "status": "monitoring",
+            "status_url": f"/v1/workflows/{handle.id}"})
+
+    @app.post("/v1/internal/monitors/covenants/stop", status_code=202,
+              tags=["Internal"], summary="Stop this tenant's covenant monitor")
+    async def stop_covenant_monitor(
+            request: Request,
+            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        caller, _verified = _caller_context(request)
+        wf_id = f"cov-monitor-{_tenant_slug(caller.tenant)}"
+        client: Client = request.app.state.temporal
+        try:
+            await client.get_workflow_handle(wf_id).signal(CovenantMonitorWorkflow.stop)
+        except TemporalError as exc:
+            return _problem(404, "Not found", f"No monitor for this tenant: {exc}")
+        return ORJSONResponse(status_code=202,
+                              content={"workflow_id": wf_id, "status": "stopping"})
+
+    @app.post("/v1/workflows/ews-cases", status_code=202, tags=["Workflows"],
+              summary="Attach the SLA clock to an EWS case (idempotent per case)")
+    async def start_ews_case(payload: EwsCaseStartIn, request: Request,
+                             x_api_key: str | None = Header(default=None,
+                                                            alias="X-API-Key")) -> Any:
+        """The Register's case record stays the single source of truth; this run keeps
+        it honest against its SLAs (unassigned reminder → auto-escalation → escalated
+        re-alerts) and completes when the record closes."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        caller, _verified = _caller_context(request)
+        wf_id = f"ews-{_tenant_slug(caller.tenant)}-{payload.case_id}"
+        handle = await start(
+            request, EwsCaseWorkflow,
+            EwsCaseInput(
+                case_id=payload.case_id,
+                assign_sla_hours=(payload.assign_sla_hours
+                                  or settings.ews_assign_sla_hours),
+                investigation_sla_hours=(payload.investigation_sla_hours
+                                         or settings.ews_investigation_sla_hours),
+                escalated_reminder_hours=(payload.escalated_reminder_hours
+                                          or settings.ews_escalated_reminder_hours),
+                notify=payload.notify,
+                emit_search_attributes=settings.search_attributes_enabled,
+                caller=caller),
+            wf_id, memo={"initiator": (caller.email or ""), "tenant": caller.tenant,
+                         "case_id": payload.case_id})
+        return ORJSONResponse(status_code=202, content={
+            "workflow_id": handle.id, "status": "watching",
+            "sync_url": f"/v1/workflows/{handle.id}/ews-sync",
+            "status_url": f"/v1/workflows/{handle.id}"})
+
+    @app.post("/v1/workflows/{workflow_id}/ews-sync", status_code=202,
+              tags=["Workflows"],
+              summary="Nudge an EWS case run to re-read its record now")
+    async def ews_sync(workflow_id: str, request: Request,
+                       x_api_key: str | None = Header(default=None,
+                                                      alias="X-API-Key")) -> Any:
+        """Call after any register-side case action (assign / escalate / close) so the
+        clock reacts immediately instead of on its next deadline. The signal carries
+        NOTHING — the run re-reads the durable record, so a forged nudge is harmless."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        if not workflow_id.startswith("ews-"):
+            return _problem(404, "Not found",
+                            "ews-sync only addresses EWS case runs (ews-…).")
+        client: Client = request.app.state.temporal
+        try:
+            await client.get_workflow_handle(workflow_id).signal(
+                EwsCaseWorkflow.case_updated)
+        except TemporalError as exc:
+            return _problem(404, "Not found", f"No such case run: {exc}")
+        return ORJSONResponse(status_code=202,
+                              content={"workflow_id": workflow_id, "status": "nudged"})
 
     def _tenant_slug(tenant: str) -> str:
         """A workflow-id-safe, COLLISION-FREE tenant slug, so a tenant-B run can never

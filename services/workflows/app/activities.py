@@ -741,6 +741,29 @@ async def create_calendar_event(subject_type: str | None, subject_id: str | None
 
 
 @activity.defn
+async def sweep_covenants(horizon_days: int,
+                          caller: CallerContext | None = None) -> dict[str, Any]:
+    """Run the Register's covenant sweep (generate due observations / mark overdue /
+    expire lapsed waivers — each idempotent, each reported exactly once) and return the
+    report so the monitor workflow can notify. Errors propagate → Temporal retries."""
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        return await reg.run_covenant_sweep(horizon_days=horizon_days, request_id=wf_id)
+
+
+@activity.defn
+async def auto_escalate_ews_case(case_id: str, reason: str,
+                                 caller: CallerContext | None = None) -> dict[str, Any]:
+    """Escalate an EWS case whose investigation SLA lapsed — through the Register's
+    audited service route (idempotent: an already-escalated or closed case comes back
+    unchanged, so a retry or a race with a human action is harmless)."""
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        return await reg.auto_escalate_ews(case_id, reason, workflow_id=wf_id,
+                                           request_id=wf_id)
+
+
+@activity.defn
 async def sweep_document_expiry(warn_days: int,
                                 caller: CallerContext | None = None) -> dict[str, Any]:
     """Run the Register's document expiry sweep (lapsed → 'Expired', idempotent) and

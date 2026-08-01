@@ -73,6 +73,17 @@ spec:
               value: {{ .Values.foundation.docExpiryIntervalHours | quote }}
             - name: WORKFLOWS_DOC_EXPIRY_WARN_DAYS
               value: {{ .Values.foundation.docExpiryWarnDays | quote }}
+            # Increment 8: covenant monitor defaults + EWS case SLAs.
+            - name: WORKFLOWS_COVENANT_INTERVAL_HOURS
+              value: {{ .Values.foundation.covenantIntervalHours | quote }}
+            - name: WORKFLOWS_COVENANT_HORIZON_DAYS
+              value: {{ .Values.foundation.covenantHorizonDays | quote }}
+            - name: WORKFLOWS_EWS_ASSIGN_SLA_HOURS
+              value: {{ .Values.foundation.ewsAssignSlaHours | quote }}
+            - name: WORKFLOWS_EWS_INVESTIGATION_SLA_HOURS
+              value: {{ .Values.foundation.ewsInvestigationSlaHours | quote }}
+            - name: WORKFLOWS_EWS_ESCALATED_REMINDER_HOURS
+              value: {{ .Values.foundation.ewsEscalatedReminderHours | quote }}
             - name: WORKFLOWS_REGISTER_TENANT
               value: {{ .Values.register.tenant | quote }}
             - name: WORKFLOWS_REGISTER_API_KEY

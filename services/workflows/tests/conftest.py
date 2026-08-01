@@ -472,6 +472,49 @@ def build_mock() -> FastAPI:
         app.state.expiry_report["expired"] = []
         return report
 
+    # -- Increment 8: covenants + EWS ---------------------------------------
+    app.state.covenant_report = {"generated": 0, "overdue": [],
+                                 "waivers_expired": []}   # next sweep's payload
+    app.state.covenant_sweeps = 0
+    app.state.ews = {}               # case id -> case row
+
+    @app.post("/v1/internal/covenants/run-sweep")
+    async def covenant_sweep(request: Request):
+        # Mirror the real sweep's report-once semantics: an overdue flip / waiver expiry
+        # is returned exactly once (the status change drops it from later sweeps).
+        await request.json()
+        app.state.covenant_sweeps += 1
+        report = {"swept_on": "2026-08-01",
+                  "generated": app.state.covenant_report["generated"],
+                  "overdue": list(app.state.covenant_report["overdue"]),
+                  "waivers_expired": list(app.state.covenant_report["waivers_expired"])}
+        app.state.covenant_report.update(generated=0, overdue=[], waivers_expired=[])
+        return report
+
+    @app.get("/v1/ews-cases/{cid}")
+    async def get_ews_case(cid: str):
+        row = app.state.ews.get(cid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no case", "request_id": None}}, status_code=404)
+        return row
+
+    @app.post("/v1/internal/ews-cases/{cid}/auto-escalate")
+    async def auto_escalate_ews(cid: str, request: Request):
+        body = await request.json()
+        row = app.state.ews.get(cid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no case", "request_id": None}}, status_code=404)
+        # Mirror the real route: closed/escalated cases come back unchanged (idempotent).
+        if row["status"] not in ("Closed", "Escalated"):
+            row = {**row, "status": "Escalated", "escalated_by": "system:sla",
+                   "escalation_note": body.get("reason")}
+            app.state.ews[cid] = row
+        return row
+
     @app.post("/v1/evidence", status_code=201)
     async def attach_evidence(request: Request):
         body = await request.json()

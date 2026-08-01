@@ -41,6 +41,13 @@ foundation:
   # POST /v1/internal/monitors/document-expiry).
   docExpiryIntervalHours: 24
   docExpiryWarnDays: 7
+  # Increment 8: the covenant monitor's sweep cadence + generation horizon, and the EWS
+  # case SLAs (unassigned flag / auto-escalation / escalated re-alert cadence).
+  covenantIntervalHours: 24
+  covenantHorizonDays: 30
+  ewsAssignSlaHours: 24
+  ewsInvestigationSlaHours: 72
+  ewsEscalatedReminderHours: 48
 
 # Increment 7: durable notifications. When enabled, workflow ops events that name
 # recipients also land as in-app inbox rows in the Register, fanning out to the listed

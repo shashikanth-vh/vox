@@ -18,7 +18,7 @@ from enum import IntEnum
 # The approved ATLAS RBAC policy version this package transcribes. Propagated into every
 # signed authorization context (claim: policy_version) and stamped on seeds and drift
 # reports, so an authorization decision can always answer "under which policy?".
-POLICY_VERSION = "3.3"
+POLICY_VERSION = "3.4"
 
 
 

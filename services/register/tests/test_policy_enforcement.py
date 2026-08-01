@@ -165,10 +165,17 @@ async def test_deal_stage_is_the_commercial_funnel(client):
     # NULL → a terminal is not a birth state (the entry allowlist governs the first set too).
     r = await client.patch(f"/v1/deals/{did}", json={"stage": "Closed Won"})
     assert r.status_code == 422, r.text
-    # The funnel walks in order to a win…
-    for fs in ("New Inquiry", "In Screening", "In Pipeline", "Closed Won"):
+    # The funnel walks in order to the decision point…
+    for fs in ("New Inquiry", "In Screening", "In Pipeline"):
         r = await client.patch(f"/v1/deals/{did}", json={"stage": fs})
         assert r.status_code == 200, f"{fs}: {r.text}"
+    # …the CLOSED terminals are never a bare stage edit (increment 8: closure is
+    # open-item validated via the dedicated endpoint)…
+    r = await client.patch(f"/v1/deals/{did}", json={"stage": "Closed Won"})
+    assert r.status_code == 422 and "close" in r.text.lower()
+    r = await client.post(f"/v1/deals/{did}/close",
+                          json={"outcome": "won", "note": "mandate signed"})
+    assert r.status_code == 200 and r.json()["stage"] == "Closed Won"
     # …and a CLOSED terminal is final (a revived opportunity is a new deal).
     r = await client.patch(f"/v1/deals/{did}", json={"stage": "In Pipeline"})
     assert r.status_code == 422, r.text

@@ -144,6 +144,18 @@ class Settings(BaseServiceSettings):
     doc_expiry_interval_hours: float = 24.0
     doc_expiry_warn_days: int = 7
 
+    # --- Increment 8: covenants + EWS ------------------------------------------------- #
+    # The covenant monitor workflow: sweep cadence and how far ahead observations are
+    # generated from each covenant's schedule.
+    covenant_interval_hours: float = 24.0
+    covenant_horizon_days: int = 30
+    # EWS case SLAs: an unassigned case is flagged after assign_sla; an investigation
+    # that outlives investigation_sla is AUTO-ESCALATED; an escalated case re-alerts
+    # every escalated_reminder until someone closes it. 0 disables the corresponding leg.
+    ews_assign_sla_hours: float = 24.0
+    ews_investigation_sla_hours: float = 72.0
+    ews_escalated_reminder_hours: float = 48.0
+
     def notify_channel_list(self) -> list[str]:
         return [c.strip() for c in self.notify_channels.split(",") if c.strip()]
 

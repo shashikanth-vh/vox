@@ -92,7 +92,12 @@ REF_VALUES: dict[str, list[str]] = {
     # Backing for the new financials / covenant fields.
     "Financial Section": ["P&L", "Balance Sheet", "Cash Flow", "Ratios"],
     "Scale": ["Absolute", "Thousand", "Lakh", "Million", "Crore"],
-    "Waiver Status": ["None", "Requested", "Granted", "Rejected"],
+    "Waiver Status": ["None", "Requested", "Granted", "Rejected", "Expired"],
+    "Covenant Frequency": ["OneTime", "Monthly", "Quarterly", "SemiAnnual", "Annual"],
+    "EWS Severity": ["Amber", "Red"],
+    "EWS Status": ["Open", "UnderInvestigation", "Escalated", "Closed"],
+    "EWS Disposition": ["Resolved", "Downgraded", "FalseAlarm", "LossMitigated",
+                        "Restructured"],
     # Data Register (documents) dropdowns.
     "Document Section": [
         "KYC & Constitutional", "Financials", "Banking & Debt",
