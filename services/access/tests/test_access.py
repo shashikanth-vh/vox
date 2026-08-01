@@ -183,3 +183,50 @@ async def test_drift_endpoint_admin_only(client: AsyncClient):
     r = await client.get("/v1/access/drift",
                          headers={"X-User-Email": "plainrm@evamfinance.com"})
     assert r.status_code == 403
+
+
+async def test_first_boot_bootstrap_seeds_only_an_empty_database():
+    """`--if-empty` (the prod-posture container start): a TRULY EMPTY authority DB is
+    bootstrapped — tenant + baseline matrix + admin — because an empty Access service
+    bricks the whole platform; any NON-empty DB is never written on start (an operator
+    edit survives; the start degrades to the drift report)."""
+    from evam_backend_core.db.session import dispose_engine, get_sessionmaker, init_engine
+    from sqlalchemy import text
+
+    from app import seed as access_seed
+    from app.config import get_settings
+    from app.security import clear_tenant_cache
+
+    init_engine(get_settings())
+    sm = get_sessionmaker()
+    async with sm() as session:                       # start from a virgin DB
+        await session.execute(text(
+            "TRUNCATE tenants, users, user_roles, access_grants, matrix_versions, "
+            "access_audit RESTART IDENTITY CASCADE"))
+        await session.commit()
+    await dispose_engine()
+    clear_tenant_cache()
+
+    assert await access_seed.bootstrap_if_empty() == 0     # first boot: seeds
+    init_engine(get_settings())
+    sm = get_sessionmaker()
+    async with sm() as session:
+        tenants = (await session.execute(text("SELECT count(*) FROM tenants"))).scalar()
+        admins = (await session.execute(text(
+            "SELECT count(*) FROM users WHERE email = 'admin@evamfinance.com'"))).scalar()
+        cells = (await session.execute(text("SELECT count(*) FROM access_grants"))).scalar()
+        assert (tenants, admins) == (1, 1) and cells > 0
+        await session.execute(text("UPDATE tenants SET name = 'Renamed by operator'"))
+        await session.commit()
+    await dispose_engine()
+
+    assert await access_seed.bootstrap_if_empty() in (0, 3)  # non-empty: report only
+    init_engine(get_settings())
+    sm = get_sessionmaker()
+    async with sm() as session:                       # the operator's edit SURVIVED
+        name = (await session.execute(text("SELECT name FROM tenants"))).scalar()
+        assert name == "Renamed by operator"
+        await session.execute(text("UPDATE tenants SET name = 'Evam Finance'"))
+        await session.commit()
+    await dispose_engine()
+    clear_tenant_cache()

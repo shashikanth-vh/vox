@@ -36,10 +36,12 @@ services:
       # signed context still being within its TTL. Fails CLOSED (503) if Access is down.
       REGISTER_ONLINE_REVALIDATION: "true"
 
-  # The authority model in production: PostgreSQL (access_grants) decides human access;
-  # the container start never writes grants — it prints the drift report against the
-  # approved compiled baseline, and seeding happens only through the explicit command
-  # (docker compose exec access python -m app.seed).
+  # The authority model in production: PostgreSQL (access_grants) decides human access.
+  # A container start NEVER writes to a non-empty database — it prints the drift report
+  # against the approved compiled baseline, and grants change only through the governed
+  # APIs (or the explicit `docker compose exec access python -m app.seed`). The one
+  # exception is a completely EMPTY database: first boot bootstraps the baseline
+  # (tenant + matrix + admin user) so a fresh stack is usable, not bricked.
   access:
     environment:
       ACCESS_AUTO_SEED: "false"

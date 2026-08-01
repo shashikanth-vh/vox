@@ -31,8 +31,10 @@ gatewaySharedSecret: ""
 config:
   environment: prod
   logLevel: INFO
-  # Production authority model: the container start never writes grants (drift report
-  # only); seeding is the explicit versioned command `python -m app.seed`.
+  # Production authority model: a start never writes to a NON-EMPTY database (drift
+  # report only; grants change through the governed APIs or the explicit
+  # `python -m app.seed`). A completely empty database is bootstrapped on first boot
+  # (tenant + baseline matrix + admin user) so a fresh install is usable immediately.
   autoSeed: "false"
   logJson: true
   defaultTenantCode: EVAM

@@ -9,8 +9,14 @@ the RBAC chicken-and-egg is solved. Idempotent; NEVER overwrites a runtime overr
 against the approved baseline and print the differences — WITHOUT writing anything. Exit
 code 0 = in sync, 3 = drift found (so a deployment pipeline can gate on it).
 
+``python -m app.seed --if-empty`` is the FIRST-BOOT bootstrap: seed only when the
+database holds no tenants at all (an empty Access DB is a bricked platform — nothing can
+authenticate against nothing); any non-empty database is NEVER written — it gets the
+drift report, exactly like --check.
+
 Production posture runs with ``ACCESS_AUTO_SEED=false``: the container start performs the
---check report only, and seeding happens solely through this explicit command.
+--if-empty bootstrap (first boot fills the baseline; every later start is report-only),
+and all subsequent grants happen through the governed Access APIs.
 """
 
 from __future__ import annotations
@@ -104,7 +110,33 @@ async def _tenant_id_readonly(session: AsyncSession, code: str):
     return row.id
 
 
+async def bootstrap_if_empty() -> int:
+    """First-boot bootstrap. An EMPTY Access database (no tenants at all) is a bricked
+    platform, not a hardened one — nothing can authenticate against nothing — so it is
+    seeded with the baseline (tenant + matrix + admin) in ANY posture. A database with
+    any tenant row is NEVER written on start: it gets the drift report, and every later
+    grant goes through the governed APIs."""
+    settings = get_settings()
+    configure_logging(settings.log_level, json_logs=False)
+    init_engine(settings)
+    sm = get_sessionmaker()
+    async with sm() as session:
+        empty = (await session.execute(select(Tenant.id).limit(1))).first() is None
+        await session.rollback()
+    await dispose_engine()
+    if empty:
+        print("Access database is EMPTY — first-boot bootstrap "
+              "(tenant + baseline matrix + admin user).")
+        return await run()
+    return await check()
+
+
 if __name__ == "__main__":
     import sys
-    mode = check if "--check" in sys.argv[1:] else run
+    if "--check" in sys.argv[1:]:
+        mode = check
+    elif "--if-empty" in sys.argv[1:]:
+        mode = bootstrap_if_empty
+    else:
+        mode = run
     raise SystemExit(asyncio.run(mode()))

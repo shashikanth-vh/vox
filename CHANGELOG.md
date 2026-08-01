@@ -6,6 +6,22 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Access: first-boot bootstrap + a single baseline migration.** Two changes born from
+  the same discovery (a fresh prod-posture stack came up with EMPTY access tables and
+  every request 502'd):
+  * **Bootstrap-if-empty.** `ACCESS_AUTO_SEED=false` (prod posture / Helm default) no
+    longer leaves a virgin database bricked: the container start now runs
+    `python -m app.seed --if-empty` — a database with NO tenants at all gets the
+    baseline (tenant + approved matrix + `admin@evamfinance.com`) exactly once; a
+    database with any tenant row is NEVER written on start (drift report only, operator
+    edits survive — proven by a new test). Later users are added through the governed
+    APIs, as before. Dev posture (`ACCESS_AUTO_SEED=true`) is unchanged.
+  * **One initial schema.** The access migration chain (0001 + 0002) is now a single
+    `0001_access_schema.py`, matching the register's single-file baseline policy;
+    pg_dump-verified byte-identical to the old chain. One-time step for EXISTING dev
+    DBs stamped '0002': recreate the access database (it will migrate + bootstrap
+    itself on next start) — fresh deploys are unaffected.
+
 - **Fixed: 502 "Illegal header value b'Bearer '" on every gateway-lane Postman request
   in the dev posture.** Root cause: the E2E/All-APIs collections send
   `Authorization: Bearer {{adminToken}}` and the token variables are EMPTY until you run
