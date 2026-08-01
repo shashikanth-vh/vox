@@ -6,14 +6,21 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
-- **All Release-1 schema consolidated into the baseline.** Release 1 has not shipped, so
-  there is nothing to migrate: the increment-7/8 tables (calendar_events, notifications,
-  notification_deliveries, covenants, ews_cases, the covenant-period unique index) now
-  live in the BASELINE migrations (0001 creates them; 0005 gives them the fail-closed
-  RLS policy) instead of incremental steps — the former 0017/0018 files are gone. A
-  fresh deploy (`alembic upgrade head`, which the container entrypoint runs) creates the
-  complete schema in one pass; no migration step, no `down -v` dance, nothing to
-  re-import. Behaviour and DDL are identical — only where the DDL lives changed.
+- **One baseline migration — the whole Release-1 schema in a single file.** Release 1
+  has not shipped, so there is nothing to migrate: the entire chain (0001–0016, plus the
+  formerly-incremental increment-7/8 DDL) is now ONE `0001_initial_schema.py`. Each
+  former migration survives as a labelled section in its original order, so the domain
+  story stays reviewable (master tables → documents → RBAC → fail-closed RLS →
+  decisions → outbox → reconciliation → evidence → Advaya → CP/CS → calendar/
+  notifications → covenants/EWS). The only net edit: the Register never creates the
+  identity tables (users/user_roles) the historical chain created and then moved to the
+  Access service. Verified by diffing `pg_dump --schema-only` of the single file against
+  the historical chain — byte-identical. A fresh deploy (`alembic upgrade head`, run by
+  the container entrypoint) creates everything in one pass; no migration step, nothing
+  to re-import. One-time note for EXISTING dev/test databases only: they are stamped
+  with the old chain's revision ids, so recreate them once (drop + create, or
+  `docker compose down -v`) — alembic cannot walk from a revision that no longer
+  exists, by design.
 
 
 - **Covenants, EWS, waivers, and deal closure (increment 8).** Covenant DEFINITIONS
