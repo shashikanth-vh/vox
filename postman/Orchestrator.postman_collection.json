@@ -1113,7 +1113,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"by\": \"sample by\",\n  \"lender_row_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"status\": \"sample status\"\n}",
+              "raw": "{\n  \"buyer_row_id\": \"{{id}}\",\n  \"by\": \"sample by\",\n  \"note\": \"sample note\",\n  \"status\": \"sample status\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

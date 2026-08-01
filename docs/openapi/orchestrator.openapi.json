@@ -201,6 +201,39 @@
         "title": "AmStartIn",
         "type": "object"
       },
+      "BuyerUpdateIn": {
+        "additionalProperties": false,
+        "properties": {
+          "buyer_row_id": {
+            "maxLength": 64,
+            "title": "Buyer Row Id",
+            "type": "string"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "maxLength": 40,
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "buyer_row_id",
+          "status",
+          "by"
+        ],
+        "title": "BuyerUpdateIn",
+        "type": "object"
+      },
       "ChecklistItemIn": {
         "additionalProperties": false,
         "description": "One qualification checklist RESULT from the caller. The item definitions (which keys\nexist, which are required) come from deployment config \u2014 the caller only says what\npassed; unknown keys are refused at merge time.",
@@ -3009,7 +3042,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LenderUpdateIn"
+                "$ref": "#/components/schemas/BuyerUpdateIn"
               }
             }
           },

@@ -12147,7 +12147,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"lender_row_id\": \"sample\",\n  \"status\": \"sample\",\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "raw": "{\n  \"buyer_row_id\": \"sample\",\n  \"status\": \"sample\",\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

@@ -195,6 +195,14 @@ class LenderUpdateIn(BaseModel):
     by: str = Field(max_length=200)
 
 
+class BuyerUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    buyer_row_id: str = Field(max_length=64)
+    status: str = Field(max_length=40)
+    note: str = Field(default="", max_length=1000)
+    by: str = Field(max_length=200)
+
+
 class AllocationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # lender row id → allocated amount (₹ Cr); validated in-run against the mandate.
@@ -1877,12 +1885,12 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/workflows/{workflow_id}/buyer-update", tags=["Workflows"],
               summary="Record buyer-level activity on an AM run")
-    async def buyer_update(workflow_id: str, payload: LenderUpdateIn, request: Request,
+    async def buyer_update(workflow_id: str, payload: BuyerUpdateIn, request: Request,
                            x_api_key: str | None = Header(default=None, alias="X-API-Key"),
                            ) -> Any:
         return await _deliver_signal(
             workflow_id, request, "buyer_update",
-            [payload.lender_row_id, payload.status, payload.note, payload.by], 3, x_api_key)
+            [payload.buyer_row_id, payload.status, payload.note, payload.by], 3, x_api_key)
 
     @app.post("/v1/workflows/{workflow_id}/record-nda", tags=["Workflows"],
               summary="Record a buyer's NDA (and data-room grant) on an AM run")
