@@ -641,3 +641,121 @@ async def test_intelligence_features_are_independently_switchable(stub_register,
     cfg = build_vox_config(get_settings())
     sp = build_system_prompt(cfg)
     assert "EVAM DOMAIN GLOSSARY" in sp and "WORKED EXAMPLES" in sp
+
+
+# ---------------------------------------------------------------------------
+# Follow-up meeting capture: "schedule followup meeting next monday 11am"
+# ---------------------------------------------------------------------------
+
+def _null_meeting_client(captured: dict):
+    """A fake Anthropic client whose extraction leaves next_meeting empty — the
+    exact failure the deterministic backfill exists to catch."""
+    from types import SimpleNamespace
+
+    class _Msgs:
+        def create(self, **kw):
+            captured.update(kw)
+            block = SimpleNamespace(type="tool_use", input={
+                "company_mentioned": "Biomas Energy Systems",
+                "report": {"title": "Biomas Energy Systems"},
+                "next_meeting": {"date": None, "time": None, "mode": None,
+                                 "confidence": 0.0},
+            })
+            return SimpleNamespace(content=[block])
+
+    return SimpleNamespace(messages=_Msgs())
+
+
+async def test_followup_backfill_resolves_next_monday_when_model_returns_null():
+    """A plainly stated follow-up must land in next_meeting even when the model
+    fails to resolve the relative date — resolved deterministically against
+    capture_ts, at a confidence that clears the gate (no approval block)."""
+    from app.vocx.core import extract as vocx_extract
+
+    captured: dict = {}
+    ext = vocx_extract.extract(
+        "Met the Biomas Energy Systems team about the machinery loan. "
+        "Schedule followup meeting next monday 11am.",
+        capture_ts="2026-08-01T10:00:00", rm="Priya",
+        client=_null_meeting_client(captured), config={},
+    )
+    nm = ext["next_meeting"]
+    assert nm["date"] == "2026-08-03"          # 2026-08-01 is a Saturday
+    assert nm["time"] == "11:00"
+    assert nm["confidence"] >= 0.70            # >= VOX_DATE_CONF_MIN
+    # And the model is TOLD the weekday, so it can resolve relative dates itself.
+    assert "(a Saturday)" in captured["messages"][0]["content"]
+
+
+async def test_followup_backfill_never_invents_a_meeting_from_a_deadline():
+    """'they will share financials on Friday' is a commitment, not a meeting —
+    without a scheduling phrase the backfill must leave next_meeting empty."""
+    from app.vocx.core import extract as vocx_extract
+
+    ext = vocx_extract.extract(
+        "They will share the audited financials on friday.",
+        capture_ts="2026-08-01T10:00:00", rm="Priya",
+        client=_null_meeting_client({}), config={},
+    )
+    assert ext["next_meeting"]["date"] is None
+
+
+async def test_followup_backfill_fills_missing_time_and_mode_next_to_a_model_date():
+    """When the model resolved the date but dropped the time/mode, the backfill
+    completes them from the transcript instead of leaving the card half-empty."""
+    from types import SimpleNamespace
+
+    from app.vocx.core import extract as vocx_extract
+
+    class _Msgs:
+        def create(self, **kw):
+            block = SimpleNamespace(type="tool_use", input={
+                "company_mentioned": "Biomas Energy Systems",
+                "report": {"title": "Biomas Energy Systems"},
+                "next_meeting": {"date": "2026-08-03", "time": None, "mode": None,
+                                 "confidence": 0.9},
+            })
+            return SimpleNamespace(content=[block])
+
+    ext = vocx_extract.extract(
+        "Schedule a follow-up video call next monday 11am.",
+        capture_ts="2026-08-01T10:00:00", rm="Priya",
+        client=SimpleNamespace(messages=_Msgs()), config={},
+    )
+    nm = ext["next_meeting"]
+    assert nm["date"] == "2026-08-03" and nm["time"] == "11:00"
+    assert nm["mode"] == "video"
+
+
+async def test_stub_relative_date_and_time_resolvers():
+    from app.vocx.core.extract import _stub_next_date, _stub_time
+
+    ts = "2026-08-01T10:00:00"                       # a Saturday
+    assert _stub_next_date("followup meeting next monday 11am", ts)[0] == "2026-08-03"
+    assert _stub_next_date("let us meet this monday", ts)[0] == "2026-08-03"
+    assert _stub_next_date("meet the day after tomorrow", ts)[0] == "2026-08-03"
+    assert _stub_next_date("review on the 29th", ts)[0] == "2026-08-29"
+    assert _stub_next_date("review on the 1st", ts)[0] == "2026-09-01"   # past -> next month
+    assert _stub_next_date("no date here at all", ts) == (None, 0.0)
+    assert _stub_time("meet at 11am") == "11:00"
+    assert _stub_time("around 3:30 p.m.") == "15:30"
+    assert _stub_time("meet at 4 o'clock") == "16:00"
+    assert _stub_time("meet at 14:30") == "14:30"
+    assert _stub_time("no time stated") is None
+
+
+async def test_offline_capture_populates_next_meeting_end_to_end(stub_register):
+    """The user's exact phrase, through /v1/capture: the review payload carries the
+    resolved follow-up date + time so the VOM card's NEXT MEETING is filled."""
+    app = create_app()
+    async with await _client(app) as c:
+        r = await c.post("/v1/capture", json={
+            "rm": "Priya",
+            "transcript": "Met the EcoSoch Solar team about the machinery loan. "
+                          "Schedule followup meeting next monday 11am.",
+            "capture_ts": "2026-08-01T10:00:00",
+            "offline": True})
+    assert r.status_code == 200, r.text
+    nm = r.json()["extraction"]["next_meeting"]
+    assert nm["date"] == "2026-08-03"
+    assert nm["time"] == "11:00"

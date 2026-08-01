@@ -293,8 +293,44 @@ def extract(
         result = _haiku_extract(transcript, capture_ts, model, key_env, client, config)
 
     ext = _coerce(result)
+    _backfill_next_meeting(ext, transcript, capture_ts)
     ext["_meta"] = {"capture_ts": capture_ts, "rm": rm, "transcript_ref": transcript_ref}
     return ext
+
+
+# Phrases that mark the transcript as SCHEDULING a follow-up meeting (vs. a mere
+# commitment like "they will share financials on Friday"). Deliberately meeting-
+# specific so the deterministic backfill never invents a meeting from a deadline.
+_FOLLOWUP_HINTS = (
+    "follow up", "follow-up", "followup", "next meeting", "meet again",
+    "meet on", "meet next", "meeting on", "meeting next", "meeting at",
+    "schedule a meeting", "schedule meeting", "catch up", "call with",
+    "call them", "call him", "call her", "review meeting", "site visit",
+    "visit on", "visit next",
+)
+
+
+def _backfill_next_meeting(ext: dict[str, Any], transcript: str, capture_ts: str) -> None:
+    """Deterministic safety net for the follow-up meeting.
+
+    The model is told to resolve relative dates against capture_ts, but when it
+    can't (or returns null), a plainly stated follow-up ("schedule a follow-up
+    next Monday 11am") must still land in next_meeting — a calendar event and the
+    review card depend on it. Only fires when the transcript carries an explicit
+    scheduling phrase AND a resolvable date; fills time/mode from the transcript
+    whenever a date is present but they are missing."""
+    low = transcript.lower()
+    nm = ext["next_meeting"]
+    if not nm.get("date") and any(k in low for k in _FOLLOWUP_HINTS):
+        date, conf = _stub_next_date(low, capture_ts)
+        if date:
+            nm["date"] = date
+            nm["confidence"] = max(float(nm.get("confidence") or 0.0), conf)
+    if nm.get("date"):
+        if not nm.get("time"):
+            nm["time"] = _stub_time(low)
+        if not nm.get("mode"):
+            nm["mode"] = next((v for k, v in _MODE_WORDS.items() if k in low), None)
 
 
 def _haiku_extract(transcript, capture_ts, model, key_env, client,
@@ -303,8 +339,13 @@ def _haiku_extract(transcript, capture_ts, model, key_env, client,
         import anthropic  # imported lazily so offline use needs no SDK
         client = anthropic.Anthropic(api_key=os.environ[key_env])
     system = build_system_prompt(config)
+    # Name the weekday explicitly — resolving "next Monday" requires knowing what
+    # day capture_ts falls on, and weekday arithmetic from a bare ISO date is
+    # exactly the kind of thing a model gets silently wrong.
+    base = _parse_ts(capture_ts)
+    ts_line = f"{capture_ts} (a {base.strftime('%A')})" if base else capture_ts
     user_msg = (
-        f"capture_ts (resolve all relative dates against this): {capture_ts}\n\n"
+        f"capture_ts (resolve all relative dates against this): {ts_line}\n\n"
         f"Transcript:\n\"\"\"\n{transcript.strip()}\n\"\"\""
     )
     # STRUCTURED OUTPUT: force a tool call whose input must match EXTRACTION_SCHEMA —
@@ -440,13 +481,22 @@ def _stub_contact(t: str) -> str | None:
 
 
 def _stub_time(low: str) -> str | None:
-    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", low)
-    if not m:
-        return None
-    h = int(m.group(1)) % 12
-    if m.group(3) == "pm":
-        h += 12
-    return "{:02d}:{}".format(h, m.group(2) or "00")
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?!\w)", low)
+    if m:
+        h = int(m.group(1)) % 12
+        if m.group(3).startswith("p"):
+            h += 12
+        return "{:02d}:{}".format(h, m.group(2) or "00")
+    m = re.search(r"\b(\d{1,2})\s*o'?\s?clock\b", low)
+    if m:
+        h = int(m.group(1))
+        if 1 <= h <= 7:               # business context: "4 o'clock" means 16:00
+            h += 12
+        return f"{h % 24:02d}:00"
+    m = re.search(r"\bat ([01]?\d|2[0-3]):([0-5]\d)\b", low)
+    if m:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    return None
 
 
 def _stub_sector(low: str) -> str | None:
@@ -467,7 +517,7 @@ def _stub_next_date(low: str, capture_ts: str) -> tuple:
     base = _parse_ts(capture_ts)
     if base is None:
         return None, 0.0
-    m = re.search(r"\bnext (mon|tues|wednes|thurs|fri|satur|sun)day\b", low)
+    m = re.search(r"\b(?:next|this|coming) (mon|tues|wednes|thurs|fri|satur|sun)day\b", low)
     if not m:
         m = re.search(r"\bon (mon|tues|wednes|thurs|fri|satur|sun)day\b", low)
     if m:
@@ -481,6 +531,11 @@ def _stub_next_date(low: str, capture_ts: str) -> tuple:
     m = re.search(r"\bin (\d{1,2}) days?\b", low)
     if m:
         return (base + _dt.timedelta(days=int(m.group(1)))).date().isoformat(), 0.8
+    # "day after tomorrow" must be tested BEFORE bare "tomorrow" — the shorter
+    # pattern matches inside the longer phrase and would resolve a day early.
+    m = re.search(r"\bday after tomorrow\b", low)
+    if m:
+        return (base + _dt.timedelta(days=2)).date().isoformat(), 0.9
     m = re.search(r"\btomorrow\b", low)
     if m:
         return (base + _dt.timedelta(days=1)).date().isoformat(), 0.9
@@ -488,6 +543,18 @@ def _stub_next_date(low: str, capture_ts: str) -> tuple:
     if m:
         days = 14 if ("fortnight" in m.group(0) or "two" in m.group(0)) else 7
         return (base + _dt.timedelta(days=days)).date().isoformat(), 0.6
+    m = re.search(r"\bon the (\d{1,2})(?:st|nd|rd|th)?\b", low)
+    if m:
+        day = int(m.group(1))
+        year, month = base.year, base.month
+        if day <= base.day:           # already past this month -> next month
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+        try:
+            return _dt.date(year, month, day).isoformat(), 0.8
+        except ValueError:            # e.g. "on the 31st" in a 30-day month
+            return None, 0.0
     m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", low)
     if m:
         return m.group(1), 0.95

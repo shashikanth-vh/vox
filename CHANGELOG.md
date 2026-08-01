@@ -6,6 +6,23 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **VocX: "schedule followup meeting next Monday 11am" now fills NEXT MEETING.** Two
+  fixes in `services/vocx/app/vocx/core/extract.py`. (1) The AI path now tells the
+  model the WEEKDAY of the capture timestamp ("2026-08-01 (a Saturday)") — resolving
+  "next Monday" from a bare ISO date requires weekday arithmetic, which models get
+  silently wrong, and the prompt then (correctly) made them emit null rather than
+  guess. (2) A deterministic backfill runs after EVERY extraction (AI and stub):
+  when the transcript plainly schedules a follow-up ("follow up"/"followup"/"next
+  meeting"/"meet again"/…) but `next_meeting.date` came back null, the relative date
+  is resolved against capture_ts in code ("next/this/coming <weekday>", "tomorrow",
+  "day after tomorrow", "in N days", "on the 29th", explicit dates), and a missing
+  time/mode is filled from the transcript ("11am", "3:30 p.m.", "4 o'clock",
+  "at 14:30"; video/phone/site/…). The backfill needs BOTH a scheduling phrase and a
+  resolvable date, so a mere deadline ("they'll share financials on Friday") never
+  invents a meeting. Confidence is set from the resolver (0.9 for an explicit
+  weekday), so the gate auto-accepts instead of raising an approval card. Covered by
+  five new tests including the user's exact phrase end-to-end through `/v1/capture`.
+
 - **The complete E2E showcase collection + a complete Excel export.** The regenerated
   `postman/PRISM_E2E_Full.postman_collection.json` (19 folders, 121 requests) now walks
   the ENTIRE PRISM-native journey the Excel tracker used to hold — approvals included:
