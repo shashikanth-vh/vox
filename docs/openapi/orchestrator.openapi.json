@@ -1779,6 +1779,54 @@
         ],
         "title": "VoxTouchpointIn",
         "type": "object"
+      },
+      "WaiverDecisionIn": {
+        "additionalProperties": false,
+        "description": "A covenant-waiver decision, recorded through the front door. The Register's\nsingle-winner decision store accepts writes only from the workflow service principal\ncarrying a verified approver identity \u2014 so the senior credit human records it HERE,\nand this service persists it under its principal with the approver's delegated,\nroute-bound context. Authority (_WAIVER_AUTHORITY) and the subject binding are\nenforced by the Register from that context, never from these fields.",
+        "properties": {
+          "by": {
+            "default": "",
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "decision": {
+            "pattern": "^(Approved|Rejected)$",
+            "title": "Decision",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reference": {
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Reference",
+            "type": "string"
+          },
+          "subject_id": {
+            "maxLength": 64,
+            "title": "Subject Id",
+            "type": "string"
+          },
+          "valid_days": {
+            "maximum": 730.0,
+            "minimum": 1.0,
+            "title": "Valid Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reference",
+          "decision",
+          "subject_id",
+          "valid_days"
+        ],
+        "title": "WaiverDecisionIn",
+        "type": "object"
       }
     }
   },
@@ -1788,6 +1836,66 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/decisions/waiver": {
+      "post": {
+        "description": "The waiver DECISION through the front door. The Register's single-winner\ndecision store accepts writes only from the workflow service principal carrying a\nverified approver identity \u2014 so the human records it here: the caller is verified\n(bearer under require_auth; header trust in dev) and this service persists the\ndecision under its principal with the approver's delegated, route-bound context.\n``/v1/monitoring/{id}/waive`` then verifies that record \u2014 authority, subject\nbinding, validity window \u2014 before any breach is excused.",
+        "operationId": "record_waiver_decision_v1_decisions_waiver_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaiverDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Record Waiver Decision V1 Decisions Waiver Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a covenant-waiver decision (verified senior credit authority)",
+        "tags": [
+          "Decisions"
+        ]
+      }
+    },
     "/v1/internal/monitors/covenants": {
       "post": {
         "description": "Idempotent per tenant (workflow id ``cov-monitor-{tenant}``): the recurring\ncovenant clock \u2014 generate due observations, flag overdue submissions, expire\nlapsed waivers \u2014 with one run keeping the whole schedule honest.",

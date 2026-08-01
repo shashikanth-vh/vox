@@ -248,6 +248,22 @@ class OfferIn(BaseModel):
     by: str = Field(max_length=200)
 
 
+class WaiverDecisionIn(BaseModel):
+    """A covenant-waiver decision, recorded through the front door. The Register's
+    single-winner decision store accepts writes only from the workflow service principal
+    carrying a verified approver identity — so the senior credit human records it HERE,
+    and this service persists it under its principal with the approver's delegated,
+    route-bound context. Authority (_WAIVER_AUTHORITY) and the subject binding are
+    enforced by the Register from that context, never from these fields."""
+    model_config = ConfigDict(extra="forbid")
+    reference: str = Field(min_length=3, max_length=200)
+    decision: str = Field(pattern="^(Approved|Rejected)$")
+    subject_id: str = Field(max_length=64)          # the Monitoring observation row
+    valid_days: int = Field(ge=1, le=730)           # a waiver is ALWAYS time-boxed
+    note: str = Field(default="", max_length=1000)
+    by: str = Field(default="", max_length=200)
+
+
 class CreditNoteRevisionIn(BaseModel):
     """A REVISED credit note for a structuring run awaiting (or returned for) a committee
     decision — the committee-rework loop's artefact. Filed as the next credit_note version
@@ -2102,6 +2118,67 @@ def create_app() -> FastAPI:
         elif desc.status == WorkflowExecutionStatus.COMPLETED:
             out["result"] = await handle.result()
         return out
+
+    @app.post("/v1/decisions/waiver", status_code=201, tags=["Decisions"],
+              summary="Record a covenant-waiver decision (verified senior credit authority)")
+    async def record_waiver_decision(payload: WaiverDecisionIn, request: Request,
+                                     x_api_key: str | None = Header(default=None,
+                                                                    alias="X-API-Key"),
+                                     ) -> Any:
+        """The waiver DECISION through the front door. The Register's single-winner
+        decision store accepts writes only from the workflow service principal carrying a
+        verified approver identity — so the human records it here: the caller is verified
+        (bearer under require_auth; header trust in dev) and this service persists the
+        decision under its principal with the approver's delegated, route-bound context.
+        ``/v1/monitoring/{id}/waive`` then verifies that record — authority, subject
+        binding, validity window — before any breach is excused."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        decided_by, err = await _verified_email(request, payload.by)
+        if err is not None:
+            return err
+        caller, verified = _caller_context(request, decided_by)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound caller identity is required to "
+                            "record a waiver decision.")
+        extra = {"kind": "waiver", "subject_type": "Monitoring",
+                 "subject_id": payload.subject_id, "valid_days": payload.valid_days}
+        if settings.internal_signing_secret:
+            record, perr = await _persist_decision(
+                request, payload.reference, payload.decision, decided_by,
+                payload.note or None, caller, None, extra=extra)
+            if perr is not None:
+                return perr
+            return ORJSONResponse(status_code=201, content=record)
+        # Dev (no signing): the Register's svc lane accepts header identity — write
+        # directly so the decision row exists for /waive to verify, same as prod.
+        body = {"workflow_id": payload.reference, "decision": payload.decision,
+                "note": payload.note or None, **extra}
+        try:
+            resp2 = await request.app.state.http.post(
+                f"{settings.register_base_url.rstrip('/')}/v1/internal/decisions",
+                json={k: v for k, v in body.items() if v is not None},
+                headers={"X-API-Key": settings.register_api_key,
+                         "X-Tenant": caller.tenant,
+                         "X-User-Email": decided_by,
+                         "X-User-Roles": request.headers.get("X-User-Roles", "")})
+        except httpx.HTTPError as exc:
+            return _problem(502, "Upstream unavailable",
+                            f"Could not record the decision (Register: {exc}).")
+        if resp2.status_code == 409:
+            return _problem(409, "Conflict",
+                            "A different decision has already been recorded for this "
+                            "reference; it cannot be changed.")
+        if resp2.status_code >= 300:
+            try:
+                detail = (resp2.json().get("error") or {}).get("detail") or ""
+            except ValueError:
+                detail = ""
+            status = resp2.status_code if resp2.status_code in (403, 422) else 502
+            return _problem(status, "Register refused the decision",
+                            detail or f"Register answered {resp2.status_code}.")
+        return ORJSONResponse(status_code=201, content=resp2.json())
 
     return app
 

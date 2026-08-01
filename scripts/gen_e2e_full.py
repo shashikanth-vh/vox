@@ -263,8 +263,6 @@ _RM = [*_H, {"key": "Authorization", "value": "Bearer {{rmToken}}"},
 _SVC = [{"key": "X-API-Key", "value": "{{svcWorkflowsKey}}"},
         {"key": "X-Tenant", "value": "{{tenant}}"},
         {"key": "X-Actor", "value": "e2e-machine"}]
-_SVC_CREDIT = [*_SVC, {"key": "X-User-Email", "value": "{{makerEmail}}"},
-               {"key": "X-User-Roles", "value": "Credit Head"}]
 
 
 def poll_kinds(name, subject_type, id_var, kind):
@@ -970,15 +968,19 @@ F.append(("13 · Covenants & EWS ▸ breach → case → escalate → close → 
               "note": "DSCR restored by the waived quarter's one-off O&M cost."},
         tests=[OK, "pm.test('Closed (frozen at the database)', () => "
                    "pm.expect(pm.response.json().status).to.eql('Closed'));"]),
-    req("MACHINE LANE · POST internal/decisions — record the WAIVER decision", "POST", MREG,
-        "/v1/internal/decisions", headers=_SVC_CREDIT,
-        body={"workflow_id": "waiver-{{runSuffix}}", "decision": "Approved",
-              "kind": "waiver", "subject_type": "Monitoring", "subject_id": "{{covObsId}}",
-              "valid_days": 90, "note": "One-off O&M cost; headroom restored by Q3."},
+    req("POST /orchestrator/v1/decisions/waiver — senior credit records the WAIVER", "POST",
+        ORC, "/v1/decisions/waiver", headers=_MAKER,
+        body={"reference": "waiver-{{runSuffix}}", "decision": "Approved",
+              "subject_id": "{{covObsId}}", "valid_days": 90,
+              "note": "One-off O&M cost; headroom restored by Q3.",
+              "by": "{{makerEmail}}"},
         tests=[OK],
         desc="A waiver is a DECISION first: senior credit authority, subject-bound to the "
              "exact observation, MANDATORY validity window — recorded on the single-winner "
-             "store before it can take effect anywhere."),
+             "store before it can take effect anywhere. Through the ORCHESTRATOR: the "
+             "verified Credit Head identity is delegated (route-bound signed context) to "
+             "the decision store, so this works identically in the dev header-trust and "
+             "prod bearer postures — the Register never accepts a client-asserted role."),
     req("POST /v1/monitoring/{id}/waive — the verified, time-boxed waiver", "POST", REG,
         "/v1/monitoring/{{covObsId}}/waive", headers=_MAKER,
         body={"decision_ref": "waiver-{{runSuffix}}"},

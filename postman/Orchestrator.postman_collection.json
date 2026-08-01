@@ -6,6 +6,65 @@
   },
   "item": [
     {
+      "name": "Decisions",
+      "item": [
+        {
+          "name": "POST /v1/decisions/waiver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/decisions/waiver",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "decisions",
+                "waiver"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"by\": \"sample by\",\n  \"decision\": \"sample decision\",\n  \"note\": \"sample note\",\n  \"reference\": \"sample reference\",\n  \"subject_id\": \"{{id}}\",\n  \"valid_days\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Internal",
       "item": [
         {

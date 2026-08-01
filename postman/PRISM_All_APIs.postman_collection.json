@@ -11131,8 +11131,63 @@
       ]
     },
     {
-      "name": "Orchestrator  (35 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (36 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
+        {
+          "name": "Decisions",
+          "item": [
+            {
+              "name": "POST /orchestrator/v1/decisions/waiver \u2014 Record a covenant-waiver decision (verified senior credit authority)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/decisions/waiver",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "decisions",
+                    "waiver"
+                  ]
+                },
+                "description": "The waiver DECISION through the front door. The Register's single-winner\ndecision store accepts writes only from the workflow service principal carrying a\nverified approver identity \u2014 so the human records it here: the caller is verified\n(bearer under require_auth; header trust in dev) and this service persists the\ndecision under its principal with the approver's delegated, route-bound context.\n``/v1/monitoring/{id}/waive`` then verifies that record \u2014 authority, subject\nbinding, validity window \u2014 before any breach is excused.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference\": \"sample\",\n  \"decision\": \"REPLACE-to-match-^(Approved|Rejected)\",\n  \"subject_id\": \"sample\",\n  \"valid_days\": 1,\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
         {
           "name": "Internal",
           "item": [
