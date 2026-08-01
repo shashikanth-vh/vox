@@ -28,23 +28,32 @@ from app.core import reconciliation as recon
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.models import (
+    AdvayaHandoverPackage,
     AssetMonetisation,
+    CalendarEvent,
     ContractAsset,
     Counterparty,
+    Covenant,
+    CpcsChecklist,
     Deal,
     Document,
     DocumentChecklistItem,
     Entity,
+    EwsCase,
     ExternalIntelligence,
     Financial,
+    GovernanceEvidence,
     Interaction,
     Lead,
     LendingTracker,
     MonitoringReporting,
+    Notification,
     Person,
     SyndicationLender,
     SyndicationTracker,
+    WorkflowDecision,
 )
+from app.models.advaya import DisbursementTranche
 from app.models.system import RefValue
 
 router = api_router(tags=["Export"])
@@ -67,8 +76,22 @@ _EXPORT_MODELS: list[tuple[str, Any]] = [
     ("monitoring_reporting", MonitoringReporting),
     ("documents", Document),
     ("document_checklist", DocumentChecklistItem),
+    # Release-1 operational records — the activities the Excel tracker used to hold by
+    # hand all live in PRISM now, so the export carries every one of them:
+    ("calendar_events", CalendarEvent),          # meetings / follow-ups
+    ("covenants", Covenant),                     # covenant definitions (the schedule)
+    ("ews_cases", EwsCase),                      # early-warning case file
+    ("governance_evidence", GovernanceEvidence),  # the audit-grade evidence trail
+    ("workflow_decisions", WorkflowDecision),    # committee / waiver / control decisions
+    ("cp_cs_checklists", CpcsChecklist),         # CP/CS maker-checker record
+    ("advaya_handover_packages", AdvayaHandoverPackage),  # disbursement handover
+    ("disbursement_tranches", DisbursementTranche),       # tranche-level callbacks
+    ("notifications", Notification),             # the in-app notification record
     ("ref_values", RefValue),
 ]
+# Deliberately NOT exported (machine plumbing, not business records): the delivery
+# outboxes (workflow_decision_outbox, notification_deliveries), idempotency keys, and
+# import-reconciliation work items.
 _MODELS_BY_NAME = dict(_EXPORT_MODELS)
 
 
@@ -148,7 +171,12 @@ _LINE_SUBJECT: dict[str, str] = {
 _COMPANY_TABLES = {
     "financials", "contracts_assets", "interactions", "external_intelligence",
     "monitoring_reporting", "documents",
+    "calendar_events", "covenants", "ews_cases",
 }
+# The remaining Release-1 records (governance_evidence, workflow_decisions, CP/CS,
+# handover packages, tranches, notifications) carry NO entity_id — for a restricted
+# exporter they fall to the conservative unknown-table rule (own book only); an
+# Admin/Management export carries them whole.
 # Directory / reference tables any authenticated user may already read → exported whole.
 _DIRECTORY_TABLES = {"people", "counterparties", "document_checklist", "ref_values"}
 
@@ -221,6 +249,13 @@ _TABLE_VIEW: dict[str, str] = {
     "contracts_assets": "clients", "interactions": "clients",
     "external_intelligence": "clients", "monitoring_reporting": "clients",
     "documents": "clients", "document_checklist": "tools", "ref_values": "tools",
+    # Release-1 operational records. Credit-side governance sits behind the lending
+    # view; the evidence trail behind deals (broadly visible, like its API); decisions
+    # and personal notifications behind the Admin-only audit view.
+    "calendar_events": "clients", "covenants": "lending", "ews_cases": "clients",
+    "governance_evidence": "deals", "workflow_decisions": "audit",
+    "cp_cs_checklists": "lending", "advaya_handover_packages": "lending",
+    "disbursement_tranches": "lending", "notifications": "audit",
 }
 
 

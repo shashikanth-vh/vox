@@ -6,6 +6,28 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The complete E2E showcase collection + a complete Excel export.** The regenerated
+  `postman/PRISM_E2E_Full.postman_collection.json` (19 folders, 121 requests) now walks
+  the ENTIRE PRISM-native journey the Excel tracker used to hold — approvals included:
+  VOX field capture (creates the lead + owner + interaction in one durable run) → the RM
+  updates the lead → evidence-backed qualification → conversion as request + APPROVE
+  (an RM's self-approval is refused) → conditional committee approval through Temporal →
+  CP/CS BOTH ways (checker returns v1, approves v2) → handover approval → Disbursed +
+  tranche reconciliation → the syndication and asset-monetisation mandate WORKFLOWS
+  (versioned IM/teaser, lender/buyer tracking, authority-checked decisions, allocation,
+  gated terminals) → document validate / expire / replace → calendar complete-and-freeze
+  → covenant breach → EWS case worked, escalated, closed with authority → time-boxed
+  waiver → open-item-validated deal closure → the in-app inbox — and finally
+  `GET /v1/export/excel`: the workbook. To make that last step true, the export registry
+  now carries EVERY Release-1 operational register (calendar_events, covenants,
+  ews_cases, governance_evidence, workflow_decisions, cp_cs_checklists,
+  advaya_handover_packages, disbursement_tranches, notifications) with view-gated,
+  row-scoped access like every other sheet — covered by a new export-completeness test.
+  Clearly-marked MACHINE LANE requests (tranches, sweeps, the waiver decision, a demo
+  notification) go direct to the Register under the workflow service key, as the
+  monitors/notifier/Advaya do in production.
+
+
 - **One baseline migration — the whole Release-1 schema in a single file.** Release 1
   has not shipped, so there is nothing to migrate: the entire chain (0001–0016, plus the
   formerly-incremental increment-7/8 DDL) is now ONE `0001_initial_schema.py`. Each
