@@ -7,6 +7,7 @@ serving the last-known-good answer if the Access service is briefly unreachable.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 
@@ -77,7 +78,14 @@ class Resolver:
             if cached is not None and (
                     time.monotonic() - cached.fetched_at) < settings.cache_max_stale_s:
                 return cached
-            raise AccessUnavailableError(f"access /resolve returned {resp.status_code}")
+            # Surface Access's own explanation — "resolve returned 403" alone hides
+            # actionable causes (unseeded tenant, revoked key) behind a generic 502.
+            detail = ""
+            with contextlib.suppress(ValueError):
+                detail = (resp.json().get("error") or {}).get("detail") or ""
+            raise AccessUnavailableError(
+                f"access /resolve returned {resp.status_code}"
+                + (f" — {detail}" if detail else ""))
         body = resp.json()
         resolved = ResolvedUser(
             id=body["id"], email=body["email"], roles=body["roles"],
