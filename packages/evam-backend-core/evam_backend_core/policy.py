@@ -136,6 +136,11 @@ EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
         # advaya_acknowledgement kind (future Advaya integration) would add downstream
         # verification when that mode is enabled.
     },
+    # A syndication MANDATE may not reach 'Sanctioned' until the recorded syndication
+    # decision's evidence is on file — same shape as the lending sanction gate.
+    "Syndication": {
+        "Sanctioned": ["syndication_sanction"],
+    },
 }
 
 

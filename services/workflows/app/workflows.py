@@ -48,6 +48,8 @@ with workflow.unsafe.imports_passed_through():
         LeadQualificationResult,
         SanctionExpiryInput,
         SanctionExpiryResult,
+        SyndicationMandateInput,
+        SyndicationMandateResult,
         VoxResult,
         VoxTouchpoint,
     )
@@ -1031,6 +1033,320 @@ class DealStructuringWorkflow:
             decided_by=decided_by, stage="Sanctioned",
             evidence_ids=evidence_ids, note=note, line_outcomes=line_outcomes,
             credit_note_version=self._note_version)
+
+
+# Ordered position of a SYNDICATION status, for walking the mandate up its pipeline one
+# policy-checked step at a time (parallel to the lending _DEAL_ORDER walk).
+_SYN_ORDER = ["Deal Sourced", "Docs Pending", "IM in Prep", "IM Circulated",
+              "Queries Received", "IP Received", "Sanctioned", "Disbursed"]
+
+
+def _syn_before(current: str | None, target: str) -> bool:
+    if current not in _SYN_ORDER or target not in _SYN_ORDER:
+        return False
+    return _SYN_ORDER.index(current) < _SYN_ORDER.index(target)
+
+
+@workflow.defn
+class SyndicationMandateWorkflow:
+    """The syndication mandate's journey: IM preparation → circulation (VERSIONED — every
+    circulation is immutable evidence) → lender activity (queries / proposals, landing on
+    the deal's lender rows through the policy-enforcing API) → the Syn Head's recorded
+    decision (persist-before-signal, verified fail-closed) → sanction (the Register's
+    syndication_sanction evidence gate accepts the advance ONLY because the verified
+    evidence is now on file) → lender allocation (validated against the mandate amount) →
+    done. Inherits the full run-control + SLA foundation."""
+
+    def __init__(self) -> None:
+        self._stage = "Starting"
+        self._fnd = _Foundation()
+        self._notified = False
+        self._im_version = 0
+        self._im_queue: list[tuple] = []          # (reference, sha, by)
+        self._lender_ids: list[str] = []
+        self._lender_queue: list[tuple] = []      # (row_id, status, note, by)
+        self._allocation: dict | None = None
+
+    # ---- signals (all UNTRUSTED; whitelisted / verified before any effect) ----
+    @workflow.signal
+    def syndication_decision(self, decision_ref: str = "") -> None:
+        """A wake-up only — the run re-reads the AUTHORITATIVE persisted decision."""
+        self._notified = True
+
+    @workflow.signal
+    def control(self, action: str, control_ref: str = "") -> None:
+        self._fnd.controls.append((action, control_ref))
+
+    @workflow.signal
+    def circulate_im(self, reference: str, sha256: str = "", by: str = "") -> None:
+        """Circulate the (next version of the) IM: filed as immutable im_document evidence
+        on the mandate; the first circulation advances the mandate to 'IM Circulated'."""
+        if reference.strip():
+            self._im_queue.append((reference.strip(), sha256 or None, by))
+
+    @workflow.signal
+    def lender_update(self, row_id: str, status: str, note: str = "", by: str = "") -> None:
+        """Lender-level activity (queries received, IP received, dropped …) for ONE of the
+        deal's lender rows. Whitelisted to the rows this run discovered; the move itself
+        goes through the Register's policy API, which enforces transition legality."""
+        if row_id in self._lender_ids:
+            self._lender_queue.append((row_id, status, note, by))
+
+    @workflow.signal
+    def allocate(self, allocations: dict, by: str = "") -> None:
+        """The post-sanction lender allocation: {lender_row_id: amount_cr}. Whitelisted to
+        the run's lender rows and validated against the mandate amount before it lands."""
+        if self._allocation is None and allocations:
+            self._allocation = {"by": by, "amounts": dict(allocations)}
+
+    @workflow.query
+    def status(self) -> str:
+        return self._stage
+
+    @workflow.query
+    def state(self) -> dict:
+        return {**self._fnd.state(self._stage), "im_version": self._im_version,
+                "lender_rows": self._lender_ids}
+
+    async def _advance_mandate(self, sid: str, target: str, current: str | None,
+                               caller: Any) -> str:
+        """Walk the mandate one policy-checked step at a time up to ``target``; returns the
+        resulting status."""
+        while current in _SYN_ORDER and _syn_before(current, target):
+            nxt = _SYN_ORDER[_SYN_ORDER.index(current) + 1]
+            row = await workflow.execute_activity(
+                activities.advance_stage,
+                args=["syndication", sid, "status", nxt, None, caller], **_DURABLE_IO)
+            current = row.get("status")
+        return current or target
+
+    async def _file_im(self, sid: str, reference: str, sha: str | None, by: str,
+                       caller: Any, evidence_ids: list) -> None:
+        self._im_version += 1
+        ev = await workflow.execute_activity(
+            activities.attach_evidence,
+            args=["Syndication", sid, "im_document", reference, sha,
+                  f"IM circulated to lenders (v{self._im_version}"
+                  + (f", by {by}" if by else "") + ")", caller],
+            **_DURABLE_IO)
+        evidence_ids.append(ev.get("id"))
+
+    @workflow.run
+    async def run(self, inp: SyndicationMandateInput) -> SyndicationMandateResult:
+        wf_id = workflow.info().workflow_id
+        caller = inp.caller
+        subject = f"Syndication:{inp.syndication_id}"
+        evidence_ids: list = []
+        _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
+
+        # -- 0. The mandate row + the deal's lender rows (everything else on the deal).
+        mandate = await workflow.execute_activity(
+            activities.get_resource, args=["syndication", inp.syndication_id, caller], **_IO)
+        rows = await workflow.execute_activity(
+            activities.find_lines_for_deal, args=["syndication", inp.deal_id, caller], **_IO)
+        self._lender_ids = [str(r.get("id")) for r in rows
+                            if str(r.get("id")) != str(inp.syndication_id)]
+        current = mandate.get("status")
+
+        # -- 1. First IM circulation (input, or the first circulate signal later).
+        if inp.im_reference:
+            self._stage = "Circulating IM"
+            await self._file_im(inp.syndication_id, inp.im_reference, inp.im_sha256, "",
+                                caller, evidence_ids)
+            current = await self._advance_mandate(inp.syndication_id, "IM Circulated",
+                                                  current, caller)
+
+        # -- 2. Await the Syn Head's decision; lender activity + IM revisions keep landing.
+        self._stage = "Awaiting syndication decision"
+        total = timedelta(hours=inp.decision_timeout_hours)
+        start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        verified: dict[str, Any] | None = None
+        while verified is None:
+            waited = workflow.now() - start
+            remaining = total - waited
+            if remaining <= timedelta(0):
+                break
+            if (due := self._fnd.due_sla_event(
+                    waited, inp.sla_reminder_hours, inp.sla_escalation_hours)) is not None:
+                await _emit_ops(due, {
+                    "subject": subject, "requested_by": inp.requested_by,
+                    "business_status": self._fnd.business_status,
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                continue
+            if workflow.info().is_continue_as_new_suggested():
+                import dataclasses
+                workflow.continue_as_new(dataclasses.replace(
+                    inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
+            try:
+                await workflow.wait_condition(
+                    lambda: (self._notified or bool(self._fnd.controls)
+                             or bool(self._im_queue) or bool(self._lender_queue)),
+                    timeout=self._fnd.next_wakeup(waited, remaining,
+                                                  inp.sla_reminder_hours,
+                                                  inp.sla_escalation_hours))
+            except asyncio.TimeoutError:
+                continue
+            # IM revisions: each is the next immutable version.
+            while self._im_queue:
+                ref, sha, by = self._im_queue.pop(0)
+                self._stage = f"Circulating IM v{self._im_version + 1}"
+                await self._file_im(inp.syndication_id, ref, sha, by, caller, evidence_ids)
+                current = await self._advance_mandate(inp.syndication_id, "IM Circulated",
+                                                      current, caller)
+                self._stage = "Awaiting syndication decision"
+            # Lender activity: policy-enforced per-row moves; an illegal transition is
+            # REFUSED by the Register and surfaced as an ops event, never a crashed run.
+            while self._lender_queue:
+                row_id, status, note, by = self._lender_queue.pop(0)
+                self._stage = "Recording lender update"
+                try:
+                    await workflow.execute_activity(
+                        activities.advance_stage,
+                        args=["syndication", row_id, "status", status,
+                              ({"remarks": note} if note else None), caller], **_IO)
+                    await _emit_ops("lender_update", {
+                        "subject": subject, "lender_row": row_id, "status": status,
+                        "by": by, "note": note})
+                except Exception:  # noqa: BLE001 — an illegal move must not kill the mandate run
+                    await _emit_ops("lender_update_rejected", {
+                        "subject": subject, "lender_row": row_id, "status": status,
+                        "by": by})
+                self._stage = "Awaiting syndication decision"
+            # Run-control (verified fail-closed against the durable control record).
+            while self._fnd.controls:
+                action, ref = self._fnd.controls.pop(0)
+                self._stage = "Verifying control"
+                v = await workflow.execute_activity(
+                    activities.verify_control, args=[ref, caller], **_DURABLE_IO)
+                self._stage = "Awaiting syndication decision"
+                if not v.get("valid"):
+                    continue
+                verified_action = v["action"]
+                if verified_action == "Cancelled":
+                    self._fnd.business_status = "Cancelled"
+                    self._fnd.cancelled_by = v.get("by")
+                    self._fnd.cancel_note = v.get("note")
+                elif verified_action == "ReturnedForInformation":
+                    self._fnd.business_status = "ReturnedForInformation"
+                elif verified_action == "Resubmitted":
+                    self._fnd.business_status = "AwaitingDecision"
+                    start = workflow.now()
+                    self._fnd.reminders_sent = 0
+                    self._fnd.escalated = False
+                _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
+                               subject)
+                await _emit_ops("run_control", {
+                    "subject": subject, "action": verified_action, "by": v.get("by"),
+                    "note": v.get("note")})
+            if self._fnd.business_status == "Cancelled":
+                self._stage = "Cancelled"
+                return SyndicationMandateResult(
+                    workflow_id=wf_id, syndication_id=inp.syndication_id,
+                    status="Cancelled", decided_by=self._fnd.cancelled_by,
+                    im_version=self._im_version, evidence_ids=evidence_ids,
+                    note=self._fnd.cancel_note)
+            if not self._notified:
+                continue
+            self._notified = False
+            self._stage = "Verifying syndication decision"
+            v = await workflow.execute_activity(
+                activities.verify_syndication_decision,
+                args=[inp.syndication_id, caller], **_DURABLE_IO)
+            if v.get("valid"):
+                verified = v
+            else:
+                self._stage = "Awaiting syndication decision"
+
+        if verified is None:
+            self._stage = "TimedOut"
+            self._fnd.business_status = "TimedOut"
+            _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
+            await _emit_ops("decision_timeout", {
+                "subject": subject, "requested_by": inp.requested_by,
+                "window_hours": inp.decision_timeout_hours})
+            return SyndicationMandateResult(
+                workflow_id=wf_id, syndication_id=inp.syndication_id, status="TimedOut",
+                im_version=self._im_version, evidence_ids=evidence_ids,
+                note="No syndication decision within the window.")
+
+        decided_by = verified.get("decided_by")
+        note = verified.get("note")
+
+        if verified["outcome"] == "Rejected":
+            self._stage = "Rejected"
+            self._fnd.business_status = "Rejected"
+            _upsert_search(inp.emit_search_attributes, "Rejected", subject)
+            await workflow.execute_activity(
+                activities.advance_stage,
+                args=["syndication", inp.syndication_id, "status", "Rejected", None,
+                      caller], **_DURABLE_IO)
+            return SyndicationMandateResult(
+                workflow_id=wf_id, syndication_id=inp.syndication_id, status="Rejected",
+                decided_by=decided_by, im_version=self._im_version,
+                evidence_ids=evidence_ids, note=note)
+
+        # -- 3. Approved → file the VERIFIED sanction evidence (bound to the recorded
+        #       decision), then walk the mandate to 'Sanctioned' — an advance the
+        #       Register's evidence gate accepts only because that evidence is on file.
+        self._stage = "Filing sanction evidence"
+        sanction_ref = verified.get("sanction_reference") or f"syn-sanction/{wf_id}"
+        ev = await workflow.execute_activity(
+            activities.attach_evidence,
+            args=["Syndication", inp.syndication_id, "syndication_sanction", sanction_ref,
+                  None, note, caller, wf_id],
+            **_DURABLE_IO)
+        evidence_ids.append(ev.get("id"))
+        self._stage = "Sanctioning mandate"
+        current = await self._advance_mandate(inp.syndication_id, "Sanctioned", current,
+                                              caller)
+
+        # -- 4. Lender allocation (bounded wait; the run completes without one rather than
+        #       blocking the sanction forever — allocation can still be recorded later).
+        self._stage = "Awaiting lender allocation"
+        self._fnd.business_status = "Sanctioned"
+        _upsert_search(inp.emit_search_attributes, "Sanctioned", subject)
+        allocations: dict = {}
+        try:
+            await workflow.wait_condition(
+                lambda: self._allocation is not None,
+                timeout=timedelta(hours=inp.allocation_timeout_hours))
+        except asyncio.TimeoutError:
+            await _emit_ops("allocation_pending", {
+                "subject": subject,
+                "note": "Sanctioned mandate has no lender allocation yet."})
+        if self._allocation is not None:
+            amounts = {k: float(v) for k, v in self._allocation["amounts"].items()
+                       if k in self._lender_ids}
+            mandate_amount = mandate.get("amount_cr")
+            total_alloc = sum(amounts.values())
+            if mandate_amount is not None and total_alloc > float(mandate_amount) + 1e-9:
+                await _emit_ops("allocation_rejected", {
+                    "subject": subject, "total": total_alloc,
+                    "mandate_amount": float(mandate_amount),
+                    "note": "allocation exceeds the mandate amount; not applied"})
+            elif amounts:
+                self._stage = "Recording allocation"
+                for row_id, amount in sorted(amounts.items()):
+                    await workflow.execute_activity(
+                        activities.update_fields,
+                        args=["syndication", row_id, {"amount_cr": amount}, caller],
+                        **_DURABLE_IO)
+                alloc_note = ", ".join(f"{k}={v}" for k, v in sorted(amounts.items()))
+                ev = await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["Syndication", inp.syndication_id, "syndication_allocation",
+                          f"allocation/{wf_id}", None,
+                          f"Lender allocation ({self._allocation.get('by') or 'ops'}): "
+                          f"{alloc_note}", caller],
+                    **_DURABLE_IO)
+                evidence_ids.append(ev.get("id"))
+                allocations = amounts
+
+        self._stage = "Sanctioned"
+        return SyndicationMandateResult(
+            workflow_id=wf_id, syndication_id=inp.syndication_id, status="Sanctioned",
+            decided_by=decided_by, im_version=self._im_version, allocations=allocations,
+            evidence_ids=evidence_ids, note=note)
 
 
 @workflow.defn

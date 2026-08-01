@@ -52,6 +52,8 @@ from app.models.decisions import WorkflowDecision
 from app.models.evidence import GovernanceEvidence, GovernanceEvidenceStatus
 from app.repositories.subjects import SUBJECTS, load_subject
 
+_SYNDICATION_AUTHORITY = {"Syn Head", "Management", "Admin"}
+
 router = api_router(prefix="/v1/evidence", tags=["Evidence"])
 
 _COMMITTEE_AUTHORITY = {"Credit Head", "Management", "Admin"}
@@ -128,7 +130,9 @@ async def _enforce_subject_scope(ctx: RequestContext, subject_type: str, subject
             f"This {subject_type} is not in your scope; you may not operate on its evidence.")
 
 
-async def _verify_committee_decision(ctx: RequestContext, spec, payload: EvidenceIn):  # noqa: ANN001, ANN202
+async def _verify_committee_decision(ctx: RequestContext, spec, payload: EvidenceIn,  # noqa: ANN001, ANN202
+                                     authority: set[str] | None = None,
+                                     authority_label: str = "committee"):
     """Resolve ``decision_ref`` against the durable single-winner workflow-decision record and PROVE
     it authorises this governance evidence: it exists, its outcome matches the kind's required
     outcome, it is bound to THIS tenant + subject, and it was recorded by committee authority.
@@ -152,9 +156,9 @@ async def _verify_committee_decision(ctx: RequestContext, spec, payload: Evidenc
             or str(decision.subject_id) != str(payload.subject_id)):
         raise ValidationAppError(
             "The cited decision is for a different subject than this evidence.")
-    if not (set(decision.roles or []) & _COMMITTEE_AUTHORITY):
+    if not (set(decision.roles or []) & (authority or _COMMITTEE_AUTHORITY)):
         raise ValidationAppError(
-            "The cited decision was not recorded by committee authority.")
+            f"The cited decision was not recorded by {authority_label} authority.")
     return decision
 
 
@@ -266,6 +270,17 @@ async def attach_evidence(payload: EvidenceIn,
             raise ValidationAppError(
                 f"{payload.evidence_kind!r} is governance evidence and requires a sha256 digest.")
         decision = await _verify_committee_decision(ctx, spec, payload)
+        prov_workflow, prov_run = decision.workflow_id, decision.run_id
+        decision_ref = decision.workflow_id
+    elif spec.verify_source == "syndication":
+        # Syndication sanction: VERIFY against the durable syndication decision (Syn Head
+        # authority, subject-bound) and generate provenance from it.
+        if not payload.sha256:
+            raise ValidationAppError(
+                f"{payload.evidence_kind!r} is governance evidence and requires a sha256 digest.")
+        decision = await _verify_committee_decision(
+            ctx, spec, payload, authority=_SYNDICATION_AUTHORITY,
+            authority_label="syndication")
         prov_workflow, prov_run = decision.workflow_id, decision.run_id
         decision_ref = decision.workflow_id
     elif spec.verify_source == "cpcs":

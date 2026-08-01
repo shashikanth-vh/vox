@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Syndication lifecycle workflow (increment 5).** A mandate now runs end to end under
+  Temporal with the full foundation (run-control, SLA, spoof-proof decisions): versioned
+  IM circulation (`im_document` evidence v1..n), lender-level activity landing on the
+  deal's lender rows through the policy API (whitelisted; illegal moves refused + surfaced
+  as ops events), the Syn Head's decision as a new subject-bound `kind="syndication"`
+  decision record (Syn Head/Management/Admin authority; conditions supported), sanction
+  through a NEW Register evidence gate — a syndication mandate cannot reach 'Sanctioned'
+  until the verified `syndication_sanction` evidence is on file — and a validated lender
+  allocation (`syndication_allocation` evidence; over-allocation refused). New
+  `attach_syndication_evidence` operation (policy version 3.2) granted to the syndication
+  desk + workflow service. Orchestrator endpoints: syndications start, syndication-decision,
+  circulate-im, lender-update, allocate.
+
+
 - **Documents → CP/CS → Advaya completion (increment 4).** The maker-checker loops now go
   BOTH ways, and disbursement is tracked to the tranche: **CP/CS return-to-maker**
   (`POST /v1/internal/cpcs-checklists/{id}/return`, checker ≠ maker, reasons mandatory) —

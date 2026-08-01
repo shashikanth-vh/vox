@@ -9467,7 +9467,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (18 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (23 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Workflows",
@@ -9869,6 +9869,55 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/syndications \u2014 Start a syndication-mandate workflow (IM \u2192 decision \u2192 allocation)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/syndications",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "syndications"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"syndication_id\": \"sample\",\n  \"deal_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"im_reference\": \"sample\",\n  \"im_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"decision_timeout_hours\": 1,\n  \"allocation_timeout_hours\": 1.0\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/vox-touchpoints \u2014 Start (or attach to) a VOX touchpoint workflow",
               "request": {
                 "method": "POST",
@@ -9961,6 +10010,56 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/allocate \u2014 Record the post-sanction lender allocation on a syndication run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/allocate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "allocate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"allocations\": {},\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/{workflow_id}/approve \u2014 Approve a pending human-in-the-loop workflow",
               "request": {
                 "method": "POST",
@@ -10002,6 +10101,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/circulate-im \u2014 Circulate the (next version of the) IM on a syndication run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/circulate-im",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "circulate-im"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference\": \"sample\",\n  \"sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"by\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10212,6 +10361,56 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/lender-update \u2014 Record lender-level activity on a syndication run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/lender-update",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "lender-update"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lender_row_id\": \"sample\",\n  \"status\": \"sample\",\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/{workflow_id}/reject \u2014 Reject a pending human-in-the-loop workflow",
               "request": {
                 "method": "POST",
@@ -10354,6 +10553,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"lead_id\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/syndication-decision \u2014 Record the Syn Head's decision on a mandate (durable, then signal)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/syndication-decision",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "syndication-decision"
+                  ]
+                },
+                "description": "Same trust posture as the committee: fresh authority (Syn Head vertical),\nDURABLY recorded (single-winner, subject-bound, kind='syndication') BEFORE the run\nis signalled \u2014 the signal is only a wake-up the workflow verifies fail-closed.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"sanction_reference\": \"sample\",\n  \"conditions\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

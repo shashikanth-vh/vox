@@ -59,6 +59,7 @@ class EvidenceKindSpec(NamedTuple):
 
 
 _DEAL_LINE = frozenset({"Deal", "Lending"})
+_SYN = frozenset({"Syndication"})
 
 # The authoritative kind registry. Operations are defined in ``rbac.OPERATIONS`` and granted to the
 # committee / sanction / document / qualification authorities (and the workflow service) there.
@@ -101,6 +102,14 @@ EVIDENCE_KINDS: dict[str, EvidenceKindSpec] = {
     # the monitor files (an artefact for audit + reporting, not a lifecycle gate).
     "sanction_expired": EvidenceKindSpec("attach_committee_evidence", _DEAL_LINE, False),
     # Lead qualification review — attached by the qualification authority; not governance-grade.
+    # Syndication mandate lifecycle: the IM circulated to lenders (versioned artefact —
+    # every circulation stays on the record), the mandate's SANCTION (governance: verified
+    # against the recorded syndication decision), and the lender allocation summary.
+    "im_document": EvidenceKindSpec("attach_syndication_evidence", _SYN, False),
+    "syndication_sanction": EvidenceKindSpec("attach_syndication_evidence", _SYN, True,
+                                             decision_outcome="Approved",
+                                             verify_source="syndication"),
+    "syndication_allocation": EvidenceKindSpec("attach_syndication_evidence", _SYN, False),
     "lead_qualification": EvidenceKindSpec("attach_qualification_evidence",
                                            frozenset({"Lead"}), False),
     "lead_qualification_failed": EvidenceKindSpec("attach_qualification_evidence",

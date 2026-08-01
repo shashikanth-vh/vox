@@ -190,6 +190,29 @@ Every human-in-the-loop workflow shares one operational contract:
   `-r2` id with its own decision records; version = (run, credit-note version), all
   evidence-backed.
 
+## Syndication lifecycle (Release 1, increment 5)
+
+`POST /v1/workflows/syndications` starts a **SyndicationMandateWorkflow** for a
+syndication_tracker mandate row (`syndication_id` + `deal_id`), inheriting the full
+run-control + SLA foundation:
+
+* **IM circulation is versioned evidence** — the start request's `im_reference` (or a later
+  `POST /v1/workflows/{id}/circulate-im`) files `im_document` v1, v2, … on the mandate;
+  the first circulation walks the mandate to 'IM Circulated'.
+* **Lender-level activity** — `POST /v1/workflows/{id}/lender-update` moves ONE of the
+  deal's lender rows (whitelisted to the rows the run discovered); every move goes through
+  the Register's policy API, so an illegal transition is refused and surfaced as an ops
+  event, never a crashed run.
+* **The Syn Head's decision** — `POST /v1/workflows/{id}/syndication-decision` (approve /
+  reject + sanction reference + conditions), persist-before-signal as a `kind="syndication"`
+  decision (subject-bound, Syn Head/Management/Admin authority); the run verifies it
+  fail-closed. Approval files the VERIFIED `syndication_sanction` evidence — the mandate
+  reaches 'Sanctioned' only because the Register's evidence gate now passes.
+* **Allocation** — `POST /v1/workflows/{id}/allocate` records the post-sanction lender
+  split (validated: only the run's lender rows, sum ≤ the mandate amount), applied as
+  amount updates plus a `syndication_allocation` evidence record. A bounded window
+  (default 7 days) completes the run without one rather than blocking the sanction.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |

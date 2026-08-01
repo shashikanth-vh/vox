@@ -236,8 +236,33 @@ async def test_field_lock_enforced_on_the_real_syndication_route(client):
     sid = (await client.post("/v1/syndication",
                              json={"entity_id": eid, "status": "IM in Prep"})).json()["id"]
     await _advance(client, "syndication", sid,
-                   ["IM Circulated", "Queries Received", "IP Received", "Sanctioned"],
-                   amount_cr=100)
+                   ["IM Circulated", "Queries Received", "IP Received"])
+    # 'Sanctioned' is now evidence-gated (increment 5): seed the recorded syndication
+    # decision and file the verified sanction evidence, exactly like the real path.
+    import uuid as _uuid
+
+    from sqlalchemy import text as _text
+
+    from app.db.session import get_sessionmaker as _gsm
+    wf = f"synd-{_uuid.uuid4().hex[:12]}"
+    async with _gsm()() as _s:
+        await _s.execute(_text(
+            "INSERT INTO workflow_decisions (workflow_id, decision, subject_type, "
+            "subject_id, run_id, decided_by, decided_by_id, roles, tenant_id) "
+            "SELECT :wf, 'Approved', 'Syndication', CAST(:sid AS varchar), 'run-1', "
+            "'sh@evamfinance.com', 'u-9', CAST('[\"Syn Head\"]' AS jsonb), tenant_id "  # noqa: S608
+            "FROM syndication_tracker WHERE id = CAST(:sid AS uuid)"),
+            {"wf": wf, "sid": sid})
+        await _s.commit()
+    assert (await client.post("/v1/evidence", json={
+        "subject_type": "Syndication", "subject_id": sid,
+        "evidence_kind": "syndication_sanction", "reference": "syn/1",
+        "sha256": "a" * 64, "decision_ref": wf},
+        headers={"X-User-Email": "sh@evamfinance.com",
+                 "X-User-Roles": "Syn Head"})).status_code == 201
+    assert (await client.patch(f"/v1/syndication/{sid}",
+                               json={"status": "Sanctioned",
+                                     "amount_cr": 100})).status_code == 200
     # A line RM (passes scope via FULL) may NOT revise the committed amount at Sanctioned.
     rm_headers = {"X-User-Email": "synrm@evamfinance.com", "X-User-Roles": "Syn RM",
                   "X-Authz-Decision": "FULL"}

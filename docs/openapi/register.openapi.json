@@ -3654,7 +3654,7 @@
           },
           "kind": {
             "default": "lead_conversion",
-            "pattern": "^(lead_conversion|committee|control)$",
+            "pattern": "^(lead_conversion|committee|control|syndication)$",
             "title": "Kind",
             "type": "string"
           },

@@ -313,6 +313,48 @@ class DealStructuringResult:
 
 
 @dataclass
+class SyndicationMandateInput:
+    """Drive a syndication MANDATE (a syndication_tracker row) from IM preparation to
+    sanction and allocation. The mandate's status pipeline is enforced by the Register
+    (ordered transitions + the syndication_sanction evidence gate); lender-level activity
+    arrives as signals and lands on the deal's OTHER syndication rows — each move going
+    through the same policy-enforcing API, never a side-door write."""
+
+    syndication_id: str                 # the MANDATE row this run drives
+    deal_id: str
+    requested_by: str
+    # The IM circulated at start (optional — it can arrive later via the circulate signal).
+    im_reference: str = ""
+    im_sha256: str | None = None
+    decision_timeout_hours: int = 24 * 14
+    # After sanction, how long to wait for the lender allocation before completing without
+    # one (the allocation can still be recorded later by a fresh run / directly).
+    allocation_timeout_hours: float = 24.0 * 7
+    sla_reminder_hours: float = 24.0
+    sla_escalation_hours: float = 72.0
+    emit_search_attributes: bool = False
+    resumed_elapsed_hours: float = 0.0
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class SyndicationMandateResult:
+    workflow_id: str
+    syndication_id: str
+    # Sanctioned / Rejected / TimedOut / Cancelled — the BUSINESS outcome.
+    status: str
+    decided_by: str | None = None
+    im_version: int = 0                 # which IM circulation the decision was made on
+    # lender row id → allocated amount (₹ Cr); empty when the allocation window lapsed.
+    allocations: dict = field(default_factory=dict)
+    evidence_ids: list = field(default_factory=list)
+    note: str | None = None
+
+
+@dataclass
 class SanctionExpiryInput:
     """Watch a sanctioned facility's validity window. Started (abandoned child) by the
     structuring workflow when the committee set ``valid_days``: reminds ops before the

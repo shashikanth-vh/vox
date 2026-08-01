@@ -21,6 +21,7 @@ SERVICE_GRANTS: dict[str, set[str]] = {
                       # collection) file the evidence their milestones require — as the DESIGNATED
                       # service, bound to the authoritative workflow/decision at attach time.
                       "attach_committee_evidence", "attach_sanction_evidence",
+                      "attach_syndication_evidence",
                       "attach_document_evidence", "attach_qualification_evidence",
                       # CP/CS authoritative checklist maker-checker, and the Advaya handover
                       # (immutable package + stage advance). NOTE: attach_advaya_evidence is

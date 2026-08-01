@@ -640,6 +640,31 @@ async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str
 
 
 @activity.defn
+async def verify_syndication_decision(syndication_id: str,
+                                      caller: CallerContext | None = None) -> dict[str, Any]:
+    """The AUTHORITATIVE syndication decision for THIS run (persisted by the orchestrator
+    with Syn Head authority, single-winner, subject-bound). FAIL CLOSED exactly like the
+    committee verifier: no record / wrong subject / no terminal outcome → valid=False and
+    the run keeps waiting."""
+    from evam_register_client.errors import NotFoundError
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        try:
+            rec = await reg.get_decision(wf_id, request_id=wf_id)
+        except NotFoundError:
+            return {"valid": False, "reason": "no syndication decision recorded for this run"}
+    if (rec.get("subject_type") != "Syndication"
+            or str(rec.get("subject_id")) != str(syndication_id)):
+        return {"valid": False, "reason": "syndication decision is for a different subject"}
+    if rec.get("decision") not in ("Approved", "Rejected"):
+        return {"valid": False, "reason": "syndication decision has no terminal outcome"}
+    return {"valid": True, "outcome": rec.get("decision"), "decided_by": rec.get("decided_by"),
+            "note": rec.get("note"),
+            "sanction_reference": rec.get("committee_reference"),
+            "conditions": rec.get("conditions")}
+
+
+@activity.defn
 async def verify_facility_decisions(line_ids: list[str],
                                     caller: CallerContext | None = None) -> dict[str, Any]:
     """Read the PER-FACILITY committee outcomes the orchestrator persisted under

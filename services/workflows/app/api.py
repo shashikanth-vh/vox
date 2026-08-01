@@ -41,6 +41,7 @@ from temporalio.service import RPCError
 from app.codec import build_data_converter
 from app.config import get_settings
 from app.types import (
+    SyndicationMandateInput,
     AdvayaHandoffInput,
     CallerContext,
     CpcsChecklistInput,
@@ -51,6 +52,7 @@ from app.types import (
     VoxTouchpoint,
 )
 from app.workflows import (
+    SyndicationMandateWorkflow,
     AdvayaHandoffWorkflow,
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
@@ -72,6 +74,8 @@ _APPROVER_ROLES: dict[str, set[str]] = {
     "handover": {"Credit Head", "Management", "Admin"},
     # Approving a CP/CS checklist (the checker) — senior credit authority.
     "cpcs": {"Credit Head", "Management", "Admin"},
+    # The syndication desk's sanction call on a mandate.
+    "synd": {"Syn Head", "Management", "Admin"},
 }
 
 
@@ -147,6 +151,44 @@ class CompanyConfirmIn(BaseModel):
 class LeadSelectIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lead_id: str = Field(max_length=60)
+    by: str = Field(max_length=200)
+
+
+class SyndicationStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    syndication_id: str = Field(max_length=64)
+    deal_id: str = Field(max_length=64)
+    requested_by: str = Field(max_length=200)
+    im_reference: str = Field(default="", max_length=500)
+    im_sha256: str | None = Field(default=None, pattern="^[0-9a-fA-F]{64}$")
+    decision_timeout_hours: int = Field(default=24 * 14, ge=1, le=24 * 90)
+    allocation_timeout_hours: float = Field(default=24.0 * 7, ge=1, le=24 * 90)
+
+
+class SyndicationDecisionIn(BaseModel):
+    """The Syn Head's recorded decision on a mandate — persist-before-signal, like every
+    decision in the platform."""
+
+    model_config = ConfigDict(extra="forbid")
+    by: str = Field(max_length=200)
+    approved: bool
+    sanction_reference: str = Field(default="", max_length=500)
+    conditions: str | None = Field(default=None, max_length=4000)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class LenderUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lender_row_id: str = Field(max_length=64)
+    status: str = Field(max_length=40)
+    note: str = Field(default="", max_length=1000)
+    by: str = Field(max_length=200)
+
+
+class AllocationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # lender row id → allocated amount (₹ Cr); validated in-run against the mandate.
+    allocations: dict[str, float] = Field(min_length=1)
     by: str = Field(max_length=200)
 
 
@@ -1413,6 +1455,129 @@ def create_app() -> FastAPI:
                           ) -> Any:
         return await _deliver_confirmation(workflow_id, request, "select_lead",
                                            [payload.lead_id, payload.by], x_api_key)
+
+    @app.post("/v1/workflows/syndications", status_code=202, tags=["Workflows"],
+              summary="Start a syndication-mandate workflow (IM → decision → allocation)")
+    async def start_syndication(payload: SyndicationStartIn, request: Request,
+                                x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                ) -> Any:
+        return await _start_business(
+            request, x_api_key, payload.requested_by, SyndicationMandateWorkflow,
+            SyndicationMandateInput, "synd", payload.syndication_id,
+            {"syndication_id": payload.syndication_id, "subject_type": "Syndication",
+             "deal_id": payload.deal_id},
+            syndication_id=payload.syndication_id, deal_id=payload.deal_id,
+            requested_by=payload.requested_by, im_reference=payload.im_reference,
+            im_sha256=payload.im_sha256,
+            decision_timeout_hours=payload.decision_timeout_hours,
+            allocation_timeout_hours=payload.allocation_timeout_hours)
+
+    @app.post("/v1/workflows/{workflow_id}/syndication-decision", tags=["Workflows"],
+              summary="Record the Syn Head's decision on a mandate (durable, then signal)")
+    async def syndication_decision(workflow_id: str, payload: SyndicationDecisionIn,
+                                   request: Request,
+                                   x_api_key: str | None = Header(default=None,
+                                                                  alias="X-API-Key"),
+                                   ) -> Any:
+        """Same trust posture as the committee: fresh authority (Syn Head vertical),
+        DURABLY recorded (single-winner, subject-bound, kind='syndication') BEFORE the run
+        is signalled — the signal is only a wake-up the workflow verifies fail-closed."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        outcome = "Approved" if payload.approved else "Rejected"
+        decided_by, approver, _token, err = await _decider(
+            request, workflow_id, outcome, DecisionIn(by=payload.by, note=payload.note))
+        if err is not None:
+            return err
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict", "This run is no longer awaiting a decision.")
+        syndication_id = await desc.memo_value("syndication_id", None)
+        if not syndication_id:
+            return _problem(409, "Conflict", "This workflow has no bound mandate.")
+        _rec, err = await _persist_decision(
+            request, workflow_id, outcome, decided_by, payload.note, approver, None,
+            extra={"kind": "syndication", "subject_type": "Syndication",
+                   "subject_id": str(syndication_id), "run_id": desc.run_id,
+                   "committee_reference": payload.sanction_reference or workflow_id,
+                   "conditions": payload.conditions})
+        if err is not None:
+            return err
+        try:
+            await handle.signal("syndication_decision", args=[workflow_id])
+        except RPCError as exc:
+            log.warning("syndication_signal_failed", extra={"workflow": workflow_id,
+                                                            "error": exc.message})
+            return _problem(409, "Conflict",
+                            "The decision was recorded but the run closed before it could "
+                            "be delivered.")
+        log.info("syndication_decision", extra={"workflow": workflow_id,
+                                                "decision": outcome, "by": decided_by})
+        return {"workflow_id": workflow_id, "decision": outcome, "by": decided_by}
+
+    async def _deliver_signal(workflow_id: str, request: Request, signal: str, args: list,
+                              by_index: int, x_api_key: str | None) -> Any:
+        """Verified-identity signal delivery for the syndication run's business signals
+        (IM circulation / lender activity / allocation). The payload's effects all go
+        through the Register's policy-enforcing API from inside the run — the run is the
+        audit; the endpoint's job is identity, tenant binding and liveness."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        acted_by, err = await _verified_email(request, args[by_index] or "")
+        if err is not None:
+            return err
+        args[by_index] = acted_by
+        if (resp := _wf_tenant_denied(request, workflow_id)) is not None:
+            return resp
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict", "This run is closed.")
+        if _auth_enforced():
+            scope_err = await _status_scope_denied(request, workflow_id, desc, acted_by)
+            if scope_err is not None:
+                return scope_err
+        await handle.signal(signal, args=args)
+        log.info("workflow_signal", extra={"workflow": workflow_id, "signal": signal,
+                                           "by": acted_by})
+        return {"workflow_id": workflow_id, "delivered": signal, "by": acted_by}
+
+    @app.post("/v1/workflows/{workflow_id}/circulate-im", tags=["Workflows"],
+              summary="Circulate the (next version of the) IM on a syndication run")
+    async def circulate_im(workflow_id: str, payload: CreditNoteRevisionIn,
+                           request: Request,
+                           x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                           ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "circulate_im",
+            [payload.reference, payload.sha256 or "", payload.by], 2, x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/lender-update", tags=["Workflows"],
+              summary="Record lender-level activity on a syndication run")
+    async def lender_update(workflow_id: str, payload: LenderUpdateIn, request: Request,
+                            x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                            ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "lender_update",
+            [payload.lender_row_id, payload.status, payload.note, payload.by], 3, x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/allocate", tags=["Workflows"],
+              summary="Record the post-sanction lender allocation on a syndication run")
+    async def allocate(workflow_id: str, payload: AllocationIn, request: Request,
+                       x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                       ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "allocate",
+            [payload.allocations, payload.by], 1, x_api_key)
 
     @app.post("/v1/workflows/{workflow_id}/revise-credit-note", tags=["Workflows"],
               summary="Circulate a revised credit note to the committee (rework loop)")

@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.workflows import (
     AdvayaHandoffWorkflow,
     SanctionExpiryMonitorWorkflow,
+    SyndicationMandateWorkflow,
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
@@ -59,7 +60,7 @@ async def main() -> None:
                    LeadConversionWorkflow, LeadQualificationWorkflow,
                    DealStructuringWorkflow, DocumentCollectionWorkflow,
                    AdvayaHandoffWorkflow, CpcsChecklistWorkflow,
-                   SanctionExpiryMonitorWorkflow],
+                   SanctionExpiryMonitorWorkflow, SyndicationMandateWorkflow],
         activities=[
             activities.write_interaction, activities.fetch_dossier,
             # VOX touchpoint set
@@ -81,6 +82,7 @@ async def main() -> None:
             activities.attach_evidence, activities.advance_stage, activities.get_resource,
             activities.verify_committee_decision,
             activities.verify_facility_decisions,  # per-facility committee outcomes
+            activities.verify_syndication_decision,
             activities.find_lines_for_deal,       # a deal's product lines (sanction fan-out)
             activities.update_fields,             # plain data update, no lifecycle change
             activities.prepare_cpcs_checklist,   # authoritative CP/CS checklist (maker)

@@ -86,6 +86,30 @@
         "title": "AdvayaHandoverIn",
         "type": "object"
       },
+      "AllocationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "allocations": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "minProperties": 1,
+            "title": "Allocations",
+            "type": "object"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allocations",
+          "by"
+        ],
+        "title": "AllocationIn",
+        "type": "object"
+      },
       "ChecklistItemIn": {
         "additionalProperties": false,
         "description": "One qualification checklist RESULT from the caller. The item definitions (which keys\nexist, which are required) come from deployment config \u2014 the caller only says what\npassed; unknown keys are refused at merge time.",
@@ -926,6 +950,149 @@
           "by"
         ],
         "title": "LeadSelectIn",
+        "type": "object"
+      },
+      "LenderUpdateIn": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "lender_row_id": {
+            "maxLength": 64,
+            "title": "Lender Row Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "maxLength": 40,
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lender_row_id",
+          "status",
+          "by"
+        ],
+        "title": "LenderUpdateIn",
+        "type": "object"
+      },
+      "SyndicationDecisionIn": {
+        "additionalProperties": false,
+        "description": "The Syn Head's recorded decision on a mandate \u2014 persist-before-signal, like every\ndecision in the platform.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "sanction_reference": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Sanction Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "approved"
+        ],
+        "title": "SyndicationDecisionIn",
+        "type": "object"
+      },
+      "SyndicationStartIn": {
+        "additionalProperties": false,
+        "properties": {
+          "allocation_timeout_hours": {
+            "default": 168.0,
+            "maximum": 2160.0,
+            "minimum": 1.0,
+            "title": "Allocation Timeout Hours",
+            "type": "number"
+          },
+          "deal_id": {
+            "maxLength": 64,
+            "title": "Deal Id",
+            "type": "string"
+          },
+          "decision_timeout_hours": {
+            "default": 336,
+            "maximum": 2160.0,
+            "minimum": 1.0,
+            "title": "Decision Timeout Hours",
+            "type": "integer"
+          },
+          "im_reference": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Im Reference",
+            "type": "string"
+          },
+          "im_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Im Sha256"
+          },
+          "requested_by": {
+            "maxLength": 200,
+            "title": "Requested By",
+            "type": "string"
+          },
+          "syndication_id": {
+            "maxLength": 64,
+            "title": "Syndication Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "syndication_id",
+          "deal_id",
+          "requested_by"
+        ],
+        "title": "SyndicationStartIn",
         "type": "object"
       },
       "ValidationError": {
@@ -1770,6 +1937,65 @@
         ]
       }
     },
+    "/v1/workflows/syndications": {
+      "post": {
+        "operationId": "start_syndication_v1_workflows_syndications_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyndicationStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Start Syndication V1 Workflows Syndications Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start a syndication-mandate workflow (IM \u2192 decision \u2192 allocation)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/vox-touchpoints": {
       "post": {
         "operationId": "start_vox_v1_workflows_vox_touchpoints_post",
@@ -1899,6 +2125,74 @@
         ]
       }
     },
+    "/v1/workflows/{workflow_id}/allocate": {
+      "post": {
+        "operationId": "allocate_v1_workflows__workflow_id__allocate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllocationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Allocate V1 Workflows  Workflow Id  Allocate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record the post-sanction lender allocation on a syndication run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/{workflow_id}/approve": {
       "post": {
         "operationId": "approve_v1_workflows__workflow_id__approve_post",
@@ -1962,6 +2256,74 @@
           }
         },
         "summary": "Approve a pending human-in-the-loop workflow",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/circulate-im": {
+      "post": {
+        "operationId": "circulate_im_v1_workflows__workflow_id__circulate_im_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditNoteRevisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Circulate Im V1 Workflows  Workflow Id  Circulate Im Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Circulate the (next version of the) IM on a syndication run",
         "tags": [
           "Workflows"
         ]
@@ -2240,6 +2602,74 @@
         ]
       }
     },
+    "/v1/workflows/{workflow_id}/lender-update": {
+      "post": {
+        "operationId": "lender_update_v1_workflows__workflow_id__lender_update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LenderUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Lender Update V1 Workflows  Workflow Id  Lender Update Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record lender-level activity on a syndication run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/{workflow_id}/reject": {
       "post": {
         "operationId": "reject_v1_workflows__workflow_id__reject_post",
@@ -2440,6 +2870,75 @@
           }
         },
         "summary": "Answer a multi-lead selection on a parked VOX capture",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/syndication-decision": {
+      "post": {
+        "description": "Same trust posture as the committee: fresh authority (Syn Head vertical),\nDURABLY recorded (single-winner, subject-bound, kind='syndication') BEFORE the run\nis signalled \u2014 the signal is only a wake-up the workflow verifies fail-closed.",
+        "operationId": "syndication_decision_v1_workflows__workflow_id__syndication_decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyndicationDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Syndication Decision V1 Workflows  Workflow Id  Syndication Decision Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record the Syn Head's decision on a mandate (durable, then signal)",
         "tags": [
           "Workflows"
         ]

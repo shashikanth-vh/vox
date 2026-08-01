@@ -13,9 +13,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from tests.test_handover import ADMIN, CREDIT_HEAD, _entity, _prepare_body, _ready_lending
 
 from app.core.config import get_settings
+from tests.test_handover import ADMIN, CREDIT_HEAD, _entity, _prepare_body, _ready_lending
 
 pytestmark = pytest.mark.asyncio
 

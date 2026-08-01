@@ -205,6 +205,7 @@ def build_mock() -> FastAPI:
 
     # -- Lending lines + Advaya handoffs (disbursement leg) -----------------
     app.state.lending = {}          # id -> lending row
+    app.state.syndication = {}      # id -> syndication row (mandate + lender rows)
     app.state.handoffs = {}         # handoff_key -> authoritative handoff record
     app.state.handover_packages = {}  # lending_id -> handover package
 
@@ -295,6 +296,49 @@ def build_mock() -> FastAPI:
         row = {"id": uuid.uuid4().hex, **body}
         app.state.handoffs[hk] = row
         return row
+
+    @app.get("/v1/syndication")
+    async def list_syndication(request: Request):
+        rows = list(app.state.syndication.values())
+        did = request.query_params.get("deal_id")
+        if did:
+            rows = [r for r in rows if str(r.get("deal_id")) == did]
+        return {"items": rows, "next_cursor": None}
+
+    @app.get("/v1/syndication/{sid}")
+    async def get_syndication(sid: str):
+        row = app.state.syndication.get(sid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no syndication", "request_id": None}}, status_code=404)
+        return row
+
+    @app.patch("/v1/syndication/{sid}")
+    async def patch_syndication(sid: str, request: Request):
+        from evam_backend_core import policy as core_policy
+        body = await request.json()
+        row = app.state.syndication.get(sid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no syndication", "request_id": None}}, status_code=404)
+        # Mirror the REAL Register: lifecycle writes go through the shared policy engine
+        # (ordered transitions + the syndication_sanction evidence gate).
+        if "status" in body and body["status"] != row.get("status"):
+            have = {e["evidence_kind"] for e in app.state.evidence
+                    if e["subject_type"] == "Syndication" and e["subject_id"] == sid}
+            v = core_policy.check_write(
+                "Syndication", current=row, changes={"status": body["status"]},
+                roles=None, evidence=have)
+            if v is not None:
+                return JSONResponse(
+                    {"error": {"type": "validation_failed", "title": "refused",
+                               "status": 422, "detail": v.message, "request_id": None}},
+                    status_code=422)
+        app.state.syndication[sid] = {**row, **body,
+                                      "version": int(row.get("version", 1)) + 1}
+        return app.state.syndication[sid]
 
     @app.get("/v1/lending")
     async def list_lending(request: Request):
