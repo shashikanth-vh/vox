@@ -102,6 +102,13 @@ async def register_document(
         data["uploaded_at"] = datetime.now(UTC)
     if not data.get("status"):
         data["status"] = "On File"
+    # Defense in depth for the multipart upload path (which bypasses DocumentCreate):
+    # lifecycle statuses are outcomes of the validate/reject/replace endpoints, never a
+    # registration input.
+    try:
+        s._direct_document_status(str(data["status"]))
+    except ValueError as exc:
+        raise ValidationAppError(str(exc)) from None
 
     _resolve_bytes(data)
     return await _repo.create(session, tenant_id, actor, data)

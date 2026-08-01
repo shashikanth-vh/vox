@@ -23,6 +23,7 @@ from app.workflows import (
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
+    DocumentExpiryMonitorWorkflow,
     IngestInteractionWorkflow,
     LeadConversionWorkflow,
     LeadQualificationWorkflow,
@@ -62,7 +63,7 @@ async def main() -> None:
                    DealStructuringWorkflow, DocumentCollectionWorkflow,
                    AdvayaHandoffWorkflow, CpcsChecklistWorkflow,
                    SanctionExpiryMonitorWorkflow, SyndicationMandateWorkflow,
-                   AssetMonetisationWorkflow],
+                   AssetMonetisationWorkflow, DocumentExpiryMonitorWorkflow],
         activities=[
             activities.write_interaction, activities.fetch_dossier,
             # VOX touchpoint set
@@ -94,6 +95,9 @@ async def main() -> None:
             # Release-1 foundation: run-control verification + operational events.
             activities.verify_control,
             activities.emit_operational_event,
+            # Increment 7: first-class calendar events + the document-expiry sweep.
+            activities.create_calendar_event,
+            activities.sweep_document_expiry,
         ],
     )
     log.info("worker_started",

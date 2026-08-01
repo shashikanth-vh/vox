@@ -233,6 +233,44 @@ asset_monetisation mandate row, mirroring the syndication pattern:
   Register's evidence gate passes; rejection is a LOST mandate ('Dropped', reason on
   record).
 
+## Calendar, notifications & document expiry (Release 1, increment 7)
+
+Increment 7 upgrades the increment-1 ops seam into a real notification service, gives
+follow-ups a first-class calendar, and puts document validity on a clock.
+
+* **Durable notifications with retry** (`WORKFLOWS_NOTIFICATIONS_ENABLED=true`) — every
+  operational event that names recipients (SLA reminders/escalations, decision timeouts,
+  sanction and document expiries) ALSO lands as a durable row in the Register's
+  notification store. That row IS the in-app inbox (`GET /v1/notifications` on the
+  Register, recipient-scoped, mark-read), and it anchors one delivery-outbox row per
+  configured external channel (`WORKFLOWS_NOTIFY_CHANNELS`, subset of
+  `email,sms,webhook`). The **notifier** daemon (`python -m app.notifier` — its own
+  compose service / Helm deployment) claims due deliveries (lease + fencing token,
+  `SKIP LOCKED`) and drives each to `delivered`, `retry` (exponential backoff
+  base·2^(n−1), capped) or `dead` after `WORKFLOWS_NOTIFIER_MAX_ATTEMPTS`. Dead letters
+  stay recoverable via the audited Admin redrive endpoint. Creation is idempotent per
+  occurrence (dedupe key), so activity retries can never double-notify. Channel
+  transports: SMTP (`WORKFLOWS_SMTP_*`), a provider-agnostic SMS hook
+  (`WORKFLOWS_SMS_WEBHOOK_URL`), and a JSON webhook (`WORKFLOWS_NOTIFY_WEBHOOK_URL`,
+  falling back to the ops webhook).
+* **First-class calendar events** (`WORKFLOWS_CALENDAR_EVENTS_ENABLED=true`) — a VOX
+  capture with a next-meeting date creates a real `calendar_events` row in the Register
+  (idempotent per run, organised by the owning RM) instead of only the `meta.calendar`
+  hand-off note. The Register API carries the full lifecycle: create, reschedule
+  (in-place, audited), `/cancel` (note mandatory) and `/complete`; terminal rows are
+  frozen by a DB trigger.
+* **Document expiry monitoring** — `POST /v1/internal/monitors/document-expiry` starts
+  ONE `DocumentExpiryMonitorWorkflow` per tenant (id `doc-expiry-{tenant}`; idempotent —
+  a second start attaches). Every `WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS` it runs the
+  Register's idempotent expiry sweep: documents whose `expires_on` lapsed are marked
+  'Expired' (audited) and raise a **critical** event + notifications to the uploader and
+  the monitor's ops recipients; documents entering the
+  `WORKFLOWS_DOC_EXPIRY_WARN_DAYS` window get a warning (deduped to one per document).
+  The monitor observes and records — replacing or re-validating an expired document is a
+  human call, made through the Register's `/validate`, `/reject` and `/replace` document
+  endpoints (maker≠checker, mandatory rejection reasons, superseded-chain replacement).
+  `sweep_now` / `stop` signals give ops manual control.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |
@@ -243,5 +281,14 @@ asset_monetisation mandate row, mirroring the syndication pattern:
 | `WORKFLOWS_REGISTER_API_KEY` | `dev-local-key` | Must be in `REGISTER_API_KEYS` |
 | `WORKFLOWS_REGISTER_TENANT` | `EVAM` | Tenant the workflows act on |
 | `WORKFLOWS_LOG_LEVEL` / `WORKFLOWS_LOG_JSON` | `INFO` / `true` | Structured logging |
+| `WORKFLOWS_NOTIFICATIONS_ENABLED` | `false` | Ops events with recipients also become durable notifications |
+| `WORKFLOWS_NOTIFY_CHANNELS` | `` | External channels: subset of `email,sms,webhook` |
+| `WORKFLOWS_SMTP_HOST` / `_PORT` / `_FROM` / `_USERNAME` / `_PASSWORD` / `_STARTTLS` | — | The email channel's SMTP relay |
+| `WORKFLOWS_SMS_WEBHOOK_URL` | `` | Provider-agnostic SMS hook (`POST {to, body, event}`) |
+| `WORKFLOWS_NOTIFY_WEBHOOK_URL` | `` | Webhook channel target (falls back to the ops webhook) |
+| `WORKFLOWS_NOTIFIER_INTERVAL_SECONDS` / `_BATCH` / `_LEASE_SECONDS` | `30` / `50` / `60` | The notifier sweep's claim cadence |
+| `WORKFLOWS_NOTIFIER_MAX_ATTEMPTS` / `_BACKOFF_BASE_SECONDS` / `_BACKOFF_CAP_SECONDS` | `8` / `60` / `3600` | Retry → dead-letter policy |
+| `WORKFLOWS_CALENDAR_EVENTS_ENABLED` | `false` | VOX follow-ups create first-class calendar events |
+| `WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS` / `_WARN_DAYS` | `24` / `7` | Document-expiry monitor defaults |
 
 See [`BACKEND_STANDARDS.md`](../../BACKEND_STANDARDS.md) for the shared conventions.

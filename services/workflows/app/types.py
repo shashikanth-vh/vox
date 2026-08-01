@@ -122,6 +122,10 @@ class VoxTouchpoint:
     # How long a parked run waits for its confirmation before failing loudly.
     confirmation_timeout_hours: float = 72.0
     state: str | None = None
+    # ---- Release-1 increment 7 (flag-set by the orchestrator from settings): create a
+    # first-class Register calendar event for next_meeting_date (idempotent per run),
+    # in addition to the meta.calendar hand-off note on the interaction.
+    create_calendar_event: bool = False
 
     # The tenant + human this capture acts for (set by the orchestrator from the request).
     caller: CallerContext = field(default_factory=CallerContext)
@@ -418,6 +422,40 @@ class SanctionExpiryResult:
     status: str                         # Progressed / Expired
     stage_at_close: str | None = None
     evidence_id: str | None = None
+
+
+@dataclass
+class DocumentExpiryInput:
+    """The tenant-wide document-expiry monitor (increment 7): a long-running loop that
+    periodically runs the Register's expiry sweep, raises an ops event + durable
+    notifications for every document that LAPSED, and warns the owners of documents
+    ENTERING the warn window. One run per tenant (workflow id ``doc-expiry-{tenant}``);
+    continue-as-new keeps the history bounded."""
+
+    # Sweep cadence and the warn-ahead window (defaults come from settings via the
+    # orchestrator; pinned into the input so a running monitor is deterministic).
+    interval_hours: float = 24.0
+    warn_days: int = 7
+    # Who to notify (ops inbox / DL). The sweep also notifies each document's uploader.
+    notify: list = field(default_factory=list)
+    # Iterations before continue-as-new (bounds history; ~6 months at daily cadence).
+    max_iterations: int = 180
+    emit_search_attributes: bool = False
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class DocumentExpiryResult:
+    """Returned only when the monitor is STOPPED (signal) — the loop otherwise
+    continues-as-new forever."""
+
+    workflow_id: str
+    sweeps: int = 0
+    expired_total: int = 0
+    warned_total: int = 0
 
 
 @dataclass

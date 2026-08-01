@@ -34,6 +34,36 @@ foundation:
   voxConfirmLeadSelection: false
   # Deployment-wide qualification checklist definitions (JSON list; empty = legacy flag).
   qualificationChecklist: ""
+  # Increment 7: VOX captures with a next-meeting date create a first-class Register
+  # calendar event (per-run idempotent) instead of only the meta.calendar note.
+  calendarEventsEnabled: false
+  # Defaults for the per-tenant document-expiry monitor (started via the orchestrator's
+  # POST /v1/internal/monitors/document-expiry).
+  docExpiryIntervalHours: 24
+  docExpiryWarnDays: 7
+
+# Increment 7: durable notifications. When enabled, workflow ops events that name
+# recipients also land as in-app inbox rows in the Register, fanning out to the listed
+# external channels; the notifier deployment drives delivery with retry + dead-letter.
+notifications:
+  enabled: false
+  # Comma-separated subset of "email,sms,webhook" (in-app is implicit).
+  channels: ""
+  smtpHost: ""
+  smtpPort: 587
+  smtpFrom: "prism@evamfinance.com"
+  smtpUsername: ""
+  smtpPassword: ""            # prefer a Secret in production
+  smsWebhookUrl: ""
+  webhookUrl: ""
+
+# The notification delivery sweep (`python -m app.notifier`). Safe to run always —
+# with notifications disabled there is nothing to claim.
+notifier:
+  enabled: true
+  replicaCount: 1
+  intervalSeconds: 30
+  maxAttempts: 8
 
 register:
   baseUrl: http://prism-register        # the Register Service (umbrella release)

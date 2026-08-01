@@ -75,6 +75,17 @@ def _wait_healthy(port: int, timeout: float = 30.0) -> None:
     raise RuntimeError(f"service on :{port} did not become healthy")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_settings() -> Iterator[None]:
+    """Ordering-independence: a test that patches env + rebuilds the settings cache
+    (e.g. the require_auth enforcement tests) must never leak its cached Settings into
+    the next test — a stale REQUIRE_AUTH=true turns every later proxy test into a 401."""
+    from app.config import get_settings
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def stack() -> Iterator[None]:
     # Pure-ASGI tests (auth gate short-circuits before any upstream) can run without

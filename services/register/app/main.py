@@ -11,13 +11,16 @@ from evam_backend_core.app import create_service_app
 from fastapi import FastAPI
 
 from app.api.advaya import router as advaya_router
+from app.api.calendar import router as calendar_router
 from app.api.cpcs import router as cpcs_router
 from app.api.custom import router as custom_router
 from app.api.decisions import router as decisions_router
+from app.api.documents_lifecycle import router as documents_lifecycle_router
 from app.api.evidence import router as evidence_router
 from app.api.export import router as export_router
 from app.api.handover import router as handover_router
 from app.api.imports import router as import_router
+from app.api.notifications import router as notifications_router
 from app.api.rbac import router as rbac_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
@@ -54,6 +57,9 @@ def create_app() -> FastAPI:
         cpcs_router,
         handover_router,
         tranches_router,
+        calendar_router,
+        documents_lifecycle_router,
+        notifications_router,
         reconciliation_router,
         evidence_router,
         build_resource_router(),

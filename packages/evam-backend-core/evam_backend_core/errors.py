@@ -111,6 +111,18 @@ def register_exception_handlers(app) -> None:  # noqa: ANN001 - FastAPI app
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> ORJSONResponse:
+        # Pydantic embeds the RAW exception object in ``ctx`` for value_error entries
+        # (e.g. a ValueError raised inside a field_validator); orjson cannot serialize
+        # that, which would turn a clean 422 into a 500. Stringify non-JSON ctx values.
+        def _clean(err: dict) -> dict:
+            ctx = err.get("ctx")
+            if isinstance(ctx, dict):
+                err = {**err, "ctx": {
+                    k: (v if isinstance(v, (str, int, float, bool, list, dict,
+                                            type(None))) else str(v))
+                    for k, v in ctx.items()}}
+            return err
+
         return ORJSONResponse(
             status_code=422,
             content=_payload(
@@ -118,7 +130,7 @@ def register_exception_handlers(app) -> None:  # noqa: ANN001 - FastAPI app
                 "validation_error",
                 "Validation failed",
                 "One or more fields are invalid.",
-                errors=exc.errors(),
+                errors=[_clean(e) for e in exc.errors()],
             ),
         )
 

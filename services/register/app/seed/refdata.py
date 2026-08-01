@@ -98,7 +98,10 @@ REF_VALUES: dict[str, list[str]] = {
         "KYC & Constitutional", "Financials", "Banking & Debt",
         "Compliance & Bureau", "Project & Technical", "Deal Documents",
     ],
-    "Document Status": ["On File", "Pending", "Waived", "Rejected", "Superseded"],
+    "Document Status": ["On File", "Pending", "Verified", "Waived", "Rejected",
+                        "Superseded", "Expired"],
+    "Calendar Event Status": ["Scheduled", "Completed", "Cancelled"],
+    "Notification Severity": ["info", "warning", "critical"],
     # RBAC (ATLAS RBAC v3.1) — role catalogue + assignment capacities.
     "RBAC Role": [
         "Admin", "Management", "BD Head", "Credit Head", "Syn Head", "AM Head",

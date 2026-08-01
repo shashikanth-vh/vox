@@ -381,6 +381,356 @@
       ]
     },
     {
+      "name": "Calendar",
+      "item": [
+        {
+          "name": "GET /v1/calendar-events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events"
+              ],
+              "query": [
+                {
+                  "key": "organizer",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "subject_type",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "subject_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "workflow_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "from_ts",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to_ts",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/calendar-events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendees\": [\n    \"sample attendees\"\n  ],\n  \"description\": \"sample description\",\n  \"ends_at\": \"2026-03-31T10:00:00Z\",\n  \"external_ref\": \"sample external_ref\",\n  \"location\": \"sample location\",\n  \"organizer\": \"sample organizer\",\n  \"source\": \"sample source\",\n  \"starts_at\": \"2026-03-31T10:00:00Z\",\n  \"subject_id\": \"{{id}}\",\n  \"subject_type\": \"sample subject_type\",\n  \"title\": \"sample title\",\n  \"workflow_id\": \"{{id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/calendar-events/{{event_id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events",
+                "{{event_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/calendar-events/{{event_id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events",
+                "{{event_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendees\": [\n    \"sample attendees\"\n  ],\n  \"description\": \"sample description\",\n  \"ends_at\": \"2026-03-31T10:00:00Z\",\n  \"external_ref\": \"sample external_ref\",\n  \"location\": \"sample location\",\n  \"starts_at\": \"2026-03-31T10:00:00Z\",\n  \"title\": \"sample title\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/calendar-events/{{event_id}}/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events",
+                "{{event_id}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/calendar-events/{{event_id}}/complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "calendar-events",
+                "{{event_id}}",
+                "complete"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Contracts & Assets",
       "item": [
         {
@@ -1471,7 +1821,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1682,7 +2032,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1893,7 +2243,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2427,7 +2777,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2526,6 +2876,171 @@
                 "{{doc_id}}",
                 "content"
               ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "reject"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/replace",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/replace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "replace"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/validate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "validate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expires_on\": \"2026-03-31\",\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -2661,7 +3176,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2861,7 +3376,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3072,7 +3587,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3283,7 +3798,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3494,7 +4009,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6606,6 +7121,61 @@
           }
         },
         {
+          "name": "POST /v1/internal/documents/expiry-sweep",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/documents/expiry-sweep",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "documents",
+                "expiry-sweep"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"limit\": 1,\n  \"warn_days\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/internal/handover-packages",
           "request": {
             "method": "POST",
@@ -6849,6 +7419,272 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"advaya_reference\": \"sample advaya_reference\",\n  \"amount\": 1.0,\n  \"disbursed_on\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"tranche_ref\": \"sample tranche_ref\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/internal/notifications",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "notifications"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"sample body\",\n  \"channels\": [\n    \"sample channels\"\n  ],\n  \"dedupe_key\": \"sample dedupe_key\",\n  \"event\": \"sample event\",\n  \"meta\": {},\n  \"recipient\": \"sample recipient\",\n  \"recipient_role\": \"sample recipient_role\",\n  \"severity\": \"sample severity\",\n  \"sms_to\": \"sample sms_to\",\n  \"subject_id\": \"{{id}}\",\n  \"subject_type\": \"sample subject_type\",\n  \"title\": \"sample title\",\n  \"webhook_url\": \"sample webhook_url\",\n  \"workflow_id\": \"{{id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/internal/notifications/deliveries/claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/claim",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "notifications",
+                "deliveries",
+                "claim"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lease_seconds\": 1,\n  \"limit\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/internal/notifications/deliveries/stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "notifications",
+                "deliveries",
+                "stats"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/internal/notifications/deliveries/{{delivery_id}}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/{{delivery_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "notifications",
+                "deliveries",
+                "{{delivery_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"backoff_seconds\": 1,\n  \"claim_token\": \"sample claim_token\",\n  \"error\": \"sample error\",\n  \"status\": \"sample status\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/internal/notifications/deliveries/{{delivery_id}}/redrive",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/{{delivery_id}}/redrive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "notifications",
+                "deliveries",
+                "{{delivery_id}}",
+                "redrive"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"sample reason\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7923,6 +8759,110 @@
                 "monitoring",
                 "{{{id}}}",
                 "restore"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "GET /v1/notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "unread_only",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "recipient",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/notifications/{{notification_id}}/read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/notifications/{{notification_id}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "notifications",
+                "{{notification_id}}",
+                "read"
               ]
             }
           }

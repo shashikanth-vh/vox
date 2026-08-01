@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.base import CreateModel, ReadModel, UpdateModel
 
@@ -946,6 +946,22 @@ class MonitoringRead(ReadModel):
 # --------------------------------------------------------------------------- #
 # Documents (the catalog behind ATLAS's "Data Register")
 # --------------------------------------------------------------------------- #
+# Lifecycle statuses (Verified / Rejected / Superseded / Expired) are OUTCOMES, minted
+# only by the dedicated /validate /reject /replace endpoints and the internal expiry
+# sweep — never set directly through the generic create/update payloads.
+_DIRECT_DOCUMENT_STATUSES = {"On File", "Pending", "Waived"}
+
+
+def _direct_document_status(v: str) -> str:
+    if v not in _DIRECT_DOCUMENT_STATUSES:
+        raise ValueError(
+            f"status {v!r} cannot be set directly; lifecycle statuses are reached via "
+            "the validate/reject/replace endpoints (or the expiry sweep). "
+            f"Directly settable: {sorted(_DIRECT_DOCUMENT_STATUSES)}."
+        )
+    return v
+
+
 class DocumentCreate(CreateModel):
     # subject_type/subject_id are optional here because the nested endpoints
     # (/v1/<subject>/{id}/documents) inject them from the path; the generic
@@ -973,6 +989,14 @@ class DocumentCreate(CreateModel):
     uploaded_at: datetime | None = None
     notes: str | None = None
     meta: dict[str, Any] | None = None
+    # Validity window (e.g. an insurance policy or sanction letter): the expiry sweep
+    # marks the document 'Expired' once this date lapses.
+    expires_on: date | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _status_settable(cls, v: str) -> str:
+        return _direct_document_status(v)
 
 
 class DocumentUpdate(UpdateModel):
@@ -990,6 +1014,12 @@ class DocumentUpdate(UpdateModel):
     original_filename: str | None = Field(default=None, max_length=300)
     notes: str | None = None
     meta: dict[str, Any] | None = None
+    expires_on: date | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _status_settable(cls, v: str | None) -> str | None:
+        return None if v is None else _direct_document_status(v)
 
 
 class DocumentRead(ReadModel):
@@ -1013,6 +1043,11 @@ class DocumentRead(ReadModel):
     uploaded_at: datetime | None
     notes: str | None
     meta: dict[str, Any] | None
+    expires_on: date | None = None
+    verified_by: str | None = None
+    verified_at: datetime | None = None
+    status_note: str | None = None
+    superseded_by: uuid.UUID | None = None
     # inline_content (the raw bytes) is intentionally NOT exposed here — fetch it from
     # GET /v1/documents/{id}/content.
 

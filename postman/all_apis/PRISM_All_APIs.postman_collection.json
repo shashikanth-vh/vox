@@ -6,7 +6,7 @@
   },
   "item": [
     {
-      "name": "Register  (190 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (207 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -350,6 +350,315 @@
                       "disabled": true
                     }
                   ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Calendar",
+          "item": [
+            {
+              "name": "POST /v1/calendar-events \u2014 Schedule a meeting / follow-up",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"sample\",\n  \"starts_at\": \"2026-01-31T10:00:00Z\",\n  \"ends_at\": \"2026-01-31T10:00:00Z\",\n  \"description\": \"sample\",\n  \"location\": \"sample\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"organizer\": \"sample\",\n  \"attendees\": [\n    \"sample\"\n  ],\n  \"source\": \"REPLACE-to-match-^(manual|VOX|workflo\",\n  \"workflow_id\": \"sample\",\n  \"external_ref\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/calendar-events \u2014 List calendar events (mine by default)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events"
+                  ],
+                  "query": [
+                    {
+                      "key": "organizer",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "subject_type",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "subject_id",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "workflow_id",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "from_ts",
+                      "value": "2026-01-31T10:00:00Z",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to_ts",
+                      "value": "2026-01-31T10:00:00Z",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/calendar-events/{event_id} \u2014 One calendar event",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events",
+                    "{{event_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PATCH /v1/calendar-events/{event_id} \u2014 Update / reschedule a Scheduled event",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events",
+                    "{{event_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"sample\",\n  \"starts_at\": \"2026-01-31T10:00:00Z\",\n  \"ends_at\": \"2026-01-31T10:00:00Z\",\n  \"description\": \"sample\",\n  \"location\": \"sample\",\n  \"attendees\": [\n    \"sample\"\n  ],\n  \"external_ref\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/calendar-events/{event_id}/cancel \u2014 Cancel a Scheduled event (note mandatory)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events",
+                    "{{event_id}}",
+                    "cancel"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/calendar-events/{event_id}/complete \u2014 Mark a Scheduled event completed",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/calendar-events/{{event_id}}/complete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "calendar-events",
+                    "{{event_id}}",
+                    "complete"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             }
@@ -1362,7 +1671,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1539,7 +1848,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1716,7 +2025,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2129,7 +2438,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2277,6 +2586,153 @@
               }
             },
             {
+              "name": "POST /v1/documents/{doc_id}/reject \u2014 Reject a document (checker \u2260 uploader, reasons mandatory)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "documents",
+                    "{{doc_id}}",
+                    "reject"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/documents/{doc_id}/replace \u2014 Replace a document (old \u2192 Superseded, chained to the successor)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/replace",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "documents",
+                    "{{doc_id}}",
+                    "replace"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/documents/{doc_id}/validate \u2014 Verify a document (checker \u2260 uploader)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/validate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "documents",
+                    "{{doc_id}}",
+                    "validate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\",\n  \"expires_on\": \"2026-01-31\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "GET /v1/documents/{obj_id} \u2014 Get document",
               "request": {
                 "method": "GET",
@@ -2362,7 +2818,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2580,7 +3036,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2757,7 +3213,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2934,7 +3390,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3111,7 +3567,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {}\n}",
+                  "raw": "{\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"{{id}}\",\n  \"section\": \"sample\",\n  \"slot_key\": \"sample\",\n  \"doc_type\": \"sample\",\n  \"title\": \"sample\",\n  \"is_required\": false,\n  \"status\": \"sample\",\n  \"storage_uri\": \"sample\",\n  \"storage_backend\": \"sample\",\n  \"content_type\": \"sample\",\n  \"size_bytes\": 1,\n  \"checksum\": \"sample\",\n  \"original_filename\": \"sample\",\n  \"content_base64\": \"sample\",\n  \"uploaded_by\": \"sample\",\n  \"uploaded_at\": \"2026-01-31T10:00:00Z\",\n  \"notes\": \"sample\",\n  \"meta\": {},\n  \"expires_on\": \"2026-01-31\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -5923,6 +6379,55 @@
               }
             },
             {
+              "name": "POST /v1/internal/documents/expiry-sweep \u2014 Mark lapsed documents Expired; report the expiring set (idempotent)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/documents/expiry-sweep",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "documents",
+                    "expiry-sweep"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"warn_days\": 1,\n  \"limit\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/handover-packages \u2014 MAKER prepares the Advaya handover package (does NOT advance the stage)",
               "request": {
                 "method": "POST",
@@ -6142,6 +6647,242 @@
                     "{{lending_id}}",
                     "tranches"
                   ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/notifications \u2014 Create a notification (idempotent) + its channel delivery rows",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/notifications",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "notifications"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"recipient\": \"sample\",\n  \"recipient_role\": \"sample\",\n  \"event\": \"sample\",\n  \"severity\": \"REPLACE-to-match-^(info|warning|criti\",\n  \"title\": \"sample\",\n  \"body\": \"sample\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"workflow_id\": \"sample\",\n  \"dedupe_key\": \"sample\",\n  \"channels\": [\n    \"sample\"\n  ],\n  \"sms_to\": \"sample\",\n  \"webhook_url\": \"sample\",\n  \"meta\": {}\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/notifications/deliveries/claim \u2014 Notifier: atomically claim due pending deliveries (with a lease)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/claim",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "notifications",
+                    "deliveries",
+                    "claim"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"limit\": 1,\n  \"lease_seconds\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/notifications/deliveries/stats \u2014 Notifier: delivery counts + aged-pending gauge (for metrics/alerts)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/stats",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "notifications",
+                    "deliveries",
+                    "stats"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/notifications/deliveries/{delivery_id} \u2014 Notifier: mark a delivery delivered / retry (backoff) / dead",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/{{delivery_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "notifications",
+                    "deliveries",
+                    "{{delivery_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"REPLACE-to-match-^(delivered|retry|de\",\n  \"claim_token\": \"sample\",\n  \"error\": \"sample\",\n  \"backoff_seconds\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/notifications/deliveries/{delivery_id}/redrive \u2014 Recover a dead-lettered delivery back to pending (Admin, audited)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/notifications/deliveries/{{delivery_id}}/redrive",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "notifications",
+                    "deliveries",
+                    "{{delivery_id}}",
+                    "redrive"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             },
@@ -7127,6 +7868,98 @@
                     "monitoring",
                     "{{obj_id}}",
                     "restore"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Notifications",
+          "item": [
+            {
+              "name": "GET /v1/notifications \u2014 My notifications (in-app inbox)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/notifications",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "notifications"
+                  ],
+                  "query": [
+                    {
+                      "key": "unread_only",
+                      "value": "False",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "recipient",
+                      "value": "sample",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/notifications/{notification_id}/read \u2014 Mark a notification read (recipient or Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/notifications/{{notification_id}}/read",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "notifications",
+                    "{{notification_id}}",
+                    "read"
                   ]
                 }
               }
@@ -9467,8 +10300,102 @@
       ]
     },
     {
-      "name": "Orchestrator  (29 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (31 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
+        {
+          "name": "Internal",
+          "item": [
+            {
+              "name": "POST /orchestrator/v1/internal/monitors/document-expiry \u2014 Start (or attach to) this tenant's document-expiry monitor",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/internal/monitors/document-expiry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "internal",
+                    "monitors",
+                    "document-expiry"
+                  ]
+                },
+                "description": "Idempotent per tenant: the monitor's workflow id is ``doc-expiry-{tenant}``,\nso a second start attaches to the run already keeping the clock. Deploy-time\none-liner (compose/Helm post-start hook) or a manual ops action \u2014 either way the\ntenant ends up with exactly one monitor.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"notify\": [\n    \"sample\"\n  ],\n  \"interval_hours\": 1.0,\n  \"warn_days\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/internal/monitors/document-expiry/stop \u2014 Stop this tenant's document-expiry monitor",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/internal/monitors/document-expiry/stop",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "internal",
+                    "monitors",
+                    "document-expiry",
+                    "stop"
+                  ]
+                }
+              }
+            }
+          ]
+        },
         {
           "name": "Workflows",
           "item": [

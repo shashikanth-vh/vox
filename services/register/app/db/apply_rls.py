@@ -28,7 +28,9 @@ from app.db.session import get_engine, init_engine
 
 log = get_logger(__name__)
 
-# Every tenant table + the audit log — must match migration 0005.
+# Every tenant table + the audit log — migration 0005's set plus every tenant table a
+# later migration added (0011+ create their policies in-migration; the FORCE posture is
+# converged here so a REGISTER_ENFORCE_RLS flip takes effect on the next deploy).
 TENANT_TABLES = [
     "entities", "people", "counterparties", "deals", "leads", "lending_tracker",
     "syndication_tracker", "syndication_lenders", "asset_monetisation", "financials",
@@ -36,6 +38,10 @@ TENANT_TABLES = [
     "documents", "document_checklist", "line_assignments", "change_requests",
     "tenant_settings", "idempotency_keys", "audit_log", "workflow_decisions",
     "workflow_decision_outbox", "import_reconciliation_items",
+    "governance_evidence", "governance_evidence_status", "advaya_handoffs",
+    "cp_cs_checklists",
+    "advaya_handover_packages", "disbursement_tranches",
+    "calendar_events", "notifications", "notification_deliveries",
 ]
 
 # Append-only tables: rows are write-once, so the runtime role must NOT hold UPDATE/DELETE

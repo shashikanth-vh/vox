@@ -663,6 +663,47 @@
         "title": "DecisionIn",
         "type": "object"
       },
+      "DocExpiryMonitorIn": {
+        "additionalProperties": false,
+        "description": "Start (or attach to) the tenant's document-expiry monitor. Overrides default to\ndeployment settings when omitted.",
+        "properties": {
+          "interval_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 720.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Hours"
+          },
+          "notify": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notify",
+            "type": "array"
+          },
+          "warn_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn Days"
+          }
+        },
+        "title": "DocExpiryMonitorIn",
+        "type": "object"
+      },
       "DocumentCollectionIn": {
         "additionalProperties": false,
         "properties": {
@@ -1610,6 +1651,115 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/internal/monitors/document-expiry": {
+      "post": {
+        "description": "Idempotent per tenant: the monitor's workflow id is ``doc-expiry-{tenant}``,\nso a second start attaches to the run already keeping the clock. Deploy-time\none-liner (compose/Helm post-start hook) or a manual ops action \u2014 either way the\ntenant ends up with exactly one monitor.",
+        "operationId": "start_doc_expiry_monitor_v1_internal_monitors_document_expiry_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocExpiryMonitorIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Start Doc Expiry Monitor V1 Internal Monitors Document Expiry Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start (or attach to) this tenant's document-expiry monitor",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/v1/internal/monitors/document-expiry/stop": {
+      "post": {
+        "operationId": "stop_doc_expiry_monitor_v1_internal_monitors_document_expiry_stop_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Stop Doc Expiry Monitor V1 Internal Monitors Document Expiry Stop Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop this tenant's document-expiry monitor",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
     "/v1/workflows/advaya-handover": {
       "post": {
         "operationId": "start_advaya_handover_v1_workflows_advaya_handover_post",

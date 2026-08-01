@@ -602,41 +602,154 @@ async def verify_control(control_ref: str,
             "note": rec.get("note")}
 
 
+async def _fan_out_notifications(payload: dict[str, Any],
+                                 notify: dict[str, Any]) -> dict[str, Any]:
+    """The increment-7 upgrade of the ops seam: when a workflow's operational event names
+    recipients, ALSO write a DURABLE notification per recipient in the Register (the
+    in-app inbox row + one delivery-outbox row per configured external channel — the
+    notifier sweep then drives email/sms/webhook with retry + dead-letter).
+
+    Best-effort at THIS layer by design (ops visibility must never take a business
+    workflow down): the register client retries transient failures itself; anything
+    terminal is logged and reported, not raised. Idempotent per (run, event, recipient)
+    via the dedupe key, so an activity retry can never double-notify."""
+    from evam_register_client.errors import RegisterError
+
+    s = get_settings()
+    recipients = [r for r in (notify.get("recipients") or []) if r]
+    if not recipients:
+        return {"notified": 0}
+    # Only request channels whose transport is actually configured — a durable delivery
+    # row for a channel that can never send would sit pending until dead-letter.
+    channels = []
+    for ch in s.notify_channel_list():
+        if ch == "email" and s.smtp_host:
+            channels.append(ch)
+        elif ch == "sms" and s.sms_webhook_url and notify.get("sms_to"):
+            channels.append(ch)
+        elif ch == "webhook" and (s.notify_webhook_url or s.ops_webhook_url):
+            channels.append(ch)
+        elif ch in ("email", "sms", "webhook"):
+            activity.logger.warning("notify_channel_unconfigured", extra={"channel": ch})
+    created = 0
+    errors: list[str] = []
+    caller = notify.get("caller")
+    async with _client(CallerContext(**caller) if isinstance(caller, dict) else caller) as reg:
+        for recipient in recipients:
+            try:
+                await reg.create_notification(
+                    recipient,
+                    str(payload.get("event")),
+                    str(notify.get("title") or payload.get("event")),
+                    severity=str(notify.get("severity") or "info"),
+                    body=notify.get("body"),
+                    subject_type=notify.get("subject_type"),
+                    subject_id=notify.get("subject_id"),
+                    workflow_id=str(payload.get("workflow_id")),
+                    dedupe_key=f"{payload.get('workflow_id')}:{payload.get('event')}:"
+                               f"{notify.get('discriminator', '')}:{recipient}"[:240],
+                    channels=channels,
+                    sms_to=notify.get("sms_to"),
+                    webhook_url=s.notify_webhook_url or s.ops_webhook_url or None,
+                    recipient_role=notify.get("recipient_role"),
+                    request_id=str(payload.get("workflow_id")))
+                created += 1
+            except RegisterError as exc:
+                errors.append(f"{recipient}: {exc}")
+    if errors:
+        activity.logger.warning("notification_create_failed",
+                                extra={"errors": errors, "event": payload.get("event")})
+    out: dict[str, Any] = {"notified": created, "channels": channels}
+    if errors:
+        out["notify_errors"] = errors
+    return out
+
+
 @activity.defn
 async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str, Any]:
     """Emit an operational event (SLA reminder, escalation, control action, business
     milestone) for the humans who run PRISM.
 
-    Always lands in the structured log (the ops baseline every deployment has). When
-    ``WORKFLOWS_OPS_WEBHOOK_URL`` is set, the event is ALSO posted as JSON to it — Slack,
-    Teams, PagerDuty, or any receiver — with a short bounded retry. Delivery is deliberately
-    BEST-EFFORT: an unreachable webhook logs a warning and returns delivered=False; it never
-    fails the workflow that raised the event (increment 7 replaces this seam with the full
-    notification service)."""
+    Three layers, each optional beyond the first:
+    1. The structured log — the ops baseline every deployment has. Always.
+    2. The ops webhook (``WORKFLOWS_OPS_WEBHOOK_URL``) — Slack/Teams/PagerDuty fan-in,
+       short bounded retry, best-effort.
+    3. DURABLE notifications (``WORKFLOWS_NOTIFICATIONS_ENABLED``) — when the event's
+       ``detail["notify"]`` names recipients, each gets an in-app inbox row in the
+       Register plus per-channel delivery rows the notifier sweep drives with real retry
+       and dead-letter semantics. This is increment 7's upgrade of the seam.
+
+    Delivery is deliberately BEST-EFFORT at every layer: an unreachable webhook or
+    Register logs a warning in the result; it never fails the workflow that raised the
+    event."""
     import asyncio as _asyncio
 
     import httpx
 
     s = get_settings()
     wf_id = str(activity.info().workflow_id)
+    notify = detail.pop("notify", None) if isinstance(detail, dict) else None
     payload = {"event": event, "workflow_id": wf_id, **detail}
     activity.logger.info("operational_event", extra={"ops": payload})
+
+    result: dict[str, Any] = {"delivered": False, "channel": "log"}
+    if s.notifications_enabled and isinstance(notify, dict):
+        result.update(await _fan_out_notifications(payload, notify))
+
     if not s.ops_webhook_url:
-        return {"delivered": False, "channel": "log"}
+        return result
     last_error = ""
     for attempt in range(1 + max(0, s.ops_webhook_retries)):
         try:
             async with httpx.AsyncClient(timeout=s.ops_webhook_timeout_s) as client:
                 r = await client.post(s.ops_webhook_url, json=payload)
             if r.status_code < 300:
-                return {"delivered": True, "channel": "webhook"}
+                return {**result, "delivered": True, "channel": "webhook"}
             last_error = f"HTTP {r.status_code}"
         except httpx.HTTPError as exc:
             last_error = str(exc)
         await _asyncio.sleep(min(2.0 * (attempt + 1), 5.0))
     activity.logger.warning("operational_event_undelivered",
                             extra={"ops": payload, "error": last_error})
-    return {"delivered": False, "channel": "webhook", "error": last_error}
+    return {**result, "delivered": False, "channel": "webhook", "error": last_error}
+
+
+@activity.defn
+async def create_calendar_event(subject_type: str | None, subject_id: str | None,
+                                title: str, starts_on: str, organizer: str,
+                                attendees: list[str] | None = None,
+                                source: str = "workflow",
+                                caller: CallerContext | None = None) -> dict[str, Any]:
+    """Create a first-class calendar event for this run's follow-up — IDEMPOTENT per run:
+    if the run already created an event (matched by workflow_id in the Register), that
+    event is returned unchanged, so activity retries never double-book the RM.
+
+    ``starts_on`` is a date (YYYY-MM-DD) or full ISO timestamp; a bare date lands as
+    start-of-day UTC (the RM refines the slot in their calendar)."""
+    wf_id = str(activity.info().workflow_id)
+    starts_at = starts_on if "T" in starts_on else f"{starts_on}T09:00:00+00:00"
+    async with _client(caller) as reg:
+        page = await reg.list("calendar-events", workflow_id=wf_id, request_id=wf_id)
+        for row in page.items:
+            if row.get("workflow_id") == wf_id:
+                return row
+        return await reg.create("calendar-events", {
+            "title": title, "starts_at": starts_at, "subject_type": subject_type,
+            "subject_id": subject_id, "organizer": organizer,
+            "attendees": attendees or [], "source": source, "workflow_id": wf_id,
+        }, request_id=wf_id)
+
+
+@activity.defn
+async def sweep_document_expiry(warn_days: int,
+                                caller: CallerContext | None = None) -> dict[str, Any]:
+    """Run the Register's document expiry sweep (lapsed → 'Expired', idempotent) and
+    return both the newly expired and the soon-to-expire sets, so the monitor workflow
+    can notify the owners. Errors propagate → Temporal retries; the sweep itself is
+    idempotent so a retry never double-reports (an already-Expired row drops out)."""
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        return await reg.sweep_document_expiry(warn_days=warn_days, request_id=wf_id)
 
 
 @activity.defn

@@ -1,0 +1,104 @@
+{{- if .Values.notifier.enabled }}
+# The notification delivery sweep (`python -m app.notifier`): claims pending
+# email/sms/webhook deliveries from the Register (lease + fencing token) and drives each
+# to delivered / retry (exponential backoff) / dead-letter. Needs only the Register —
+# not Temporal. Multiple replicas are safe (claims use SKIP LOCKED leasing); one is
+# plenty. With notifications disabled there is simply nothing to claim.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "workflows.fullname" . }}-notifier
+  labels:
+    {{- include "workflows.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notification-notifier
+spec:
+  replicas: {{ .Values.notifier.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "workflows.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: notification-notifier
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "workflows.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: notification-notifier
+    spec:
+      serviceAccountName: {{ include "workflows.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: notifier
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "app.notifier"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: WORKFLOWS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: WORKFLOWS_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: WORKFLOWS_REGISTER_BASE_URL
+              value: {{ .Values.register.baseUrl | quote }}
+            - name: WORKFLOWS_REGISTER_TENANT
+              value: {{ .Values.register.tenant | quote }}
+            - name: WORKFLOWS_REGISTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.register.existingSecret }}
+                  name: {{ .Values.register.existingSecret }}
+                  key: {{ .Values.register.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.secretName" . }}
+                  key: api-key
+                  {{- end }}
+            - name: WORKFLOWS_NOTIFY_CHANNELS
+              value: {{ .Values.notifications.channels | quote }}
+            - name: WORKFLOWS_SMTP_HOST
+              value: {{ .Values.notifications.smtpHost | quote }}
+            - name: WORKFLOWS_SMTP_PORT
+              value: {{ .Values.notifications.smtpPort | quote }}
+            - name: WORKFLOWS_SMTP_FROM
+              value: {{ .Values.notifications.smtpFrom | quote }}
+            - name: WORKFLOWS_SMTP_USERNAME
+              value: {{ .Values.notifications.smtpUsername | quote }}
+            - name: WORKFLOWS_SMTP_PASSWORD
+              value: {{ .Values.notifications.smtpPassword | quote }}
+            - name: WORKFLOWS_SMS_WEBHOOK_URL
+              value: {{ .Values.notifications.smsWebhookUrl | quote }}
+            - name: WORKFLOWS_NOTIFY_WEBHOOK_URL
+              value: {{ .Values.notifications.webhookUrl | quote }}
+            - name: WORKFLOWS_NOTIFIER_INTERVAL_SECONDS
+              value: {{ .Values.notifier.intervalSeconds | default 30 | quote }}
+            - name: WORKFLOWS_NOTIFIER_MAX_ATTEMPTS
+              value: {{ .Values.notifier.maxAttempts | default 8 | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

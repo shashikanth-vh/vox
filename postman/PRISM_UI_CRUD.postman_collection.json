@@ -1471,7 +1471,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1682,7 +1682,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1893,7 +1893,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2427,7 +2427,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2526,6 +2526,171 @@
                 "{{doc_id}}",
                 "content"
               ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "reject"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/replace",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/replace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "replace"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/documents/{{doc_id}}/validate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents/{{doc_id}}/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents",
+                "{{doc_id}}",
+                "validate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expires_on\": \"2026-03-31\",\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
@@ -2661,7 +2826,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2861,7 +3026,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3072,7 +3237,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3283,7 +3448,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3494,7 +3659,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"storage_uri\": \"sample storage_uri\",\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"checksum\": \"sample checksum\",\n  \"content_base64\": \"sample content_base64\",\n  \"content_type\": \"sample content_type\",\n  \"doc_type\": \"sample doc_type\",\n  \"expires_on\": \"2026-03-31\",\n  \"is_required\": false,\n  \"meta\": {},\n  \"notes\": \"sample notes\",\n  \"original_filename\": \"sample original_filename\",\n  \"section\": \"sample section\",\n  \"size_bytes\": 1,\n  \"slot_key\": \"sample slot_key\",\n  \"status\": \"sample status\",\n  \"storage_backend\": \"sample storage_backend\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

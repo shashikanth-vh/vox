@@ -66,6 +66,18 @@ spec:
               value: {{ .Values.foundation.metricsBindAddress | quote }}
             - name: WORKFLOWS_WORKER_BUILD_ID
               value: {{ .Values.foundation.workerBuildId | quote }}
+            # Increment 7: durable notifications (the worker's ops events fan out to the
+            # Register's notification store when enabled; the notifier drives delivery).
+            - name: WORKFLOWS_NOTIFICATIONS_ENABLED
+              value: {{ .Values.notifications.enabled | quote }}
+            - name: WORKFLOWS_NOTIFY_CHANNELS
+              value: {{ .Values.notifications.channels | quote }}
+            - name: WORKFLOWS_SMTP_HOST
+              value: {{ .Values.notifications.smtpHost | quote }}
+            - name: WORKFLOWS_SMS_WEBHOOK_URL
+              value: {{ .Values.notifications.smsWebhookUrl | quote }}
+            - name: WORKFLOWS_NOTIFY_WEBHOOK_URL
+              value: {{ .Values.notifications.webhookUrl | quote }}
             - name: WORKFLOWS_REGISTER_TENANT
               value: {{ .Values.register.tenant | quote }}
             - name: WORKFLOWS_REGISTER_API_KEY

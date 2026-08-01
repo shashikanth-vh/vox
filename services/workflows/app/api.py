@@ -48,6 +48,7 @@ from app.types import (
     CpcsChecklistInput,
     DealStructuringInput,
     DocumentCollectionInput,
+    DocumentExpiryInput,
     LeadConversionInput,
     LeadQualificationInput,
     VoxTouchpoint,
@@ -59,6 +60,7 @@ from app.workflows import (
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
+    DocumentExpiryMonitorWorkflow,
     LeadConversionWorkflow,
     LeadQualificationWorkflow,
     VoxTouchpointWorkflow,
@@ -418,6 +420,18 @@ class DocumentReceivedIn(BaseModel):
     sha256: str | None = Field(default=None, pattern="^[0-9a-fA-F]{64}$")
 
 
+class DocExpiryMonitorIn(BaseModel):
+    """Start (or attach to) the tenant's document-expiry monitor. Overrides default to
+    deployment settings when omitted."""
+
+    model_config = ConfigDict(extra="forbid")
+    # Additional ops recipients notified on every expiry/warn (each document's uploader
+    # is always notified).
+    notify: list[str] = Field(default_factory=list)
+    interval_hours: float | None = Field(default=None, gt=0, le=24 * 30)
+    warn_days: int | None = Field(default=None, ge=0, le=365)
+
+
 def _problem(status: int, title: str, detail: str) -> ORJSONResponse:
     return ORJSONResponse(status_code=status, content={"error": {
         "type": title.lower().replace(" ", "_"), "title": title, "detail": detail}})
@@ -542,6 +556,7 @@ def create_app() -> FastAPI:
                 require_company_confirmation=settings.vox_confirm_ambiguous_company,
                 require_lead_confirmation=settings.vox_confirm_lead_selection,
                 confirmation_timeout_hours=settings.vox_confirmation_timeout_hours,
+                create_calendar_event=settings.calendar_events_enabled,
                 **payload.model_dump()),
             wf_id, memo=memo)
         if wait:
@@ -589,6 +604,51 @@ def create_app() -> FastAPI:
             "approve_url": f"/v1/workflows/{wf_id}/approve",
             "reject_url": f"/v1/workflows/{wf_id}/reject",
             "status_url": f"/v1/workflows/{wf_id}"})
+
+    @app.post("/v1/internal/monitors/document-expiry", status_code=202, tags=["Internal"],
+              summary="Start (or attach to) this tenant's document-expiry monitor")
+    async def start_doc_expiry_monitor(
+            payload: DocExpiryMonitorIn, request: Request,
+            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        """Idempotent per tenant: the monitor's workflow id is ``doc-expiry-{tenant}``,
+        so a second start attaches to the run already keeping the clock. Deploy-time
+        one-liner (compose/Helm post-start hook) or a manual ops action — either way the
+        tenant ends up with exactly one monitor."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        caller, _verified = _caller_context(request)
+        wf_id = f"doc-expiry-{_tenant_slug(caller.tenant)}"
+        handle = await start(
+            request, DocumentExpiryMonitorWorkflow,
+            DocumentExpiryInput(
+                interval_hours=payload.interval_hours or settings.doc_expiry_interval_hours,
+                warn_days=(payload.warn_days if payload.warn_days is not None
+                           else settings.doc_expiry_warn_days),
+                notify=payload.notify,
+                emit_search_attributes=settings.search_attributes_enabled,
+                caller=caller),
+            wf_id, memo={"initiator": (caller.email or ""), "tenant": caller.tenant})
+        return ORJSONResponse(status_code=202, content={
+            "workflow_id": handle.id, "status": "monitoring",
+            "status_url": f"/v1/workflows/{handle.id}"})
+
+    @app.post("/v1/internal/monitors/document-expiry/stop", status_code=202,
+              tags=["Internal"], summary="Stop this tenant's document-expiry monitor")
+    async def stop_doc_expiry_monitor(
+            request: Request,
+            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        caller, _verified = _caller_context(request)
+        wf_id = f"doc-expiry-{_tenant_slug(caller.tenant)}"
+        client: Client = request.app.state.temporal
+        try:
+            await client.get_workflow_handle(wf_id).signal(
+                DocumentExpiryMonitorWorkflow.stop)
+        except TemporalError as exc:
+            return _problem(404, "Not found", f"No monitor for this tenant: {exc}")
+        return ORJSONResponse(status_code=202,
+                              content={"workflow_id": wf_id, "status": "stopping"})
 
     def _tenant_slug(tenant: str) -> str:
         """A workflow-id-safe, COLLISION-FREE tenant slug, so a tenant-B run can never

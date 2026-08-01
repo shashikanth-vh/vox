@@ -423,6 +423,55 @@ def build_mock() -> FastAPI:
         app.state.lending[lid] = {**row, **body}
         return app.state.lending[lid]
 
+    # -- Increment 7: notifications / calendar / document expiry ------------
+    app.state.notifications = {}     # dedupe_key (or id) -> notification row
+    app.state.calendar = {}          # id -> calendar event row
+    app.state.expiry_report = {"expired": [], "expiring": []}  # next sweep's payload
+    app.state.expiry_sweeps = 0
+
+    @app.post("/v1/internal/notifications", status_code=201)
+    async def create_notification(request: Request):
+        # Mirror the real Register: idempotent by dedupe_key (a replay returns the
+        # ORIGINAL row) + one delivery row per requested external channel.
+        body = await request.json()
+        key = body.get("dedupe_key")
+        if key and key in app.state.notifications:
+            return app.state.notifications[key]
+        row = {"id": uuid.uuid4().hex, "read_at": None,
+               "deliveries": [{"id": uuid.uuid4().hex, "channel": ch,
+                               "status": "pending"}
+                              for ch in body.get("channels", [])],
+               **body}
+        app.state.notifications[key or row["id"]] = row
+        return row
+
+    @app.get("/v1/calendar-events")
+    async def list_calendar_events(request: Request):
+        rows = list(app.state.calendar.values())
+        wf = request.query_params.get("workflow_id")
+        if wf:
+            rows = [r for r in rows if r.get("workflow_id") == wf]
+        return {"items": rows, "next_cursor": None}
+
+    @app.post("/v1/calendar-events", status_code=201)
+    async def create_calendar_event(request: Request):
+        body = await request.json()
+        row = {"id": uuid.uuid4().hex, "status": "Scheduled", "version": 1, **body}
+        app.state.calendar[row["id"]] = row
+        return row
+
+    @app.post("/v1/internal/documents/expiry-sweep")
+    async def expiry_sweep(request: Request):
+        # Mirror the real sweep's idempotency: a document is reported as NEWLY expired
+        # exactly once (it is 'Expired' afterwards and drops out of later sweeps).
+        await request.json()
+        app.state.expiry_sweeps += 1
+        report = {"swept_on": "2026-08-01",
+                  "expired": list(app.state.expiry_report["expired"]),
+                  "expiring": list(app.state.expiry_report["expiring"])}
+        app.state.expiry_report["expired"] = []
+        return report
+
     @app.post("/v1/evidence", status_code=201)
     async def attach_evidence(request: Request):
         body = await request.json()

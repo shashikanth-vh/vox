@@ -106,6 +106,47 @@ class Settings(BaseServiceSettings):
     reconciler_lease_seconds: int = 60         # how long a claimed row is leased
     reconciler_backoff_seconds: int = 60       # backoff for a still-running / errored delivery
 
+    # --- Increment 7: notifications / calendar / document expiry ---------------------- #
+    # Master switch: when true, operational events that name recipients ALSO land as
+    # durable in-app notifications in the Register (and fan out to the channels below).
+    # Off = the increment-1 posture (structured log + optional ops webhook) unchanged.
+    notifications_enabled: bool = False
+    # External channels to request on every notification, comma-separated subset of
+    # "email,sms,webhook". In-app is implicit (the durable row IS the in-app channel).
+    # Channels missing their transport config below are skipped with a warning.
+    notify_channels: str = ""
+    # email channel — SMTP relay. Empty host = channel unavailable.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_from: str = "prism@localhost"
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    smtp_timeout_s: float = 10.0
+    # sms channel — a provider-agnostic HTTP hook: POST {to, body, event} as JSON.
+    # (Twilio/MSG91/… adapters terminate behind this URL.) Empty = channel unavailable.
+    sms_webhook_url: str = ""
+    # webhook channel target for notifications (falls back to ops_webhook_url).
+    notify_webhook_url: str = ""
+    notify_timeout_s: float = 10.0
+    # The notifier sweep (python -m app.notifier): claim cadence + retry policy.
+    # Backoff is exponential: base * 2^(attempts-1), capped — then dead-letter.
+    notifier_interval_seconds: int = 30
+    notifier_batch: int = 50
+    notifier_lease_seconds: int = 60
+    notifier_max_attempts: int = 8
+    notifier_backoff_base_seconds: int = 60
+    notifier_backoff_cap_seconds: int = 3600
+    # Create a first-class calendar event (Register calendar_events) for a VOX capture's
+    # next-meeting date, instead of only the meta.calendar hand-off note.
+    calendar_events_enabled: bool = False
+    # The document-expiry monitor workflow: sweep cadence and the warn-ahead window.
+    doc_expiry_interval_hours: float = 24.0
+    doc_expiry_warn_days: int = 7
+
+    def notify_channel_list(self) -> list[str]:
+        return [c.strip() for c in self.notify_channels.split(",") if c.strip()]
+
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 

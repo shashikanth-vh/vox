@@ -21,11 +21,12 @@ everything logged against its leads, deals and trackers.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -126,3 +127,16 @@ class Document(RegisterBase):
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict | None] = mapped_column(JSONB)
+
+    # Lifecycle (increment 7). Status walks On File/Pending → Verified | Rejected;
+    # replacement supersedes the old row (``superseded_by`` → the successor); a validity
+    # window (``expires_on``) lets the expiry sweep mark lapsed documents 'Expired'.
+    # Set ONLY through the /validate /reject /replace endpoints and the internal sweep —
+    # the generic CRUD update refuses these fields.
+    expires_on: Mapped[date | None] = mapped_column(Date)
+    verified_by: Mapped[str | None] = mapped_column(String(120))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status_note: Mapped[str | None] = mapped_column(Text)
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )

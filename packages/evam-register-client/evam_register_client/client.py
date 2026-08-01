@@ -347,6 +347,67 @@ class AsyncRegisterClient:
             "POST", f"/v1/internal/decisions/{workflow_id}/delivery", json=body,
             request_id=request_id))
 
+    # -- Notifications (increment 7) --------------------------------------
+    async def create_notification(self, recipient: str, event: str, title: str, *,
+                                  severity: str = "info", body: str | None = None,
+                                  subject_type: str | None = None,
+                                  subject_id: str | None = None,
+                                  workflow_id: str | None = None,
+                                  dedupe_key: str | None = None,
+                                  channels: builtins.list[str] | None = None,
+                                  sms_to: str | None = None,
+                                  webhook_url: str | None = None,
+                                  recipient_role: str | None = None,
+                                  meta: dict | None = None,
+                                  request_id: str | None = None) -> dict:
+        """Create a durable notification (the in-app inbox row) plus one delivery-outbox
+        row per external channel — idempotent by ``dedupe_key`` (a replay returns the
+        original row instead of double-notifying)."""
+        payload = {"recipient": recipient, "event": event, "title": title,
+                   "severity": severity, "body": body, "subject_type": subject_type,
+                   "subject_id": subject_id, "workflow_id": workflow_id,
+                   "dedupe_key": dedupe_key, "channels": channels or [],
+                   "sms_to": sms_to, "webhook_url": webhook_url,
+                   "recipient_role": recipient_role, "meta": meta}
+        return await self._send(_Plan(
+            "POST", "/v1/internal/notifications",
+            json={k: v for k, v in payload.items() if v is not None},
+            request_id=request_id))
+
+    async def claim_notification_deliveries(self, *, limit: int = 20,
+                                            lease_seconds: int = 60,
+                                            request_id: str | None = None
+                                            ) -> builtins.list[dict]:
+        """Notifier: atomically claim a batch of due, pending notification deliveries
+        (leased). Each claim carries channel/target and the rendered content."""
+        resp = await self._send(_Plan(
+            "POST", "/v1/internal/notifications/deliveries/claim",
+            json={"limit": limit, "lease_seconds": lease_seconds},
+            request_id=request_id))
+        return list(resp.get("claimed", []))
+
+    async def update_notification_delivery(self, delivery_id: str, status: str, *,
+                                           claim_token: str, error: str | None = None,
+                                           backoff_seconds: int = 60,
+                                           request_id: str | None = None) -> dict:
+        """Notifier: mark a delivery ``delivered`` / ``retry`` (backoff) / ``dead`` —
+        fenced by the claim token exactly like the decision outbox."""
+        body: dict[str, Any] = {"status": status, "claim_token": claim_token,
+                                "backoff_seconds": backoff_seconds}
+        if error is not None:
+            body["error"] = error
+        return await self._send(_Plan(
+            "POST", f"/v1/internal/notifications/deliveries/{delivery_id}", json=body,
+            request_id=request_id))
+
+    async def sweep_document_expiry(self, *, warn_days: int = 7, limit: int = 500,
+                                    request_id: str | None = None) -> dict:
+        """Run the document expiry sweep: lapsed documents are marked ``Expired`` and
+        returned; documents expiring within ``warn_days`` are reported untouched."""
+        return await self._send(_Plan(
+            "POST", "/v1/internal/documents/expiry-sweep",
+            json={"warn_days": warn_days, "limit": limit}, request_id=request_id))
+
     async def redrive_delivery(self, workflow_id: str, *, reason: str,
                                ticket: str | None = None,
                                extra_headers: dict[str, str] | None = None,
@@ -366,6 +427,11 @@ class AsyncRegisterClient:
     async def delivery_stats(self, *, request_id: str | None = None) -> dict:
         """Reconciler metrics: ``{pending, applied, dead, aged_pending}`` for the tenant."""
         return await self._send(_Plan("GET", "/v1/internal/decisions/deliveries/stats",
+                                      request_id=request_id))
+
+    async def notification_delivery_stats(self, *, request_id: str | None = None) -> dict:
+        """Notifier metrics: ``{pending, delivered, dead, aged_pending}`` for the tenant."""
+        return await self._send(_Plan("GET", "/v1/internal/notifications/deliveries/stats",
                                       request_id=request_id))
 
     async def internal_tenants(self, *, request_id: str | None = None) -> builtins.list[str]:

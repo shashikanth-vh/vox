@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from app.db.base import AuditLog, Base
 from app.models.advaya import AdvayaHandoff, AdvayaHandoverPackage
+from app.models.calendar import CalendarEvent
 from app.models.cpcs import CpcsChecklist
 from app.models.deals import Deal, Lead
 from app.models.decisions import WorkflowDecision, WorkflowDecisionOutbox
 from app.models.documents import Document, DocumentChecklistItem
 from app.models.evidence import GovernanceEvidence, GovernanceEvidenceStatus
 from app.models.interactions import Interaction
+from app.models.notifications import Notification, NotificationDelivery
 from app.models.prism import (
     ContractAsset,
     ExternalIntelligence,
@@ -60,4 +62,7 @@ __all__ = [
     "AdvayaHandoff",
     "AdvayaHandoverPackage",
     "CpcsChecklist",
+    "CalendarEvent",
+    "Notification",
+    "NotificationDelivery",
 ]

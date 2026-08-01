@@ -66,6 +66,13 @@ spec:
               value: {{ .Values.foundation.voxConfirmLeadSelection | quote }}
             - name: WORKFLOWS_QUALIFICATION_CHECKLIST
               value: {{ .Values.foundation.qualificationChecklist | quote }}
+            # Increment 7: VOX calendar events + document-expiry monitor defaults.
+            - name: WORKFLOWS_CALENDAR_EVENTS_ENABLED
+              value: {{ .Values.foundation.calendarEventsEnabled | quote }}
+            - name: WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS
+              value: {{ .Values.foundation.docExpiryIntervalHours | quote }}
+            - name: WORKFLOWS_DOC_EXPIRY_WARN_DAYS
+              value: {{ .Values.foundation.docExpiryWarnDays | quote }}
             - name: WORKFLOWS_REGISTER_TENANT
               value: {{ .Values.register.tenant | quote }}
             - name: WORKFLOWS_REGISTER_API_KEY

@@ -84,7 +84,8 @@ async def client() -> AsyncIterator[AsyncClient]:
                 "syndication_lenders, asset_monetisation, financials, contracts_assets, "
                 "interactions, external_intelligence, monitoring_reporting, counterparties, "
                 "people, documents, document_checklist, line_assignments, "
-                "change_requests, audit_log, idempotency_keys "
+                "change_requests, audit_log, idempotency_keys, "
+                "calendar_events, notifications, notification_deliveries "
                 "RESTART IDENTITY CASCADE"
             ))
             await session.commit()

@@ -431,6 +431,44 @@ services:
       # Prometheus scrape endpoint for the worker's SDK metrics ("" = off).
       WORKFLOWS_METRICS_BIND_ADDRESS: "${WORKFLOWS_METRICS_BIND_ADDRESS:-}"
       WORKFLOWS_WORKER_BUILD_ID: "${WORKFLOWS_WORKER_BUILD_ID:-}"
+      # --- Increment 7: durable notifications (off by default). When enabled, ops
+      # events that name recipients also land as in-app inbox rows in the Register,
+      # fanning out to the channels below (the notifier service drives delivery).
+      WORKFLOWS_NOTIFICATIONS_ENABLED: "${WORKFLOWS_NOTIFICATIONS_ENABLED:-false}"
+      WORKFLOWS_NOTIFY_CHANNELS: "${WORKFLOWS_NOTIFY_CHANNELS:-}"
+      WORKFLOWS_SMTP_HOST: "${WORKFLOWS_SMTP_HOST:-}"
+      WORKFLOWS_SMTP_PORT: "${WORKFLOWS_SMTP_PORT:-587}"
+      WORKFLOWS_SMTP_FROM: "${WORKFLOWS_SMTP_FROM:-prism@evamfinance.com}"
+      WORKFLOWS_SMS_WEBHOOK_URL: "${WORKFLOWS_SMS_WEBHOOK_URL:-}"
+      WORKFLOWS_NOTIFY_WEBHOOK_URL: "${WORKFLOWS_NOTIFY_WEBHOOK_URL:-}"
+    restart: unless-stopped
+
+  # Notification delivery sweep (increment 7): claims pending email/sms/webhook
+  # deliveries from the Register (lease + fencing token) and drives them to
+  # delivered / retry (exponential backoff) / dead-letter. Safe to run always —
+  # with notifications disabled there is simply nothing to claim.
+  notifier:
+    build:
+      context: ../..
+      dockerfile: services/workflows/Dockerfile
+    command: ["python", "-m", "app.notifier"]
+    depends_on:
+      - register
+    environment:
+      WORKFLOWS_REGISTER_BASE_URL: http://register:8000
+      WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
+      WORKFLOWS_REGISTER_TENANT: EVAM
+      WORKFLOWS_LOG_JSON: "true"
+      WORKFLOWS_NOTIFY_CHANNELS: "${WORKFLOWS_NOTIFY_CHANNELS:-}"
+      WORKFLOWS_SMTP_HOST: "${WORKFLOWS_SMTP_HOST:-}"
+      WORKFLOWS_SMTP_PORT: "${WORKFLOWS_SMTP_PORT:-587}"
+      WORKFLOWS_SMTP_FROM: "${WORKFLOWS_SMTP_FROM:-prism@evamfinance.com}"
+      WORKFLOWS_SMTP_USERNAME: "${WORKFLOWS_SMTP_USERNAME:-}"
+      WORKFLOWS_SMTP_PASSWORD: "${WORKFLOWS_SMTP_PASSWORD:-}"
+      WORKFLOWS_SMS_WEBHOOK_URL: "${WORKFLOWS_SMS_WEBHOOK_URL:-}"
+      WORKFLOWS_NOTIFY_WEBHOOK_URL: "${WORKFLOWS_NOTIFY_WEBHOOK_URL:-}"
+      WORKFLOWS_NOTIFIER_INTERVAL_SECONDS: "${WORKFLOWS_NOTIFIER_INTERVAL_SECONDS:-30}"
+      WORKFLOWS_NOTIFIER_MAX_ATTEMPTS: "${WORKFLOWS_NOTIFIER_MAX_ATTEMPTS:-8}"
     restart: unless-stopped
 
   # Orchestrator API — the workflow plane's HTTP front door: starts workflows with
@@ -477,6 +515,13 @@ services:
       WORKFLOWS_OIDC_ISSUER: "${GATEWAY_OIDC_ISSUER:-}"
       WORKFLOWS_OIDC_AUDIENCE: "${GATEWAY_OIDC_AUDIENCE:-prism}"
       WORKFLOWS_REQUIRE_AUTH: "${WORKFLOWS_REQUIRE_AUTH:-false}"
+      # --- Increment 7: first-class calendar events + the document-expiry monitor ---
+      # VOX captures with a next-meeting date create a Register calendar event (per-run
+      # idempotent) instead of only the meta.calendar hand-off note.
+      WORKFLOWS_CALENDAR_EVENTS_ENABLED: "${WORKFLOWS_CALENDAR_EVENTS_ENABLED:-false}"
+      # Defaults for POST /v1/internal/monitors/document-expiry (per-tenant monitor).
+      WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS: "${WORKFLOWS_DOC_EXPIRY_INTERVAL_HOURS:-24}"
+      WORKFLOWS_DOC_EXPIRY_WARN_DAYS: "${WORKFLOWS_DOC_EXPIRY_WARN_DAYS:-7}"
     # No host port: the orchestrator API is reachable ONLY through the gateway
     # (edge → /orchestrator/...), so workflow starts pass the RBAC gate first.
     restart: unless-stopped

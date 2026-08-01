@@ -97,12 +97,20 @@ def upgrade() -> None:
         uploaded_by varchar(120),
         uploaded_at timestamptz,
         notes text,
-        meta jsonb
+        meta jsonb,
+        expires_on date,
+        verified_by varchar(120),
+        verified_at timestamptz,
+        status_note text,
+        superseded_by uuid REFERENCES documents(id) ON DELETE SET NULL
     """)
     op.execute("CREATE INDEX ix_documents_subject ON documents (tenant_id, subject_type, subject_id);")
     op.execute("CREATE INDEX ix_documents_entity ON documents (tenant_id, entity_id);")
     op.execute("CREATE INDEX ix_documents_slot ON documents (tenant_id, subject_type, subject_id, slot_key);")
     op.execute("CREATE INDEX ix_documents_entity_fk ON documents (entity_id);")
+    # The expiry sweep scans live documents whose validity window can lapse.
+    op.execute("CREATE INDEX ix_documents_expiry ON documents (tenant_id, expires_on) "
+               "WHERE expires_on IS NOT NULL AND deleted_at IS NULL;")
 
     _apply_row_level_security()
 

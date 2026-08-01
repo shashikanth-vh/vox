@@ -6,6 +6,30 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Calendar, notifications with retry, and document expiry (increment 7).** The
+  increment-1 ops seam is now a real notification service: workflow events that name
+  recipients (SLA reminders/escalations, decision timeouts, sanction + document
+  expiries) land as DURABLE rows in the Register's new notification store — the in-app
+  inbox (`GET /v1/notifications`, recipient-scoped, mark-read) — with one
+  delivery-outbox row per external channel (email / sms / webhook). A new **notifier**
+  daemon (compose service + Helm deployment, `python -m app.notifier`) claims due
+  deliveries (lease + fencing token) and drives each to delivered / retry (exponential
+  backoff) / dead-letter, with an audited Admin redrive; creation is idempotent per
+  occurrence, so retries never double-notify. **Calendar events** are first-class
+  (`calendar_events`, migration 0017): create / reschedule-in-place / `/cancel` (note
+  mandatory) / `/complete`, terminal rows frozen by trigger; a VOX capture's next-meeting
+  date creates one idempotently per run (flag `WORKFLOWS_CALENDAR_EVENTS_ENABLED`).
+  **Document lifecycle**: `/validate` (maker≠checker, fixes `expires_on`), `/reject`
+  (reasons mandatory), `/replace` (old row → Superseded, chained to its successor);
+  lifecycle statuses are unreachable through generic create/update. A per-tenant
+  `DocumentExpiryMonitorWorkflow` (started via
+  `POST /v1/internal/monitors/document-expiry`) runs the Register's idempotent expiry
+  sweep on a clock: lapsed documents become 'Expired' (critical alert to uploader + ops),
+  soon-to-expire ones get a deduped warning. Schema: migration 0017 (calendar_events,
+  notifications, notification_deliveries) + document lifecycle columns folded into 0002 —
+  redeploy with `docker compose down -v` and re-import.
+
+
 - **Asset Monetisation lifecycle workflow (increment 6).** The AM mandate runs end to end
   under Temporal, mirroring the syndication pattern: versioned teaser circulation
   (`teaser_document` evidence), buyer-level tracking on the deal's buyer rows (whitelisted,

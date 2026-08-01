@@ -40,6 +40,8 @@ with workflow.unsafe.imports_passed_through():
         DealStructuringResult,
         DocumentCollectionInput,
         DocumentCollectionResult,
+        DocumentExpiryInput,
+        DocumentExpiryResult,
         IngestResult,
         InteractionInput,
         LeadConversionInput,
@@ -144,10 +146,31 @@ class _Foundation:
         return None
 
 
-async def _emit_ops(event: str, detail: dict) -> None:
-    """Raise an operational event (log + optional webhook). BEST-EFFORT by design: ops
-    visibility must never take a business workflow down, so failures are swallowed after the
-    activity's own bounded retry."""
+async def _emit_ops(event: str, detail: dict, notify_to: list | None = None,
+                    severity: str = "info") -> None:
+    """Raise an operational event (log + optional webhook + durable notifications).
+    BEST-EFFORT by design: ops visibility must never take a business workflow down, so
+    failures are swallowed after the activity's own bounded retry.
+
+    ``notify_to`` names the humans who should ALSO receive this as a durable notification
+    (in-app inbox + configured external channels) when the deployment enables
+    notifications — the increment-7 upgrade of this seam. The event's ``subject``
+    ("Lead:{id}" style) becomes the notification's subject binding."""
+    recipients = sorted({r for r in (notify_to or []) if r})
+    if recipients:
+        subject = str(detail.get("subject") or "")
+        stype, _, sid = subject.partition(":")
+        title = event.replace("_", " ").capitalize() + (f" — {subject}" if subject else "")
+        # The dedupe discriminator makes each DISTINCT occurrence its own notification
+        # (different document, different reminder round) while an activity retry of the
+        # SAME occurrence stays a no-op at the Register.
+        discriminator = "|".join(
+            str(detail[k]) for k in ("subject", "document_id", "expires_on",
+                                     "waiting_hours") if detail.get(k) is not None)
+        detail = {**detail, "notify": {
+            "recipients": recipients, "severity": severity, "title": title,
+            "discriminator": discriminator,
+            "subject_type": stype or None, "subject_id": sid or None}}
     try:
         await workflow.execute_activity(
             activities.emit_operational_event, args=[event, detail],
@@ -383,6 +406,27 @@ class VoxTouchpointWorkflow:
                          "next_action_date": tp.next_action_date,
                          "next_meeting_date": tp.next_meeting_date,
                          "calendar": "pending" if tp.next_meeting_date else None}
+        # Increment 7 (flag): the follow-up becomes a FIRST-CLASS calendar event, not just
+        # a meta.calendar note. Idempotent per run (the activity matches by workflow_id),
+        # organised by the owning RM. Best-effort: a calendar hiccup never voids a capture
+        # that is already fully logged.
+        if tp.create_calendar_event and tp.next_meeting_date:
+            organizer = tp.assigned_rm or tp.performed_by
+            if organizer:
+                try:
+                    event = await workflow.execute_activity(
+                        activities.create_calendar_event,
+                        args=["Lead", lead["id"],
+                              tp.next_action or "Follow-up meeting",
+                              tp.next_meeting_date, organizer,
+                              [a for a in (tp.performed_by,) if a and a != organizer],
+                              "VOX", tp.caller],
+                        **_DURABLE_IO)
+                    follow_up["calendar_event_id"] = event.get("id")
+                    follow_up["calendar"] = "scheduled"
+                except Exception:  # noqa: BLE001 — the capture itself already succeeded
+                    workflow.logger.warning("calendar_event_failed",
+                                            extra={"lead_id": lead["id"]})
         return VoxResult(
             workflow_id=wf_id,
             entity_id=entity_id,
@@ -485,7 +529,9 @@ class LeadConversionWorkflow:
                 await _emit_ops(due, {
                     "subject": f"Lead:{inp.lead_id}", "requested_by": inp.requested_by,
                     "business_status": self._fnd.business_status,
-                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=[inp.requested_by],
+                    severity="warning" if due == "sla_escalation" else "info")
                 continue
             # History pressure (very long waits): carry the elapsed window across the reset.
             if workflow.info().is_continue_as_new_suggested():
@@ -570,7 +616,8 @@ class LeadConversionWorkflow:
             _upsert_search(inp.emit_search_attributes, "TimedOut", f"Lead:{inp.lead_id}")
             await _emit_ops("decision_timeout", {
                 "subject": f"Lead:{inp.lead_id}", "requested_by": inp.requested_by,
-                "window_hours": inp.approval_timeout_hours})
+                "window_hours": inp.approval_timeout_hours},
+                notify_to=[inp.requested_by], severity="warning")
             # No verified decider on a timeout → record as the system (service) actor, not the
             # requester. Idempotent + durable so a retry never double-appends and an outage
             # never drops the outcome.
@@ -827,7 +874,9 @@ class DealStructuringWorkflow:
                 await _emit_ops(due, {
                     "subject": subject, "requested_by": inp.requested_by,
                     "business_status": self._fnd.business_status,
-                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=[inp.requested_by],
+                    severity="warning" if due == "sla_escalation" else "info")
                 continue
             if workflow.info().is_continue_as_new_suggested():
                 import dataclasses
@@ -922,7 +971,8 @@ class DealStructuringWorkflow:
             _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
             await _emit_ops("decision_timeout", {
                 "subject": subject, "requested_by": inp.requested_by,
-                "window_hours": inp.decision_timeout_hours})
+                "window_hours": inp.decision_timeout_hours},
+                notify_to=[inp.requested_by], severity="warning")
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="TimedOut",
                 stage=lines[0].get("stage"), evidence_ids=evidence_ids,
@@ -1173,7 +1223,9 @@ class SyndicationMandateWorkflow:
                 await _emit_ops(due, {
                     "subject": subject, "requested_by": inp.requested_by,
                     "business_status": self._fnd.business_status,
-                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=[inp.requested_by],
+                    severity="warning" if due == "sla_escalation" else "info")
                 continue
             if workflow.info().is_continue_as_new_suggested():
                 import dataclasses
@@ -1265,7 +1317,8 @@ class SyndicationMandateWorkflow:
             _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
             await _emit_ops("decision_timeout", {
                 "subject": subject, "requested_by": inp.requested_by,
-                "window_hours": inp.decision_timeout_hours})
+                "window_hours": inp.decision_timeout_hours},
+                notify_to=[inp.requested_by], severity="warning")
             return SyndicationMandateResult(
                 workflow_id=wf_id, syndication_id=inp.syndication_id, status="TimedOut",
                 im_version=self._im_version, evidence_ids=evidence_ids,
@@ -1497,7 +1550,9 @@ class AssetMonetisationWorkflow:
                 await _emit_ops(due, {
                     "subject": subject, "requested_by": inp.requested_by,
                     "business_status": self._fnd.business_status,
-                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)},
+                    notify_to=[inp.requested_by],
+                    severity="warning" if due == "sla_escalation" else "info")
                 continue
             if workflow.info().is_continue_as_new_suggested():
                 import dataclasses
@@ -1623,7 +1678,8 @@ class AssetMonetisationWorkflow:
             _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
             await _emit_ops("decision_timeout", {
                 "subject": subject, "requested_by": inp.requested_by,
-                "window_hours": inp.decision_timeout_hours})
+                "window_hours": inp.decision_timeout_hours},
+                notify_to=[inp.requested_by], severity="warning")
             return AssetMonetisationResult(
                 workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="TimedOut",
                 teaser_version=self._teaser_version, offers=self._offers,
@@ -1709,7 +1765,8 @@ class SanctionExpiryMonitorWorkflow:
                 await _emit_ops("sanction_expiry_reminder", {
                     "subject": subject, "deal_id": inp.deal_id,
                     "days_left": inp.remind_before_days,
-                    "decision_ref": inp.decision_ref})
+                    "decision_ref": inp.decision_ref},
+                    notify_to=[inp.caller.email], severity="warning")
                 await workflow.sleep(total - remind_at)
             elif stage is not None:
                 self._stage = "Progressed"
@@ -1735,7 +1792,8 @@ class SanctionExpiryMonitorWorkflow:
         _upsert_search(inp.emit_search_attributes, "SanctionExpired", subject)
         await _emit_ops("sanction_expired", {
             "subject": subject, "deal_id": inp.deal_id, "valid_days": inp.valid_days,
-            "decision_ref": inp.decision_ref, "evidence_id": ev.get("id")})
+            "decision_ref": inp.decision_ref, "evidence_id": ev.get("id")},
+            notify_to=[inp.caller.email], severity="critical")
         return SanctionExpiryResult(workflow_id=wf_id, lending_id=inp.lending_id,
                                     status="Expired", stage_at_close=stage,
                                     evidence_id=ev.get("id"))
@@ -1904,6 +1962,90 @@ class CpcsChecklistWorkflow:
             status=chk.get("status") or "Completed",
             note="CP/CS checklist prepared; a different checker must approve it before "
                  "cp_cs_completion can be filed.")
+
+
+@workflow.defn
+class DocumentExpiryMonitorWorkflow:
+    """The tenant-wide document-expiry clock (increment 7). One run per tenant
+    (workflow id ``doc-expiry-{tenant}``), looping forever:
+
+    sweep → the Register marks lapsed documents 'Expired' (idempotent) and reports
+            the newly expired + soon-to-expire sets
+          → every NEWLY EXPIRED document raises a critical ops event + durable
+            notifications (the document's uploader + the deployment's ops recipients)
+          → every document ENTERING the warn window gets a warning the same way
+          → sleep ``interval_hours`` (or until ``sweep_now``), continue-as-new
+            periodically to bound history.
+
+    The monitor only OBSERVES and RECORDS — replacing or re-validating an expired
+    document is a human call, made on the record this run created. ``stop`` ends the
+    monitor cleanly (e.g. before decommissioning a tenant)."""
+
+    def __init__(self) -> None:
+        self._stopped = False
+        self._sweep_now = False
+        self._last: dict[str, Any] = {}
+
+    @workflow.signal
+    def stop(self) -> None:
+        self._stopped = True
+
+    @workflow.signal
+    def sweep_now(self) -> None:
+        """Ops convenience: run the next sweep immediately instead of on the timer."""
+        self._sweep_now = True
+
+    @workflow.query
+    def state(self) -> dict:
+        return dict(self._last)
+
+    @workflow.run
+    async def run(self, inp: DocumentExpiryInput) -> DocumentExpiryResult:
+        wf_id = workflow.info().workflow_id
+        sweeps = expired_total = warned_total = 0
+        _upsert_search(inp.emit_search_attributes, "Monitoring",
+                       f"DocumentExpiry:{inp.caller.tenant or 'default'}")
+        while not self._stopped:
+            report = await workflow.execute_activity(
+                activities.sweep_document_expiry, args=[inp.warn_days, inp.caller],
+                start_to_close_timeout=timedelta(minutes=2), retry_policy=_DURABLE)
+            sweeps += 1
+            expired = list(report.get("expired") or [])
+            expiring = list(report.get("expiring") or [])
+            expired_total += len(expired)
+            self._last = {"swept_on": report.get("swept_on"), "sweeps": sweeps,
+                          "expired": len(expired), "expiring": len(expiring)}
+            for doc in expired:
+                await _emit_ops("document_expired", {
+                    "subject": f"{doc.get('subject_type')}:{doc.get('subject_id')}",
+                    "document_id": doc.get("id"), "title": doc.get("title"),
+                    "slot_key": doc.get("slot_key"), "expires_on": doc.get("expires_on")},
+                    notify_to=[doc.get("uploaded_by"), *inp.notify], severity="critical")
+            for doc in expiring:
+                # Warn each owner ONCE per document+date: the dedupe key derived from the
+                # event+subject+discriminator makes repeats no-ops at the Register.
+                warned_total += 1
+                await _emit_ops("document_expiring", {
+                    "subject": f"{doc.get('subject_type')}:{doc.get('subject_id')}",
+                    "document_id": doc.get("id"), "title": doc.get("title"),
+                    "slot_key": doc.get("slot_key"), "expires_on": doc.get("expires_on")},
+                    notify_to=[doc.get("uploaded_by"), *inp.notify], severity="warning")
+            if self._stopped:
+                break
+            # Sleep to the next sweep (or an ops nudge), then bound history.
+            self._sweep_now = False
+            try:
+                await workflow.wait_condition(
+                    lambda: self._stopped or self._sweep_now,
+                    timeout=timedelta(hours=inp.interval_hours))
+            except asyncio.TimeoutError:
+                pass
+            if not self._stopped and (sweeps >= inp.max_iterations
+                                      or workflow.info().is_continue_as_new_suggested()):
+                workflow.continue_as_new(inp)
+        return DocumentExpiryResult(workflow_id=wf_id, sweeps=sweeps,
+                                    expired_total=expired_total,
+                                    warned_total=warned_total)
 
 
 # Ordered position of a LENDING credit-pipeline stage, for "is X before Y" checks in
