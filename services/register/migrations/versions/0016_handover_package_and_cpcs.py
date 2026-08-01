@@ -95,7 +95,7 @@ def upgrade() -> None:
             updated_by     varchar(120),
             deleted_at     timestamptz,
             CONSTRAINT cp_cs_checklists_status
-                CHECK (status IN ('Draft', 'Completed', 'Approved', 'Rejected')),
+                CHECK (status IN ('Draft', 'Completed', 'Approved', 'Rejected', 'Returned')),
             CONSTRAINT cp_cs_checklists_tenant_lending_version
                 UNIQUE (tenant_id, lending_id, checklist_version)
         );
@@ -111,7 +111,7 @@ def upgrade() -> None:
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'cp_cs_checklists rows are append-only and cannot be deleted';
             END IF;
-            IF OLD.status IN ('Approved', 'Rejected') THEN
+            IF OLD.status IN ('Approved', 'Rejected', 'Returned') THEN
                 RAISE EXCEPTION 'cp_cs_checklists row % is % and is frozen', OLD.id, OLD.status;
             END IF;
             RETURN NEW;
@@ -154,7 +154,7 @@ def upgrade() -> None:
             advaya_reference             varchar(200),
             status                       varchar(20) NOT NULL DEFAULT 'Prepared',
             CONSTRAINT advaya_handover_packages_status
-                CHECK (status IN ('Prepared', 'HandedOver')),
+                CHECK (status IN ('Prepared', 'HandedOver', 'Returned')),
             note                         text,
             snapshot                     jsonb,
             tenant_id  uuid        NOT NULL,
@@ -180,8 +180,8 @@ def upgrade() -> None:
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'advaya_handover_packages rows cannot be deleted';
             END IF;
-            IF OLD.status = 'Prepared' THEN
-                RETURN NEW;   -- preparation / approval transition
+            IF OLD.status IN ('Prepared', 'Returned') THEN
+                RETURN NEW;   -- preparation / return / re-prepare / approval transitions
             END IF;
             -- OLD.status = 'HandedOver' → frozen except a one-time advaya_reference set.
             IF OLD.advaya_reference IS NOT NULL OR NEW.advaya_reference IS NULL THEN
@@ -219,8 +219,60 @@ def upgrade() -> None:
     _enable_rls("advaya_handover_packages", "advaya_handover_packages_tenant_isolation")
     _grant("advaya_handover_packages", "SELECT, INSERT, UPDATE")
 
+    # -- Disbursement tranches ----------------------------------------------
+    # Tranche-level disbursement callbacks (Advaya, or ops on its behalf): one row per
+    # tranche, idempotent on (tenant, lending, tranche_ref), append-only — a recorded
+    # disbursement is a fact, never edited; a correction is a NEW tranche (negative
+    # amounts are refused at the API; reversals get their own ref and a note).
+    op.execute(
+        """
+        CREATE TABLE disbursement_tranches (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            lending_id    varchar(64)  NOT NULL,
+            deal_id       varchar(64),
+            tranche_ref   varchar(200) NOT NULL,
+            amount        numeric(14,2) NOT NULL,
+            disbursed_on  date,
+            advaya_reference varchar(200),
+            note          text,
+            recorded_by   varchar(120),
+            tenant_id  uuid        NOT NULL,
+            version    integer     NOT NULL DEFAULT 1,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            updated_at timestamptz NOT NULL DEFAULT now(),
+            created_by varchar(120),
+            updated_by varchar(120),
+            deleted_at timestamptz,
+            CONSTRAINT disbursement_tranches_tenant_ref
+                UNIQUE (tenant_id, lending_id, tranche_ref)
+        );
+        """
+    )
+    op.execute("CREATE INDEX ix_disbursement_tranches_lending "
+               "ON disbursement_tranches (tenant_id, lending_id);")
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION disbursement_tranche_guard() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'disbursement_tranches rows are append-only';
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_disbursement_tranche_guard
+        BEFORE UPDATE OR DELETE ON disbursement_tranches
+        FOR EACH ROW EXECUTE FUNCTION disbursement_tranche_guard();
+        """
+    )
+    _enable_rls("disbursement_tranches", "disbursement_tranches_tenant_isolation")
+    _grant("disbursement_tranches", "SELECT, INSERT")
+
 
 def downgrade() -> None:
+    op.execute("DROP TABLE IF EXISTS disbursement_tranches;")
+    op.execute("DROP FUNCTION IF EXISTS disbursement_tranche_guard();")
     op.execute("DROP TABLE IF EXISTS advaya_handover_packages;")
     op.execute("DROP FUNCTION IF EXISTS advaya_handover_package_guard();")
     op.execute("DROP TABLE IF EXISTS cp_cs_checklists;")

@@ -77,3 +77,24 @@ class AdvayaHandoff(RegisterBase):
     workflow_id: Mapped[str | None] = mapped_column(String(200))
     run_id: Mapped[str | None] = mapped_column(String(200))
     note: Mapped[str | None] = mapped_column(Text)
+
+
+class DisbursementTranche(RegisterBase):
+    """One disbursement tranche against a Lending line — the callback record from Advaya
+    (or ops on its behalf). Append-only at the database (trigger): a recorded disbursement
+    is a fact; a correction is a NEW tranche with its own ref and a note."""
+
+    __tablename__ = "disbursement_tranches"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "lending_id", "tranche_ref",
+                         name="disbursement_tranches_tenant_ref"),
+    )
+
+    lending_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    deal_id: Mapped[str | None] = mapped_column(String(64))
+    tranche_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
+    disbursed_on: Mapped[date | None] = mapped_column()
+    advaya_reference: Mapped[str | None] = mapped_column(String(200))
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[str | None] = mapped_column(String(120))

@@ -183,6 +183,54 @@ async def approve_checklist(checklist_id: str,
     return _serialize(row)
 
 
+class ReturnIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # A return without a reason is useless to the maker — the note is mandatory.
+    note: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/v1/internal/cpcs-checklists/{checklist_id}/return", tags=["Internal"],
+             summary="Return the CP/CS checklist to its maker (checker; with reasons)")
+async def return_checklist(checklist_id: str, payload: ReturnIn,
+                           ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """RETURN-TO-MAKER: the checker sends a Completed checklist back for amendment instead
+    of approving or rejecting it. The row becomes 'Returned' (immutable reasons in the
+    audit trail + note); the maker AMENDS by submitting the NEXT checklist_version — the
+    returned version stays on the record untouched, so every iteration of the checklist is
+    permanently reviewable."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "approve_cpcs_checklist")   # checker authority, like approve
+    try:
+        cid = uuid.UUID(checklist_id)
+    except (ValueError, AttributeError):
+        raise ValidationAppError("checklist_id must be a valid id.") from None
+    row = (await ctx.session.execute(select(CpcsChecklist).where(
+        CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.id == cid,
+        CpcsChecklist.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No CP/CS checklist {checklist_id!r}.")
+    if row.status != "Completed":
+        raise ConflictError(
+            f"The CP/CS checklist is {row.status!r}; only a 'Completed' checklist can be "
+            "returned to its maker.")
+    checker_id = _actor_id(ctx)
+    if (checker_id is not None and checker_id == row.prepared_by_id) or (
+            checker_id is None and ctx.actor == row.prepared_by):
+        raise ValidationAppError(
+            "The CP/CS checklist must be returned by a DIFFERENT checker than its preparer.")
+    row.status = "Returned"
+    row.note = payload.note
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="cpcs.return",
+        resource_type="cp_cs_checklists", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
+                 "status": "Returned", "note": payload.note}))
+    return _serialize(row)
+
+
 @router.get("/v1/internal/cpcs-checklists/{checklist_id}", tags=["Internal"],
             summary="Read a CP/CS checklist")
 async def get_checklist(checklist_id: str,

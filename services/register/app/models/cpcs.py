@@ -30,7 +30,8 @@ class CpcsChecklist(RegisterBase):
     checklist_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # [{key, label, required (bool), status ('Pending'|'Completed'|'Waived'), note}]
     items: Mapped[list | None] = mapped_column(JSONB)
-    # Draft -> Completed -> Approved | Rejected
+    # Draft -> Completed -> Approved | Rejected | Returned (checker sent it back; the maker
+    # amends by submitting the NEXT checklist_version — returned versions stay on record).
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="Draft")
     prepared_by: Mapped[str | None] = mapped_column(String(120))
     prepared_by_id: Mapped[str | None] = mapped_column(String(64))

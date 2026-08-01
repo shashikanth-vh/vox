@@ -142,7 +142,7 @@ async def prepare_handover_package(payload: HandoverIn,
         raise ValidationAppError("lending_id must be a valid id.") from None
 
     existing = await _package_for_lending(ctx, payload.lending_id)
-    if existing is not None:
+    if existing is not None and existing.status != "Returned":
         # A handover is already in flight for this line — idempotent for the maker.
         return _serialize(existing)
 
@@ -222,19 +222,45 @@ async def prepare_handover_package(payload: HandoverIn,
     snapshot = {**manifest, "package_reference": package_reference,
                 "package_sha256": package_sha256, "from_stage": _READY, "to_stage": _HANDED_OVER,
                 "request_id": request_id_ctx.get()}
-    row = AdvayaHandoverPackage(
-        tenant_id=ctx.tenant_id, handover_key=handover_key, lending_id=payload.lending_id,
-        deal_id=str(line.deal_id) if line.deal_id else None, facility_amount=facility_amount,
-        proposed_disbursement_amount=prop_amt, proposed_disbursement_date=prop_date,
-        cpcs_checklist_version=checklist_version, executed_document_refs=doc_refs,
-        package_reference=package_reference, package_sha256=package_sha256,
-        package_document=package_document, initiated_by=maker_name, initiated_by_id=maker_id,
-        delivery_method=payload.delivery_method, recipient=payload.recipient,
-        status="Prepared", note=payload.note, snapshot=snapshot, created_by=ctx.actor)
-    ctx.session.add(row)
+    if existing is not None:
+        # RE-PREPARE after a checker return: the same row is rebuilt (fresh manifest,
+        # digest and maker identity) and goes back to 'Prepared' — the return reasons stay
+        # in the audit trail; the package the checker sees is always the CURRENT one.
+        row = existing
+        row.facility_amount = facility_amount
+        row.proposed_disbursement_amount = prop_amt
+        row.proposed_disbursement_date = prop_date
+        row.cpcs_checklist_version = checklist_version
+        row.executed_document_refs = doc_refs
+        row.package_reference = package_reference
+        row.package_sha256 = package_sha256
+        row.package_document = package_document
+        row.initiated_by = maker_name
+        row.initiated_by_id = maker_id
+        row.delivery_method = payload.delivery_method
+        row.recipient = payload.recipient
+        row.status = "Prepared"
+        row.note = payload.note
+        row.snapshot = snapshot
+        row.updated_by = ctx.actor
+        action = "advaya.handover.reprepare"
+    else:
+        row = AdvayaHandoverPackage(
+            tenant_id=ctx.tenant_id, handover_key=handover_key, lending_id=payload.lending_id,
+            deal_id=str(line.deal_id) if line.deal_id else None,
+            facility_amount=facility_amount,
+            proposed_disbursement_amount=prop_amt, proposed_disbursement_date=prop_date,
+            cpcs_checklist_version=checklist_version, executed_document_refs=doc_refs,
+            package_reference=package_reference, package_sha256=package_sha256,
+            package_document=package_document, initiated_by=maker_name,
+            initiated_by_id=maker_id,
+            delivery_method=payload.delivery_method, recipient=payload.recipient,
+            status="Prepared", note=payload.note, snapshot=snapshot, created_by=ctx.actor)
+        ctx.session.add(row)
+        action = "advaya.handover.prepare"
     await ctx.session.flush()
     ctx.session.add(AuditLog(
-        tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.prepare",
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action=action,
         resource_type="advaya_handover_packages", resource_id=str(row.id),
         request_id=request_id_ctx.get(),
         changes={"lending_id": payload.lending_id, "handover_key": handover_key,
@@ -298,6 +324,50 @@ async def approve_handover_package(lending_id: str,
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "from": _READY, "to": _HANDED_OVER,
                  "maker": pkg.initiated_by, "checker": checker_name}))
+    return _serialize(pkg)
+
+
+class HandoverReturnIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # A return without a reason is useless to the maker — the note is mandatory.
+    note: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/v1/internal/handover-packages/{lending_id}/return", tags=["Internal"],
+             summary="CHECKER returns the handover package to its maker (with reasons)")
+async def return_handover_package(lending_id: str, payload: HandoverReturnIn,
+                                  ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """RETURN-TO-MAKER on the handover: the checker sends a 'Prepared' package back for
+    amendment instead of approving it. The line does NOT move (it stays at 'Ready for
+    Disbursement'); the maker re-prepares — same row, fresh manifest + digest — and a
+    DIFFERENT checker approves the rebuilt package. Reasons are mandatory and audited."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "approve_advaya_handover")   # checker authority, like approve
+    pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
+        AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+        AdvayaHandoverPackage.lending_id == lending_id,
+        AdvayaHandoverPackage.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if pkg is None:
+        raise NotFoundError(f"No prepared handover package for Lending line {lending_id!r}.")
+    if pkg.status != "Prepared":
+        raise ConflictError(
+            f"The handover package is {pkg.status!r}; only a 'Prepared' package can be "
+            "returned to its maker.")
+    checker_name, checker_id = _ident(ctx)
+    if checker_id == pkg.initiated_by_id:
+        raise ValidationAppError(
+            "The handover must be returned by a DIFFERENT checker than the maker who "
+            "prepared it.")
+    pkg.status = "Returned"
+    pkg.note = payload.note
+    pkg.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.return",
+        resource_type="advaya_handover_packages", resource_id=str(pkg.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, "status": "Returned", "checker": checker_name,
+                 "note": payload.note}))
     return _serialize(pkg)
 
 

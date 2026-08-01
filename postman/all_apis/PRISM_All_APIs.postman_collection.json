@@ -6,7 +6,7 @@
   },
   "item": [
     {
-      "name": "Register  (186 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (190 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -5600,6 +5600,57 @@
               }
             },
             {
+              "name": "POST /v1/internal/cpcs-checklists/{checklist_id}/return \u2014 Return the CP/CS checklist to its maker (checker; with reasons)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{checklist_id}}/return",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cpcs-checklists",
+                    "{{checklist_id}}",
+                    "return"
+                  ]
+                },
+                "description": "RETURN-TO-MAKER: the checker sends a Completed checklist back for amendment instead\nof approving or rejecting it. The row becomes 'Returned' (immutable reasons in the\naudit trail + note); the maker AMENDS by submitting the NEXT checklist_version \u2014 the\nreturned version stays on the record untouched, so every iteration of the checklist is\npermanently reviewable.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/decisions \u2014 Record a lead-conversion decision (single-winner)",
               "request": {
                 "method": "POST",
@@ -5952,6 +6003,144 @@
                     "handover-packages",
                     "{{lending_id}}",
                     "approve"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/handover-packages/{lending_id}/return \u2014 CHECKER returns the handover package to its maker (with reasons)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lending_id}}/return",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "handover-packages",
+                    "{{lending_id}}",
+                    "return"
+                  ]
+                },
+                "description": "RETURN-TO-MAKER on the handover: the checker sends a 'Prepared' package back for\namendment instead of approving it. The line does NOT move (it stays at 'Ready for\nDisbursement'); the maker re-prepares \u2014 same row, fresh manifest + digest \u2014 and a\nDIFFERENT checker approves the rebuilt package. Reasons are mandatory and audited.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/lending/{lending_id}/tranches \u2014 Record one disbursement tranche (idempotent)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/lending/{{lending_id}}/tranches",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "lending",
+                    "{{lending_id}}",
+                    "tranches"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tranche_ref\": \"sample\",\n  \"amount\": 1.0,\n  \"disbursed_on\": \"2026-01-31\",\n  \"advaya_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/lending/{lending_id}/tranches \u2014 A line's disbursement tranches + reconciliation totals",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/lending/{{lending_id}}/tranches",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "lending",
+                    "{{lending_id}}",
+                    "tranches"
                   ]
                 }
               }

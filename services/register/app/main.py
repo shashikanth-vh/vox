@@ -22,6 +22,7 @@ from app.api.rbac import router as rbac_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
 from app.api.tenants import router as tenants_router
+from app.api.tranches import router as tranches_router
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
         decisions_router,
         cpcs_router,
         handover_router,
+        tranches_router,
         reconciliation_router,
         evidence_router,
         build_resource_router(),

@@ -6,6 +6,22 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Documents → CP/CS → Advaya completion (increment 4).** The maker-checker loops now go
+  BOTH ways, and disbursement is tracked to the tranche: **CP/CS return-to-maker**
+  (`POST /v1/internal/cpcs-checklists/{id}/return`, checker ≠ maker, reasons mandatory) —
+  the returned version FREEZES at the database and the maker amends via the next
+  `checklist_version`, so every iteration stays reviewable; **handover return + re-prepare**
+  (`POST /v1/internal/handover-packages/{lending_id}/return`) — the line never moves, the
+  maker rebuilds the same row with a fresh manifest + digest, and a different checker
+  approves the rebuilt package; **tranche-level disbursement callbacks**
+  (`POST/GET /v1/internal/lending/{id}/tranches`, service-principal only) — append-only at
+  the database, idempotent per `tranche_ref` (same ref + different amount = 409; a
+  correction is a NEW tranche), refused before the line is 'Disbursed', bounded by the
+  line's disbursement ceiling (over-disbursement callbacks are refused loudly), with
+  reconciliation totals (`total_disbursed` / `remaining` / `fully_disbursed`). New
+  `disbursement_tranches` table folded into the handover migration.
+
+
 - **Lending depth (increment 3): committee rework, conditional approval, sanction expiry.**
   The rework loop is complete: return-for-information → `POST
   /v1/workflows/{id}/revise-credit-note` (each revision filed as the next immutable
