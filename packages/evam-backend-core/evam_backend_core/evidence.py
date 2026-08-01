@@ -60,6 +60,7 @@ class EvidenceKindSpec(NamedTuple):
 
 _DEAL_LINE = frozenset({"Deal", "Lending"})
 _SYN = frozenset({"Syndication"})
+_AM = frozenset({"AssetMonetisation"})
 
 # The authoritative kind registry. Operations are defined in ``rbac.OPERATIONS`` and granted to the
 # committee / sanction / document / qualification authorities (and the workflow service) there.
@@ -110,6 +111,16 @@ EVIDENCE_KINDS: dict[str, EvidenceKindSpec] = {
                                              decision_outcome="Approved",
                                              verify_source="syndication"),
     "syndication_allocation": EvidenceKindSpec("attach_syndication_evidence", _SYN, False),
+    # Asset-monetisation mandate lifecycle: the teaser circulated to buyers (versioned
+    # artefact), per-buyer NDA / data-room access records, NBO / binding offers (the offer
+    # comparison's immutable inputs), and the CLOSURE approval (governance: verified
+    # against the recorded asset-monetisation decision).
+    "teaser_document": EvidenceKindSpec("attach_am_evidence", _AM, False),
+    "am_nda": EvidenceKindSpec("attach_am_evidence", _AM, False),
+    "am_offer": EvidenceKindSpec("attach_am_evidence", _AM, False),
+    "am_closure_approval": EvidenceKindSpec("attach_am_evidence", _AM, True,
+                                            decision_outcome="Approved",
+                                            verify_source="asset_mon"),
     "lead_qualification": EvidenceKindSpec("attach_qualification_evidence",
                                            frozenset({"Lead"}), False),
     "lead_qualification_failed": EvidenceKindSpec("attach_qualification_evidence",

@@ -110,6 +110,97 @@
         "title": "AllocationIn",
         "type": "object"
       },
+      "AmDecisionIn": {
+        "additionalProperties": false,
+        "description": "The AM Head's closure decision on a mandate \u2014 approved = the sale CLOSES;\nrejected = the mandate is LOST/dropped, with the reason on record.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "closure_reference": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Closure Reference",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "by",
+          "approved"
+        ],
+        "title": "AmDecisionIn",
+        "type": "object"
+      },
+      "AmStartIn": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_mon_id": {
+            "maxLength": 64,
+            "title": "Asset Mon Id",
+            "type": "string"
+          },
+          "deal_id": {
+            "maxLength": 64,
+            "title": "Deal Id",
+            "type": "string"
+          },
+          "decision_timeout_hours": {
+            "default": 1440,
+            "maximum": 8760.0,
+            "minimum": 1.0,
+            "title": "Decision Timeout Hours",
+            "type": "integer"
+          },
+          "requested_by": {
+            "maxLength": 200,
+            "title": "Requested By",
+            "type": "string"
+          },
+          "teaser_reference": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Teaser Reference",
+            "type": "string"
+          },
+          "teaser_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teaser Sha256"
+          }
+        },
+        "required": [
+          "asset_mon_id",
+          "deal_id",
+          "requested_by"
+        ],
+        "title": "AmStartIn",
+        "type": "object"
+      },
       "ChecklistItemIn": {
         "additionalProperties": false,
         "description": "One qualification checklist RESULT from the caller. The item definitions (which keys\nexist, which are required) come from deployment config \u2014 the caller only says what\npassed; unknown keys are refused at merge time.",
@@ -985,6 +1076,78 @@
         "title": "LenderUpdateIn",
         "type": "object"
       },
+      "NdaIn": {
+        "additionalProperties": false,
+        "properties": {
+          "buyer_row_id": {
+            "maxLength": 64,
+            "title": "Buyer Row Id",
+            "type": "string"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "data_room": {
+            "default": false,
+            "title": "Data Room",
+            "type": "boolean"
+          },
+          "reference": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "buyer_row_id",
+          "reference",
+          "by"
+        ],
+        "title": "NdaIn",
+        "type": "object"
+      },
+      "OfferIn": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_cr": {
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Cr",
+            "type": "number"
+          },
+          "buyer_row_id": {
+            "maxLength": 64,
+            "title": "Buyer Row Id",
+            "type": "string"
+          },
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "kind": {
+            "pattern": "^(nbo|binding)$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "reference": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "buyer_row_id",
+          "kind",
+          "amount_cr",
+          "by"
+        ],
+        "title": "OfferIn",
+        "type": "object"
+      },
       "SyndicationDecisionIn": {
         "additionalProperties": false,
         "description": "The Syn Head's recorded decision on a mandate \u2014 persist-before-signal, like every\ndecision in the platform.",
@@ -1569,6 +1732,65 @@
           }
         },
         "summary": "CHECKER approves a prepared Advaya handover (different person)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/asset-monetisations": {
+      "post": {
+        "operationId": "start_asset_mon_v1_workflows_asset_monetisations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Start Asset Mon V1 Workflows Asset Monetisations Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start an asset-monetisation workflow (teaser \u2192 offers \u2192 closure)",
         "tags": [
           "Workflows"
         ]
@@ -2193,6 +2415,75 @@
         ]
       }
     },
+    "/v1/workflows/{workflow_id}/am-decision": {
+      "post": {
+        "description": "Persist-before-signal with kind='asset_monetisation' (subject-bound, AM Head\nauthority) \u2014 the run verifies the record fail-closed before acting.",
+        "operationId": "am_decision_v1_workflows__workflow_id__am_decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Am Decision V1 Workflows  Workflow Id  Am Decision Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record the AM Head's closure decision (durable, then signal)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/{workflow_id}/approve": {
       "post": {
         "operationId": "approve_v1_workflows__workflow_id__approve_post",
@@ -2261,6 +2552,74 @@
         ]
       }
     },
+    "/v1/workflows/{workflow_id}/buyer-update": {
+      "post": {
+        "operationId": "buyer_update_v1_workflows__workflow_id__buyer_update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LenderUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Buyer Update V1 Workflows  Workflow Id  Buyer Update Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record buyer-level activity on an AM run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/{workflow_id}/circulate-im": {
       "post": {
         "operationId": "circulate_im_v1_workflows__workflow_id__circulate_im_post",
@@ -2324,6 +2683,74 @@
           }
         },
         "summary": "Circulate the (next version of the) IM on a syndication run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/circulate-teaser": {
+      "post": {
+        "operationId": "circulate_teaser_v1_workflows__workflow_id__circulate_teaser_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditNoteRevisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Circulate Teaser V1 Workflows  Workflow Id  Circulate Teaser Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Circulate the (next version of the) teaser on an AM run",
         "tags": [
           "Workflows"
         ]
@@ -2665,6 +3092,142 @@
           }
         },
         "summary": "Record lender-level activity on a syndication run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/record-nda": {
+      "post": {
+        "operationId": "record_nda_v1_workflows__workflow_id__record_nda_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NdaIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Record Nda V1 Workflows  Workflow Id  Record Nda Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a buyer's NDA (and data-room grant) on an AM run",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/record-offer": {
+      "post": {
+        "operationId": "record_offer_v1_workflows__workflow_id__record_offer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Record Offer V1 Workflows  Workflow Id  Record Offer Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a buyer's NBO / binding offer on an AM run",
         "tags": [
           "Workflows"
         ]

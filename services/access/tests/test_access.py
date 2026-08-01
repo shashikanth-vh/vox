@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from evam_backend_core.rbac_catalog import POLICY_VERSION
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
@@ -153,7 +154,7 @@ async def test_matrix_edit_records_override_provenance_and_audit(client: AsyncCl
         "kind": "operation", "item": "add_lead", "role": "Syn RM", "access": "SCOPED"})
     assert r.status_code == 200, r.text
     drift = (await client.get("/v1/access/drift", headers=ADMIN)).json()
-    assert drift["policy_version"] == "3.2" and drift["fingerprint"]
+    assert drift["policy_version"] == POLICY_VERSION and drift["fingerprint"]
     assert drift["in_sync"] is False
     cell = next(c for c in drift["differing_cells"]
                 if c["item"] == "add_lead" and c["role"] == "Syn RM")
@@ -167,7 +168,7 @@ async def test_matrix_edit_records_override_provenance_and_audit(client: AsyncCl
             "SELECT actor, policy_version, detail->>'to' FROM access_audit "
             "WHERE action='matrix.edit' AND item='operation:add_lead:Syn RM' "
             "ORDER BY created_at DESC LIMIT 1"))).first()
-        assert row is not None and row[1] == "3.2" and row[2] == "SCOPED"
+        assert row is not None and row[1] == POLICY_VERSION and row[2] == "SCOPED"
         # Append-only: the DB trigger refuses tampering.
         import pytest as _pytest
         from sqlalchemy.exc import DBAPIError

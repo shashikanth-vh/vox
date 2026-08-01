@@ -48,6 +48,8 @@ with workflow.unsafe.imports_passed_through():
         LeadQualificationResult,
         SanctionExpiryInput,
         SanctionExpiryResult,
+        AssetMonetisationInput,
+        AssetMonetisationResult,
         SyndicationMandateInput,
         SyndicationMandateResult,
         VoxResult,
@@ -1347,6 +1349,323 @@ class SyndicationMandateWorkflow:
             workflow_id=wf_id, syndication_id=inp.syndication_id, status="Sanctioned",
             decided_by=decided_by, im_version=self._im_version, allocations=allocations,
             evidence_ids=evidence_ids, note=note)
+
+
+_AM_ORDER = ["Teaser Prepared", "Teaser Shared", "In Discussion", "NBO Received",
+             "BO Received", "SPA / Documentation", "Closed"]
+
+
+def _am_before(current: str | None, target: str) -> bool:
+    if current not in _AM_ORDER or target not in _AM_ORDER:
+        return False
+    return _AM_ORDER.index(current) < _AM_ORDER.index(target)
+
+
+@workflow.defn
+class AssetMonetisationWorkflow:
+    """The asset-monetisation mandate's journey: teaser (VERSIONED evidence) → buyer
+    outreach (buyer-level activity on the deal's buyer rows, policy-enforced) → NDA /
+    data-room records (immutable evidence per buyer) → offers (NBO / binding — the offer
+    comparison's immutable inputs; a binding offer advances the mandate) → the AM Head's
+    recorded CLOSURE decision (persist-before-signal, verified fail-closed; the Register's
+    am_closure_approval evidence gate accepts 'Closed' only because that verified evidence
+    is on file) → Closed, or Lost. Inherits the full run-control + SLA foundation."""
+
+    def __init__(self) -> None:
+        self._stage = "Starting"
+        self._fnd = _Foundation()
+        self._notified = False
+        self._teaser_version = 0
+        self._teaser_queue: list[tuple] = []      # (reference, sha, by)
+        self._buyer_ids: list[str] = []
+        self._buyer_queue: list[tuple] = []       # (row_id, status, note, by)
+        self._nda_queue: list[tuple] = []         # (row_id, reference, data_room, by)
+        self._offer_queue: list[tuple] = []       # (row_id, kind, amount, reference, by)
+        self._offers: list[dict] = []
+
+    # ---- signals (UNTRUSTED; whitelisted / policy-checked / verified) ----
+    @workflow.signal
+    def am_decision(self, decision_ref: str = "") -> None:
+        """Wake-up only — the run re-reads the AUTHORITATIVE persisted decision."""
+        self._notified = True
+
+    @workflow.signal
+    def control(self, action: str, control_ref: str = "") -> None:
+        self._fnd.controls.append((action, control_ref))
+
+    @workflow.signal
+    def circulate_teaser(self, reference: str, sha256: str = "", by: str = "") -> None:
+        if reference.strip():
+            self._teaser_queue.append((reference.strip(), sha256 or None, by))
+
+    @workflow.signal
+    def buyer_update(self, row_id: str, status: str, note: str = "", by: str = "") -> None:
+        """Buyer-level pipeline movement on ONE of the deal's buyer rows (whitelisted; the
+        move itself is policy-enforced by the Register)."""
+        if row_id in self._buyer_ids:
+            self._buyer_queue.append((row_id, status, note, by))
+
+    @workflow.signal
+    def record_nda(self, row_id: str, reference: str, data_room: bool = False,
+                   by: str = "") -> None:
+        """An NDA signed (and optionally data-room access granted) for ONE buyer —
+        filed as immutable am_nda evidence on the mandate."""
+        if row_id in self._buyer_ids and reference.strip():
+            self._nda_queue.append((row_id, reference.strip(), data_room, by))
+
+    @workflow.signal
+    def record_offer(self, row_id: str, kind: str, amount_cr: float,
+                     reference: str = "", by: str = "") -> None:
+        """An offer from ONE buyer: kind 'nbo' (non-binding) or 'binding'. Every offer is
+        immutable am_offer evidence — the comparison set can never be quietly edited."""
+        if row_id in self._buyer_ids and kind in ("nbo", "binding") and amount_cr > 0:
+            self._offer_queue.append((row_id, kind, float(amount_cr), reference, by))
+
+    @workflow.query
+    def status(self) -> str:
+        return self._stage
+
+    @workflow.query
+    def state(self) -> dict:
+        return {**self._fnd.state(self._stage), "teaser_version": self._teaser_version,
+                "buyer_rows": self._buyer_ids}
+
+    @workflow.query
+    def offer_comparison(self) -> list:
+        """Every offer this run collected, in arrival order — the comparison a closure
+        decision is made on (each is also on file as evidence)."""
+        return self._offers
+
+    async def _advance_mandate(self, mid: str, target: str, current: str | None,
+                               caller: Any) -> str:
+        while current in _AM_ORDER and _am_before(current, target):
+            nxt = _AM_ORDER[_AM_ORDER.index(current) + 1]
+            row = await workflow.execute_activity(
+                activities.advance_stage,
+                args=["asset-monetisation", mid, "status", nxt, None, caller],
+                **_DURABLE_IO)
+            current = row.get("status")
+        return current or target
+
+    async def _file_teaser(self, mid: str, reference: str, sha: str | None, by: str,
+                           caller: Any, evidence_ids: list) -> None:
+        self._teaser_version += 1
+        ev = await workflow.execute_activity(
+            activities.attach_evidence,
+            args=["AssetMonetisation", mid, "teaser_document", reference, sha,
+                  f"Teaser circulated to buyers (v{self._teaser_version}"
+                  + (f", by {by}" if by else "") + ")", caller],
+            **_DURABLE_IO)
+        evidence_ids.append(ev.get("id"))
+
+    @workflow.run
+    async def run(self, inp: AssetMonetisationInput) -> AssetMonetisationResult:  # noqa: PLR0915
+        wf_id = workflow.info().workflow_id
+        caller = inp.caller
+        subject = f"AssetMonetisation:{inp.asset_mon_id}"
+        evidence_ids: list = []
+        _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
+
+        mandate = await workflow.execute_activity(
+            activities.get_resource,
+            args=["asset-monetisation", inp.asset_mon_id, caller], **_IO)
+        rows = await workflow.execute_activity(
+            activities.find_lines_for_deal,
+            args=["asset-monetisation", inp.deal_id, caller], **_IO)
+        self._buyer_ids = [str(r.get("id")) for r in rows
+                           if str(r.get("id")) != str(inp.asset_mon_id)]
+        current = mandate.get("status")
+
+        if inp.teaser_reference:
+            self._stage = "Circulating teaser"
+            await self._file_teaser(inp.asset_mon_id, inp.teaser_reference,
+                                    inp.teaser_sha256, "", caller, evidence_ids)
+            current = await self._advance_mandate(inp.asset_mon_id, "Teaser Shared",
+                                                  current, caller)
+
+        self._stage = "Awaiting closure decision"
+        total = timedelta(hours=inp.decision_timeout_hours)
+        start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        verified: dict[str, Any] | None = None
+        while verified is None:
+            waited = workflow.now() - start
+            remaining = total - waited
+            if remaining <= timedelta(0):
+                break
+            if (due := self._fnd.due_sla_event(
+                    waited, inp.sla_reminder_hours, inp.sla_escalation_hours)) is not None:
+                await _emit_ops(due, {
+                    "subject": subject, "requested_by": inp.requested_by,
+                    "business_status": self._fnd.business_status,
+                    "waiting_hours": round(waited.total_seconds() / 3600, 1)})
+                continue
+            if workflow.info().is_continue_as_new_suggested():
+                import dataclasses
+                workflow.continue_as_new(dataclasses.replace(
+                    inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
+            try:
+                await workflow.wait_condition(
+                    lambda: (self._notified or bool(self._fnd.controls)
+                             or bool(self._teaser_queue) or bool(self._buyer_queue)
+                             or bool(self._nda_queue) or bool(self._offer_queue)),
+                    timeout=self._fnd.next_wakeup(waited, remaining,
+                                                  inp.sla_reminder_hours,
+                                                  inp.sla_escalation_hours))
+            except asyncio.TimeoutError:
+                continue
+            while self._teaser_queue:
+                ref, sha, by = self._teaser_queue.pop(0)
+                self._stage = f"Circulating teaser v{self._teaser_version + 1}"
+                await self._file_teaser(inp.asset_mon_id, ref, sha, by, caller,
+                                        evidence_ids)
+                current = await self._advance_mandate(inp.asset_mon_id, "Teaser Shared",
+                                                      current, caller)
+                self._stage = "Awaiting closure decision"
+            while self._nda_queue:
+                row_id, ref, data_room, by = self._nda_queue.pop(0)
+                self._stage = "Recording NDA"
+                ev = await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["AssetMonetisation", inp.asset_mon_id, "am_nda", ref, None,
+                          f"NDA signed for buyer row {row_id}"
+                          + (" — data-room access GRANTED" if data_room else "")
+                          + (f" (by {by})" if by else ""), caller],
+                    **_DURABLE_IO)
+                evidence_ids.append(ev.get("id"))
+                await _emit_ops("am_nda", {"subject": subject, "buyer_row": row_id,
+                                           "data_room": data_room, "by": by})
+                self._stage = "Awaiting closure decision"
+            while self._offer_queue:
+                row_id, kind, amount, ref, by = self._offer_queue.pop(0)
+                self._stage = "Recording offer"
+                ev = await workflow.execute_activity(
+                    activities.attach_evidence,
+                    args=["AssetMonetisation", inp.asset_mon_id, "am_offer",
+                          ref or f"offer/{wf_id}/{len(self._offers) + 1}", None,
+                          f"{'Binding offer' if kind == 'binding' else 'NBO'} from buyer "
+                          f"row {row_id}: {amount} Cr"
+                          + (f" (by {by})" if by else ""), caller],
+                    **_DURABLE_IO)
+                evidence_ids.append(ev.get("id"))
+                self._offers.append({"buyer_row": row_id, "kind": kind,
+                                     "amount_cr": amount, "reference": ref})
+                # An offer moves the MANDATE forward (policy-checked walk): any offer
+                # reaches 'NBO Received'; a binding one reaches 'BO Received'.
+                target = "BO Received" if kind == "binding" else "NBO Received"
+                current = await self._advance_mandate(inp.asset_mon_id, target, current,
+                                                      caller)
+                await _emit_ops("am_offer", {"subject": subject, "buyer_row": row_id,
+                                             "kind": kind, "amount_cr": amount})
+                self._stage = "Awaiting closure decision"
+            while self._buyer_queue:
+                row_id, status, note, by = self._buyer_queue.pop(0)
+                self._stage = "Recording buyer update"
+                try:
+                    await workflow.execute_activity(
+                        activities.advance_stage,
+                        args=["asset-monetisation", row_id, "status", status,
+                              ({"notes": note} if note else None), caller], **_IO)
+                    await _emit_ops("buyer_update", {
+                        "subject": subject, "buyer_row": row_id, "status": status,
+                        "by": by})
+                except Exception:  # noqa: BLE001 — an illegal move must not kill the run
+                    await _emit_ops("buyer_update_rejected", {
+                        "subject": subject, "buyer_row": row_id, "status": status,
+                        "by": by})
+                self._stage = "Awaiting closure decision"
+            while self._fnd.controls:
+                action, ref = self._fnd.controls.pop(0)
+                self._stage = "Verifying control"
+                v = await workflow.execute_activity(
+                    activities.verify_control, args=[ref, caller], **_DURABLE_IO)
+                self._stage = "Awaiting closure decision"
+                if not v.get("valid"):
+                    continue
+                verified_action = v["action"]
+                if verified_action == "Cancelled":
+                    self._fnd.business_status = "Cancelled"
+                    self._fnd.cancelled_by = v.get("by")
+                    self._fnd.cancel_note = v.get("note")
+                elif verified_action == "ReturnedForInformation":
+                    self._fnd.business_status = "ReturnedForInformation"
+                elif verified_action == "Resubmitted":
+                    self._fnd.business_status = "AwaitingDecision"
+                    start = workflow.now()
+                    self._fnd.reminders_sent = 0
+                    self._fnd.escalated = False
+                _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
+                               subject)
+                await _emit_ops("run_control", {
+                    "subject": subject, "action": verified_action, "by": v.get("by"),
+                    "note": v.get("note")})
+            if self._fnd.business_status == "Cancelled":
+                self._stage = "Cancelled"
+                return AssetMonetisationResult(
+                    workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="Cancelled",
+                    decided_by=self._fnd.cancelled_by,
+                    teaser_version=self._teaser_version, offers=self._offers,
+                    evidence_ids=evidence_ids, note=self._fnd.cancel_note)
+            if not self._notified:
+                continue
+            self._notified = False
+            self._stage = "Verifying closure decision"
+            v = await workflow.execute_activity(
+                activities.verify_am_decision,
+                args=[inp.asset_mon_id, caller], **_DURABLE_IO)
+            if v.get("valid"):
+                verified = v
+            else:
+                self._stage = "Awaiting closure decision"
+
+        if verified is None:
+            self._stage = "TimedOut"
+            self._fnd.business_status = "TimedOut"
+            _upsert_search(inp.emit_search_attributes, "TimedOut", subject)
+            await _emit_ops("decision_timeout", {
+                "subject": subject, "requested_by": inp.requested_by,
+                "window_hours": inp.decision_timeout_hours})
+            return AssetMonetisationResult(
+                workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="TimedOut",
+                teaser_version=self._teaser_version, offers=self._offers,
+                evidence_ids=evidence_ids,
+                note="No closure decision within the window.")
+
+        decided_by = verified.get("decided_by")
+        note = verified.get("note")
+
+        if verified["outcome"] == "Rejected":
+            # A LOST / cancelled sale: the mandate drops, with the reason on record.
+            self._stage = "Lost"
+            self._fnd.business_status = "Lost"
+            _upsert_search(inp.emit_search_attributes, "Lost", subject)
+            await workflow.execute_activity(
+                activities.advance_stage,
+                args=["asset-monetisation", inp.asset_mon_id, "status", "Dropped", None,
+                      caller], **_DURABLE_IO)
+            return AssetMonetisationResult(
+                workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="Lost",
+                decided_by=decided_by, teaser_version=self._teaser_version,
+                offers=self._offers, evidence_ids=evidence_ids, note=note)
+
+        # Approved → file the VERIFIED closure evidence, then walk to 'Closed' — an
+        # advance the Register's evidence gate accepts only because it is on file.
+        self._stage = "Filing closure evidence"
+        closure_ref = verified.get("closure_reference") or f"am-closure/{wf_id}"
+        ev = await workflow.execute_activity(
+            activities.attach_evidence,
+            args=["AssetMonetisation", inp.asset_mon_id, "am_closure_approval",
+                  closure_ref, None, note, caller, wf_id],
+            **_DURABLE_IO)
+        evidence_ids.append(ev.get("id"))
+        self._stage = "Closing mandate"
+        await self._advance_mandate(inp.asset_mon_id, "Closed", current, caller)
+        self._stage = "Closed"
+        self._fnd.business_status = "Closed"
+        _upsert_search(inp.emit_search_attributes, "Closed", subject)
+        return AssetMonetisationResult(
+            workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="Closed",
+            decided_by=decided_by, teaser_version=self._teaser_version,
+            offers=self._offers, evidence_ids=evidence_ids, note=note)
 
 
 @workflow.defn

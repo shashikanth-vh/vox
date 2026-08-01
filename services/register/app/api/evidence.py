@@ -53,6 +53,7 @@ from app.models.evidence import GovernanceEvidence, GovernanceEvidenceStatus
 from app.repositories.subjects import SUBJECTS, load_subject
 
 _SYNDICATION_AUTHORITY = {"Syn Head", "Management", "Admin"}
+_AM_AUTHORITY = {"AM Head", "Management", "Admin"}
 
 router = api_router(prefix="/v1/evidence", tags=["Evidence"])
 
@@ -281,6 +282,17 @@ async def attach_evidence(payload: EvidenceIn,
         decision = await _verify_committee_decision(
             ctx, spec, payload, authority=_SYNDICATION_AUTHORITY,
             authority_label="syndication")
+        prov_workflow, prov_run = decision.workflow_id, decision.run_id
+        decision_ref = decision.workflow_id
+    elif spec.verify_source == "asset_mon":
+        # AM closure approval: VERIFY against the durable asset-monetisation decision
+        # (AM Head authority, subject-bound) and generate provenance from it.
+        if not payload.sha256:
+            raise ValidationAppError(
+                f"{payload.evidence_kind!r} is governance evidence and requires a sha256 digest.")
+        decision = await _verify_committee_decision(
+            ctx, spec, payload, authority=_AM_AUTHORITY,
+            authority_label="asset-monetisation")
         prov_workflow, prov_run = decision.workflow_id, decision.run_id
         decision_ref = decision.workflow_id
     elif spec.verify_source == "cpcs":

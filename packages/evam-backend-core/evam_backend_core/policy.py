@@ -141,6 +141,11 @@ EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
     "Syndication": {
         "Sanctioned": ["syndication_sanction"],
     },
+    # An asset-monetisation mandate may not CLOSE until the recorded closure approval's
+    # evidence is on file — the sale of an asset is a senior decision, never a typed word.
+    "AssetMonetisation": {
+        "Closed": ["am_closure_approval"],
+    },
 }
 
 

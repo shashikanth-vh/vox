@@ -665,6 +665,29 @@ async def verify_syndication_decision(syndication_id: str,
 
 
 @activity.defn
+async def verify_am_decision(asset_mon_id: str,
+                             caller: CallerContext | None = None) -> dict[str, Any]:
+    """The AUTHORITATIVE asset-monetisation closure decision for THIS run (persisted by the
+    orchestrator with AM Head authority, single-winner, subject-bound). FAIL CLOSED like
+    every decision verifier."""
+    from evam_register_client.errors import NotFoundError
+    wf_id = str(activity.info().workflow_id)
+    async with _client(caller) as reg:
+        try:
+            rec = await reg.get_decision(wf_id, request_id=wf_id)
+        except NotFoundError:
+            return {"valid": False, "reason": "no AM decision recorded for this run"}
+    if (rec.get("subject_type") != "AssetMonetisation"
+            or str(rec.get("subject_id")) != str(asset_mon_id)):
+        return {"valid": False, "reason": "AM decision is for a different subject"}
+    if rec.get("decision") not in ("Approved", "Rejected"):
+        return {"valid": False, "reason": "AM decision has no terminal outcome"}
+    return {"valid": True, "outcome": rec.get("decision"), "decided_by": rec.get("decided_by"),
+            "note": rec.get("note"),
+            "closure_reference": rec.get("committee_reference")}
+
+
+@activity.defn
 async def verify_facility_decisions(line_ids: list[str],
                                     caller: CallerContext | None = None) -> dict[str, Any]:
     """Read the PER-FACILITY committee outcomes the orchestrator persisted under

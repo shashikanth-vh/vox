@@ -9467,7 +9467,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (23 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (29 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Workflows",
@@ -9564,6 +9564,55 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"approved_by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/asset-monetisations \u2014 Start an asset-monetisation workflow (teaser \u2192 offers \u2192 closure)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/asset-monetisations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "asset-monetisations"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"asset_mon_id\": \"sample\",\n  \"deal_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"teaser_reference\": \"sample\",\n  \"teaser_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"decision_timeout_hours\": 1\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10060,6 +10109,57 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/am-decision \u2014 Record the AM Head's closure decision (durable, then signal)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/am-decision",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "am-decision"
+                  ]
+                },
+                "description": "Persist-before-signal with kind='asset_monetisation' (subject-bound, AM Head\nauthority) \u2014 the run verifies the record fail-closed before acting.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"closure_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/{workflow_id}/approve \u2014 Approve a pending human-in-the-loop workflow",
               "request": {
                 "method": "POST",
@@ -10110,6 +10210,56 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/buyer-update \u2014 Record buyer-level activity on an AM run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/buyer-update",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "buyer-update"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lender_row_id\": \"sample\",\n  \"status\": \"sample\",\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/{workflow_id}/circulate-im \u2014 Circulate the (next version of the) IM on a syndication run",
               "request": {
                 "method": "POST",
@@ -10146,6 +10296,56 @@
                     "workflows",
                     "{{workflow_id}}",
                     "circulate-im"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference\": \"sample\",\n  \"sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/circulate-teaser \u2014 Circulate the (next version of the) teaser on an AM run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/circulate-teaser",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "circulate-teaser"
                   ]
                 },
                 "body": {
@@ -10402,6 +10602,106 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"lender_row_id\": \"sample\",\n  \"status\": \"sample\",\n  \"note\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/record-nda \u2014 Record a buyer's NDA (and data-room grant) on an AM run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/record-nda",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "record-nda"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"buyer_row_id\": \"sample\",\n  \"reference\": \"sample\",\n  \"data_room\": false,\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/record-offer \u2014 Record a buyer's NBO / binding offer on an AM run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/record-offer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "record-offer"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"buyer_row_id\": \"sample\",\n  \"kind\": \"REPLACE-to-match-^(nbo|binding)$\",\n  \"amount_cr\": 1.0,\n  \"reference\": \"sample\",\n  \"by\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

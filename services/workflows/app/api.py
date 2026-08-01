@@ -41,6 +41,7 @@ from temporalio.service import RPCError
 from app.codec import build_data_converter
 from app.config import get_settings
 from app.types import (
+    AssetMonetisationInput,
     SyndicationMandateInput,
     AdvayaHandoffInput,
     CallerContext,
@@ -52,6 +53,7 @@ from app.types import (
     VoxTouchpoint,
 )
 from app.workflows import (
+    AssetMonetisationWorkflow,
     SyndicationMandateWorkflow,
     AdvayaHandoffWorkflow,
     CpcsChecklistWorkflow,
@@ -76,6 +78,8 @@ _APPROVER_ROLES: dict[str, set[str]] = {
     "cpcs": {"Credit Head", "Management", "Admin"},
     # The syndication desk's sanction call on a mandate.
     "synd": {"Syn Head", "Management", "Admin"},
+    # The AM desk's closure call on an asset-monetisation mandate.
+    "amon": {"AM Head", "Management", "Admin"},
 }
 
 
@@ -189,6 +193,44 @@ class AllocationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # lender row id → allocated amount (₹ Cr); validated in-run against the mandate.
     allocations: dict[str, float] = Field(min_length=1)
+    by: str = Field(max_length=200)
+
+
+class AmStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_mon_id: str = Field(max_length=64)
+    deal_id: str = Field(max_length=64)
+    requested_by: str = Field(max_length=200)
+    teaser_reference: str = Field(default="", max_length=500)
+    teaser_sha256: str | None = Field(default=None, pattern="^[0-9a-fA-F]{64}$")
+    decision_timeout_hours: int = Field(default=24 * 60, ge=1, le=24 * 365)
+
+
+class AmDecisionIn(BaseModel):
+    """The AM Head's closure decision on a mandate — approved = the sale CLOSES;
+    rejected = the mandate is LOST/dropped, with the reason on record."""
+
+    model_config = ConfigDict(extra="forbid")
+    by: str = Field(max_length=200)
+    approved: bool
+    closure_reference: str = Field(default="", max_length=500)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class NdaIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    buyer_row_id: str = Field(max_length=64)
+    reference: str = Field(min_length=1, max_length=500)
+    data_room: bool = False
+    by: str = Field(max_length=200)
+
+
+class OfferIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    buyer_row_id: str = Field(max_length=64)
+    kind: str = Field(pattern="^(nbo|binding)$")
+    amount_cr: float = Field(gt=0)
+    reference: str = Field(default="", max_length=500)
     by: str = Field(max_length=200)
 
 
@@ -1578,6 +1620,105 @@ def create_app() -> FastAPI:
         return await _deliver_signal(
             workflow_id, request, "allocate",
             [payload.allocations, payload.by], 1, x_api_key)
+
+    @app.post("/v1/workflows/asset-monetisations", status_code=202, tags=["Workflows"],
+              summary="Start an asset-monetisation workflow (teaser → offers → closure)")
+    async def start_asset_mon(payload: AmStartIn, request: Request,
+                              x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                              ) -> Any:
+        return await _start_business(
+            request, x_api_key, payload.requested_by, AssetMonetisationWorkflow,
+            AssetMonetisationInput, "amon", payload.asset_mon_id,
+            {"asset_mon_id": payload.asset_mon_id, "subject_type": "AssetMonetisation",
+             "deal_id": payload.deal_id},
+            asset_mon_id=payload.asset_mon_id, deal_id=payload.deal_id,
+            requested_by=payload.requested_by, teaser_reference=payload.teaser_reference,
+            teaser_sha256=payload.teaser_sha256,
+            decision_timeout_hours=payload.decision_timeout_hours)
+
+    @app.post("/v1/workflows/{workflow_id}/am-decision", tags=["Workflows"],
+              summary="Record the AM Head's closure decision (durable, then signal)")
+    async def am_decision(workflow_id: str, payload: AmDecisionIn, request: Request,
+                          x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                          ) -> Any:
+        """Persist-before-signal with kind='asset_monetisation' (subject-bound, AM Head
+        authority) — the run verifies the record fail-closed before acting."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        outcome = "Approved" if payload.approved else "Rejected"
+        decided_by, approver, _token, err = await _decider(
+            request, workflow_id, outcome, DecisionIn(by=payload.by, note=payload.note))
+        if err is not None:
+            return err
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict", "This run is no longer awaiting a decision.")
+        asset_mon_id = await desc.memo_value("asset_mon_id", None)
+        if not asset_mon_id:
+            return _problem(409, "Conflict", "This workflow has no bound mandate.")
+        _rec, err = await _persist_decision(
+            request, workflow_id, outcome, decided_by, payload.note, approver, None,
+            extra={"kind": "asset_monetisation", "subject_type": "AssetMonetisation",
+                   "subject_id": str(asset_mon_id), "run_id": desc.run_id,
+                   "committee_reference": payload.closure_reference or workflow_id})
+        if err is not None:
+            return err
+        try:
+            await handle.signal("am_decision", args=[workflow_id])
+        except RPCError as exc:
+            log.warning("am_signal_failed", extra={"workflow": workflow_id,
+                                                   "error": exc.message})
+            return _problem(409, "Conflict",
+                            "The decision was recorded but the run closed before it could "
+                            "be delivered.")
+        log.info("am_decision", extra={"workflow": workflow_id, "decision": outcome,
+                                       "by": decided_by})
+        return {"workflow_id": workflow_id, "decision": outcome, "by": decided_by}
+
+    @app.post("/v1/workflows/{workflow_id}/circulate-teaser", tags=["Workflows"],
+              summary="Circulate the (next version of the) teaser on an AM run")
+    async def circulate_teaser(workflow_id: str, payload: CreditNoteRevisionIn,
+                               request: Request,
+                               x_api_key: str | None = Header(default=None,
+                                                              alias="X-API-Key"),
+                               ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "circulate_teaser",
+            [payload.reference, payload.sha256 or "", payload.by], 2, x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/buyer-update", tags=["Workflows"],
+              summary="Record buyer-level activity on an AM run")
+    async def buyer_update(workflow_id: str, payload: LenderUpdateIn, request: Request,
+                           x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                           ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "buyer_update",
+            [payload.lender_row_id, payload.status, payload.note, payload.by], 3, x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/record-nda", tags=["Workflows"],
+              summary="Record a buyer's NDA (and data-room grant) on an AM run")
+    async def record_nda(workflow_id: str, payload: NdaIn, request: Request,
+                         x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                         ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "record_nda",
+            [payload.buyer_row_id, payload.reference, payload.data_room, payload.by], 3,
+            x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/record-offer", tags=["Workflows"],
+              summary="Record a buyer's NBO / binding offer on an AM run")
+    async def record_offer(workflow_id: str, payload: OfferIn, request: Request,
+                           x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                           ) -> Any:
+        return await _deliver_signal(
+            workflow_id, request, "record_offer",
+            [payload.buyer_row_id, payload.kind, payload.amount_cr, payload.reference,
+             payload.by], 4, x_api_key)
 
     @app.post("/v1/workflows/{workflow_id}/revise-credit-note", tags=["Workflows"],
               summary="Circulate a revised credit note to the committee (rework loop)")

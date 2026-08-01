@@ -119,6 +119,60 @@
           }
         },
         {
+          "name": "POST /v1/workflows/asset-monetisations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/asset-monetisations",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "asset-monetisations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"asset_mon_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"decision_timeout_hours\": 1,\n  \"requested_by\": \"sample requested_by\",\n  \"teaser_reference\": \"sample teaser_reference\",\n  \"teaser_sha256\": \"sample teaser_sha256\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/workflows/cpcs-checklists",
           "request": {
             "method": "POST",
@@ -649,6 +703,61 @@
           }
         },
         {
+          "name": "POST /v1/workflows/{{{workflowId}}}/am-decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/am-decision",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "am-decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved\": false,\n  \"by\": \"sample by\",\n  \"closure_reference\": \"sample closure_reference\",\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/workflows/{{{workflowId}}}/approve",
           "request": {
             "method": "POST",
@@ -704,6 +813,61 @@
           }
         },
         {
+          "name": "POST /v1/workflows/{{{workflowId}}}/buyer-update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/buyer-update",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "buyer-update"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"by\": \"sample by\",\n  \"lender_row_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"status\": \"sample status\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/workflows/{{{workflowId}}}/circulate-im",
           "request": {
             "method": "POST",
@@ -745,6 +909,61 @@
                 "workflows",
                 "{{{workflowId}}}",
                 "circulate-im"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"by\": \"sample by\",\n  \"reference\": \"sample reference\",\n  \"sha256\": \"sample sha256\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/{{{workflowId}}}/circulate-teaser",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/circulate-teaser",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "circulate-teaser"
               ]
             },
             "body": {
@@ -1025,6 +1244,116 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"by\": \"sample by\",\n  \"lender_row_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"status\": \"sample status\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/{{{workflowId}}}/record-nda",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/record-nda",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "record-nda"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"buyer_row_id\": \"{{id}}\",\n  \"by\": \"sample by\",\n  \"data_room\": false,\n  \"reference\": \"sample reference\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/{{{workflowId}}}/record-offer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/record-offer",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "record-offer"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_cr\": 1.0,\n  \"buyer_row_id\": \"{{id}}\",\n  \"by\": \"sample by\",\n  \"kind\": \"sample kind\",\n  \"reference\": \"sample reference\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

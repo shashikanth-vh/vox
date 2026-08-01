@@ -355,6 +355,43 @@ class SyndicationMandateResult:
 
 
 @dataclass
+class AssetMonetisationInput:
+    """Drive an asset-monetisation MANDATE (an asset_monetisation row) from teaser to
+    closure. Buyer-level activity lands on the deal's OTHER asset_monetisation rows through
+    the policy-enforcing API; NDAs / data-room access and every offer are immutable
+    evidence; closure needs the AM Head's recorded decision (evidence-gated)."""
+
+    asset_mon_id: str                   # the MANDATE row this run drives
+    deal_id: str
+    requested_by: str
+    teaser_reference: str = ""          # circulated at start (or later via signal)
+    teaser_sha256: str | None = None
+    decision_timeout_hours: int = 24 * 60      # sale processes run long
+    sla_reminder_hours: float = 24.0 * 7
+    sla_escalation_hours: float = 24.0 * 21
+    emit_search_attributes: bool = False
+    resumed_elapsed_hours: float = 0.0
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class AssetMonetisationResult:
+    workflow_id: str
+    asset_mon_id: str
+    # Closed / Lost / TimedOut / Cancelled — the BUSINESS outcome.
+    status: str
+    decided_by: str | None = None
+    teaser_version: int = 0
+    # The immutable offer log this run collected: [{buyer_row, kind, amount_cr, reference}]
+    offers: list = field(default_factory=list)
+    evidence_ids: list = field(default_factory=list)
+    note: str | None = None
+
+
+@dataclass
 class SanctionExpiryInput:
     """Watch a sanctioned facility's validity window. Started (abandoned child) by the
     structuring workflow when the committee set ``valid_days``: reminds ops before the

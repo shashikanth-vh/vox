@@ -206,6 +206,7 @@ def build_mock() -> FastAPI:
     # -- Lending lines + Advaya handoffs (disbursement leg) -----------------
     app.state.lending = {}          # id -> lending row
     app.state.syndication = {}      # id -> syndication row (mandate + lender rows)
+    app.state.asset_mon = {}        # id -> asset_monetisation row (mandate + buyer rows)
     app.state.handoffs = {}         # handoff_key -> authoritative handoff record
     app.state.handover_packages = {}  # lending_id -> handover package
 
@@ -339,6 +340,49 @@ def build_mock() -> FastAPI:
         app.state.syndication[sid] = {**row, **body,
                                       "version": int(row.get("version", 1)) + 1}
         return app.state.syndication[sid]
+
+    @app.get("/v1/asset-monetisation")
+    async def list_asset_mon(request: Request):
+        rows = list(app.state.asset_mon.values())
+        did = request.query_params.get("deal_id")
+        if did:
+            rows = [r for r in rows if str(r.get("deal_id")) == did]
+        return {"items": rows, "next_cursor": None}
+
+    @app.get("/v1/asset-monetisation/{aid}")
+    async def get_asset_mon(aid: str):
+        row = app.state.asset_mon.get(aid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no asset-monetisation", "request_id": None}},
+                status_code=404)
+        return row
+
+    @app.patch("/v1/asset-monetisation/{aid}")
+    async def patch_asset_mon(aid: str, request: Request):
+        from evam_backend_core import policy as core_policy
+        body = await request.json()
+        row = app.state.asset_mon.get(aid)
+        if row is None:
+            return JSONResponse(
+                {"error": {"type": "not_found", "title": "missing", "status": 404,
+                           "detail": "no asset-monetisation", "request_id": None}},
+                status_code=404)
+        if "status" in body and body["status"] != row.get("status"):
+            have = {e["evidence_kind"] for e in app.state.evidence
+                    if e["subject_type"] == "AssetMonetisation" and e["subject_id"] == aid}
+            v = core_policy.check_write(
+                "AssetMonetisation", current=row, changes={"status": body["status"]},
+                roles=None, evidence=have)
+            if v is not None:
+                return JSONResponse(
+                    {"error": {"type": "validation_failed", "title": "refused",
+                               "status": 422, "detail": v.message, "request_id": None}},
+                    status_code=422)
+        app.state.asset_mon[aid] = {**row, **body,
+                                    "version": int(row.get("version", 1)) + 1}
+        return app.state.asset_mon[aid]
 
     @app.get("/v1/lending")
     async def list_lending(request: Request):

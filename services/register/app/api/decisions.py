@@ -68,6 +68,7 @@ _DELIVERY_SQL = {
 # Roles that constitute Credit Committee authority for a governance decision.
 _COMMITTEE_AUTHORITY = {"Credit Head", "Management", "Admin"}
 _SYNDICATION_AUTHORITY = {"Syn Head", "Management", "Admin"}
+_AM_AUTHORITY = {"AM Head", "Management", "Admin"}
 
 
 class DecisionIn(BaseModel):
@@ -84,7 +85,7 @@ class DecisionIn(BaseModel):
     # one and from a run-control record; a committee decision binds to a subject and requires
     # committee authority.
     kind: str = Field(default="lead_conversion",
-                      pattern="^(lead_conversion|committee|control|syndication)$")
+                      pattern="^(lead_conversion|committee|control|syndication|asset_monetisation)$")
     subject_type: str | None = Field(default=None, max_length=40)
     subject_id: str | None = Field(default=None, max_length=64)
     run_id: str | None = Field(default=None, max_length=200)
@@ -176,6 +177,17 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
             raise ForbiddenError(
                 "Recording a syndication decision requires syndication authority "
                 f"(one of {sorted(_SYNDICATION_AUTHORITY)}).")
+    # An ASSET-MONETISATION decision (the AM Head's closure call on a mandate) mirrors the
+    # syndication rule: subject-bound, reserved to AM authority.
+    if payload.kind == "asset_monetisation":
+        if not (payload.subject_type == "AssetMonetisation" and payload.subject_id):
+            raise ValidationAppError(
+                "An asset-monetisation decision must bind to "
+                "subject_type='AssetMonetisation' + subject_id.")
+        if not (set(approver.roles or []) & _AM_AUTHORITY):
+            raise ForbiddenError(
+                "Recording an asset-monetisation decision requires AM authority "
+                f"(one of {sorted(_AM_AUTHORITY)}).")
     # Control records and business outcomes must not masquerade as one another: the value
     # space is disjoint by kind, so a spoofed "control" write can never mint an approval and
     # a business decision can never be replayed as a cancellation.
@@ -212,7 +224,7 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
         # so an accepted decision always has a durable "deliver me" record (pending, due now).
         # A CONTROL/SYNDICATION record is an audit + verification anchor, not a
         # lead-conversion outcome — no delivery row.
-        if payload.kind not in ("control", "syndication"):
+        if payload.kind not in ("control", "syndication", "asset_monetisation"):
             await ctx.session.execute(
                 pg_insert(WorkflowDecisionOutbox)
                 .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,
@@ -230,7 +242,7 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
         # Idempotent replay of the SAME decision → return the original, unchanged. ENSURE an
         # outbox row exists too, so a decision recorded before the outbox existed (or one whose
         # row was somehow lost) becomes deliverable on the next replay.
-        if payload.kind not in ("control", "syndication"):
+        if payload.kind not in ("control", "syndication", "asset_monetisation"):
             await ctx.session.execute(
                 pg_insert(WorkflowDecisionOutbox)
                 .values(tenant_id=ctx.tenant_id, workflow_id=payload.workflow_id,

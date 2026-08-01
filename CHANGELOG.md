@@ -6,6 +6,19 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Asset Monetisation lifecycle workflow (increment 6).** The AM mandate runs end to end
+  under Temporal, mirroring the syndication pattern: versioned teaser circulation
+  (`teaser_document` evidence), buyer-level tracking on the deal's buyer rows (whitelisted,
+  policy-enforced), immutable NDA / data-room records (`am_nda`) and offers (`am_offer` —
+  the `offer_comparison` query exposes the arrival-ordered set; offers walk the mandate to
+  'NBO Received' / 'BO Received'), and the AM Head's closure decision as a new subject-bound
+  `kind="asset_monetisation"` record — 'Closed' is reachable only through the NEW
+  `am_closure_approval` evidence gate; rejection lands as a LOST mandate ('Dropped').
+  New `attach_am_evidence` operation (policy version 3.3). Orchestrator endpoints:
+  asset-monetisations start, am-decision, circulate-teaser, buyer-update, record-nda,
+  record-offer.
+
+
 - **Syndication lifecycle workflow (increment 5).** A mandate now runs end to end under
   Temporal with the full foundation (run-control, SLA, spoof-proof decisions): versioned
   IM circulation (`im_document` evidence v1..n), lender-level activity landing on the

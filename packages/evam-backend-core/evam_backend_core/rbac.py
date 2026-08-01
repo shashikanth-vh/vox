@@ -141,6 +141,10 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     # syndication sanction record) — the syndication desk's authority, senior-gated.
     #                                        Adm Mgt BDH BDR CrH DA  SyH SyR AMH AMR
     "attach_syndication_evidence":    _row("F F - - - - F S - -"),
+    # Asset-monetisation mandate artefacts + closure approval (teaser versions, NDA /
+    # data-room records, offers, the closure decision's evidence) — the AM desk's
+    # authority, senior-gated.
+    "attach_am_evidence":             _row("F F - - - - - - F S"),
     # Advaya disbursement acknowledgement — recorded by the Advaya-handoff workflow service ONLY
     # under an enabled Advaya integration (default OFF; not in svc_workflows' baseline grant).
     "attach_advaya_evidence":         _row("F F - - - - - - - -"),

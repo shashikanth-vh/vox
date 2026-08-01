@@ -213,6 +213,26 @@ run-control + SLA foundation:
   amount updates plus a `syndication_allocation` evidence record. A bounded window
   (default 7 days) completes the run without one rather than blocking the sanction.
 
+## Asset Monetisation lifecycle (Release 1, increment 6)
+
+`POST /v1/workflows/asset-monetisations` starts an **AssetMonetisationWorkflow** for an
+asset_monetisation mandate row, mirroring the syndication pattern:
+
+* **Teaser circulation is versioned evidence** (`teaser_document` v1, v2, … via
+  `/circulate-teaser`; the first walks the mandate to 'Teaser Shared').
+* **Buyer-level tracking** — `/buyer-update` moves ONE of the deal's buyer rows
+  (whitelisted; policy-enforced; illegal moves surfaced as ops events).
+* **NDA / data-room control** — `/record-nda` files an immutable `am_nda` record per
+  buyer (with the data-room grant flagged).
+* **Offers** — `/record-offer` (nbo | binding) files immutable `am_offer` evidence; the
+  `offer_comparison` query returns the full arrival-ordered set; any offer walks the
+  mandate to 'NBO Received', a binding one to 'BO Received'.
+* **Closure** — `/am-decision` records the AM Head's call as a `kind="asset_monetisation"`
+  decision (subject-bound, AM Head/Management/Admin); approval files the VERIFIED
+  `am_closure_approval` evidence and the mandate reaches 'Closed' only because the
+  Register's evidence gate passes; rejection is a LOST mandate ('Dropped', reason on
+  record).
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |
