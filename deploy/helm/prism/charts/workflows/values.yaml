@@ -29,6 +29,11 @@ foundation:
   # Prometheus scrape endpoint for the WORKER's SDK metrics, e.g. "0.0.0.0:9464". "" = off.
   metricsBindAddress: ""
   workerBuildId: ""
+  # Increment 2: park ambiguous VOX captures / lead ties for human confirmation.
+  voxConfirmAmbiguousCompany: false
+  voxConfirmLeadSelection: false
+  # Deployment-wide qualification checklist definitions (JSON list; empty = legacy flag).
+  qualificationChecklist: ""
 
 register:
   baseUrl: http://prism-register        # the Register Service (umbrella release)

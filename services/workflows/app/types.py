@@ -109,6 +109,18 @@ class VoxTouchpoint:
     # Hints used only when the workflow has to CREATE the company.
     sector: str | None = None
     lens: str | None = None
+
+    # ---- Release-1 increment 2: human confirmation gates (flag-set by the orchestrator
+    # from deployment settings; never trusted from the raw capture payload) --------------
+    # With no EXACT canonical company match but CLOSE candidates, park the run and ask the
+    # capturing RM to confirm (pick a candidate or "create new") instead of silently
+    # creating a possible duplicate company.
+    require_company_confirmation: bool = False
+    # With SEVERAL active leads for the company, ask instead of auto-picking when the
+    # ranked choice is a tie (ranking: owning RM > lens > sector > recency).
+    require_lead_confirmation: bool = False
+    # How long a parked run waits for its confirmation before failing loudly.
+    confirmation_timeout_hours: float = 72.0
     state: str | None = None
 
     # The tenant + human this capture acts for (set by the orchestrator from the request).
@@ -213,6 +225,12 @@ class LeadQualificationInput:
     qualification_sha256: str | None = None
     passed: bool = True
     reason: str | None = None
+    # CONFIGURABLE checklist: [{key, label, required, passed, note}]. When present it is
+    # AUTHORITATIVE — the workflow computes the outcome from it (every required item must
+    # pass) and the legacy ``passed`` flag is ignored; the evaluation is recorded in the
+    # qualification evidence. Item definitions come from deployment config (the orchestrator
+    # merges WORKFLOWS_QUALIFICATION_CHECKLIST with the caller's per-item results).
+    checklist: list = field(default_factory=list)
     caller: CallerContext = field(default_factory=CallerContext)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
@@ -226,6 +244,9 @@ class LeadQualificationResult:
     status: str                     # Qualified / NotQualified
     evidence_id: str | None = None
     note: str | None = None
+    # When a checklist drove the outcome: {"passed": bool, "failed_required": [keys],
+    # "items_total": n, "items_passed": n} — the same summary filed in the evidence.
+    checklist_summary: dict = field(default_factory=dict)
 
 
 @dataclass

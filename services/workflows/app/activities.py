@@ -158,6 +158,58 @@ async def resolve_entity(company_name: str,
 
 
 @activity.defn
+async def resolve_entity_candidates(company_name: str,
+                                    caller: CallerContext | None = None) -> dict[str, Any]:
+    """Company resolution with the AMBIGUITY made explicit: the exact canonical match when
+    one exists, plus the close-but-not-exact candidates (same search corpus) so the workflow
+    can ask a human instead of silently creating a near-duplicate company.
+
+    ``exact``      — the row whose suffix-stripped lowercase name equals the spoken name.
+    ``candidates`` — other rows the search surfaced whose canonical name SHARES a leading
+                     token with the spoken name ("EcoSoch" vs "EcoSoch Energy") — the ones
+                     a human should adjudicate. Bounded, deduplicated, id-sorted."""
+    wanted = _canonical(company_name)
+    first_token = (wanted.split() or [""])[0]
+    exact: dict[str, Any] | None = None
+    near: dict[str, dict[str, Any]] = {}
+    async with _client(caller) as reg:
+        seen_pages = []
+        page = await reg.list("entities", q=company_name.strip()[:60], limit=50,
+                              request_id=activity.info().workflow_id)
+        seen_pages.append(page.items)
+        if wanted and wanted != company_name.strip().lower():
+            page2 = await reg.list("entities", q=wanted[:60], limit=50,
+                                   request_id=activity.info().workflow_id)
+            seen_pages.append(page2.items)
+    for items in seen_pages:
+        for row in items:
+            names = [n for n in (row.get("legal_name"), row.get("display_name")) if n]
+            canon = [_canonical(n) for n in names]
+            if exact is None and wanted in canon:
+                exact = row
+                continue
+            if first_token and any(c.split()[:1] == [first_token] for c in canon if c):
+                near.setdefault(str(row.get("id")), row)
+    candidates = [near[k] for k in sorted(near)][:8]
+    activity.logger.info("company_resolution",
+                         extra={"company": company_name, "exact": bool(exact),
+                                "candidates": len(candidates)})
+    return {"exact": exact, "candidates": candidates}
+
+
+@activity.defn
+async def find_active_leads(entity_id: str,
+                            caller: CallerContext | None = None) -> list[dict[str, Any]]:
+    """ALL of the company's active leads (bounded), newest first — the workflow ranks them
+    by owning RM / lens / sector / recency and, on a tie, can ask the capturing RM to pick
+    instead of guessing."""
+    async with _client(caller) as reg:
+        page = await reg.list("leads", entity_id=entity_id, status="Active", limit=10,
+                              request_id=activity.info().workflow_id)
+        return list(page.items)
+
+
+@activity.defn
 async def create_entity(tp: VoxTouchpoint, idempotency_key: str) -> dict[str, Any]:
     """The 'new company' scenario: register the company from the capture's hints."""
     name = (tp.company_name or "").strip()

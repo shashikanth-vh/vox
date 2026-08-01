@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **VOX + lead lifecycle completion (increment 2).** Ambiguity now asks a human instead of
+  guessing, behind flags: an **ambiguous company** (close candidates, no exact canonical
+  match) parks the capture with its candidate list — `POST /v1/workflows/{id}/confirm-company`
+  answers it (choice whitelisted to the run's own candidates; "" = genuinely new); several
+  active leads rank **deterministically (owning RM > lens > sector > recency)** with an
+  optional human tiebreak on genuine ties (`/select-lead`); the **qualification checklist is
+  configurable** (`WORKFLOWS_QUALIFICATION_CHECKLIST` defines items once per deployment,
+  requests answer every item, the workflow computes the outcome and files the evaluation in
+  the evidence — asserted `passed` flags are overridden); repeat conversion after
+  rejection/withdrawal is covered by the `-r2` retry-run machinery. Confirmation endpoints
+  refuse when the run isn't actually waiting (409) and carry the verified identity, never
+  the request body's.
+
+
 - **Release-1 workflow foundation (increment 1).** Every waiting run now has the
   operational controls real usage needs, all spoof-proof (persist-before-signal + in-run
   verification, same trust posture as decisions): `POST /v1/workflows/{id}/control` for

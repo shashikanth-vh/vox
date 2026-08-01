@@ -135,6 +135,21 @@ class DecisionIn(BaseModel):
     note: str | None = None
 
 
+class CompanyConfirmIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # One of the run's proposed candidate entity ids, or "" = "this really is a NEW
+    # company". The workflow whitelists against its own candidates — an id it never
+    # proposed is ignored, so this can steer only among legitimate choices.
+    entity_id: str = Field(default="", max_length=60)
+    by: str = Field(max_length=200)
+
+
+class LeadSelectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lead_id: str = Field(max_length=60)
+    by: str = Field(max_length=200)
+
+
 class ControlIn(BaseModel):
     """A run-control action on a waiting workflow. ``cancel`` ends the run; ``return`` parks
     it as ReturnedForInformation (the deciders want more from the requester); ``resubmit``
@@ -146,6 +161,17 @@ class ControlIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
+class ChecklistItemIn(BaseModel):
+    """One qualification checklist RESULT from the caller. The item definitions (which keys
+    exist, which are required) come from deployment config — the caller only says what
+    passed; unknown keys are refused at merge time."""
+
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(max_length=60)
+    passed: bool
+    note: str | None = Field(default=None, max_length=500)
+
+
 class LeadQualificationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lead_id: str
@@ -154,6 +180,10 @@ class LeadQualificationIn(BaseModel):
     qualification_sha256: str | None = Field(default=None, pattern="^[0-9a-fA-F]{64}$")
     passed: bool = True
     reason: str | None = Field(default=None, max_length=2000)
+    # Per-item results against the deployment's configured checklist. Required whenever the
+    # deployment configures one (the workflow then COMPUTES the outcome; `passed` above is
+    # ignored); refused when it doesn't (results against no definitions mean nothing).
+    checklist: list[ChecklistItemIn] | None = None
 
 
 class DealStructuringIn(BaseModel):
@@ -399,9 +429,16 @@ def create_app() -> FastAPI:
                             "this workflow.")
         wf_id = f"vox-{_tenant_slug(caller.tenant)}-{payload.capture_id}"
         memo = {"initiator": (caller.email or ""), "tenant": caller.tenant}
-        handle = await start(request, VoxTouchpointWorkflow,
-                             VoxTouchpoint(caller=caller, **payload.model_dump()), wf_id,
-                             memo=memo)
+        handle = await start(
+            request, VoxTouchpointWorkflow,
+            VoxTouchpoint(
+                caller=caller,
+                # Deployment policy, not capture payload: whether ambiguity parks the run.
+                require_company_confirmation=settings.vox_confirm_ambiguous_company,
+                require_lead_confirmation=settings.vox_confirm_lead_selection,
+                confirmation_timeout_hours=settings.vox_confirmation_timeout_hours,
+                **payload.model_dump()),
+            wf_id, memo=memo)
         if wait:
             result = await handle.result()
             return ORJSONResponse(status_code=200,
@@ -911,13 +948,56 @@ def create_app() -> FastAPI:
     async def start_qualification(payload: LeadQualificationIn, request: Request,
                                   x_api_key: str | None = Header(default=None, alias="X-API-Key"),
                                   ) -> Any:
+        merged, err = _merged_checklist(payload.checklist)
+        if err is not None:
+            return err
         return await _start_business(
             request, x_api_key, payload.qualified_by, LeadQualificationWorkflow,
             LeadQualificationInput, "qual", payload.lead_id, {"lead_id": payload.lead_id},
             lead_id=payload.lead_id, qualified_by=payload.qualified_by,
             qualification_reference=payload.qualification_reference,
             qualification_sha256=payload.qualification_sha256, passed=payload.passed,
-            reason=payload.reason)
+            reason=payload.reason, checklist=merged)
+
+    def _merged_checklist(results: list[ChecklistItemIn] | None
+                          ) -> tuple[list, ORJSONResponse | None]:
+        """The deployment's checklist DEFINITIONS (config) merged with the caller's per-item
+        RESULTS. Config-less deployments keep the legacy passed flag (results are refused —
+        they would assert against nothing); a configured deployment REQUIRES results for
+        every defined item, and unknown keys are refused."""
+        import json as _json
+
+        if not settings.qualification_checklist:
+            if results:
+                return [], _problem(
+                    422, "Validation failed",
+                    "This deployment has no qualification checklist configured "
+                    "(WORKFLOWS_QUALIFICATION_CHECKLIST) — send the plain 'passed' flag.")
+            return [], None
+        try:
+            definitions = _json.loads(settings.qualification_checklist)
+            assert isinstance(definitions, list) and definitions
+        except (ValueError, AssertionError):
+            return [], _problem(500, "Misconfigured",
+                                "WORKFLOWS_QUALIFICATION_CHECKLIST is not a JSON list.")
+        by_key = {r.key: r for r in (results or [])}
+        unknown = sorted(set(by_key) - {str(d.get("key")) for d in definitions})
+        if unknown:
+            return [], _problem(422, "Validation failed",
+                                f"Unknown checklist keys: {', '.join(unknown)}.")
+        missing = [str(d.get("key")) for d in definitions if str(d.get("key")) not in by_key]
+        if missing:
+            return [], _problem(
+                422, "Validation failed",
+                f"The configured checklist requires a result for every item; "
+                f"missing: {', '.join(missing)}.")
+        merged = []
+        for d in definitions:
+            r = by_key[str(d.get("key"))]
+            merged.append({"key": str(d.get("key")), "label": d.get("label"),
+                           "required": bool(d.get("required", True)),
+                           "passed": r.passed, "note": r.note})
+        return merged, None
 
     @app.post("/v1/workflows/deal-structurings", status_code=202, tags=["Workflows"],
               summary="Start a deal-structuring workflow (awaits the committee decision)")
@@ -1252,6 +1332,57 @@ def create_app() -> FastAPI:
         except (RPCError, TemporalError) as exc:
             return _problem(503, "Delivery failed", f"Signal delivery failed: {exc}")
         return {"workflow_id": workflow_id, "document_received": payload.name}
+
+    async def _deliver_confirmation(workflow_id: str, request: Request, signal: str,
+                                    args: list, x_api_key: str | None) -> Any:
+        """Shared delivery path for a parked VOX capture's confirmation signals: API-key
+        gate → verified identity → tenant binding → the run must be RUNNING and actually
+        WAITING on that confirmation (else 409 — a confirmation for nothing is a bug)."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        acted_by, err = await _verified_email(request, args[-1] or "")
+        if err is not None:
+            return err
+        args[-1] = acted_by                      # the VERIFIED identity, not the body's
+        if (resp := _wf_tenant_denied(request, workflow_id)) is not None:
+            return resp
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict", "This run is no longer waiting on anything.")
+        try:
+            pending = await handle.query("pending_confirmation")
+        except (RPCError, TemporalError):
+            pending = {}
+        wanted = {"confirm_company": "company", "select_lead": "lead"}[signal]
+        if (pending or {}).get("kind") != wanted:
+            return _problem(409, "Conflict",
+                            f"This run is not awaiting a {wanted} confirmation.")
+        await handle.signal(signal, args=args)
+        log.info("vox_confirmation", extra={"workflow": workflow_id, "signal": signal,
+                                            "by": acted_by})
+        return {"workflow_id": workflow_id, "delivered": signal, "by": acted_by,
+                "candidates_were": pending.get("candidates", [])}
+
+    @app.post("/v1/workflows/{workflow_id}/confirm-company", tags=["Workflows"],
+              summary="Answer an ambiguous-company confirmation on a parked VOX capture")
+    async def confirm_company(workflow_id: str, payload: CompanyConfirmIn, request: Request,
+                              x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                              ) -> Any:
+        return await _deliver_confirmation(workflow_id, request, "confirm_company",
+                                           [payload.entity_id, payload.by], x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/select-lead", tags=["Workflows"],
+              summary="Answer a multi-lead selection on a parked VOX capture")
+    async def select_lead(workflow_id: str, payload: LeadSelectIn, request: Request,
+                          x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                          ) -> Any:
+        return await _deliver_confirmation(workflow_id, request, "select_lead",
+                                           [payload.lead_id, payload.by], x_api_key)
 
     _CONTROL_OUTCOME = {"cancel": "Cancelled", "return": "ReturnedForInformation",
                         "resubmit": "Resubmitted"}

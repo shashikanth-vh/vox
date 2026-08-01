@@ -81,6 +81,20 @@ class Settings(BaseServiceSettings):
     worker_build_id: str = ""
     use_worker_versioning: bool = False
 
+    # --- Increment 2: VOX + lead lifecycle -------------------------------------------- #
+    # Park an ambiguous company capture (close candidates, no exact match) for the RM to
+    # confirm instead of silently creating a possible duplicate.
+    vox_confirm_ambiguous_company: bool = False
+    # Ask when several active leads TIE at the top of the ranking (RM > lens > sector).
+    vox_confirm_lead_selection: bool = False
+    # How long a parked capture waits for its confirmation.
+    vox_confirmation_timeout_hours: float = 72.0
+    # Deployment-wide qualification checklist definitions, as JSON:
+    #   [{"key": "kyc", "label": "KYC complete", "required": true}, ...]
+    # A qualification request supplies per-item results; the orchestrator merges them with
+    # these definitions and the workflow COMPUTES the outcome. Empty = legacy passed flag.
+    qualification_checklist: str = ""
+
     # Production switch. When true, the requester of a conversion and the approver/rejecter
     # MUST present a verified OIDC token — the orchestrator refuses to trust a
     # caller-supplied identity string. Leave false only for local dev without an IdP.

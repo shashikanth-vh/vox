@@ -9278,7 +9278,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (15 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (17 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Workflows",
@@ -9670,7 +9670,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"lead_id\": \"sample\",\n  \"qualified_by\": \"sample\",\n  \"qualification_reference\": \"sample\",\n  \"qualification_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"passed\": false,\n  \"reason\": \"sample\"\n}",
+                  "raw": "{\n  \"lead_id\": \"sample\",\n  \"qualified_by\": \"sample\",\n  \"qualification_reference\": \"sample\",\n  \"qualification_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"passed\": false,\n  \"reason\": \"sample\",\n  \"checklist\": [\n    {\n      \"key\": \"sample\",\n      \"passed\": false,\n      \"note\": \"sample\"\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9872,6 +9872,56 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/confirm-company \u2014 Answer an ambiguous-company confirmation on a parked VOX capture",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/confirm-company",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "confirm-company"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entity_id\": \"sample\",\n  \"by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/{workflow_id}/control \u2014 Cancel / return-for-information / resubmit a waiting run",
               "request": {
                 "method": "POST",
@@ -10014,6 +10064,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/select-lead \u2014 Answer a multi-lead selection on a parked VOX capture",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/select-lead",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "select-lead"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lead_id\": \"sample\",\n  \"by\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

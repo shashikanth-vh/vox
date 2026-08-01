@@ -60,6 +60,12 @@ spec:
               value: {{ .Values.foundation.payloadEncryptionKey | quote }}
             - name: WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED
               value: {{ .Values.foundation.searchAttributesEnabled | quote }}
+            - name: WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY
+              value: {{ .Values.foundation.voxConfirmAmbiguousCompany | quote }}
+            - name: WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION
+              value: {{ .Values.foundation.voxConfirmLeadSelection | quote }}
+            - name: WORKFLOWS_QUALIFICATION_CHECKLIST
+              value: {{ .Values.foundation.qualificationChecklist | quote }}
             - name: WORKFLOWS_REGISTER_TENANT
               value: {{ .Values.register.tenant | quote }}
             - name: WORKFLOWS_REGISTER_API_KEY

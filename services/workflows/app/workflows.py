@@ -160,6 +160,34 @@ def _upsert_search(enabled: bool, business_status: str, subject: str) -> None:
             _SA_SUBJECT.value_set(subject)])
 
 
+def _lead_rank(lead: dict, tp: Any) -> tuple:
+    """Deterministic ranking key for choosing among a company's ACTIVE leads (higher wins):
+    the lead owned by the capturing/owning RM outranks everything, then lens match, then
+    sector match, then recency; the id is the final tiebreak so the order is total and
+    replay-stable. Two leads are a genuine TIE (worth asking a human) when their score
+    triples are equal."""
+    rms = {x for x in (tp.assigned_rm, tp.performed_by) if x}
+    score = 0
+    if lead.get("rm") and lead.get("rm") in rms:
+        score += 4
+    if tp.lens and lead.get("lens") == tp.lens:
+        score += 2
+    if tp.sector and lead.get("sector") == tp.sector:
+        score += 1
+    return (score, str(lead.get("last_interaction_date") or ""), str(lead.get("id")))
+
+
+def evaluate_checklist(items: list) -> dict:
+    """The configurable qualification checklist, evaluated: every REQUIRED item must pass.
+    Pure and shape-tolerant (items are plain dicts) — the same summary is returned to the
+    caller and filed in the qualification evidence."""
+    failed = [str(i.get("key") or i.get("label") or "?") for i in items
+              if i.get("required", True) and not i.get("passed", False)]
+    return {"passed": not failed, "failed_required": failed,
+            "items_total": len(items),
+            "items_passed": sum(1 for i in items if i.get("passed", False))}
+
+
 _DURABLE_IO: dict[str, Any] = {
     "start_to_close_timeout": timedelta(seconds=30),
     "retry_policy": _DURABLE,
@@ -198,11 +226,47 @@ class VoxTouchpointWorkflow:
 
     def __init__(self) -> None:
         self._stage = "starting"
+        # Confirmation gates (increment 2). The candidate lists are what the RUN itself
+        # proposed — a confirmation signal may only pick from them (or "create new"), so a
+        # forged signal can at worst choose a legitimate candidate, never inject an id.
+        self._company_candidates: list[dict] = []
+        self._company_choice: str | None = None      # entity id, or "" = create new
+        self._lead_candidates: list[dict] = []
+        self._lead_choice: str | None = None
+        self._confirmed_by: str | None = None
 
     @workflow.query
     def status(self) -> str:
         """Live progress for dashboards/debugging: which step the run is on."""
         return self._stage
+
+    @workflow.query
+    def pending_confirmation(self) -> dict:
+        """What (if anything) this run is waiting on a human for, with the candidates —
+        everything a UI needs to render the confirmation prompt."""
+        if self._stage == "awaiting company confirmation":
+            return {"kind": "company", "candidates": self._company_candidates}
+        if self._stage == "awaiting lead selection":
+            return {"kind": "lead", "candidates": self._lead_candidates}
+        return {}
+
+    @workflow.signal
+    def confirm_company(self, entity_id: str, by: str = "") -> None:
+        """Resolve the ambiguous-company gate: one of the proposed candidate ids, or ""
+        to create a new company. Anything else is ignored (whitelist, not trust)."""
+        if self._company_choice is None and (
+                entity_id == "" or any(str(c.get("id")) == entity_id
+                                       for c in self._company_candidates)):
+            self._company_choice = entity_id
+            self._confirmed_by = by or self._confirmed_by
+
+    @workflow.signal
+    def select_lead(self, lead_id: str, by: str = "") -> None:
+        """Resolve the multi-lead gate: must be one of the proposed candidate ids."""
+        if self._lead_choice is None and any(str(c.get("id")) == lead_id
+                                             for c in self._lead_candidates):
+            self._lead_choice = lead_id
+            self._confirmed_by = by or self._confirmed_by
 
     @workflow.run
     async def run(self, tp: VoxTouchpoint) -> VoxResult:
@@ -216,8 +280,34 @@ class VoxTouchpointWorkflow:
                 raise ApplicationError(
                     "VoxTouchpoint needs company_name or entity_id", non_retryable=True)
             self._stage = "resolving company"
-            entity = await workflow.execute_activity(
-                activities.resolve_entity, args=[tp.company_name, tp.caller], **_IO)
+            resolution = await workflow.execute_activity(
+                activities.resolve_entity_candidates,
+                args=[tp.company_name, tp.caller], **_IO)
+            entity = resolution.get("exact")
+            candidates = resolution.get("candidates") or []
+            if entity is None and candidates and tp.require_company_confirmation:
+                # AMBIGUOUS: close candidates but no exact match. Ask the capturing RM
+                # instead of silently creating a near-duplicate company. The run parks
+                # durably; the choice is whitelisted to the candidates the run proposed.
+                self._company_candidates = [
+                    {"id": str(c.get("id")), "legal_name": c.get("legal_name"),
+                     "display_name": c.get("display_name"), "sector": c.get("sector")}
+                    for c in candidates]
+                self._stage = "awaiting company confirmation"
+                try:
+                    await workflow.wait_condition(
+                        lambda: self._company_choice is not None,
+                        timeout=timedelta(hours=tp.confirmation_timeout_hours))
+                except asyncio.TimeoutError:
+                    raise ApplicationError(
+                        f"Company confirmation for '{tp.company_name}' was not answered "
+                        f"within {tp.confirmation_timeout_hours}h — nothing was written; "
+                        "confirm via /confirm-company on a fresh capture.",
+                        non_retryable=True) from None
+                if self._company_choice:
+                    entity = next(c for c in candidates
+                                  if str(c.get("id")) == self._company_choice)
+                # "" → the RM says it really is a NEW company → create below.
             if entity is None:
                 self._stage = "creating company"
                 entity = await workflow.execute_activity(
@@ -229,8 +319,36 @@ class VoxTouchpointWorkflow:
         # -- 2. lead: link the active one, or open one ------------------------
         self._stage = "linking lead"
         lead_created = False
-        lead: dict[str, Any] | None = await workflow.execute_activity(
-            activities.find_active_lead, args=[entity_id, tp.caller], **_IO)
+        active = await workflow.execute_activity(
+            activities.find_active_leads, args=[entity_id, tp.caller], **_IO)
+        lead: dict[str, Any] | None = None
+        if len(active) == 1:
+            lead = active[0]
+        elif len(active) > 1:
+            # Several active leads: rank by owning RM > lens > sector > recency. Only a
+            # GENUINE tie at the top (equal scores) is worth a human's time — and only
+            # when the deployment asked for it.
+            ranked = sorted(active, key=lambda ld: _lead_rank(ld, tp), reverse=True)
+            top_score = _lead_rank(ranked[0], tp)[0]
+            tied = [ld for ld in ranked if _lead_rank(ld, tp)[0] == top_score]
+            if len(tied) > 1 and tp.require_lead_confirmation:
+                self._lead_candidates = [
+                    {"id": str(ld.get("id")), "rm": ld.get("rm"), "lens": ld.get("lens"),
+                     "sector": ld.get("sector"),
+                     "last_interaction_date": ld.get("last_interaction_date")}
+                    for ld in tied]
+                self._stage = "awaiting lead selection"
+                try:
+                    await workflow.wait_condition(
+                        lambda: self._lead_choice is not None,
+                        timeout=timedelta(hours=tp.confirmation_timeout_hours))
+                except asyncio.TimeoutError:
+                    raise ApplicationError(
+                        "Lead selection was not answered in time — nothing was written; "
+                        "re-capture and pick via /select-lead.", non_retryable=True) from None
+                lead = next(ld for ld in tied if str(ld.get("id")) == self._lead_choice)
+            else:
+                lead = ranked[0]
         if lead is None:
             lead = await workflow.execute_activity(
                 activities.create_lead, args=[tp, entity_id, f"wf:{wf_id}:lead"], **_IO)
@@ -529,30 +647,46 @@ class LeadQualificationWorkflow:
     @workflow.run
     async def run(self, inp: LeadQualificationInput) -> LeadQualificationResult:
         wf_id = workflow.info().workflow_id
+        # A CHECKLIST, when supplied, is authoritative: the outcome is COMPUTED (every
+        # required item must pass), never asserted — and the evaluation itself becomes part
+        # of the immutable qualification evidence. Without one, the legacy passed flag
+        # stands (the deployment hasn't configured a checklist).
+        summary: dict = {}
+        passed = inp.passed
+        reason = inp.reason
+        if inp.checklist:
+            summary = evaluate_checklist(inp.checklist)
+            passed = summary["passed"]
+            if not passed:
+                reason = (f"required checklist items failed: "
+                          f"{', '.join(summary['failed_required'])}"
+                          + (f" — {inp.reason}" if inp.reason else ""))
         # The qualification review is itself durable evidence on the lead (so a later reader can see
         # WHY it qualified, immutably), whether it passed or failed.
         self._stage = "Recording qualification"
-        kind = "lead_qualification" if inp.passed else "lead_qualification_failed"
+        kind = "lead_qualification" if passed else "lead_qualification_failed"
+        note = reason or ("qualified" if passed else "not qualified")
+        if summary:
+            note = (f"{note} [checklist {summary['items_passed']}/{summary['items_total']}"
+                    f" passed]")
         evidence = await workflow.execute_activity(
             activities.attach_evidence,
             args=["Lead", inp.lead_id, kind,
                   inp.qualification_reference or f"qualification/{wf_id}",
-                  inp.qualification_sha256,
-                  inp.reason or ("qualified" if inp.passed else "not qualified"),
-                  inp.caller],
+                  inp.qualification_sha256, note, inp.caller],
             **_DURABLE_IO)
 
-        if not inp.passed:
+        if not passed:
             self._stage = "NotQualified"
             await workflow.execute_activity(
                 activities.mark_lead_note,
                 args=[inp.lead_id,
                       f"Lead not qualified by {inp.qualified_by}: "
-                      f"{inp.reason or 'no reason given'} (workflow {wf_id}).", inp.caller],
+                      f"{reason or 'no reason given'} (workflow {wf_id}).", inp.caller],
                 **_DURABLE_IO)
             return LeadQualificationResult(
                 workflow_id=wf_id, lead_id=inp.lead_id, status="NotQualified",
-                evidence_id=evidence.get("id"), note=inp.reason)
+                evidence_id=evidence.get("id"), note=reason, checklist_summary=summary)
 
         self._stage = "Qualified"
         await workflow.execute_activity(
@@ -563,7 +697,7 @@ class LeadQualificationWorkflow:
             **_DURABLE_IO)
         return LeadQualificationResult(
             workflow_id=wf_id, lead_id=inp.lead_id, status="Qualified",
-            evidence_id=evidence.get("id"), note=inp.reason)
+            evidence_id=evidence.get("id"), note=reason, checklist_summary=summary)
 
 
 @workflow.defn

@@ -148,6 +148,27 @@ Every human-in-the-loop workflow shares one operational contract:
   carrying its elapsed window (`resumed_elapsed_hours`), so a 14-day committee wait never
   hits Temporal's history cap.
 
+## VOX + lead lifecycle (Release 1, increment 2)
+
+* **Ambiguous-company confirmation** (`WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY=true`) —
+  a capture whose company has CLOSE candidates but no exact canonical match parks instead
+  of silently creating a near-duplicate. `GET /v1/workflows/{id}` (query
+  `pending_confirmation`) lists the candidates; answer with
+  `POST /v1/workflows/{id}/confirm-company` `{"entity_id": "<candidate>" | "", "by": ...}`
+  ("" = genuinely new → create). The choice is WHITELISTED to the run's own candidates.
+* **Multi-active-lead selection** — several active leads rank deterministically (owning RM
+  > lens > sector > recency); with `WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION=true` a genuine
+  tie at the top parks the run for `POST /v1/workflows/{id}/select-lead`.
+* **Configurable qualification checklist** — define once per deployment:
+  `WORKFLOWS_QUALIFICATION_CHECKLIST='[{"key":"kyc","label":"KYC complete","required":true}, …]'`.
+  A qualification request then answers every item
+  (`"checklist": [{"key":"kyc","passed":true,"note":…}, …]`); the workflow COMPUTES the
+  outcome (all required items must pass) and files the evaluation in the qualification
+  evidence. Unknown or missing keys are refused at the door.
+* **Repeat conversion** — after a rejection/withdrawal/timeout, a fresh conversion request
+  for the same lead starts a NEW run under a `-r2`/`-r3` id (covered in the approval and
+  persist test suites); each run gets its own single-winner decision record.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |

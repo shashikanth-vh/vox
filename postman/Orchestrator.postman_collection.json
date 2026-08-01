@@ -435,7 +435,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"lead_id\": \"{{id}}\",\n  \"passed\": false,\n  \"qualification_reference\": \"sample qualification_reference\",\n  \"qualification_sha256\": \"sample qualification_sha256\",\n  \"qualified_by\": \"sample qualified_by\",\n  \"reason\": \"sample reason\"\n}",
+              "raw": "{\n  \"checklist\": [\n    {\n      \"key\": \"sample key\",\n      \"note\": \"sample note\",\n      \"passed\": false\n    }\n  ],\n  \"lead_id\": \"{{id}}\",\n  \"passed\": false,\n  \"qualification_reference\": \"sample qualification_reference\",\n  \"qualification_sha256\": \"sample qualification_sha256\",\n  \"qualified_by\": \"sample qualified_by\",\n  \"reason\": \"sample reason\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -650,6 +650,61 @@
           }
         },
         {
+          "name": "POST /v1/workflows/{{{workflowId}}}/confirm-company",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/confirm-company",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "confirm-company"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"by\": \"sample by\",\n  \"entity_id\": \"{{entityId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/workflows/{{{workflowId}}}/control",
           "request": {
             "method": "POST",
@@ -806,6 +861,61 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"by\": \"sample by\",\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/{{{workflowId}}}/select-lead",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{{workflowId}}}/select-lead",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{{workflowId}}}",
+                "select-lead"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"by\": \"sample by\",\n  \"lead_id\": \"{{id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

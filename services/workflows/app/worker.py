@@ -62,7 +62,8 @@ async def main() -> None:
             activities.write_interaction, activities.fetch_dossier,
             # VOX touchpoint set
             activities.resolve_entity, activities.create_entity,
-            activities.find_active_lead, activities.create_lead,
+            activities.find_active_lead, activities.find_active_leads,
+            activities.resolve_entity_candidates, activities.create_lead,
             activities.update_lead_touch, activities.log_touchpoint,
             activities.assign_lead_owner,
             # Lead-conversion set. verify_decision MUST be registered: the

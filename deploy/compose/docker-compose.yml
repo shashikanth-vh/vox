@@ -423,6 +423,11 @@ services:
       WORKFLOWS_PAYLOAD_ENCRYPTION_KEY: "${WORKFLOWS_PAYLOAD_ENCRYPTION_KEY:-}"
       # Per-run search attributes (register them on the Temporal server first — see README).
       WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED: "${WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED:-false}"
+      # --- Increment 2: VOX + lead lifecycle (safe/off defaults) ---
+      WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY: "${WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY:-false}"
+      WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION: "${WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION:-false}"
+      # Deployment-wide qualification checklist definitions (JSON list; empty = legacy flag).
+      WORKFLOWS_QUALIFICATION_CHECKLIST: "${WORKFLOWS_QUALIFICATION_CHECKLIST:-}"
       # Prometheus scrape endpoint for the worker's SDK metrics ("" = off).
       WORKFLOWS_METRICS_BIND_ADDRESS: "${WORKFLOWS_METRICS_BIND_ADDRESS:-}"
       WORKFLOWS_WORKER_BUILD_ID: "${WORKFLOWS_WORKER_BUILD_ID:-}"
@@ -451,6 +456,11 @@ services:
       WORKFLOWS_PAYLOAD_ENCRYPTION_KEY: "${WORKFLOWS_PAYLOAD_ENCRYPTION_KEY:-}"
       # Per-run search attributes (register them on the Temporal server first — see README).
       WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED: "${WORKFLOWS_SEARCH_ATTRIBUTES_ENABLED:-false}"
+      # --- Increment 2: VOX + lead lifecycle (safe/off defaults) ---
+      WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY: "${WORKFLOWS_VOX_CONFIRM_AMBIGUOUS_COMPANY:-false}"
+      WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION: "${WORKFLOWS_VOX_CONFIRM_LEAD_SELECTION:-false}"
+      # Deployment-wide qualification checklist definitions (JSON list; empty = legacy flag).
+      WORKFLOWS_QUALIFICATION_CHECKLIST: "${WORKFLOWS_QUALIFICATION_CHECKLIST:-}"
       # The orchestrator calls the Register directly for durable decision records + the handover
       # approval (server-minted delegated context), so it needs the Register's in-network URL.
       WORKFLOWS_REGISTER_BASE_URL: http://register:8000
