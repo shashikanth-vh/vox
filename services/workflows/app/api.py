@@ -553,11 +553,31 @@ def create_app() -> FastAPI:
 
     @app.get("/readyz", include_in_schema=False)
     async def readyz(request: Request) -> Any:
+        client = request.app.state.temporal
         try:
-            await request.app.state.temporal.service_client.check_health()
+            await client.service_client.check_health()
         except Exception as exc:  # noqa: BLE001
             return _problem(503, "Not ready", f"Temporal unreachable: {exc}")
-        return {"status": "ready", "service": "prism-orchestrator"}
+        # Server-up is necessary but NOT sufficient: a run started while no WORKER polls
+        # the task queue just sits queued, and a ?wait=true caller dies on the timeout —
+        # exactly the cold-start window after a stack wipe. Ready means pollers > 0.
+        try:
+            from temporalio.api.enums.v1 import TaskQueueType
+            from temporalio.api.taskqueue.v1 import TaskQueue
+            from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+            resp = await client.service_client.workflow_service.describe_task_queue(
+                DescribeTaskQueueRequest(
+                    namespace=settings.temporal_namespace,
+                    task_queue=TaskQueue(name=settings.task_queue),
+                    task_queue_type=TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW))
+            pollers = len(resp.pollers)
+        except Exception as exc:  # noqa: BLE001
+            return _problem(503, "Not ready", f"Task-queue check failed: {exc}")
+        if pollers == 0:
+            return _problem(503, "Not ready",
+                            f"No worker is polling task queue '{settings.task_queue}' yet.")
+        return {"status": "ready", "service": "prism-orchestrator",
+                "worker_pollers": pollers}
 
     @app.post("/v1/workflows/vox-touchpoints", status_code=202, tags=["Workflows"],
               summary="Start (or attach to) a VOX touchpoint workflow")
@@ -594,7 +614,21 @@ def create_app() -> FastAPI:
                 **payload.model_dump()),
             wf_id, memo=memo)
         if wait:
-            result = await handle.result()
+            try:
+                result = await handle.result()
+            except (RPCError, TemporalError) as exc:
+                # Surface the run's OWN failure chain — a bare 500 hides the register
+                # refusal / activity error that actually killed the capture.
+                chain: list[str] = []
+                cur: BaseException | None = exc
+                while cur is not None and len(chain) < 4:
+                    msg = str(cur).strip() or cur.__class__.__name__
+                    if msg not in chain:
+                        chain.append(msg)
+                    cur = cur.__cause__
+                return _problem(502, "Workflow run failed",
+                                f"VOX run '{wf_id}' did not complete: "
+                                + " <- ".join(chain))
             return ORJSONResponse(status_code=200,
                                   content={"workflow_id": wf_id, "result": result})
         return ORJSONResponse(status_code=202, content={
