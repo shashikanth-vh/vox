@@ -6,6 +6,16 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **All Release-1 schema consolidated into the baseline.** Release 1 has not shipped, so
+  there is nothing to migrate: the increment-7/8 tables (calendar_events, notifications,
+  notification_deliveries, covenants, ews_cases, the covenant-period unique index) now
+  live in the BASELINE migrations (0001 creates them; 0005 gives them the fail-closed
+  RLS policy) instead of incremental steps — the former 0017/0018 files are gone. A
+  fresh deploy (`alembic upgrade head`, which the container entrypoint runs) creates the
+  complete schema in one pass; no migration step, no `down -v` dance, nothing to
+  re-import. Behaviour and DDL are identical — only where the DDL lives changed.
+
+
 - **Covenants, EWS, waivers, and deal closure (increment 8).** Covenant DEFINITIONS
   (`/v1/covenants`: schedule + financial test + breach severity, credit-governed under
   the new `manage_covenants` operation) project their observations into
@@ -26,9 +36,9 @@ bundle, or just check that the newest item below is present in your copy).
   **Deal closure is open-item validated**: `POST /v1/deals/{id}/close` refuses while
   open EWS cases, un-excused covenant breaches, or mid-pipeline product lines remain
   (`GET /open-items` lists them); the closed terminals are no longer reachable by a
-  bare stage PATCH. Policy version 3.4. Schema: migration 0018 (covenants, ews_cases,
-  covenant-period unique index) + waiver columns folded into 0001 — redeploy with
-  `docker compose down -v` and re-import.
+  bare stage PATCH. Policy version 3.4. Schema (covenants, ews_cases, the
+  covenant-period unique index, the waiver columns on monitoring_reporting) is part of
+  the baseline migrations — a fresh deploy creates it all; no migration step.
 
 
 - **Calendar, notifications with retry, and document expiry (increment 7).** The
@@ -41,7 +51,7 @@ bundle, or just check that the newest item below is present in your copy).
   deliveries (lease + fencing token) and drives each to delivered / retry (exponential
   backoff) / dead-letter, with an audited Admin redrive; creation is idempotent per
   occurrence, so retries never double-notify. **Calendar events** are first-class
-  (`calendar_events`, migration 0017): create / reschedule-in-place / `/cancel` (note
+  (`calendar_events`): create / reschedule-in-place / `/cancel` (note
   mandatory) / `/complete`, terminal rows frozen by trigger; a VOX capture's next-meeting
   date creates one idempotently per run (flag `WORKFLOWS_CALENDAR_EVENTS_ENABLED`).
   **Document lifecycle**: `/validate` (maker≠checker, fixes `expires_on`), `/reject`
@@ -50,9 +60,9 @@ bundle, or just check that the newest item below is present in your copy).
   `DocumentExpiryMonitorWorkflow` (started via
   `POST /v1/internal/monitors/document-expiry`) runs the Register's idempotent expiry
   sweep on a clock: lapsed documents become 'Expired' (critical alert to uploader + ops),
-  soon-to-expire ones get a deduped warning. Schema: migration 0017 (calendar_events,
-  notifications, notification_deliveries) + document lifecycle columns folded into 0002 —
-  redeploy with `docker compose down -v` and re-import.
+  soon-to-expire ones get a deduped warning. Schema (calendar_events, notifications,
+  notification_deliveries, the document lifecycle columns) is part of the baseline
+  migrations — a fresh deploy creates it all; no migration step.
 
 
 - **Asset Monetisation lifecycle workflow (increment 6).** The AM mandate runs end to end

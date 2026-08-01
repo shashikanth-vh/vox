@@ -510,6 +510,214 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_monitoring_tenant_entity ON monitoring_reporting (tenant_id, entity_id);")
     op.execute("CREATE INDEX ix_monitoring_tenant_type ON monitoring_reporting (tenant_id, record_type);")
     op.execute("CREATE INDEX ix_monitoring_entity_fk ON monitoring_reporting (entity_id);")
+    # Recurring-covenant idempotency: ONE observation per (covenant, due date), ever —
+    # the covenant sweep's generation is replay-safe by construction.
+    op.execute(
+        """
+        CREATE UNIQUE INDEX monitoring_covenant_period_unique
+        ON monitoring_reporting (tenant_id, (details->>'covenant_id'), due_date)
+        WHERE record_type = 'Covenant' AND details->>'covenant_id' IS NOT NULL;
+        """
+    )
+
+    # --- calendar events -------------------------------------------------
+    # First-class meeting/follow-up records: Scheduled → Completed / Cancelled;
+    # reschedules update the Scheduled row; terminal rows are frozen by trigger.
+    _table("calendar_events", """
+        subject_type    varchar(30),
+        subject_id      varchar(64),
+        entity_id       uuid REFERENCES entities(id) ON DELETE SET NULL,
+        title           varchar(300) NOT NULL,
+        description     text,
+        location        varchar(300),
+        starts_at       timestamptz NOT NULL,
+        ends_at         timestamptz,
+        organizer       varchar(200) NOT NULL,
+        attendees       jsonb,
+        status          varchar(16) NOT NULL DEFAULT 'Scheduled',
+        source          varchar(20) NOT NULL DEFAULT 'manual',
+        workflow_id     varchar(200),
+        external_ref    varchar(200),
+        completed_by    varchar(200),
+        completed_at    timestamptz,
+        completion_note text,
+        cancelled_by    varchar(200),
+        cancelled_at    timestamptz,
+        cancel_note     text,
+        CONSTRAINT calendar_events_status
+            CHECK (status IN ('Scheduled', 'Completed', 'Cancelled')),
+        CONSTRAINT calendar_events_window
+            CHECK (ends_at IS NULL OR ends_at >= starts_at)
+    """)
+    op.execute("CREATE INDEX ix_calendar_events_organizer "
+               "ON calendar_events (tenant_id, organizer, starts_at);")
+    op.execute("CREATE INDEX ix_calendar_events_subject "
+               "ON calendar_events (tenant_id, subject_type, subject_id);")
+    op.execute("CREATE INDEX ix_calendar_events_window "
+               "ON calendar_events (tenant_id, starts_at) WHERE status = 'Scheduled';")
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION calendar_event_guard() RETURNS trigger AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'calendar_events rows cannot be deleted (cancel instead)';
+            END IF;
+            IF OLD.status IN ('Completed', 'Cancelled') THEN
+                RAISE EXCEPTION 'calendar_events row % is % and is frozen',
+                    OLD.id, OLD.status;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_calendar_event_guard
+        BEFORE UPDATE OR DELETE ON calendar_events
+        FOR EACH ROW EXECUTE FUNCTION calendar_event_guard();
+        """
+    )
+
+    # --- notifications (in-app inbox) + external-channel delivery outbox --
+    # One notification row per recipient (idempotent by dedupe_key), plus one
+    # delivery-outbox row per external channel — lease + fencing-token claims,
+    # exponential backoff, dead-letter (the same machinery as the decision outbox).
+    _table("notifications", """
+        recipient      varchar(200) NOT NULL,
+        recipient_role varchar(60),
+        event          varchar(120) NOT NULL,
+        severity       varchar(12)  NOT NULL DEFAULT 'info',
+        title          varchar(300) NOT NULL,
+        body           text,
+        subject_type   varchar(40),
+        subject_id     varchar(64),
+        workflow_id    varchar(200),
+        dedupe_key     varchar(240),
+        read_at        timestamptz,
+        meta           jsonb,
+        CONSTRAINT notifications_severity
+            CHECK (severity IN ('info', 'warning', 'critical'))
+    """)
+    op.execute("CREATE UNIQUE INDEX notifications_tenant_dedupe "
+               "ON notifications (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL;")
+    op.execute("CREATE INDEX ix_notifications_inbox "
+               "ON notifications (tenant_id, recipient, created_at DESC);")
+    op.execute("CREATE INDEX ix_notifications_unread "
+               "ON notifications (tenant_id, recipient) WHERE read_at IS NULL;")
+
+    _table("notification_deliveries", """
+        notification_id uuid NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+        channel         varchar(12)  NOT NULL,
+        target          varchar(300) NOT NULL,
+        status          varchar(12)  NOT NULL DEFAULT 'pending',
+        attempts        integer      NOT NULL DEFAULT 0,
+        next_attempt_at timestamptz  NOT NULL DEFAULT now(),
+        leased_until    timestamptz,
+        claim_token     uuid,
+        last_error      text,
+        delivered_at    timestamptz,
+        CONSTRAINT notification_deliveries_channel
+            CHECK (channel IN ('email', 'sms', 'webhook')),
+        CONSTRAINT notification_deliveries_status
+            CHECK (status IN ('pending', 'delivered', 'dead')),
+        CONSTRAINT notification_deliveries_unique
+            UNIQUE (tenant_id, notification_id, channel)
+    """)
+    op.execute("CREATE INDEX ix_notification_deliveries_due "
+               "ON notification_deliveries (tenant_id, next_attempt_at) "
+               "WHERE status = 'pending';")
+
+    # --- covenant definitions --------------------------------------------
+    # The covenant DEFINITION/schedule; the OBSERVATIONS live in monitoring_reporting
+    # (record_type='Covenant', one row per period via the partial unique index above).
+    _table("covenants", """
+        entity_id     uuid NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        deal_id       uuid REFERENCES deals(id) ON DELETE SET NULL,
+        lending_id    uuid,
+        name          varchar(200) NOT NULL,
+        covenant_type varchar(30)  NOT NULL DEFAULT 'Financial',
+        description   text,
+        metric        varchar(60),
+        operator      varchar(2),
+        threshold     numeric(18,4),
+        frequency     varchar(12) NOT NULL DEFAULT 'Quarterly',
+        first_due_on  date NOT NULL,
+        grace_days    integer NOT NULL DEFAULT 0,
+        breach_severity varchar(12) NOT NULL DEFAULT 'Amber',
+        is_active     boolean NOT NULL DEFAULT true,
+        CONSTRAINT covenants_type
+            CHECK (covenant_type IN ('Financial', 'Reporting', 'Security', 'Other')),
+        CONSTRAINT covenants_frequency
+            CHECK (frequency IN ('OneTime', 'Monthly', 'Quarterly', 'SemiAnnual',
+                                 'Annual')),
+        CONSTRAINT covenants_operator
+            CHECK (operator IS NULL OR operator IN ('>=', '<=', '>', '<', '=')),
+        CONSTRAINT covenants_severity
+            CHECK (breach_severity IN ('Amber', 'Red')),
+        CONSTRAINT covenants_financial_shape CHECK (
+            covenant_type <> 'Financial'
+            OR (metric IS NOT NULL AND operator IS NOT NULL AND threshold IS NOT NULL))
+    """)
+    op.execute("CREATE INDEX ix_covenants_entity ON covenants (tenant_id, entity_id);")
+    op.execute("CREATE INDEX ix_covenants_deal ON covenants (tenant_id, deal_id);")
+    op.execute("CREATE INDEX ix_covenants_active ON covenants (tenant_id) "
+               "WHERE is_active AND deleted_at IS NULL;")
+
+    # --- EWS cases --------------------------------------------------------
+    # Early-warning case file: Open → UnderInvestigation → Escalated → Closed; deduped
+    # per trigger source; Closed rows frozen by trigger, never deletable.
+    _table("ews_cases", """
+        entity_id  uuid NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+        deal_id    uuid REFERENCES deals(id) ON DELETE SET NULL,
+        source     varchar(30)  NOT NULL,
+        source_ref varchar(120) NOT NULL,
+        severity   varchar(12)  NOT NULL DEFAULT 'Amber',
+        title      varchar(300) NOT NULL,
+        summary    text,
+        status     varchar(24)  NOT NULL DEFAULT 'Open',
+        opened_by  varchar(200),
+        assigned_to varchar(200),
+        assigned_at timestamptz,
+        investigation_note text,
+        escalated_by varchar(200),
+        escalated_at timestamptz,
+        escalation_note text,
+        disposition varchar(30),
+        closure_note text,
+        closed_by  varchar(200),
+        closed_at  timestamptz,
+        workflow_id varchar(200),
+        CONSTRAINT ews_cases_severity CHECK (severity IN ('Amber', 'Red')),
+        CONSTRAINT ews_cases_status
+            CHECK (status IN ('Open', 'UnderInvestigation', 'Escalated', 'Closed')),
+        CONSTRAINT ews_cases_source_dedupe UNIQUE (tenant_id, source, source_ref)
+    """)
+    op.execute("CREATE INDEX ix_ews_cases_entity ON ews_cases (tenant_id, entity_id);")
+    op.execute("CREATE INDEX ix_ews_cases_open ON ews_cases (tenant_id, status) "
+               "WHERE status <> 'Closed';")
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION ews_case_guard() RETURNS trigger AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'ews_cases rows cannot be deleted (close instead)';
+            END IF;
+            IF OLD.status = 'Closed' THEN
+                RAISE EXCEPTION 'ews_cases row % is Closed and is frozen', OLD.id;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_ews_case_guard
+        BEFORE UPDATE OR DELETE ON ews_cases
+        FOR EACH ROW EXECUTE FUNCTION ews_case_guard();
+        """
+    )
 
     _apply_row_level_security()
 
@@ -519,6 +727,8 @@ _RLS_TABLES = [
     "entities", "people", "counterparties", "deals", "leads", "lending_tracker",
     "syndication_tracker", "syndication_lenders", "asset_monetisation", "financials",
     "contracts_assets", "interactions", "external_intelligence", "monitoring_reporting",
+    "calendar_events", "notifications", "notification_deliveries", "covenants",
+    "ews_cases",
 ]
 
 
@@ -550,8 +760,12 @@ def downgrade() -> None:
         "monitoring_reporting", "external_intelligence", "interactions", "contracts_assets",
         "financials", "asset_monetisation", "syndication_lenders", "syndication_tracker",
         "lending_tracker", "leads", "deals", "counterparties", "people", "entities",
+        "calendar_events", "notifications", "notification_deliveries", "covenants",
+        "ews_cases",
     ]):
         op.execute(f"DROP TABLE IF EXISTS {tbl} CASCADE;")
+    op.execute("DROP FUNCTION IF EXISTS calendar_event_guard() CASCADE;")
+    op.execute("DROP FUNCTION IF EXISTS ews_case_guard() CASCADE;")
     op.execute("DROP TABLE IF EXISTS audit_log CASCADE;")
     op.execute("DROP TABLE IF EXISTS idempotency_keys CASCADE;")
     op.execute("DROP TABLE IF EXISTS ref_values CASCADE;")

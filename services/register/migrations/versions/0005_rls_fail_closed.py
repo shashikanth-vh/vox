@@ -50,6 +50,8 @@ _TENANT_TABLES = [
     "contracts_assets", "interactions", "external_intelligence", "monitoring_reporting",
     "documents", "document_checklist", "line_assignments", "change_requests",
     "tenant_settings", "idempotency_keys",
+    "calendar_events", "notifications", "notification_deliveries", "covenants",
+    "ews_cases",
 ]
 
 
