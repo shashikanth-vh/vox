@@ -3635,6 +3635,18 @@
             ],
             "title": "Committee Reference"
           },
+          "conditions": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
           "decision": {
             "pattern": "^(Approved|Rejected|Cancelled|ReturnedForInformation|Resubmitted)$",
             "title": "Decision",
@@ -3716,6 +3728,19 @@
               }
             ],
             "title": "Subject Type"
+          },
+          "valid_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Days"
           },
           "workflow_id": {
             "maxLength": 200,

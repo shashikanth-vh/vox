@@ -46,6 +46,8 @@ with workflow.unsafe.imports_passed_through():
         LeadConversionResult,
         LeadQualificationInput,
         LeadQualificationResult,
+        SanctionExpiryInput,
+        SanctionExpiryResult,
         VoxResult,
         VoxTouchpoint,
     )
@@ -716,6 +718,10 @@ class DealStructuringWorkflow:
         self._notified = False
         self._stage = "Structuring"
         self._fnd = _Foundation()
+        # Credit-note versioning: v1 is the note circulated at start; each committee-rework
+        # revision (revise_credit_note) bumps it.
+        self._note_version = 0
+        self._note_revisions: list[tuple] = []
 
     @workflow.signal
     def committee_decision(self, decision_ref: str = "") -> None:
@@ -731,6 +737,15 @@ class DealStructuringWorkflow:
         here, verified against the durable control record before it does anything."""
         self._fnd.controls.append((action, control_ref))
 
+    @workflow.signal
+    def revise_credit_note(self, reference: str, sha256: str = "", by: str = "") -> None:
+        """Committee REWORK: circulate a REVISED credit note while the run awaits (or was
+        returned for) a decision. Each revision is filed as a NEW credit_note evidence
+        version on every line — the full circulation history stays immutable; the version
+        counter tells the committee (and the audit) exactly what was decided on."""
+        if reference.strip():
+            self._note_revisions.append((reference.strip(), sha256 or None, by))
+
     @workflow.query
     def status(self) -> str:
         return self._stage
@@ -739,7 +754,8 @@ class DealStructuringWorkflow:
     def state(self) -> dict:
         """BUSINESS status and TECHNICAL stage, separately — dashboards should never have
         to infer one from the other."""
-        return self._fnd.state(self._stage)
+        return {**self._fnd.state(self._stage),
+                "credit_note_version": self._note_version}
 
     @workflow.run
     async def run(self, inp: DealStructuringInput) -> DealStructuringResult:
@@ -776,12 +792,13 @@ class DealStructuringWorkflow:
         evidence_ids: list = []
         if inp.credit_note_reference:
             self._stage = "Circulating credit note"
+            self._note_version = 1
             for line in lines:
                 note_ev = await workflow.execute_activity(
                     activities.attach_evidence,
                     args=["Lending", str(line.get("id")), "credit_note",
                           inp.credit_note_reference, None,
-                          "Structured credit note circulated to committee", caller],
+                          "Structured credit note circulated to committee (v1)", caller],
                     **_DURABLE_IO)
                 evidence_ids.append(note_ev.get("id"))
 
@@ -814,12 +831,34 @@ class DealStructuringWorkflow:
                     inp, resumed_elapsed_hours=waited.total_seconds() / 3600))
             try:
                 await workflow.wait_condition(
-                    lambda: self._notified or bool(self._fnd.controls),
+                    lambda: (self._notified or bool(self._fnd.controls)
+                             or bool(self._note_revisions)),
                     timeout=self._fnd.next_wakeup(waited, remaining,
                                                   inp.sla_reminder_hours,
                                                   inp.sla_escalation_hours))
             except asyncio.TimeoutError:
                 continue
+            # Committee REWORK: file each revised credit note as the next VERSION on every
+            # line (immutable circulation history), before any decision is verified — the
+            # committee always decides on the version the state query reports.
+            while self._note_revisions:
+                ref, sha, revised_by = self._note_revisions.pop(0)
+                self._note_version += 1
+                self._stage = f"Circulating credit note v{self._note_version}"
+                for line in lines:
+                    ev = await workflow.execute_activity(
+                        activities.attach_evidence,
+                        args=["Lending", str(line.get("id")), "credit_note", ref, sha,
+                              f"Revised credit note circulated to committee "
+                              f"(v{self._note_version}"
+                              + (f", by {revised_by}" if revised_by else "") + ")",
+                              caller],
+                        **_DURABLE_IO)
+                    evidence_ids.append(ev.get("id"))
+                self._stage = "Awaiting committee decision"
+                await _emit_ops("credit_note_revised", {
+                    "subject": subject, "version": self._note_version,
+                    "reference": ref, "by": revised_by})
             # Run-control first (verified against the durable control record, fail-closed).
             while self._fnd.controls:
                 action, ref = self._fnd.controls.pop(0)
@@ -915,6 +954,17 @@ class DealStructuringWorkflow:
                               line_ref],
                         **_DURABLE_IO)
                     evidence_ids.append(ev.get("id"))
+                # CONDITIONAL approval: the committee's conditions are governance evidence
+                # on the line, verified against the SAME per-line decision the sanction
+                # cites — the conditions travel with the sanction, immutably.
+                if fac.get("conditions"):
+                    ev = await workflow.execute_activity(
+                        activities.attach_evidence,
+                        args=["Lending", line_id, "sanction_conditions",
+                              f"conditions/{line_ref}", None, fac["conditions"], caller,
+                              line_ref],
+                        **_DURABLE_IO)
+                    evidence_ids.append(ev.get("id"))
                 self._stage = "Sanctioning lending facility"
                 # product_type is a DEAL field — LendingUpdate is extra="forbid", so send only
                 # fields the lending line actually has.
@@ -925,6 +975,19 @@ class DealStructuringWorkflow:
                           caller],
                     **_DURABLE_IO)
                 line_outcomes[line_id] = "Sanctioned"
+                # A validity window makes the sanction PERISHABLE: an abandoned child
+                # monitor outlives this run, reminds ops before the deadline, and files
+                # the expiry evidence if the facility never progresses past 'Sanctioned'.
+                if fac.get("valid_days"):
+                    await workflow.start_child_workflow(
+                        SanctionExpiryMonitorWorkflow.run,
+                        SanctionExpiryInput(
+                            lending_id=line_id, deal_id=inp.deal_id,
+                            valid_days=int(fac["valid_days"]),
+                            decision_ref=line_ref, caller=caller,
+                            emit_search_attributes=inp.emit_search_attributes),
+                        id=f"{wf_id}:expiry:{line_id}",
+                        parent_close_policy=workflow.ParentClosePolicy.ABANDON)
             else:
                 self._stage = "Recording facility rejection"
                 await workflow.execute_activity(
@@ -946,7 +1009,8 @@ class DealStructuringWorkflow:
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
                 decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids,
-                note=note, line_outcomes=line_outcomes)
+                note=note, line_outcomes=line_outcomes,
+                credit_note_version=self._note_version)
 
         # -- 5. Record the sanction basics on the DEAL as plain data (product_type/rm carried on
         #       the structuring request). This is NOT a lifecycle change — the deal's stage is the
@@ -965,7 +1029,81 @@ class DealStructuringWorkflow:
         return DealStructuringResult(
             workflow_id=wf_id, deal_id=inp.deal_id, status=status,
             decided_by=decided_by, stage="Sanctioned",
-            evidence_ids=evidence_ids, note=note, line_outcomes=line_outcomes)
+            evidence_ids=evidence_ids, note=note, line_outcomes=line_outcomes,
+            credit_note_version=self._note_version)
+
+
+@workflow.defn
+class SanctionExpiryMonitorWorkflow:
+    """A sanction with a validity window is PERISHABLE — this monitor is the clock.
+
+    Started as an ABANDONED child by the structuring workflow for every facility whose
+    committee approval set ``valid_days``. It sleeps to the reminder point (default 7 days
+    before expiry), checks the line, and reminds ops if it still sits at 'Sanctioned';
+    at expiry it checks once more and — if the facility NEVER progressed — files the
+    ``sanction_expired`` evidence (immutable audit) and raises the ops event. A facility
+    that moved on ends the run quietly as Progressed. The monitor only ever OBSERVES and
+    RECORDS: it never moves the line itself — what happens to a lapsed sanction (re-table,
+    extend, close) is a committee/RM call, on the record this run created."""
+
+    def __init__(self) -> None:
+        self._stage = "Watching validity window"
+
+    @workflow.query
+    def status(self) -> str:
+        return self._stage
+
+    @workflow.run
+    async def run(self, inp: SanctionExpiryInput) -> SanctionExpiryResult:
+        wf_id = workflow.info().workflow_id
+        subject = f"Lending:{inp.lending_id}"
+        total = timedelta(days=inp.valid_days)
+        remind_at = total - timedelta(days=inp.remind_before_days)
+        _upsert_search(inp.emit_search_attributes, "SanctionValid", subject)
+
+        async def _line_stage() -> str | None:
+            row = await workflow.execute_activity(
+                activities.get_resource, args=["lending", inp.lending_id, inp.caller],
+                **_DURABLE_IO)
+            return row.get("stage")
+
+        if inp.remind_before_days > 0 and remind_at > timedelta(0):
+            await workflow.sleep(remind_at)
+            if (stage := await _line_stage()) == "Sanctioned":
+                self._stage = "Reminder raised"
+                await _emit_ops("sanction_expiry_reminder", {
+                    "subject": subject, "deal_id": inp.deal_id,
+                    "days_left": inp.remind_before_days,
+                    "decision_ref": inp.decision_ref})
+                await workflow.sleep(total - remind_at)
+            elif stage is not None:
+                self._stage = "Progressed"
+                return SanctionExpiryResult(workflow_id=wf_id, lending_id=inp.lending_id,
+                                            status="Progressed", stage_at_close=stage)
+        else:
+            await workflow.sleep(total)
+
+        stage = await _line_stage()
+        if stage != "Sanctioned":
+            self._stage = "Progressed"
+            return SanctionExpiryResult(workflow_id=wf_id, lending_id=inp.lending_id,
+                                        status="Progressed", stage_at_close=stage)
+        # The window lapsed unprogressed: put it on the record, loudly.
+        self._stage = "Expired"
+        ev = await workflow.execute_activity(
+            activities.attach_evidence,
+            args=["Lending", inp.lending_id, "sanction_expired",
+                  f"expiry/{inp.decision_ref or wf_id}", None,
+                  f"Sanction validity window ({inp.valid_days} days) lapsed with the "
+                  f"facility still at 'Sanctioned'.", inp.caller],
+            **_DURABLE_IO)
+        _upsert_search(inp.emit_search_attributes, "SanctionExpired", subject)
+        await _emit_ops("sanction_expired", {
+            "subject": subject, "deal_id": inp.deal_id, "valid_days": inp.valid_days,
+            "decision_ref": inp.decision_ref, "evidence_id": ev.get("id")})
+        return SanctionExpiryResult(workflow_id=wf_id, lending_id=inp.lending_id,
+                                    status="Expired", stage_at_close=stage,
+                                    evidence_id=ev.get("id"))
 
 
 @workflow.defn

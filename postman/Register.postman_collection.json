@@ -6287,7 +6287,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"committee_reference\": \"sample committee_reference\",\n  \"decision\": \"sample decision\",\n  \"kind\": \"sample kind\",\n  \"lead_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"run_id\": \"{{id}}\",\n  \"sanction_letter_reference\": \"sample sanction_letter_reference\",\n  \"subject_id\": \"{{id}}\",\n  \"subject_type\": \"sample subject_type\",\n  \"workflow_id\": \"{{id}}\"\n}",
+              "raw": "{\n  \"committee_reference\": \"sample committee_reference\",\n  \"conditions\": \"sample conditions\",\n  \"decision\": \"sample decision\",\n  \"kind\": \"sample kind\",\n  \"lead_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"run_id\": \"{{id}}\",\n  \"sanction_letter_reference\": \"sample sanction_letter_reference\",\n  \"subject_id\": \"{{id}}\",\n  \"subject_type\": \"sample subject_type\",\n  \"valid_days\": 1,\n  \"workflow_id\": \"{{id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

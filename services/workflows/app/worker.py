@@ -17,6 +17,7 @@ from app.codec import build_data_converter
 from app.config import get_settings
 from app.workflows import (
     AdvayaHandoffWorkflow,
+    SanctionExpiryMonitorWorkflow,
     CpcsChecklistWorkflow,
     DealStructuringWorkflow,
     DocumentCollectionWorkflow,
@@ -57,7 +58,8 @@ async def main() -> None:
         workflows=[IngestInteractionWorkflow, VoxTouchpointWorkflow,
                    LeadConversionWorkflow, LeadQualificationWorkflow,
                    DealStructuringWorkflow, DocumentCollectionWorkflow,
-                   AdvayaHandoffWorkflow, CpcsChecklistWorkflow],
+                   AdvayaHandoffWorkflow, CpcsChecklistWorkflow,
+                   SanctionExpiryMonitorWorkflow],
         activities=[
             activities.write_interaction, activities.fetch_dossier,
             # VOX touchpoint set

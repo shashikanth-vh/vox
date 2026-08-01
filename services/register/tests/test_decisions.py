@@ -482,3 +482,20 @@ async def test_control_records_are_kind_bound_and_create_no_delivery(wf_client):
         json={"workflow_id": f"{WF}:c2", "decision": "Cancelled"},
         headers={"X-Internal-Context": _ctx()})
     assert bad.status_code == 422, bad.text
+
+
+async def test_conditional_approval_fields_roundtrip(wf_client):
+    """A committee decision can carry CONDITIONS and a validity window — recorded once,
+    immutable, and read back by the workflow's per-facility verification."""
+    ref = f"{WF}:lending:l1"
+    r = await wf_client.post(
+        "/v1/internal/decisions",
+        json={"workflow_id": ref, "decision": "Approved", "kind": "committee",
+              "subject_type": "Lending", "subject_id": "l1",
+              "conditions": "quarterly covenant reporting; insurance assignment",
+              "valid_days": 90},
+        headers={"X-Internal-Context": _ctx(roles=("Credit Head",))})
+    assert r.status_code == 201, r.text
+    got = (await wf_client.get(f"/v1/internal/decisions/{ref}")).json()
+    assert got["conditions"] == "quarterly covenant reporting; insurance assignment"
+    assert got["valid_days"] == 90

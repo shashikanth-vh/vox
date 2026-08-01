@@ -145,6 +145,18 @@
             "title": "Committee Reference",
             "type": "string"
           },
+          "conditions": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
           "facilities": {
             "anyOf": [
               {
@@ -176,6 +188,19 @@
             "maxLength": 500,
             "title": "Sanction Letter Reference",
             "type": "string"
+          },
+          "valid_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Days"
           }
         },
         "required": [
@@ -405,6 +430,41 @@
         "title": "CpcsItemIn",
         "type": "object"
       },
+      "CreditNoteRevisionIn": {
+        "additionalProperties": false,
+        "description": "A REVISED credit note for a structuring run awaiting (or returned for) a committee\ndecision \u2014 the committee-rework loop's artefact. Filed as the next credit_note version\non every lending line; the run's `state` query reports the current version.",
+        "properties": {
+          "by": {
+            "maxLength": 200,
+            "title": "By",
+            "type": "string"
+          },
+          "reference": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reference",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          }
+        },
+        "required": [
+          "reference",
+          "by"
+        ],
+        "title": "CreditNoteRevisionIn",
+        "type": "object"
+      },
       "DealStructuringIn": {
         "additionalProperties": false,
         "properties": {
@@ -565,11 +625,23 @@
       },
       "FacilityDecision": {
         "additionalProperties": false,
-        "description": "The committee's outcome for ONE lending facility. Committee approval is\nfacility-specific: each line gets its own recorded outcome (and note/conditions).",
+        "description": "The committee's outcome for ONE lending facility. Committee approval is\nfacility-specific: each line gets its own recorded outcome, note, CONDITIONS (a\nconditional approval) and validity window.",
         "properties": {
           "approved": {
             "title": "Approved",
             "type": "boolean"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
           },
           "lending_id": {
             "maxLength": 60,
@@ -587,6 +659,19 @@
               }
             ],
             "title": "Note"
+          },
+          "valid_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Days"
           }
         },
         "required": [
@@ -2218,6 +2303,75 @@
           }
         },
         "summary": "Reject a pending human-in-the-loop workflow",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/revise-credit-note": {
+      "post": {
+        "description": "Committee rework, completed: return-for-information parks the run, this delivers\nthe revised note (filed as the NEXT immutable credit_note version on every line),\nresubmit restores the decision window. Verified identity + tenant binding; the run\nmust still be awaiting its decision.",
+        "operationId": "revise_credit_note_v1_workflows__workflow_id__revise_credit_note_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreditNoteRevisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Revise Credit Note V1 Workflows  Workflow Id  Revise Credit Note Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Circulate a revised credit note to the committee (rework loop)",
         "tags": [
           "Workflows"
         ]

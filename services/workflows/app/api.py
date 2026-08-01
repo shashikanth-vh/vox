@@ -150,6 +150,17 @@ class LeadSelectIn(BaseModel):
     by: str = Field(max_length=200)
 
 
+class CreditNoteRevisionIn(BaseModel):
+    """A REVISED credit note for a structuring run awaiting (or returned for) a committee
+    decision — the committee-rework loop's artefact. Filed as the next credit_note version
+    on every lending line; the run's `state` query reports the current version."""
+
+    model_config = ConfigDict(extra="forbid")
+    reference: str = Field(min_length=1, max_length=500)
+    sha256: str | None = Field(default=None, pattern="^[0-9a-fA-F]{64}$")
+    by: str = Field(max_length=200)
+
+
 class ControlIn(BaseModel):
     """A run-control action on a waiting workflow. ``cancel`` ends the run; ``return`` parks
     it as ReturnedForInformation (the deciders want more from the requester); ``resubmit``
@@ -198,12 +209,18 @@ class DealStructuringIn(BaseModel):
 
 class FacilityDecision(BaseModel):
     """The committee's outcome for ONE lending facility. Committee approval is
-    facility-specific: each line gets its own recorded outcome (and note/conditions)."""
+    facility-specific: each line gets its own recorded outcome, note, CONDITIONS (a
+    conditional approval) and validity window."""
 
     model_config = ConfigDict(extra="forbid")
     lending_id: str = Field(max_length=60)
     approved: bool
     note: str | None = Field(default=None, max_length=2000)
+    # Conditional approval: the conditions the sanction carries (filed as governance
+    # evidence on the line) and how many days it stays valid before lapsing unprogressed
+    # (a monitor watches the window and files the expiry).
+    conditions: str | None = Field(default=None, max_length=4000)
+    valid_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class CommitteeDecisionIn(BaseModel):
@@ -224,6 +241,10 @@ class CommitteeDecisionIn(BaseModel):
     committee_reference: str = Field(default="", max_length=500)
     sanction_letter_reference: str = Field(default="", max_length=500)
     note: str | None = Field(default=None, max_length=2000)
+    # Grouped-form conditional approval: applied to EVERY line (still recorded per
+    # facility). Facility-specific submissions carry these per entry instead.
+    conditions: str | None = Field(default=None, max_length=4000)
+    valid_days: int | None = Field(default=None, ge=1, le=3650)
 
     @model_validator(mode="after")
     def _exactly_one_form(self) -> "CommitteeDecisionIn":
@@ -1254,9 +1275,13 @@ def create_app() -> FastAPI:
             line_outcome = {lid: ("Approved" if f.approved else "Rejected")
                             for lid, f in wanted.items()}
             line_note = {lid: (f.note or payload.note) for lid, f in wanted.items()}
+            line_conditions = {lid: f.conditions for lid, f in wanted.items()}
+            line_valid_days = {lid: f.valid_days for lid, f in wanted.items()}
         else:
             line_outcome = {str(x): outcome for x in lines}
             line_note = {str(x): payload.note for x in lines}
+            line_conditions = {str(x): payload.conditions for x in lines}
+            line_valid_days = {str(x): payload.valid_days for x in lines}
         # DURABLY record the committee decision (single-winner, subject-bound, provenance server-set)
         # BEFORE signalling — so the evidence gate can VERIFY the sanction against it, and a raw
         # signal alone can never manufacture a committee outcome.
@@ -1285,7 +1310,9 @@ def create_app() -> FastAPI:
                 extra={"kind": "committee", "subject_type": "Lending", "subject_id": lid,
                        "run_id": desc.run_id,
                        "committee_reference": payload.committee_reference or workflow_id,
-                       "sanction_letter_reference": payload.sanction_letter_reference})
+                       "sanction_letter_reference": payload.sanction_letter_reference,
+                       "conditions": line_conditions[lid],
+                       "valid_days": line_valid_days[lid]})
         authoritative_by = (record.get("decided_by") if record else "") or decided_by
         # The signal is only a WAKE-UP: the workflow re-reads the authoritative decision record and
         # derives the outcome/approver/note/references from it — nothing here is trusted by the run.
@@ -1303,7 +1330,10 @@ def create_app() -> FastAPI:
                                 "retry delivery.")
             return await _reconcile_closed(handle, desc2, workflow_id, outcome)
         return {"workflow_id": workflow_id, "decision": outcome, "by": authoritative_by,
-                "facilities": line_outcome}
+                "facilities": {lid: {"outcome": line_outcome[lid],
+                                     "conditions": line_conditions[lid],
+                                     "valid_days": line_valid_days[lid]}
+                               for lid in line_outcome}}
 
     @app.post("/v1/workflows/{workflow_id}/document-received", tags=["Workflows"],
               summary="Signal that a required document was received")
@@ -1383,6 +1413,46 @@ def create_app() -> FastAPI:
                           ) -> Any:
         return await _deliver_confirmation(workflow_id, request, "select_lead",
                                            [payload.lead_id, payload.by], x_api_key)
+
+    @app.post("/v1/workflows/{workflow_id}/revise-credit-note", tags=["Workflows"],
+              summary="Circulate a revised credit note to the committee (rework loop)")
+    async def revise_credit_note(workflow_id: str, payload: CreditNoteRevisionIn,
+                                 request: Request,
+                                 x_api_key: str | None = Header(default=None,
+                                                                alias="X-API-Key"),
+                                 ) -> Any:
+        """Committee rework, completed: return-for-information parks the run, this delivers
+        the revised note (filed as the NEXT immutable credit_note version on every line),
+        resubmit restores the decision window. Verified identity + tenant binding; the run
+        must still be awaiting its decision."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        revised_by, err = await _verified_email(request, payload.by)
+        if err is not None:
+            return err
+        if (resp := _wf_tenant_denied(request, workflow_id)) is not None:
+            return resp
+        client: Client = request.app.state.temporal
+        handle = client.get_workflow_handle(workflow_id)
+        try:
+            desc = await handle.describe()
+        except RPCError as exc:
+            return _problem(404, "Not found", f"Workflow '{workflow_id}': {exc.message}")
+        if desc.status != WorkflowExecutionStatus.RUNNING:
+            return _problem(409, "Conflict",
+                            "This run is closed — a revised note needs a fresh "
+                            "structuring request.")
+        if _auth_enforced():
+            scope_err = await _status_scope_denied(request, workflow_id, desc, revised_by)
+            if scope_err is not None:
+                return scope_err
+        await handle.signal("revise_credit_note",
+                            args=[payload.reference, payload.sha256 or "", revised_by])
+        log.info("credit_note_revised", extra={"workflow": workflow_id,
+                                               "reference": payload.reference,
+                                               "by": revised_by})
+        return {"workflow_id": workflow_id, "delivered": "revise_credit_note",
+                "reference": payload.reference, "by": revised_by}
 
     _CONTROL_OUTCOME = {"cancel": "Cancelled", "return": "ReturnedForInformation",
                         "resubmit": "Resubmitted"}

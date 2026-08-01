@@ -5638,7 +5638,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"workflow_id\": \"sample\",\n  \"decision\": \"REPLACE-to-match-^(Approved|Rejected|\",\n  \"lead_id\": \"sample\",\n  \"note\": \"sample\",\n  \"kind\": \"REPLACE-to-match-^(lead_conversion|co\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\"\n}",
+                  "raw": "{\n  \"workflow_id\": \"sample\",\n  \"decision\": \"REPLACE-to-match-^(Approved|Rejected|\",\n  \"lead_id\": \"sample\",\n  \"note\": \"sample\",\n  \"kind\": \"REPLACE-to-match-^(lead_conversion|co\",\n  \"subject_type\": \"sample\",\n  \"subject_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"conditions\": \"sample\",\n  \"valid_days\": 1\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9278,7 +9278,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (17 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (18 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Workflows",
@@ -9862,7 +9862,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"facilities\": [\n    {\n      \"lending_id\": \"sample\",\n      \"approved\": false,\n      \"note\": \"sample\"\n    }\n  ],\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "raw": "{\n  \"by\": \"sample\",\n  \"approved\": false,\n  \"facilities\": [\n    {\n      \"lending_id\": \"sample\",\n      \"approved\": false,\n      \"note\": \"sample\",\n      \"conditions\": \"sample\",\n      \"valid_days\": 1\n    }\n  ],\n  \"committee_reference\": \"sample\",\n  \"sanction_letter_reference\": \"sample\",\n  \"note\": \"sample\",\n  \"conditions\": \"sample\",\n  \"valid_days\": 1\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -10064,6 +10064,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/{workflow_id}/revise-credit-note \u2014 Circulate a revised credit note to the committee (rework loop)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/{{workflow_id}}/revise-credit-note",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "{{workflow_id}}",
+                    "revise-credit-note"
+                  ]
+                },
+                "description": "Committee rework, completed: return-for-information parks the run, this delivers\nthe revised note (filed as the NEXT immutable credit_note version on every line),\nresubmit restores the decision window. Verified identity + tenant binding; the run\nmust still be awaiting its decision.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference\": \"sample\",\n  \"sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"by\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

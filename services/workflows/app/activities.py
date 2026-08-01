@@ -664,7 +664,9 @@ async def verify_facility_decisions(line_ids: list[str],
                     or rec.get("decision") not in ("Approved", "Rejected")):
                 return {"valid": False,
                         "reason": f"facility decision for {lid} is invalid or non-terminal"}
-            outcomes[str(lid)] = {"outcome": rec.get("decision"), "note": rec.get("note")}
+            outcomes[str(lid)] = {"outcome": rec.get("decision"), "note": rec.get("note"),
+                                  "conditions": rec.get("conditions"),
+                                  "valid_days": rec.get("valid_days")}
     return {"valid": True, "facilities": outcomes}
 
 

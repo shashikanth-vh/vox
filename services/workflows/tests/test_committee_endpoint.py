@@ -104,19 +104,27 @@ async def test_facility_specific_submission_records_each_outcome(monkeypatch, mo
 
     r = await _decide(app, wf_id, {
         "by": "chair@evamfinance.com",
-        "facilities": [{"lending_id": lid_a, "approved": True},
+        "facilities": [{"lending_id": lid_a, "approved": True,
+                        "conditions": "quarterly covenant reporting", "valid_days": 90},
                        {"lending_id": lid_b, "approved": False,
                         "note": "tenor beyond policy"}]})
     assert r.status_code == 200, r.text
     body = r.json()
     # A sanction happened → the deal-level submission record is Approved…
     assert body["decision"] == "Approved"
-    # …and the response answers per facility.
-    assert body["facilities"] == {lid_a: "Approved", lid_b: "Rejected"}
+    # …and the response answers per facility (outcome + conditions + validity).
+    assert body["facilities"][lid_a] == {"outcome": "Approved",
+                                         "conditions": "quarterly covenant reporting",
+                                         "valid_days": 90}
+    assert body["facilities"][lid_b]["outcome"] == "Rejected"
     # One durable, subject-bound record PER FACILITY, each with its own outcome and note.
     rec_a = mock_register.state.decisions[f"{wf_id}:lending:{lid_a}"]
     rec_b = mock_register.state.decisions[f"{wf_id}:lending:{lid_b}"]
     assert rec_a["decision"] == "Approved"
+    # The conditional approval is DURABLE per facility: conditions + validity live on the
+    # record the workflow verifies, not just in the response.
+    assert rec_a["conditions"] == "quarterly covenant reporting"
+    assert rec_a["valid_days"] == 90
     assert rec_b["decision"] == "Rejected"
     assert rec_b["note"] == "tenor beyond policy"
     # The workflow was signalled only after everything was recorded.
@@ -131,7 +139,8 @@ async def test_grouped_submission_still_records_per_facility(monkeypatch, mock_r
 
     r = await _decide(app, wf_id, {"by": "chair@evamfinance.com", "approved": True})
     assert r.status_code == 200, r.text
-    assert r.json()["facilities"] == {lid_a: "Approved", lid_b: "Approved"}
+    assert {lid: f["outcome"] for lid, f in r.json()["facilities"].items()} == {
+        lid_a: "Approved", lid_b: "Approved"}
     for lid in (lid_a, lid_b):
         assert mock_register.state.decisions[f"{wf_id}:lending:{lid}"]["decision"] == "Approved"
 

@@ -38,6 +38,9 @@ class WorkflowDecision(RegisterBase):
     # authoritative record — never the untrusted signal.
     committee_reference: Mapped[str | None] = mapped_column(String(500))
     sanction_letter_reference: Mapped[str | None] = mapped_column(String(500))
+    # Conditional approval: the committee's conditions and the sanction validity window.
+    conditions: Mapped[str | None] = mapped_column(Text)
+    valid_days: Mapped[int | None] = mapped_column(Integer)
     decision: Mapped[str] = mapped_column(String(20), nullable=False)   # Approved / Rejected
     decided_by: Mapped[str] = mapped_column(String(200), nullable=False)
     decided_by_id: Mapped[str | None] = mapped_column(String(64))

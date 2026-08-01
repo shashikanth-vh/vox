@@ -169,6 +169,27 @@ Every human-in-the-loop workflow shares one operational contract:
   for the same lead starts a NEW run under a `-r2`/`-r3` id (covered in the approval and
   persist test suites); each run gets its own single-winner decision record.
 
+## Lending depth (Release 1, increment 3)
+
+* **Committee rework, end to end** — `return` (run-control) parks the run, then
+  `POST /v1/workflows/{id}/revise-credit-note` `{"reference", "sha256"?, "by"}` circulates
+  the revision: each one is filed as the NEXT immutable `credit_note` evidence version on
+  every lending line (the full circulation history stays on the record), the `state` query
+  reports `credit_note_version`, and `resubmit` restores the decision window. The result
+  records which version the committee decided on.
+* **Conditional approval** — a committee submission (grouped or per facility) may carry
+  `conditions` and `valid_days`. Conditions are recorded on the per-facility decision AND
+  filed as governance evidence (`sanction_conditions`, verified against that same decision)
+  beside the sanction letter.
+* **Sanction validity window** — `valid_days` starts an abandoned
+  `SanctionExpiryMonitorWorkflow` per sanctioned facility: an ops reminder before the
+  deadline (default 7 days), and if the facility still sits at 'Sanctioned' when the window
+  lapses, the monitor files `sanction_expired` evidence and raises the ops event. It only
+  observes and records — what happens to a lapsed sanction is a committee/RM call.
+* **Sanction versioning** — a fresh structuring attempt after rejection runs under a new
+  `-r2` id with its own decision records; version = (run, credit-note version), all
+  evidence-backed.
+
 ## Configuration (env, prefix `WORKFLOWS_`)
 
 | Variable | Default | Meaning |

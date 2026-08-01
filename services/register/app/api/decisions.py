@@ -88,6 +88,10 @@ class DecisionIn(BaseModel):
     run_id: str | None = Field(default=None, max_length=200)
     committee_reference: str | None = Field(default=None, max_length=500)
     sanction_letter_reference: str | None = Field(default=None, max_length=500)
+    # Conditional approval (committee decisions): the conditions text and how many days
+    # the sanction stays valid before it lapses unprogressed.
+    conditions: str | None = Field(default=None, max_length=4000)
+    valid_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class ClaimIn(BaseModel):
@@ -129,6 +133,7 @@ def _serialize(row: WorkflowDecision) -> dict:
         "subject_type": row.subject_type, "subject_id": row.subject_id, "run_id": row.run_id,
         "committee_reference": row.committee_reference,
         "sanction_letter_reference": row.sanction_letter_reference,
+        "conditions": row.conditions, "valid_days": row.valid_days,
         "decision": row.decision, "decided_by": row.decided_by,
         "decided_by_id": row.decided_by_id, "roles": list(row.roles or []),
         "operations": dict(row.operations or {}), "views": dict(row.views or {}),
@@ -176,6 +181,7 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
         "subject_type": payload.subject_type, "subject_id": payload.subject_id,
         "run_id": payload.run_id, "committee_reference": payload.committee_reference,
         "sanction_letter_reference": payload.sanction_letter_reference,
+        "conditions": payload.conditions, "valid_days": payload.valid_days,
         "decided_by": approver.email, "decided_by_id": str(approver.id),
         "roles": sorted(approver.roles or []),
         "operations": ops, "views": views,

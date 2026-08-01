@@ -57,7 +57,8 @@ def build_mock() -> FastAPI:
                "lead_id": body.get("lead_id"), "decided_by": "head@evamfinance.com",
                "decided_by_id": "u-1", "roles": ["BD Head"],
                "operations": {"push_lead_to_deals": "FULL"}, "views": {},
-               "note": body.get("note")}
+               "note": body.get("note"),
+               "conditions": body.get("conditions"), "valid_days": body.get("valid_days")}
         app.state.decisions[wf] = row
         return row
 

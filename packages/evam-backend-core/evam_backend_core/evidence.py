@@ -89,7 +89,17 @@ EVIDENCE_KINDS: dict[str, EvidenceKindSpec] = {
     "advaya_acknowledgement": EvidenceKindSpec("attach_advaya_evidence", _DEAL_LINE, True,
                                                verify_source="advaya"),
     # The structured credit note circulated to committee — an artefact, not a governance gate.
+    # REVISIONS (committee rework) file the same kind again with a new reference/version note;
+    # the full circulation history stays on the line, immutably.
     "credit_note": EvidenceKindSpec("attach_committee_evidence", _DEAL_LINE, False),
+    # CONDITIONS attached to a conditional committee approval — governance-grade: verified
+    # against the same per-line APPROVED committee decision the sanction evidence cites.
+    "sanction_conditions": EvidenceKindSpec("attach_committee_evidence", _DEAL_LINE, True,
+                                            decision_outcome="Approved",
+                                            verify_source="committee"),
+    # A sanction validity window lapsed before the facility progressed — the expiry record
+    # the monitor files (an artefact for audit + reporting, not a lifecycle gate).
+    "sanction_expired": EvidenceKindSpec("attach_committee_evidence", _DEAL_LINE, False),
     # Lead qualification review — attached by the qualification authority; not governance-grade.
     "lead_qualification": EvidenceKindSpec("attach_qualification_evidence",
                                            frozenset({"Lead"}), False),

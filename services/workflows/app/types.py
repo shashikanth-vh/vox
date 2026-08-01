@@ -307,6 +307,38 @@ class DealStructuringResult:
     note: str | None = None
     # Facility-specific outcomes: lending line id → Sanctioned / Rejected / NoDecision.
     line_outcomes: dict = field(default_factory=dict)
+    # Which circulation of the credit note the committee decided on (1 = the original;
+    # each committee-rework revision bumps it).
+    credit_note_version: int = 0
+
+
+@dataclass
+class SanctionExpiryInput:
+    """Watch a sanctioned facility's validity window. Started (abandoned child) by the
+    structuring workflow when the committee set ``valid_days``: reminds ops before the
+    deadline and, if the line is STILL at 'Sanctioned' when it lapses, files the
+    ``sanction_expired`` evidence — the sanction lapsed unprogressed, immutably on record."""
+
+    lending_id: str
+    deal_id: str
+    valid_days: int
+    # Days before expiry to raise the ops reminder (0 = no reminder).
+    remind_before_days: int = 7
+    decision_ref: str = ""              # the per-line committee decision this window came from
+    emit_search_attributes: bool = False
+    caller: CallerContext = field(default_factory=CallerContext)
+    # Input-contract version — bump when this dataclass changes shape, so running
+    # workflows and new workers can tell which contract an input was written under.
+    schema_version: int = 1
+
+
+@dataclass
+class SanctionExpiryResult:
+    workflow_id: str
+    lending_id: str
+    status: str                         # Progressed / Expired
+    stage_at_close: str | None = None
+    evidence_id: str | None = None
 
 
 @dataclass

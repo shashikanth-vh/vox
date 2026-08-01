@@ -25,6 +25,12 @@ def upgrade() -> None:
                "ADD COLUMN IF NOT EXISTS committee_reference varchar(500);")
     op.execute("ALTER TABLE workflow_decisions "
                "ADD COLUMN IF NOT EXISTS sanction_letter_reference varchar(500);")
+    # Conditional approval: the committee's conditions text and the sanction's validity
+    # window (days) — recorded per decision (per facility for committee decisions).
+    op.execute("ALTER TABLE workflow_decisions "
+               "ADD COLUMN IF NOT EXISTS conditions text;")
+    op.execute("ALTER TABLE workflow_decisions "
+               "ADD COLUMN IF NOT EXISTS valid_days integer;")
 
 
 def downgrade() -> None:
@@ -32,3 +38,5 @@ def downgrade() -> None:
                "DROP COLUMN IF EXISTS committee_reference;")
     op.execute("ALTER TABLE workflow_decisions "
                "DROP COLUMN IF EXISTS sanction_letter_reference;")
+    op.execute("ALTER TABLE workflow_decisions DROP COLUMN IF EXISTS conditions;")
+    op.execute("ALTER TABLE workflow_decisions DROP COLUMN IF EXISTS valid_days;")

@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Lending depth (increment 3): committee rework, conditional approval, sanction expiry.**
+  The rework loop is complete: return-for-information → `POST
+  /v1/workflows/{id}/revise-credit-note` (each revision filed as the next immutable
+  `credit_note` evidence VERSION on every line; the run reports the version the committee
+  decided on) → resubmit → decide. Committee submissions may carry per-facility
+  `conditions` + `valid_days`: conditions live on the durable per-facility decision and are
+  ALSO filed as governance evidence (`sanction_conditions`, verified against that same
+  decision) beside the sanction letter; a validity window starts an abandoned
+  `SanctionExpiryMonitorWorkflow` per facility — ops reminder before the deadline, and a
+  `sanction_expired` evidence record + ops event if the facility never progresses past
+  'Sanctioned' (the monitor observes and records; it never moves the line). Decision store
+  gains `conditions`/`valid_days` columns (fold into the committee-references migration).
+
+
 - **VOX + lead lifecycle completion (increment 2).** Ambiguity now asks a human instead of
   guessing, behind flags: an **ambiguous company** (close candidates, no exact canonical
   match) parks the capture with its candidate list — `POST /v1/workflows/{id}/confirm-company`
