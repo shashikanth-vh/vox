@@ -1409,7 +1409,8 @@ def create_app() -> FastAPI:
                 executed_document_refs=[d.model_dump() for d in payload.executed_document_refs],
                 cpcs_checklist_version=payload.cpcs_checklist_version,
                 delivery_method=payload.delivery_method, recipient=payload.recipient,
-                note=payload.note),
+                note=payload.note,
+                approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
@@ -1530,7 +1531,8 @@ def create_app() -> FastAPI:
             CpcsChecklistInput(
                 caller=caller, lending_id=payload.lending_id, requested_by=requested_by,
                 items=[i.model_dump(mode="json") for i in payload.items], deal_id=payload.deal_id,
-                checklist_version=payload.checklist_version, note=payload.note),
+                checklist_version=payload.checklist_version, note=payload.note,
+                approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
@@ -2104,12 +2106,21 @@ def create_app() -> FastAPI:
     # The approval-bearing kinds and their Temporal workflow TYPE names — the pending
     # list filters on WorkflowType + ExecutionStatus, both BUILT-IN search attributes,
     # so it needs no custom search-attribute registration on the server.
+    # CP/CS checklists and handover packages are NOT here: their prepare-workflows
+    # complete immediately and the wait lives as a Prepared REGISTER row — those
+    # queues are read from the Register below, which also covers makers who used the
+    # register lane directly.
     _PENDING_TYPES: dict[str, str] = {
         "lead-conversion": "LeadConversionWorkflow",
         "deal-structuring": "DealStructuringWorkflow",
         "syndication": "SyndicationMandateWorkflow",
         "asset-monetisation": "AssetMonetisationWorkflow",
-        "advaya-handover": "AdvayaHandoffWorkflow",
+    }
+
+    # Register-sourced pending kinds: (queue path, approver-role prefix).
+    _PENDING_REGISTER_QUEUES: dict[str, tuple[str, str]] = {
+        "cpcs-checklist": ("/v1/internal/cpcs-checklists?status=Prepared", "cpcs"),
+        "advaya-handover": ("/v1/internal/handover-packages?status=Prepared", "handover"),
     }
 
     @app.get("/v1/workflows/pending", tags=["Workflows"],
@@ -2133,10 +2144,11 @@ def create_app() -> FastAPI:
         if _auth_enforced() and not _who:
             return _problem(401, "Unauthorized",
                             "A verified identity is required to list pending approvals.")
-        if kind is not None and kind not in _PENDING_TYPES:
+        valid_kinds = set(_PENDING_TYPES) | set(_PENDING_REGISTER_QUEUES)
+        if kind is not None and kind not in valid_kinds:
             return _problem(422, "Validation failed",
                             f"Unknown kind '{kind}'; one of: "
-                            f"{', '.join(sorted(_PENDING_TYPES))}.")
+                            f"{', '.join(sorted(valid_kinds))}.")
         tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
         slug = _tenant_slug(tenant)
         caller_roles: set[str] | None = None
@@ -2196,6 +2208,40 @@ def create_app() -> FastAPI:
                 return _problem(502, "Bad gateway",
                                 "Temporal visibility refused the pending-approvals "
                                 f"query for {wtype}: {exc.message}")
+        # CP/CS checklists + handover packages awaiting the checker: read from the
+        # REGISTER (the durable rows are the queue, whichever lane prepared them).
+        for k, (queue_path, role_prefix) in _PENDING_REGISTER_QUEUES.items():
+            if kind is not None and k != kind:
+                continue
+            if (caller_roles is not None
+                    and not (caller_roles & _APPROVER_ROLES.get(role_prefix, set()))):
+                continue
+            try:
+                queue_resp = await request.app.state.http.get(
+                    f"{settings.register_base_url.rstrip('/')}{queue_path}",
+                    headers={"X-API-Key": settings.register_api_key,
+                             "X-Tenant": tenant})
+            except (httpx.HTTPError, AttributeError):
+                continue  # register briefly unreachable — the Temporal kinds still serve
+            if queue_resp.status_code != 200:
+                continue
+            for row in queue_resp.json():
+                lending_id = str(row.get("lending_id") or "")
+                if k == "cpcs-checklist":
+                    approve = (f"/v1/workflows/cpcs-checklists/"
+                               f"{row.get('id')}/approve")
+                    extra = {"checklist_id": row.get("id"),
+                             "checklist_version": row.get("checklist_version")}
+                else:
+                    approve = f"/v1/workflows/advaya-handover/{lending_id}/approve"
+                    extra = {"package_id": row.get("id")}
+                pending.append({
+                    "kind": k, "subject_id": lending_id, "workflow_id": None,
+                    "status": "Prepared",
+                    "stage": "Prepared — awaiting checker approval",
+                    "requested_by": row.get("prepared_by"),
+                    "started_at": row.get("created_at"),
+                    "approve_url": approve, **extra})
         pending.sort(key=lambda r: r["started_at"] or "")
         return {"count": len(pending), "pending": pending}
 

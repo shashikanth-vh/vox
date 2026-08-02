@@ -1951,6 +1951,12 @@ class AdvayaHandoffWorkflow:
             **_DURABLE_IO)
 
         self._stage = "Prepared — awaiting checker approval"
+        # Tell the checkers a package awaits their approval (fallback: the requester).
+        # The Prepared register row is the durable work item the Today list serves.
+        await _emit_ops("awaiting_checker_approval", {
+            "subject": f"Lending:{inp.lending_id}", "requested_by": inp.requested_by,
+            "package_id": pkg.get("id")},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         return AdvayaHandoffResult(
             workflow_id=wf_id, lending_id=inp.lending_id, status=pkg.get("status") or "Prepared",
             handover_package_id=pkg.get("id"), handover_key=pkg.get("handover_key"),
@@ -1987,6 +1993,12 @@ class CpcsChecklistWorkflow:
             args=[inp.lending_id, {k: v for k, v in payload.items() if v is not None}, inp.caller],
             **_DURABLE_IO)
         self._stage = "Prepared — awaiting checker approval"
+        # Tell the checkers a checklist awaits their approval (fallback: the requester).
+        await _emit_ops("awaiting_checker_approval", {
+            "subject": f"Lending:{inp.lending_id}", "requested_by": inp.requested_by,
+            "checklist_id": chk.get("id"),
+            "checklist_version": inp.checklist_version},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         return CpcsChecklistResult(
             workflow_id=wf_id, lending_id=inp.lending_id, checklist_id=chk.get("id"),
             status=chk.get("status") or "Completed",

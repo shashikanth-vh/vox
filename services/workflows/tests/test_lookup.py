@@ -80,7 +80,22 @@ class _FakeTemporal:
         return _gen()
 
 
-def _app(monkeypatch, temporal):  # noqa: ANN001
+class _FakeHttp:
+    """Serves the register checker queues by URL fragment; everything else 404s."""
+
+    def __init__(self, queues: dict[str, list] | None = None) -> None:
+        self.queues = queues or {}
+
+    async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        for frag, rows in self.queues.items():
+            if frag in url:
+                return httpx.Response(200, json=rows,
+                                      request=httpx.Request("GET", url))
+        return httpx.Response(404, json={"error": "nope"},
+                              request=httpx.Request("GET", url))
+
+
+def _app(monkeypatch, temporal, http=None):  # noqa: ANN001
     # Dev posture (no signing/OIDC): the lookup itself is what's under test.
     for var in ("WORKFLOWS_INTERNAL_SIGNING_SECRET", "WORKFLOWS_OIDC_ISSUER",
                 "WORKFLOWS_REQUIRE_AUTH"):
@@ -92,6 +107,7 @@ def _app(monkeypatch, temporal):  # noqa: ANN001
     app = create_app()
     app.state.oidc = None
     app.state.temporal = temporal
+    app.state.http = http or _FakeHttp({})
     return app
 
 
@@ -226,3 +242,32 @@ async def test_pending_kind_filter_and_unknown_kind(monkeypatch):
     assert r.status_code == 200 and r.json()["count"] == 1
     r = await _get_pending(app, {"kind": "bogus"})
     assert r.status_code == 422
+
+
+async def test_pending_includes_the_register_checker_queues(monkeypatch):
+    """CP/CS checklists and handover packages awaiting a checker are Prepared REGISTER
+    rows (their prepare-workflows complete immediately) — the Today list reads them
+    from the Register so the checker sees them regardless of which lane prepared them."""
+    http = _FakeHttp({
+        "/v1/internal/cpcs-checklists": [
+            {"id": "chk-1", "lending_id": "LEND9", "checklist_version": 2,
+             "status": "Prepared", "prepared_by": "maker@evamfinance.com",
+             "created_at": "2026-08-01T09:00:00+00:00"}],
+        "/v1/internal/handover-packages": [
+            {"id": "pkg-1", "lending_id": "LEND9", "status": "Prepared",
+             "prepared_by": "maker@evamfinance.com",
+             "created_at": "2026-08-01T10:00:00+00:00"}]})
+    app = _app(monkeypatch, _FakeTemporal({}), http)
+    r = await _get_pending(app)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 2
+    cp = next(p for p in body["pending"] if p["kind"] == "cpcs-checklist")
+    assert cp["subject_id"] == "LEND9" and cp["checklist_version"] == 2
+    assert cp["approve_url"] == "/v1/workflows/cpcs-checklists/chk-1/approve"
+    assert cp["stage"] == "Prepared — awaiting checker approval"
+    ho = next(p for p in body["pending"] if p["kind"] == "advaya-handover")
+    assert ho["approve_url"] == "/v1/workflows/advaya-handover/LEND9/approve"
+    # The kind filter reaches the register-sourced kinds too.
+    r = await _get_pending(app, {"kind": "cpcs-checklist"})
+    assert r.json()["count"] == 1

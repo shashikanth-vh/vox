@@ -16,7 +16,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -109,6 +109,27 @@ def _serialize(row: CpcsChecklist) -> dict[str, Any]:
         "note": row.note,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+
+
+@router.get("/v1/internal/cpcs-checklists", tags=["Internal"],
+            summary="List CP/CS checklists (the checker's queue: ?status=Prepared)")
+async def list_checklists(ctx: RequestContext = Depends(get_context),
+                          lending_id: str | None = Query(default=None),
+                          status: str | None = Query(default=None),
+                          limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
+    """How a CHECKER discovers work: ``?status=Prepared`` is everything awaiting a
+    check, newest first — regardless of whether the maker prepared it through the
+    orchestrator lane or this register surface. ``lending_id`` narrows to one line
+    (all its versions)."""
+    conds = [CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.deleted_at.is_(None)]
+    if lending_id:
+        conds.append(CpcsChecklist.lending_id == lending_id)
+    if status:
+        conds.append(CpcsChecklist.status == status)
+    rows = (await ctx.session.execute(
+        select(CpcsChecklist).where(*conds)
+        .order_by(CpcsChecklist.created_at.desc()).limit(limit))).scalars().all()
+    return [_serialize(r) for r in rows]
 
 
 @router.post("/v1/internal/cpcs-checklists", tags=["Internal"], status_code=201,

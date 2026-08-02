@@ -597,9 +597,13 @@ class AdvayaHandoffInput:
     recipient: str | None = None
     note: str | None = None
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the package lands Prepared awaiting the checker — the
+    # deployment's governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty →
+    # the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
 
 
 @dataclass
@@ -624,9 +628,13 @@ class CpcsChecklistInput:
     checklist_version: int = 1
     note: str | None = None
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the checklist lands Prepared awaiting the checker — the
+    # deployment's governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty →
+    # the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
 
 
 @dataclass

@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (228 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (230 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -6868,6 +6868,59 @@
               }
             },
             {
+              "name": "GET /v1/internal/cpcs-checklists \u2014 List CP/CS checklists (the checker's queue: ?status=Prepared)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cpcs-checklists",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cpcs-checklists"
+                  ],
+                  "query": [
+                    {
+                      "key": "lending_id",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "How a CHECKER discovers work: ``?status=Prepared`` is everything awaiting a\ncheck, newest first \u2014 regardless of whether the maker prepared it through the\norchestrator lane or this register surface. ``lending_id`` narrows to one line\n(all its versions)."
+              }
+            },
+            {
               "name": "POST /v1/internal/cpcs-checklists \u2014 Prepare / complete the CP/CS checklist (maker)",
               "request": {
                 "method": "POST",
@@ -7456,6 +7509,54 @@
                     }
                   }
                 }
+              }
+            },
+            {
+              "name": "GET /v1/internal/handover-packages \u2014 List handover packages (the checker's queue: ?status=Prepared)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/handover-packages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "handover-packages"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "How a CHECKER discovers packages awaiting approval (and ops the pipeline\noverall): ``?status=Prepared`` = awaiting check, ``Approved`` = ready to submit,\n``Submitted`` = with Advaya. Newest first."
               }
             },
             {

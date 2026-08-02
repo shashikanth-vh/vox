@@ -37,7 +37,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -392,6 +392,25 @@ async def return_handover_package(lending_id: str, payload: HandoverReturnIn,
         changes={"lending_id": lending_id, "status": "Returned", "checker": checker_name,
                  "note": payload.note}))
     return _serialize(pkg)
+
+
+@router.get("/v1/internal/handover-packages", tags=["Internal"],
+            summary="List handover packages (the checker's queue: ?status=Prepared)")
+async def list_handover_packages(ctx: RequestContext = Depends(get_context),
+                                 status: str | None = Query(default=None),
+                                 limit: int = Query(default=100, ge=1, le=500)
+                                 ) -> list[dict]:
+    """How a CHECKER discovers packages awaiting approval (and ops the pipeline
+    overall): ``?status=Prepared`` = awaiting check, ``Approved`` = ready to submit,
+    ``Submitted`` = with Advaya. Newest first."""
+    conds = [AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+             AdvayaHandoverPackage.deleted_at.is_(None)]
+    if status:
+        conds.append(AdvayaHandoverPackage.status == status)
+    rows = (await ctx.session.execute(
+        select(AdvayaHandoverPackage).where(*conds)
+        .order_by(AdvayaHandoverPackage.created_at.desc()).limit(limit))).scalars().all()
+    return [_serialize(r) for r in rows]
 
 
 @router.get("/v1/lending/{lending_id}/handover-package", tags=["Lending"],

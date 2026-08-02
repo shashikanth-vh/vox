@@ -192,6 +192,16 @@ at the POST.
 
 ### 3.5 CP/CS maker–checker (folder 07)
 
+> **How the checker finds out:** a Prepared checklist appears in
+> `GET /orchestrator/v1/workflows/pending` as kind `cpcs-checklist` (with the
+> `checklist_id` and a ready-made approve URL), and in the direct queue
+> `GET /v1/internal/cpcs-checklists?status=Prepared`. Started through the
+> orchestrator lane it ALSO notifies `WORKFLOWS_APPROVER_NOTIFY`. Same pattern for
+> handover packages (kind `advaya-handover`,
+> `GET /v1/internal/handover-packages?status=Prepared`). The approval itself can
+> happen any time later — the Prepared row waits indefinitely, and four-eyes +
+> checker authority are enforced at the approve POST.
+
 * **Maker (analyst)**: CP/CS checklist screen → **"Submit checklist"** →
   `POST /v1/internal/cpcs-checklists` *via gateway with the user's identity* (internal
   path, human authority — the gateway routes it; only service-key lanes are barred from

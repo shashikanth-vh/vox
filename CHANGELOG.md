@@ -6,6 +6,22 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The CHECKER now finds CP/CS checklists and handover packages — the last silent
+  waits.** Their prepare-workflows complete immediately (the wait lives as a Prepared
+  REGISTER row, not a parked run), so they were invisible to the Today list and no
+  notification fired. Now:
+  * `GET /v1/internal/cpcs-checklists` and `GET /v1/internal/handover-packages` — the
+    checker queues (`?status=Prepared`), filterable, newest first, both lanes.
+  * `GET /orchestrator/v1/workflows/pending` merges those queues as kinds
+    `cpcs-checklist` / `advaya-handover` (register-sourced rows with checklist/package
+    ids and ready-made orchestrator approve URLs; role-scoped to Credit Head /
+    Management / Admin). The Temporal listing for the handover prepare-workflow was
+    dropped — it never parked, so it never truthfully listed.
+  * Orchestrator-lane prepares emit `awaiting_checker_approval` to
+    `WORKFLOWS_APPROVER_NOTIFY` (fallback: the requester) — in-app notification when
+    notifications are enabled. Register-lane prepares rely on the queue (the register
+    holds no approver config, by design). Input contracts bump to schema_version 2.
+
 - **Activity & Today parity — the v19 Activity tab and Today triage now render from
   the backend alone.** Four pieces:
   * **Audit rows carry values and a label.** Every update's `changes` now includes
