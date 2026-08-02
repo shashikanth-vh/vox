@@ -1,14 +1,30 @@
-# The ATLAS UI as a shippable image. Build context = deploy/ (see the compose file);
-# the CONTENT lives in deploy/ui/ and this folder holds only the build plumbing — so
-# replacing/wiping deploy/ui/ with a new UI build can never break the image build.
+# The ATLAS UI image, built FROM SOURCE (frontend/ — the React app) in two stages.
+# Build context = the REPO ROOT (like every service image); compose passes this file
+# via `dockerfile:`. CI equivalent:
+#   docker build -f deploy/ui-image/Dockerfile . -t <registry>/prism-ui:<tag>
 #
-#   docker compose build ui && docker compose up -d ui        # rebuild + roll the UI
-#
-# CI equivalent:  docker build -f deploy/ui-image/Dockerfile deploy -t <registry>/prism-ui:<tag>
+# Update the UI: change frontend/, then
+#   docker compose build ui && docker compose up -d ui
+
+# --- build: tsc + vite, based under /ui/ (the edge serves the app there) ----------
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ .
+# Compile-time endpoints. EMPTY = same-origin relative paths — the PRISM edge shape,
+# where the UI and every API share https://<host>:8443. Set VITE_DEX_URL to that same
+# public origin to switch the login screen to the OIDC password grant (the edge
+# proxies /dex to the sso-profile Dex); empty = dev posture (header trust, no sign-in).
+ARG VITE_PRISM_BASE_URL=""
+ARG VITE_DEX_URL=""
+ARG VITE_TENANT="EVAM"
+ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
+    VITE_DEX_URL=$VITE_DEX_URL \
+    VITE_TENANT=$VITE_TENANT
+RUN npm run build -- --base=/ui/
+
+# --- serve ------------------------------------------------------------------------
 FROM nginx:1.27-alpine
-
-COPY ui-image/ui-nginx.conf /etc/nginx/conf.d/default.conf
-COPY ui/ /usr/share/nginx/html/ui/
-
-# Folder docs have no business being servable.
-RUN rm -f /usr/share/nginx/html/ui/README.md
+COPY deploy/ui-image/ui-nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html/ui

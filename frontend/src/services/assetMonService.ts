@@ -1,0 +1,89 @@
+import { db } from '../api/atlasStore';
+import { applyQuery, delay } from '../api/queryEngine';
+import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
+import { writeAudit } from './auditService';
+import { clientsService } from './clientsService';
+import type { TableQuery, Paged } from './types';
+import type { AmRow } from '../pages/AssetMonetisation/am.types';
+import { inScope, type RowScope } from '../auth/rbac';
+
+/** The register's path — `asset-monetisation`, as the collection spells it. */
+const AM_PATH = '/asset-monetisation';
+
+/**
+ * An API asset-monetisation line read back as the row the grid renders. The wire is
+ * snake_case (value_cr, size_mw, investor_type); unmapped, the columns render blank.
+ */
+export function toAmRow(r: any): AmRow {
+  return {
+    id: r?.id || '',
+    dealId: r?.deal_id,
+    // The "Group Code" column: the deal's human number, not a UUID.
+    code: r?.deal_no || r?.code || '',
+    _name: r?.company || r?.entity_name || r?.display_name || '',
+    state: r?.state || '',
+    val: Number(r?.value_cr ?? r?.amount_cr) || 0,
+    mw: Number(r?.size_mw ?? r?.mw) || 0,
+    nature: r?.nature || '',
+    dtype: r?.deal_type || '',
+    inv: r?.investor || '',
+    itype: r?.investor_type || '',
+    status: r?.status || '',
+    teaser: r?.teaser ?? null,
+    createdAt: (r?.created_at || '').slice(0, 10),
+    notes: r?.notes || '',
+  };
+}
+
+export const assetMonService = {
+  async list(q: TableQuery, scope?: RowScope | null) {
+    return withFallback<Paged<AmRow>>(
+      async () => {
+        // Server-paged like the other registers: `limit` is the table's page size and
+        // Next carries the previous page's cursor, so applyQuery must NOT re-slice it.
+        const data = await api.get<any>(AM_PATH, toCursorParams(q));
+        const rows = asRows(data, 'asset_monetisation').map(toAmRow).filter((r) => inScope(scope ?? null, r));
+        return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
+      },
+      async () => {
+        await delay();
+        const rows = db().am.map((r: AmRow) => ({ ...r, _name: clientsService.get(r.code).name })).filter((r: any) => inScope(scope ?? null, r));
+        return applyQuery(rows, { ...q, searchFields: ['code', '_name', 'status', 'state'] });
+      },
+    );
+  },
+  // v12 vAM overlay strip: live/closed/dropped totals + investor & status spreads.
+  summary() {
+    const rows: AmRow[] = db().am;
+    const live = rows.filter((a) => !['Closed', 'Dropped'].includes(a.status));
+    const closed = rows.filter((a) => a.status === 'Closed');
+    const dropped = rows.filter((a) => a.status === 'Dropped');
+    const totVal = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.val) || 0), 0);
+    const totMW = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.mw) || 0), 0);
+    const tally = (key: (a: AmRow) => string) => {
+      const m: Record<string, number> = {};
+      live.forEach((a) => { const k = key(a); m[k] = (m[k] || 0) + 1; });
+      return Object.entries(m);
+    };
+    return {
+      live: { n: live.length, val: totVal(live), mw: totMW(live) },
+      closed: { n: closed.length, val: totVal(closed) },
+      dropped: { n: dropped.length, val: totVal(dropped) },
+      investors: tally((a) => a.itype || 'Other'),
+      statuses: tally((a) => a.status || '—'),
+    };
+  },
+  byCode(code: string): AmRow[] { return db().am.filter((r: AmRow) => r.code === code); },
+  find(id: string): AmRow | undefined { return db().am.find((r: AmRow) => r.id === id); },
+  update(id: string, key: keyof AmRow, value: any, by: string) {
+    const r = this.find(id); if (!r) return;
+    remote('patch', AM_PATH + '/' + id, { [key]: value });
+    const old = (r as any)[key]; (r as any)[key] = value;
+    writeAudit(by, key === 'status' ? 'Asset Mon status' : 'Asset Mon updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
+  },
+  remove(id: string, by: string) {
+    remote('del', AM_PATH + '/' + id);
+    const i = db().am.findIndex((r: AmRow) => r.id === id);
+    if (i > -1) { const [x] = db().am.splice(i, 1); writeAudit(by, 'Asset Mon deleted', x.code, x.id); }
+  },
+};

@@ -1,0 +1,251 @@
+import { Drawer, Box, Typography, Button, IconButton, Divider, TextField, Stack } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import AddIcon from '@mui/icons-material/Add';
+import { useState } from 'react';
+import { FieldGrid, TextFld, SelectFld, DrawerSection, FieldShell } from '../../components/common/Field';
+import { CodeText, LensPill, TempPill, ProductFlags } from '../../components/common/Pills';
+import { referenceService } from '../../services/referenceService';
+import { clientsService } from '../../services/clientsService';
+import { dealsService } from '../../services/dealsService';
+import { lendingService, LEND_GREEN } from '../../services/lendingService';
+import { syndicationService } from '../../services/syndicationService';
+import { assetMonService } from '../../services/assetMonService';
+import { interactionService } from '../../services/interactionService';
+import { notesService } from '../../services/notesService';
+import LogInteractionDialog from './LogInteractionDialog';
+import DataRegisterDialog from './DataRegisterDialog';
+import StageChangeDialog from './StageChangeDialog';
+import type { StageLine } from '../../services/stageRequestService';
+import { useAuth } from '../../auth/AuthContext';
+import { can } from '../../auth/rbac';
+import { tokens } from '../../theme';
+
+const LIFE_STAGES = ['Prospect', 'Onboarded', 'Active', 'Serviced', 'Vistaar — Expansion', 'Dormant'];
+// Field-lock triggers (Forms spec v2.1). Syndication amt/type lock once the deal is
+// sanctioned / the mandate is executed; lending amount + sanction date lock on Sanctioned.
+const SYN_SANCTIONED = ['Sanctioned', 'Disbursed'];
+
+export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }: {
+  // onAddProduct is optional — callers that have nowhere to route the flow (FI Master)
+  // open the drawer without it, and the button hides.
+  code: string | null; onClose: () => void; onChanged: () => void; onAddProduct?: (code: string) => void;
+}) {
+  const { user } = useAuth();
+  // Section-level RBAC: write follows the vertical (Operations matrix). A Credit Head
+  // can edit Lending but not the Syndication section, a BDRM edits the profile but not
+  // the product lines, etc.
+  const roProfile = !can(user.roles, 'editDealProfile');
+  const roOwn = !can(user.roles, 'editDealOwnership');
+  const roSyn = !can(user.roles, 'editSyn');
+  const roLend = !can(user.roles, 'editLending');
+  const roAM = !can(user.roles, 'editAM');
+  const canNote = can(user.roles, 'addNote');
+  const canInteract = can(user.roles, 'logInteraction');
+  const canProduct = can(user.roles, 'addProduct');
+  // Requesters (can't directly edit a line) raise a stage-change request instead.
+  const canRequest = can(user.roles, 'requestStageChange');
+  // Assigning the Deal Analyst is Credit Head's action (Admin/Mgmt override) — not the
+  // BD Head who owns the rest of the Ownership section.
+  const canAssign = can(user.roles, 'assignAnalystLending');
+  // Post-lock override: only Admin / Management may edit a locked (sanctioned/executed)
+  // field; sanction-date edits after the 24h stamp are Admin-only (Forms spec).
+  const adminOverride = user.roles.includes('Admin') || user.roles.includes('Management');
+  const isAdmin = user.roles.includes('Admin');
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const ref = referenceService;
+  const [, force] = useState(0);
+  const [logOpen, setLogOpen] = useState(false);
+  const [regOpen, setRegOpen] = useState(false);
+  const [stageReq, setStageReq] = useState<{ line: StageLine; refId: string; current: string } | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const bump = () => { force((n) => n + 1); onChanged(); };
+  if (!code) return null;
+
+  const c = clientsService.get(code);
+  const d = dealsService.find(code);
+  const lend = lendingService.byCode(code);
+  const syn = syndicationService.byCode(code);
+  const am = assetMonService.byCode(code);
+  const refType = syn.length ? 'Platform Deals' : lend.length ? 'Lending' : am.length ? 'AssetMon' : 'General';
+  const ints = interactionService.for(code);
+  const notes = notesService.for(code);
+  const aud = notesService.auditFor(code);
+
+  const updC = (k: any, v: any) => { clientsService.update(code, { [k]: v }, user.full); bump(); };
+  const updD = (k: any, v: any) => { dealsService.update(code, k, v, user.full); bump(); };
+  const updS = (id: string, k: any, v: any) => { syndicationService.update(id, k, v, user.full); bump(); };
+  const updL = (id: string, k: any, v: any) => { lendingService.update(id, k, v, user.full); bump(); };
+  const updA = (id: string, k: any, v: any) => { assetMonService.update(id, k, v, user.full); bump(); };
+  const addNote = () => { if (!noteText.trim()) return; notesService.add(code, noteText.trim(), user.full); setNoteText(''); bump(); };
+
+  return (
+    <Drawer anchor="right" open={!!code} onClose={onClose}
+      PaperProps={{ sx: { width: 580, maxWidth: '100vw', height: '100%', display: 'flex', flexDirection: 'column' } }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, p: '9px 16px', bgcolor: '#F1F3F5', borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
+        <Typography sx={{ fontSize: 15.6, fontWeight: 700, flex: 1 }}>{c.name}</Typography>
+        <CodeText code={code} /><LensPill lens={c.lens} />{d && d.temp && <TempPill temp={d.temp} />}
+        <IconButton onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
+      </Box>
+
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', p: 2 }}>
+        <DrawerSection title="Profile">
+          <FieldGrid>
+            <SelectFld label="Segment / sector" required value={c.sector} disabled={roProfile} onChange={(v) => updC('sector', v)} options={ref.getRefSync('Sector')} />
+            <SelectFld label="Climate lens" value={c.lens} disabled={roProfile} onChange={(v) => updC('lens', v)} options={ref.getRefSync('Lens')} />
+            <TextFld label="State" required value={c.state} disabled={roProfile} onChange={(v) => updC('state', v)} />
+            <TextFld label="Type of industry" value={c.toi} disabled={roProfile} onChange={(v) => updC('toi', v)} />
+            <SelectFld label="Lifecycle (Vistaar journey)" value={c.lifecycle || 'Prospect'} disabled={roProfile} onChange={(v) => updC('lifecycle', v)} options={LIFE_STAGES} />
+          </FieldGrid>
+        </DrawerSection>
+
+        {d ? (
+          <DrawerSection title="Ownership & sourcing">
+            <FieldGrid>
+              <SelectFld label="RM" required value={d.rm} disabled={roOwn} onChange={(v) => updD('rm', v)} options={ref.getRefSync('RM')} blank />
+              <SelectFld label="Deal Analyst" value={d.an} disabled={!canAssign} onChange={(v) => updD('an', v)} options={ref.getRefSync('Analyst')} blank />
+              <SelectFld label="Temperature" value={d.temp} disabled={roOwn} onChange={(v) => updD('temp', v)} options={ref.getRefSync('Temperature')} blank />
+              {/* Source + Source detail are locked-from-lead (Forms spec) — always disabled. */}
+              <SelectFld label="Source" value={d.source} disabled onChange={(v) => updD('source', v)} options={ref.getRefSync('Source')} blank />
+              <TextFld label="Source detail" value={d.sourceDetail} disabled onChange={(v) => updD('sourceDetail', v)} />
+              {/* Products sits in the grid on the same row as Source detail; the label
+                  reuses FieldShell so it matches every other field's label style. */}
+              <FieldShell label="Products">
+                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', minHeight: 34 }}>
+                  <ProductFlags lend={d.lend} syn={d.syn} am={d.am} full />
+                </Box>
+              </FieldShell>
+            </FieldGrid>
+          </DrawerSection>
+        ) : (
+          <DrawerSection title="Ownership"><Typography sx={{ fontSize: 12, color: tokens.muted }}>In Client Master only — no Deals row yet. Use + Add product to start one.</Typography></DrawerSection>
+        )}
+
+        {syn.map((r, i) => (
+          <DrawerSection key={r.id} title={`Platform Deals${syn.length > 1 ? ' · ask ' + (i + 1) : ''} — ${r.status}`}
+            action={canRequest && roSyn ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Syndication', refId: r.id, current: r.status })}>⟳ Request stage change</Button> : undefined}>
+            <FieldGrid>
+              <SelectFld label="Status of proposal" required value={r.status} disabled={roSyn} onChange={(v) => updS(r.id, 'status', v)} options={ref.getRefSync('Status of Proposal')} />
+              {/* Amt is mandatory to move past Deal Sourced and LOCKS on Sanctioned (Admin/Mgmt only after). */}
+              <TextFld label="Amt (₹ Cr)" required type="number" value={r.amt} disabled={roSyn || (SYN_SANCTIONED.includes(r.status) && !adminOverride)} onChange={(v) => updS(r.id, 'amt', v)} />
+              {/* Syndication type LOCKS once the mandate is Executed. */}
+              <SelectFld label="Platform Deals type" required value={r.synType} disabled={roSyn || (r.mstat3 === 'Executed' && !adminOverride)} onChange={(v) => updS(r.id, 'synType', v)} options={ref.getRefSync('Platform Deals Type')} blank />
+              {/* Mandate status sits right after Platform Deals type. It uses the full
+                  Mandate Status workflow list. Not required. Locks once Executed. */}
+              <SelectFld label="Mandate status"
+                value={r.mstat3} disabled={roSyn || (r.mstat3 === 'Executed' && !adminOverride)} onChange={(v) => updS(r.id, 'mstat3', v)} options={ref.getRefSync('Mandate Status')} blank />
+              <TextFld label="Facility type" value={r.fac} disabled={roSyn} onChange={(v) => updS(r.id, 'fac', v)} />
+              <SelectFld label="Tenor" value={r.tenor} disabled={roSyn} onChange={(v) => updS(r.id, 'tenor', v)} options={ref.getRefSync('Tenor')} blank />
+              <SelectFld label="IM in place" value={r.im} disabled={roSyn} onChange={(v) => updS(r.id, 'im', v)} options={ref.getRefSync('IM in Place')} blank />
+              <TextFld label="Lender coordinator" value={r.lc} disabled={roSyn} onChange={(v) => updS(r.id, 'lc', v)} />
+              <SelectFld label="Priority" value={r.pri} disabled={roSyn} onChange={(v) => updS(r.id, 'pri', v)} options={ref.getRefSync('Priority')} />
+              <SelectFld label="Pending with" value={r.pendingWith} disabled={roSyn} onChange={(v) => updS(r.id, 'pendingWith', v)} options={ref.getRefSync('Pending With')} blank />
+            </FieldGrid>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              <TextFld label="Potential lenders (after checking with client)" value={r.pot} disabled={roSyn} onChange={(v) => updS(r.id, 'pot', v)} multiline />
+              <TextFld label="Sanctioned lenders" required={r.status === 'Sanctioned'} value={r.sancL} disabled={roSyn} onChange={(v) => updS(r.id, 'sancL', v)} />
+              <TextFld label="IP received (lenders)" value={r.ipL} disabled={roSyn} onChange={(v) => updS(r.id, 'ipL', v)} />
+              <TextFld label="Existing lenders" value={r.exist} disabled={roSyn} onChange={(v) => updS(r.id, 'exist', v)} />
+              <TextFld label="Pricing expectation" value={r.price} disabled={roSyn} onChange={(v) => updS(r.id, 'price', v)} />
+              <TextFld label="Latest remarks" value={r.remarks} disabled={roSyn} onChange={(v) => updS(r.id, 'remarks', v)} multiline />
+            </Stack>
+          </DrawerSection>
+        ))}
+
+        {lend.map((r) => (
+          <DrawerSection key={r.id} title={`Lending — ${r.stage}`}
+            action={canRequest && roLend ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Lending', refId: r.id, current: r.stage })}>⟳ Request stage change</Button> : undefined}>
+            <FieldGrid>
+              {/* Amount is mandatory past Data Awaited and LOCKS on Sanctioned (Admin/Mgmt only after). */}
+              <TextFld label="Amount (₹ Cr)" required type="number" value={r.amt} disabled={roLend || (LEND_GREEN.includes(r.stage) && !adminOverride)} onChange={(v) => updL(r.id, 'amt', v)} />
+              <SelectFld label="Stage" required value={r.stage} disabled={roLend} onChange={(v) => { lendingService.updateStage(r.id, v, user.full); bump(); }} options={ref.getRefSync('Lending Stage')} />
+              <SelectFld label="Deal Analyst" value={r.an} disabled={roLend} onChange={(v) => updL(r.id, 'an', v)} options={ref.getRefSync('Analyst')} blank />
+              {/* BDRM is read-only here — edited on Company Ownership (Forms spec). */}
+              <SelectFld label="RM" value={r.rm} disabled onChange={(v) => updL(r.id, 'rm', v)} options={ref.getRefSync('RM')} blank />
+              <SelectFld label="Pending with" value={r.pendingWith} disabled={roLend} onChange={(v) => updL(r.id, 'pendingWith', v)} options={ref.getRefSync('Pending With')} blank />
+              {/* Sanction date is mandatory at Sanctioned and locks 24h after stamping (Admin-only after). */}
+              {LEND_GREEN.includes(r.stage) &&
+                <TextFld label="Sanction date" required type="date" value={r.sanc || ''} disabled={roLend || (!isAdmin && !!r.sanc && r.sanc !== todayISO)} onChange={(v) => updL(r.id, 'sanc', v)} />}
+              <TextFld label="Stage updated" value={r.updated} disabled onChange={() => {}} />
+            </FieldGrid>
+            <Box sx={{ mt: 1 }}><TextFld label="Remarks" value={r.remarks} disabled={roLend} onChange={(v) => updL(r.id, 'remarks', v)} multiline /></Box>
+          </DrawerSection>
+        ))}
+
+        {am.map((r) => (
+          <DrawerSection key={r.id} title={`Asset Monetisation — ${r.status}`}
+            action={canRequest && roAM ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Asset Monetisation', refId: r.id, current: r.status })}>⟳ Request stage change</Button> : undefined}>
+            <FieldGrid>
+              <TextFld label="State" value={r.state} disabled={roAM} onChange={(v) => updA(r.id, 'state', v)} />
+              <TextFld label="Indicative value (₹ Cr)" required type="number" value={r.val} disabled={roAM} onChange={(v) => updA(r.id, 'val', v)} />
+              <TextFld label="Size (MW)" type="number" value={r.mw} disabled={roAM} onChange={(v) => updA(r.id, 'mw', v)} />
+              <TextFld label="Nature" value={r.nature} disabled={roAM} onChange={(v) => updA(r.id, 'nature', v)} />
+              <TextFld label="Deal type" value={r.dtype} disabled={roAM} onChange={(v) => updA(r.id, 'dtype', v)} />
+              <TextFld label="Investor type" value={r.itype} disabled={roAM} onChange={(v) => updA(r.id, 'itype', v)} />
+              <SelectFld label="Status" required value={r.status} disabled={roAM} onChange={(v) => updA(r.id, 'status', v)} options={ref.getRefSync('Asset Mon Status')} />
+              <TextFld label="Date teaser shared" type="date" value={r.teaser || ''} disabled={roAM} onChange={(v) => updA(r.id, 'teaser', v)} />
+            </FieldGrid>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              <TextFld label="Investor(s)" value={r.inv} disabled={roAM} onChange={(v) => updA(r.id, 'inv', v)} />
+              <TextFld label="Notes" value={r.notes} disabled={roAM} onChange={(v) => updA(r.id, 'notes', v)} multiline />
+            </Stack>
+          </DrawerSection>
+        ))}
+
+        <DrawerSection title="About the company">
+          <TextField fullWidth multiline minRows={3} value={c.about ?? ''} disabled={roProfile} onChange={(e) => updC('about', e.target.value)} />
+        </DrawerSection>
+
+        <DrawerSection title="Updates & notes">
+          {notes.length ? notes.map((n, i) => (
+            <Box key={i} sx={{ py: 0.75, borderBottom: `1px solid ${tokens.line}` }}>
+              <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>{n.by} · {n.when}</Typography>
+              <Typography sx={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{n.text}</Typography>
+            </Box>
+          )) : <Typography sx={{ fontSize: 12, color: tokens.muted }}>No updates yet.</Typography>}
+          {canNote && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+              <TextField fullWidth size="small" placeholder="Add an update — status, call summary, lender feedback…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+              <Button variant="outlined" onClick={addNote}>Add</Button>
+            </Stack>
+          )}
+        </DrawerSection>
+
+        <DrawerSection title="Recent audit">
+          {aud.length ? aud.map((a, i) => (
+            <Box key={i} sx={{ py: 0.6, borderBottom: `1px solid ${tokens.line}` }}>
+              <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>{a.t} · {a.by}</Typography>
+              <Typography sx={{ fontSize: 12.3 }}>{a.act}{a.detail ? `: ${a.detail}` : ''}</Typography>
+            </Box>
+          )) : <Typography sx={{ fontSize: 12, color: tokens.muted }}>No changes logged.</Typography>}
+        </DrawerSection>
+
+        <DrawerSection title={`Interactions (${ints.length})`}
+          action={canInteract ? <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setLogOpen(true)}>Log interaction</Button> : undefined}>
+          <Box sx={{ borderLeft: `2px solid ${tokens.line}`, pl: 1.5 }}>
+            {ints.length ? ints.slice(0, 8).map((i) => (
+              <Box key={i.interactionId} sx={{ mb: 1.2 }}>
+                <Typography sx={{ fontSize: 11, color: tokens.muted, fontWeight: 600 }}>
+                  {i.occurredAt} · {i.interactionType} · by {i.person}{i.lenderName ? ` · ${i.lenderName}` : ''}
+                </Typography>
+                <Typography sx={{ fontSize: 12.5, whiteSpace: 'pre-wrap', mt: 0.3 }}>{i.notes}</Typography>
+                {i.nextAction && <Typography sx={{ fontSize: 11.5, color: tokens.navy, bgcolor: '#EEF4F3', borderRadius: 1, px: 1, py: 0.4, mt: 0.5, display: 'inline-block' }}>Next: {i.nextAction}{i.nextActionDate ? ` by ${i.nextActionDate}` : ''}</Typography>}
+              </Box>
+            )) : <Typography sx={{ fontSize: 12, color: tokens.muted }}>No interactions logged yet. Click <b>Log interaction</b> to add one.</Typography>}
+          </Box>
+        </DrawerSection>
+      </Box>
+
+      <Divider />
+      <Box sx={{ p: 2, display: 'flex', gap: 1, flexWrap: 'wrap', flexShrink: 0 }}>
+        <Button variant="outlined" onClick={() => setRegOpen(true)}>📁 Data Register</Button>
+        {canProduct && onAddProduct && <Button startIcon={<AddIcon />} variant="outlined" onClick={() => onAddProduct(code)}>Add product</Button>}
+        <Box sx={{ flex: 1 }} />
+        <Button variant="outlined" onClick={onClose}>Done</Button>
+      </Box>
+
+      <LogInteractionDialog code={code} refType={refType} open={logOpen} onClose={() => setLogOpen(false)} onDone={bump} />
+      <DataRegisterDialog code={code} open={regOpen} onClose={() => setRegOpen(false)} />
+      <StageChangeDialog open={!!stageReq} code={code} presetLine={stageReq?.line} refId={stageReq?.refId} currentStage={stageReq?.current} onClose={() => setStageReq(null)} onDone={bump} />
+    </Drawer>
+  );
+}

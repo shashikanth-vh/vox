@@ -1,0 +1,22 @@
+services:
+  atlas:
+    build:
+      context: .
+      args:
+        # Must match the published port below — the bundle's DEX_URL points at
+        # this app's own origin and nginx proxies /dex on to Dex.
+        VITE_DEX_URL: http://localhost:5556
+    image: evam-atlas:1.0.0
+    container_name: evam-atlas
+    ports:
+      - "8006:80"
+    # Lets the /dex proxy reach Dex on the host (:5556).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

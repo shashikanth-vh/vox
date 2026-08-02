@@ -1,0 +1,4420 @@
+{
+  "info": {
+    "name": "PRISM \u00b7 E2E FULL (via NGINX, with Temporal)",
+    "description": "Every request enters at **one door** \u2014 `{{baseUrl}}` = `https://<host>:8443`. The edge forwards everything to the gateway, which routes by prefix: `/access` \u2192 Access, `/orchestrator` \u2192 the workflow plane, anything else \u2192 the Register. **Postman sends no backend api key** \u2014 the gateway strips it and injects each upstream's own.\\n\\nAll three product lines reach their terminal state:\\n* **Lending** \u2192 `Handed Over to Advaya`\\n* **Syndication** \u2192 `Disbursed`\\n* **Asset monetisation** \u2192 `Closed`\\n\\n### The sanction goes through Temporal\\n`Sanctioned` cannot be typed (folder 05 proves it). Instead: start a deal-structuring workflow, then send the committee decision. The orchestrator durably records a subject-bound decision for the deal AND for each lending line \u2014 carrying the deciding human's committee authority \u2014 and the workflow files the Lending-scoped evidence before advancing the line.\\n\\n### Requirements\\nFull stack up (`docker compose up -d --build`, including `temporal`, `workflows`, `orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), and SSL verification OFF in Postman for the self-signed cert.\\n\\n**Temporal is asynchronous:** if folder 05's 'deal is Sanctioned' check races the run, re-send the status request and then the two GETs.\\n\\nFour requests MUST fail (unknown filter, lead\u2192Converted, hand-typed `Sanctioned`) \u2014 their tests pass on refusal. Request #1 clears every derived id, so the run is repeatable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 \u00b7 Health & run setup",
+      "item": [
+        {
+          "name": "GET /healthz \u2014 the edge is up",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            },
+            "description": "TLS terminates at NGINX; everything below enters through this one door."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Clear every DERIVED id so a stale value can never target the wrong row.",
+                  "// ONLY derived state belongs here. The fixed identities (rmEmail, makerEmail,",
+                  "// checkerEmail) are CONFIGURATION \u2014 clearing them once broke every maker/checker",
+                  "// request downstream: the create sent a literal '{{makerEmail}}', failed e-mail",
+                  "// validation, the resolve found nobody, and convert 422'd on an empty analyst_id.",
+                  "['entityId','leadId','dealId','lendingId','syndicationId','amId','checklistId',",
+                  " 'assignmentId','interactionId','financialId','documentId','synLenderId',",
+                  " 'bdrmUserId','makerUserId','checkerUserId','structWorkflowId','lendingVersion']",
+                  "  .forEach(k => pm.environment.unset(k));",
+                  "// Self-heal the fixed identities if a hand-edited environment lost them.",
+                  "if (!pm.environment.get('rmEmail')) pm.environment.set('rmEmail', 'e2e.rm@evamfinance.com');",
+                  "if (!pm.environment.get('makerEmail')) pm.environment.set('makerEmail', 'e2e.maker@evamfinance.com');",
+                  "if (!pm.environment.get('checkerEmail')) pm.environment.set('checkerEmail', 'e2e.checker@evamfinance.com');",
+                  "pm.environment.set('runSuffix', String(Date.now()).slice(-6));",
+                  "console.log('run suffix =', pm.environment.get('runSuffix'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('register reachable through NGINX', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/ref \u2014 dropdown vocabulary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/ref",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "ref"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('reference data seeded', () => pm.expect(Object.keys(pm.response.json()).length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "00b \u00b7 Sign in (Dex) \u2014 required only in the prod posture",
+      "item": [
+        {
+          "name": "POST /dex/token \u2014 sign in as ADMIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{dexUrl}}/dex/token",
+              "host": [
+                "{{dexUrl}}"
+              ],
+              "path": [
+                "dex",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "prism"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid email profile"
+                },
+                {
+                  "key": "username",
+                  "value": "{{userEmail}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ssoPassword}}"
+                }
+              ]
+            },
+            "description": "Only needed in the PRODUCTION POSTURE (docker-compose.prod-posture.yml), where REQUIRE_AUTH + an OIDC issuer are set and identity comes ONLY from a verified bearer. The gateway validates the ID TOKEN, so that is what is captured."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Dev posture: no dexUrl \u21d2 no sign-in request at all. A transport-level",
+                  "// failure (Dex not running) never reaches the test script, so the guard",
+                  "// must live here or a --bail run would abort before the journey starts.",
+                  "if (!pm.environment.get('dexUrl')) {",
+                  "  pm.environment.set('adminToken', '');",
+                  "  console.log('dexUrl empty \u2014 dev posture, ADMIN uses header trust.');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.environment.set('adminToken', b.id_token || '');",
+                  "  pm.test('ADMIN signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
+                  "} else {",
+                  "  pm.environment.set('adminToken', '');",
+                  "  console.log('Dex unavailable (ADMIN) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /dex/token \u2014 sign in as MAKER",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{dexUrl}}/dex/token",
+              "host": [
+                "{{dexUrl}}"
+              ],
+              "path": [
+                "dex",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "prism"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid email profile"
+                },
+                {
+                  "key": "username",
+                  "value": "{{makerEmail}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ssoPassword}}"
+                }
+              ]
+            },
+            "description": "Only needed in the PRODUCTION POSTURE (docker-compose.prod-posture.yml), where REQUIRE_AUTH + an OIDC issuer are set and identity comes ONLY from a verified bearer. The gateway validates the ID TOKEN, so that is what is captured."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Dev posture: no dexUrl \u21d2 no sign-in request at all. A transport-level",
+                  "// failure (Dex not running) never reaches the test script, so the guard",
+                  "// must live here or a --bail run would abort before the journey starts.",
+                  "if (!pm.environment.get('dexUrl')) {",
+                  "  pm.environment.set('makerToken', '');",
+                  "  console.log('dexUrl empty \u2014 dev posture, MAKER uses header trust.');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.environment.set('makerToken', b.id_token || '');",
+                  "  pm.test('MAKER signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
+                  "} else {",
+                  "  pm.environment.set('makerToken', '');",
+                  "  console.log('Dex unavailable (MAKER) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /dex/token \u2014 sign in as CHECKER",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{dexUrl}}/dex/token",
+              "host": [
+                "{{dexUrl}}"
+              ],
+              "path": [
+                "dex",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "prism"
+                },
+                {
+                  "key": "scope",
+                  "value": "openid email profile"
+                },
+                {
+                  "key": "username",
+                  "value": "{{checkerEmail}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ssoPassword}}"
+                }
+              ]
+            },
+            "description": "Only needed in the PRODUCTION POSTURE (docker-compose.prod-posture.yml), where REQUIRE_AUTH + an OIDC issuer are set and identity comes ONLY from a verified bearer. The gateway validates the ID TOKEN, so that is what is captured."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Dev posture: no dexUrl \u21d2 no sign-in request at all. A transport-level",
+                  "// failure (Dex not running) never reaches the test script, so the guard",
+                  "// must live here or a --bail run would abort before the journey starts.",
+                  "if (!pm.environment.get('dexUrl')) {",
+                  "  pm.environment.set('checkerToken', '');",
+                  "  console.log('dexUrl empty \u2014 dev posture, CHECKER uses header trust.');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.environment.set('checkerToken', b.id_token || '');",
+                  "  pm.test('CHECKER signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
+                  "} else {",
+                  "  pm.environment.set('checkerToken', '');",
+                  "  console.log('Dex unavailable (CHECKER) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "00c \u00b7 Sign in (Google) \u2014 for a deployment whose issuer is Google",
+      "item": [
+        {
+          "name": "POST oauth2.googleapis.com/token \u2014 ADMIN (refresh grant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "https://oauth2.googleapis.com/token",
+              "host": [
+                "oauth2",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "token"
+              ],
+              "protocol": "https"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{googleClientId}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{googleClientSecret}}"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{adminRefreshToken}}"
+                }
+              ]
+            },
+            "description": "Keep googleClientSecret and the refresh tokens in Postman VAULT or a secret environment variable \u2014 never in an exported collection."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Not configured for Google? Then don't call Google. skipRequest keeps the",
+                  "// dev run free of a pointless outbound request (and of a 400 in the report).",
+                  "if (!pm.environment.get('googleClientId')) {",
+                  "  console.log('Google not configured \u2014 skipping ADMIN sign-in (set googleClientId to enable folder 00c).');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 && pm.response.json().id_token) {",
+                  "  pm.environment.set('adminToken', pm.response.json().id_token);",
+                  "  pm.test('ADMIN signed in via Google (id_token)', () => pm.expect(pm.response.json().id_token).to.be.a('string'));",
+                  "} else {",
+                  "  console.log('Google sign-in skipped/failed for ADMIN \u2014 status ' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST oauth2.googleapis.com/token \u2014 MAKER (refresh grant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "https://oauth2.googleapis.com/token",
+              "host": [
+                "oauth2",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "token"
+              ],
+              "protocol": "https"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{googleClientId}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{googleClientSecret}}"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{makerRefreshToken}}"
+                }
+              ]
+            },
+            "description": "Keep googleClientSecret and the refresh tokens in Postman VAULT or a secret environment variable \u2014 never in an exported collection."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Not configured for Google? Then don't call Google. skipRequest keeps the",
+                  "// dev run free of a pointless outbound request (and of a 400 in the report).",
+                  "if (!pm.environment.get('googleClientId')) {",
+                  "  console.log('Google not configured \u2014 skipping MAKER sign-in (set googleClientId to enable folder 00c).');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 && pm.response.json().id_token) {",
+                  "  pm.environment.set('makerToken', pm.response.json().id_token);",
+                  "  pm.test('MAKER signed in via Google (id_token)', () => pm.expect(pm.response.json().id_token).to.be.a('string'));",
+                  "} else {",
+                  "  console.log('Google sign-in skipped/failed for MAKER \u2014 status ' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST oauth2.googleapis.com/token \u2014 CHECKER (refresh grant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "https://oauth2.googleapis.com/token",
+              "host": [
+                "oauth2",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "token"
+              ],
+              "protocol": "https"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{googleClientId}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{googleClientSecret}}"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{checkerRefreshToken}}"
+                }
+              ]
+            },
+            "description": "Keep googleClientSecret and the refresh tokens in Postman VAULT or a secret environment variable \u2014 never in an exported collection."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Not configured for Google? Then don't call Google. skipRequest keeps the",
+                  "// dev run free of a pointless outbound request (and of a 400 in the report).",
+                  "if (!pm.environment.get('googleClientId')) {",
+                  "  console.log('Google not configured \u2014 skipping CHECKER sign-in (set googleClientId to enable folder 00c).');",
+                  "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 && pm.response.json().id_token) {",
+                  "  pm.environment.set('checkerToken', pm.response.json().id_token);",
+                  "  pm.test('CHECKER signed in via Google (id_token)', () => pm.expect(pm.response.json().id_token).to.be.a('string'));",
+                  "} else {",
+                  "  console.log('Google sign-in skipped/failed for CHECKER \u2014 status ' + pm.response.code);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 \u00b7 Users, roles & people  (Access via the gateway)",
+      "item": [
+        {
+          "name": "POST /access/v1/users \u2014 RM (BDRM + Syn RM + AM RM)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Reached at {{baseUrl}}/access \u2014 the gateway strips your key and injects Access's.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{rmEmail}}\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"short_name\": \"Priya\",\n  \"phone\": \"+91-9800000001\",\n  \"is_active\": true,\n  \"roles\": [\n    \"BDRM\",\n    \"Syn RM\",\n    \"AM RM\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /access/v1/users \u2014 MAKER (Credit Head + Deal Analyst)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Sends the committee decision, prepares CP/CS and the handover package.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{makerEmail}}\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Credit Head\",\n    \"Deal Analyst\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /access/v1/users \u2014 CHECKER (Management)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Approves CP/CS and the handover \u2014 a DIFFERENT person; self-approval is refused.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{checkerEmail}}\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Management\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /access/v1/users \u2014 resolve RM id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users?q={{rmEmail}}",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{rmEmail}}"
+                }
+              ]
+            },
+            "description": "Provisioning is idempotent (UNIQUE(tenant_id, email) \u2192 409 on re-run), so the id is resolved here rather than read from the create response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = pm.response.json();",
+                  "const u = rows.find(r => r.email === pm.environment.get('rmEmail'));",
+                  "pm.test('RM exists in Access', () => pm.expect(u, 'not found: ' + JSON.stringify(rows)).to.be.an('object'));",
+                  "if (u) { pm.environment.set('bdrmUserId', u.id);",
+                  "  console.log('bdrmUserId =', u.id, '| roles:', (u.roles || []).join(',')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /access/v1/users \u2014 resolve MAKER id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users?q={{makerEmail}}",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{makerEmail}}"
+                }
+              ]
+            },
+            "description": "Provisioning is idempotent (UNIQUE(tenant_id, email) \u2192 409 on re-run), so the id is resolved here rather than read from the create response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = pm.response.json();",
+                  "const u = rows.find(r => r.email === pm.environment.get('makerEmail'));",
+                  "pm.test('MAKER exists in Access', () => pm.expect(u, 'not found: ' + JSON.stringify(rows)).to.be.an('object'));",
+                  "if (u) { pm.environment.set('makerUserId', u.id);",
+                  "  console.log('makerUserId =', u.id, '| roles:', (u.roles || []).join(',')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /access/v1/users \u2014 resolve CHECKER id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/users?q={{checkerEmail}}",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{checkerEmail}}"
+                }
+              ]
+            },
+            "description": "Provisioning is idempotent (UNIQUE(tenant_id, email) \u2192 409 on re-run), so the id is resolved here rather than read from the create response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = pm.response.json();",
+                  "const u = rows.find(r => r.email === pm.environment.get('checkerEmail'));",
+                  "pm.test('CHECKER exists in Access', () => pm.expect(u, 'not found: ' + JSON.stringify(rows)).to.be.an('object'));",
+                  "if (u) { pm.environment.set('checkerUserId', u.id);",
+                  "  console.log('checkerUserId =', u.id, '| roles:', (u.roles || []).join(',')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /access/v1/resolve \u2014 the RM's effective matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{accessUrl}}/v1/resolve?email={{rmEmail}}",
+              "host": [
+                "{{accessUrl}}"
+              ],
+              "path": [
+                "v1",
+                "resolve"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "{{rmEmail}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('leads view is SCOPED for a BDRM', () => pm.expect(pm.response.json().views.leads).to.eql('SCOPED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Priya Nair (RM on record)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "description": "/convert refuses an rm that is not a Person on record \u2014 full_name matches exactly.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya Nair\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"RM\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('rmPersonId', pm.response.json().id);",
+                  "console.log('rmPersonId =', pm.environment.get('rmPersonId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Arun Menon (Analyst on record)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arun Menon\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Analyst\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('analystPersonId', pm.response.json().id);",
+                  "console.log('analystPersonId =', pm.environment.get('analystPersonId'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 \u00b7 Client (Entity)",
+      "item": [
+        {
+          "name": "POST /v1/entities",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ECOSOCH-{{runSuffix}}\",\n  \"legal_name\": \"EcoSoch Solar Private Limited\",\n  \"display_name\": \"EcoSoch Solar\",\n  \"entity_type\": \"Company\",\n  \"sector\": \"Solar - Developer\",\n  \"lens\": \"Mitigation\",\n  \"register_status\": \"Pipeline\",\n  \"state\": \"Karnataka\",\n  \"location\": \"Bengaluru, Karnataka\",\n  \"cin\": \"U40106KA2015PTC{{runSuffix}}\",\n  \"notes\": \"E2E: 150 MW C&I solar developer.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('entityId', pm.response.json().id);",
+                  "console.log('entityId =', pm.environment.get('entityId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/entities?bogus_filter=x \u2014 REFUSED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities?bogus_filter=x",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities"
+              ],
+              "query": [
+                {
+                  "key": "bogus_filter",
+                  "value": "x"
+                }
+              ]
+            },
+            "description": "Fail-closed filtering."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 422]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 \u00b7 Lead, ownership & interaction",
+      "item": [
+        {
+          "name": "POST /v1/leads",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": \"EcoSoch Solar Private Limited\",\n  \"entity_id\": \"{{entityId}}\",\n  \"status\": \"Active\",\n  \"sector\": \"Solar - Developer\",\n  \"lens\": \"Mitigation\",\n  \"source\": \"RM\",\n  \"temperature\": \"Warm\",\n  \"rm\": \"E2E Priya Nair\",\n  \"contact\": \"Ravi Kulkarni\",\n  \"phone\": \"+91-9800000010\",\n  \"notes\": \"45 Cr term loan for a 150 MW pipeline.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('leadId', pm.response.json().id);",
+                  "console.log('leadId =', pm.environment.get('leadId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/assignments \u2014 the RM owns the lead",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "assignments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{bdrmUserId}}\",\n  \"subject_type\": \"Lead\",\n  \"subject_id\": \"{{leadId}}\",\n  \"assignment_role\": \"BDRM\",\n  \"note\": \"E2E: primary owner.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('assignmentId', pm.response.json().id);",
+                  "console.log('assignmentId =', pm.environment.get('assignmentId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/leads/{id}/interactions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}/interactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}",
+                "interactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"interaction_type\": \"In-Person Meeting\",\n  \"occurred_at\": \"2026-03-31T10:30:00Z\",\n  \"summary\": \"Site walkthrough + term sheet (150 MW, 45 Cr, 18m tenor).\",\n  \"contact_name\": \"Ravi Kulkarni\",\n  \"performed_by\": \"E2E Priya Nair\",\n  \"location\": \"Tumkur site, Karnataka\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('interactionId', pm.response.json().id);",
+                  "console.log('interactionId =', pm.environment.get('interactionId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lead \u2014 status \u2192 Converted REFUSED",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Converted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/403/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 422]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 \u00b7 Convert \u2192 deal + 3 product lines",
+      "item": [
+        {
+          "name": "POST /v1/leads/{id}/convert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/leads/{{leadId}}/convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "leads",
+                "{{leadId}}",
+                "convert"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_lending\": true,\n  \"is_syndication\": true,\n  \"is_asset_mon\": true,\n  \"product_type\": \"Term Loan\",\n  \"amount_cr\": 45.0,\n  \"rm\": \"E2E Priya Nair\",\n  \"rm_id\": \"{{bdrmUserId}}\",\n  \"analyst\": \"E2E Arun Menon\",\n  \"analyst_id\": \"{{makerUserId}}\",\n  \"approved_by\": \"{{checkerEmail}}\",\n  \"note\": \"E2E: convert with all three product lines.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "console.log('CONVERT RESPONSE:', JSON.stringify(b));",
+                  "const deal = b.deal_id || (b.deal && b.deal.id);",
+                  "pm.test('deal created', () => pm.expect(deal).to.be.a('string'));",
+                  "if (deal) pm.environment.set('dealId', deal);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending?deal_id= \u2014 resolve + VERIFY lending",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending?deal_id={{dealId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending"
+              ],
+              "query": [
+                {
+                  "key": "deal_id",
+                  "value": "{{dealId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Filtered by deal_id \u2014 now a whitelisted filter on every product line, which is how the sanction fan-out finds them too."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json(); const items = (b && b.items) || [];",
+                  "pm.test('/convert created the lending line', () => pm.expect(items.length, 'empty \u2014 response: ' + JSON.stringify(b)).to.be.above(0));",
+                  "if (items.length) {",
+                  "  const id = items[0].id;",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('leadId'));",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('dealId'));",
+                  "  pm.environment.set('lendingId', id);",
+                  "  console.log('lendingId =', id);",
+                  "} else {",
+                  "  pm.environment.unset('lendingId');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/syndication?deal_id= \u2014 resolve + VERIFY syndication",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication?deal_id={{dealId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication"
+              ],
+              "query": [
+                {
+                  "key": "deal_id",
+                  "value": "{{dealId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Filtered by deal_id \u2014 now a whitelisted filter on every product line, which is how the sanction fan-out finds them too."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json(); const items = (b && b.items) || [];",
+                  "pm.test('/convert created the syndication line', () => pm.expect(items.length, 'empty \u2014 response: ' + JSON.stringify(b)).to.be.above(0));",
+                  "if (items.length) {",
+                  "  const id = items[0].id;",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('leadId'));",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('dealId'));",
+                  "  pm.environment.set('syndicationId', id);",
+                  "  console.log('syndicationId =', id);",
+                  "} else {",
+                  "  pm.environment.unset('syndicationId');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/asset-monetisation?deal_id= \u2014 resolve + VERIFY asset-monetisation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation?deal_id={{dealId}}&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation"
+              ],
+              "query": [
+                {
+                  "key": "deal_id",
+                  "value": "{{dealId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Filtered by deal_id \u2014 now a whitelisted filter on every product line, which is how the sanction fan-out finds them too."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json(); const items = (b && b.items) || [];",
+                  "pm.test('/convert created the asset-monetisation line', () => pm.expect(items.length, 'empty \u2014 response: ' + JSON.stringify(b)).to.be.above(0));",
+                  "if (items.length) {",
+                  "  const id = items[0].id;",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('leadId'));",
+                  "  pm.expect(id).to.not.eql(pm.environment.get('dealId'));",
+                  "  pm.environment.set('amId', id);",
+                  "  console.log('amId =', id);",
+                  "} else {",
+                  "  pm.environment.unset('amId');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 \u00b7 LENDING \u25b8 Sanctioned via Temporal (deal-structuring + committee)",
+      "item": [
+        {
+          "name": "PATCH lending \u2014 \u2192 Sanctioned by hand is REFUSED",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Proves the milestone cannot be typed. The workflow below is the ONLY route.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Sanctioned\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('lendingId');",
+                  "if (!v) throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('lendingId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused as designed (400/403/422)', () => pm.expect(pm.response.code).to.be.oneOf([400, 403, 422]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orchestrator/v1/workflows/deal-structurings \u2014 start the run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/deal-structurings",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "deal-structurings"
+              ]
+            },
+            "description": "Walks the deal to 'Note Circulated', files the credit note, then WAITS for the committee. Workflow id is struct-{tenant}-{deal_id}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deal_id\": \"{{dealId}}\",\n  \"requested_by\": \"{{makerEmail}}\",\n  \"product_type\": \"Term Loan\",\n  \"rm\": \"E2E Priya Nair\",\n  \"credit_note_reference\": \"CN/ECOSOCH/{{runSuffix}}\",\n  \"decision_timeout_hours\": 24\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "console.log('workflow:', JSON.stringify(b));",
+                  "pm.test('workflow started', () => pm.expect(b.workflow_id).to.be.a('string'));",
+                  "pm.environment.set('structWorkflowId', b.workflow_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orchestrator/v1/workflows/{id}/committee-decision \u2014 the human decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{structWorkflowId}}/committee-decision",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{structWorkflowId}}",
+                "committee-decision"
+              ]
+            },
+            "description": "The orchestrator DURABLY records a subject-bound decision for the deal AND for each lending line (keyed {workflow_id}:lending:{line_id}) using THIS human's committee authority \u2014 which the workflow, a service principal, could never supply. The signal is only a wake-up; the run re-reads the authoritative record.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved\": true,\n  \"by\": \"{{makerEmail}}\",\n  \"committee_reference\": \"CC/2026/{{runSuffix}}\",\n  \"sanction_letter_reference\": \"SL/ECOSOCH/{{runSuffix}}\",\n  \"note\": \"E2E: credit committee approved 45 Cr.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "console.log('decision:', JSON.stringify(pm.response.json()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "WAIT \u00b7 poll the DEAL until Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{dealId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{dealId}}"
+              ]
+            },
+            "description": "Polls the REGISTER, not the orchestrator status endpoint (which needs a verified bearer and 401s on a dev header). Re-runs itself until the workflow settles \u2014 Collection Runner only."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Temporal settles asynchronously \u2014 pause ~1.5s before polling.",
+                  "const t = Date.now(); while (Date.now() - t < 1500) { /* spin */ }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const max = 15;",
+                  "const key = 'poll_DEAL';",
+                  "let n = Number(pm.environment.get(key) || 0);",
+                  "const cur = pm.response.json().stage;",
+                  "console.log('poll ' + n + ' :: DEAL = ' + cur);",
+                  "if (cur === 'Sanctioned') {",
+                  "  pm.environment.unset(key);",
+                  "  pm.test('DEAL reached Sanctioned', () => pm.expect(cur).to.eql('Sanctioned'));",
+                  "} else if (n < max) {",
+                  "  pm.environment.set(key, n + 1);",
+                  "  postman.setNextRequest('WAIT \u00b7 poll the DEAL until Sanctioned');",
+                  "} else {",
+                  "  pm.environment.unset(key);",
+                  "  pm.test('DEAL reached Sanctioned within ' + max + ' polls (got ' + cur + ')', () => pm.expect(cur).to.eql('Sanctioned'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "WAIT \u00b7 poll the LENDING line until Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Polls the REGISTER, not the orchestrator status endpoint (which needs a verified bearer and 401s on a dev header). Re-runs itself until the workflow settles \u2014 Collection Runner only."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Temporal settles asynchronously \u2014 pause ~1.5s before polling.",
+                  "const t = Date.now(); while (Date.now() - t < 1500) { /* spin */ }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const max = 15;",
+                  "const key = 'poll_LENDING';",
+                  "let n = Number(pm.environment.get(key) || 0);",
+                  "const cur = pm.response.json().stage;",
+                  "console.log('poll ' + n + ' :: LENDING = ' + cur);",
+                  "if (cur === 'Sanctioned') {",
+                  "  pm.environment.unset(key);",
+                  "  pm.test('LENDING reached Sanctioned', () => pm.expect(cur).to.eql('Sanctioned'));",
+                  "} else if (n < max) {",
+                  "  pm.environment.set(key, n + 1);",
+                  "  postman.setNextRequest('WAIT \u00b7 poll the LENDING line until Sanctioned');",
+                  "} else {",
+                  "  pm.environment.unset(key);",
+                  "  pm.test('LENDING reached Sanctioned within ' + max + ' polls (got ' + cur + ')', () => pm.expect(cur).to.eql('Sanctioned'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/deals/{id} \u2014 the DEAL is Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/deals/{{dealId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "deals",
+                "{{dealId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('deal Sanctioned', () => pm.expect(pm.response.json().stage).to.eql('Sanctioned'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 the LENDING line is Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "The workflow filed Lending-scoped committee + sanction-letter evidence citing the per-line decision, then advanced the line. Without that the line could never leave 'Note Circulated'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('lending Sanctioned', () => pm.expect(pm.response.json().stage).to.eql('Sanctioned'));",
+                  "pm.environment.set('lendingVersion', pm.response.json().version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/evidence \u2014 Lending evidence is on file",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence?subject_type=Lending&subject_id={{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ],
+              "query": [
+                {
+                  "key": "subject_type",
+                  "value": "Lending"
+                },
+                {
+                  "key": "subject_id",
+                  "value": "{{lendingId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "const kinds = (b.items || b).map(e => e.evidence_kind);",
+                  "console.log('lending evidence:', kinds.join(', '));",
+                  "pm.test('committee approval filed', () => pm.expect(kinds).to.include('credit_committee_approval'));",
+                  "pm.test('sanction letter filed', () => pm.expect(kinds).to.include('sanction_letter'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 \u00b7 LENDING \u25b8 CP/CS Completed (maker \u2192 checker)",
+      "item": [
+        {
+          "name": "POST /v1/evidence \u2014 executed_agreement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ]
+            },
+            "description": "No verify_source \u2014 a human may file it. The handover reconciles this digest.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"evidence_kind\": \"executed_agreement\",\n  \"reference\": \"AGR/ECOSOCH/{{runSuffix}}\",\n  \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n  \"workflow_id\": \"{{structWorkflowId}}:lending:{{lendingId}}\",\n  \"run_id\": \"manual-{{runSuffix}}\",\n  \"note\": \"E2E: executed facility agreement.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/cpcs-checklists \u2014 MAKER prepares",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists"
+              ]
+            },
+            "description": "A 'Completed' checklist may not leave a required CP Pending; waivers and CS-deferments need senior authority plus a reason.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lending_id\": \"{{lendingId}}\",\n  \"deal_id\": \"{{dealId}}\",\n  \"checklist_version\": 1,\n  \"status\": \"Completed\",\n  \"items\": [\n    {\n      \"key\": \"cp_security_perfection\",\n      \"label\": \"Security perfected & charge filed\",\n      \"condition_type\": \"CP\",\n      \"required\": true,\n      \"status\": \"Completed\",\n      \"evidence_ref\": \"SEC/{{runSuffix}}\"\n    },\n    {\n      \"key\": \"cp_insurance\",\n      \"label\": \"Insurance assigned to the lender\",\n      \"condition_type\": \"CP\",\n      \"required\": true,\n      \"status\": \"Completed\",\n      \"evidence_ref\": \"INS/{{runSuffix}}\"\n    },\n    {\n      \"key\": \"cs_quarterly_monitoring\",\n      \"label\": \"Quarterly monitoring reports\",\n      \"condition_type\": \"CS\",\n      \"required\": false,\n      \"status\": \"Pending\"\n    }\n  ],\n  \"note\": \"E2E: all required CPs satisfied.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('checklistId', pm.response.json().id);",
+                  "console.log('checklistId =', pm.environment.get('checklistId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/cpcs-checklists/{id}/approve \u2014 CHECKER approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{checklistId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists",
+                "{{checklistId}}",
+                "approve"
+              ]
+            },
+            "description": "A different authenticated user \u2014 the Register refuses self-approval. Approving does NOT create any evidence; it only makes cp_cs_completion FILEABLE (the next request), because evidence.py verifies that kind against an APPROVED checklist."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/evidence \u2014 cp_cs_completion (cites the approved checklist)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ]
+            },
+            "description": "THE step that unlocks 'CP/CS Completed'. decision_ref must be the CP/CS CHECKLIST ID; the Register then proves the checklist is Approved, belongs to this lending line, and was approved by a different checker than its preparer. Provenance is GENERATED from it (workflow_id = 'cpcs:{id}', run_id = the checklist version), so unlike executed_agreement no sha256 / workflow_id / run_id is sent.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"evidence_kind\": \"cp_cs_completion\",\n  \"reference\": \"CPCS/ECOSOCH/{{runSuffix}}\",\n  \"decision_ref\": \"{{checklistId}}\",\n  \"note\": \"E2E: CP/CS conditions verified and approved.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('provenance generated from the checklist', () => pm.expect(pm.response.json().workflow_id).to.include('cpcs:'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH lending \u2014 \u2192 CP/CS Completed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"CP/CS Completed\",\n  \"remarks\": \"E2E: CP/CS complete, agreement executed.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('stage = CP/CS Completed', () => pm.expect(pm.response.json().stage).to.eql('CP/CS Completed'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 \u00b7 LENDING \u25b8 Handed Over to Advaya  (TERMINAL)",
+      "item": [
+        {
+          "name": "PATCH lending \u2014 \u2192 Ready for Disbursement",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Mandatory fields for this stage: proposed_disbursement_amount + date.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"Ready for Disbursement\",\n  \"proposed_disbursement_amount\": 45.0,\n  \"proposed_disbursement_date\": \"2026-04-30\",\n  \"remarks\": \"E2E: drawdown proposed.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('stage = Ready for Disbursement', () => pm.expect(pm.response.json().stage).to.eql('Ready for Disbursement'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/handover-packages \u2014 MAKER prepares",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages"
+              ]
+            },
+            "description": "Two-phase. The server generates the manifest + digest and RECONCILES the document refs against the on-file executed_agreement \u2014 hence the identical sha256.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lending_id\": \"{{lendingId}}\",\n  \"executed_document_refs\": [\n    {\n      \"reference\": \"AGR/ECOSOCH/{{runSuffix}}\",\n      \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n    }\n  ],\n  \"cpcs_checklist_version\": 1,\n  \"delivery_method\": \"Secure email\",\n  \"recipient\": \"advaya-ops@evamfinance.com\",\n  \"note\": \"E2E: handover package for disbursement.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('Prepared \u2014 stage NOT advanced yet', () => pm.expect(JSON.stringify(pm.response.json())).to.include('Prepared'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/handover-packages/{lending_id}/approve \u2014 CHECKER approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lendingId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages",
+                "{{lendingId}}",
+                "approve"
+              ]
+            },
+            "description": "Freezes the package and advances the stage in one transaction."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 LENDING COMPLETE",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('LENDING terminal = Handed Over to Advaya', () => pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));",
+                  "console.log('LENDING =', pm.response.json().stage);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 \u00b7 SYNDICATION \u25b8 Disbursed  (TERMINAL)",
+      "item": [
+        {
+          "name": "POST /v1/syndication/{id}/lenders \u2014 invite a lender",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}/lenders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}",
+                "lenders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lender_name\": \"Green Bridge Capital\",\n  \"is_existing\": false,\n  \"since\": \"2026-03-31\",\n  \"note\": \"E2E: co-lender approached.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('syndicationId');",
+                  "if (!v) throw new Error('syndicationId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('syndicationId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('synLenderId', pm.response.json().id);",
+                  "console.log('synLenderId =', pm.environment.get('synLenderId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 Docs Pending",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Docs Pending\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Docs Pending', () => pm.expect(pm.response.json().status).to.eql('Docs Pending'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 IM in Prep",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IM in Prep\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = IM in Prep', () => pm.expect(pm.response.json().status).to.eql('IM in Prep'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 IM Circulated",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IM Circulated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = IM Circulated', () => pm.expect(pm.response.json().status).to.eql('IM Circulated'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 Queries Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Queries Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Queries Received', () => pm.expect(pm.response.json().status).to.eql('Queries Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 IP Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IP Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = IP Received', () => pm.expect(pm.response.json().status).to.eql('IP Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 Sanctioned",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Sanctioned\",\n  \"date_of_sanction\": \"2026-04-15\",\n  \"sanctioned_lender\": \"Green Bridge Capital\",\n  \"amount_cr\": 45.0,\n  \"remarks\": \"E2E: syndication sanctioned.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Sanctioned', () => pm.expect(pm.response.json().status).to.eql('Sanctioned'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 Disbursed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Disbursed\",\n  \"remarks\": \"E2E: syndicated facility disbursed.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Disbursed', () => pm.expect(pm.response.json().status).to.eql('Disbursed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/syndication/{id} \u2014 SYNDICATION COMPLETE",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            },
+            "description": "No evidence gate applies to Syndication \u2014 EVIDENCE_FOR_STAGE covers Deal and Lending only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('SYNDICATION terminal = Disbursed', () => pm.expect(pm.response.json().status).to.eql('Disbursed'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 \u00b7 ASSET MONETISATION \u25b8 Closed  (TERMINAL)",
+      "item": [
+        {
+          "name": "PATCH AM \u2014 \u2192 Teaser Shared",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Teaser Shared\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('amId');",
+                  "if (!v) throw new Error('amId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('amId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Teaser Shared', () => pm.expect(pm.response.json().status).to.eql('Teaser Shared'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 In Discussion",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"In Discussion\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = In Discussion', () => pm.expect(pm.response.json().status).to.eql('In Discussion'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 NBO Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"NBO Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = NBO Received', () => pm.expect(pm.response.json().status).to.eql('NBO Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 BO Received",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BO Received\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = BO Received', () => pm.expect(pm.response.json().status).to.eql('BO Received'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 SPA / Documentation",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SPA / Documentation\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = SPA / Documentation', () => pm.expect(pm.response.json().status).to.eql('SPA / Documentation'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "\u2192 Closed",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Closed\",\n  \"notes\": \"E2E: transaction closed.\",\n  \"investor\": \"Green Bridge Capital\",\n  \"indicative_value_cr\": 45.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('status = Closed', () => pm.expect(pm.response.json().status).to.eql('Closed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/asset-monetisation/{id} \u2014 AM COMPLETE",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('AM terminal = Closed', () => pm.expect(pm.response.json().status).to.eql('Closed'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 \u00b7 Financials & documents",
+      "item": [
+        {
+          "name": "POST /v1/financials \u2014 FY25 audited",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/financials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "financials"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entity_id\": \"{{entityId}}\",\n  \"statement_type\": \"Audited\",\n  \"period_end\": \"2026-03-31\",\n  \"period_start\": \"2025-04-01\",\n  \"fiscal_year\": \"FY2025-26\",\n  \"currency\": \"INR\",\n  \"is_audited\": true,\n  \"revenue\": 128.4,\n  \"ebitda\": 21.7,\n  \"pat\": 9.3,\n  \"net_worth\": 64.2,\n  \"total_debt\": 55.0,\n  \"dscr\": 1.62,\n  \"provenance\": \"E2E: audited FY25 pack.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('financialId', pm.response.json().id);",
+                  "console.log('financialId =', pm.environment.get('financialId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/documents \u2014 sanction letter reference",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_type\": \"Lending\",\n  \"subject_id\": \"{{lendingId}}\",\n  \"doc_type\": \"Sanction Letter\",\n  \"title\": \"Sanction letter \\u2014 EcoSoch 45 Cr\",\n  \"storage_uri\": \"s3://prism-e2e/SL-ECOSOCH-{{runSuffix}}.pdf\",\n  \"original_filename\": \"SL-ECOSOCH-{{runSuffix}}.pdf\",\n  \"content_type\": \"application/pdf\",\n  \"uploaded_by\": \"E2E Arun Menon\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "if (pm.response.json().id) pm.environment.set('documentId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 \u00b7 Final verification \u2014 all three lines terminal",
+      "item": [
+        {
+          "name": "GET /v1/lending/{id} \u2014 Handed Over to Advaya",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('LENDING complete', () => pm.expect(pm.response.json().stage).to.eql('Handed Over to Advaya'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/syndication/{id} \u2014 Disbursed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{syndicationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{syndicationId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('SYNDICATION complete', () => pm.expect(pm.response.json().status).to.eql('Disbursed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/asset-monetisation/{id} \u2014 Closed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/asset-monetisation/{{amId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "asset-monetisation",
+                "{{amId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('ASSET MONETISATION complete', () => pm.expect(pm.response.json().status).to.eql('Closed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/evidence \u2014 the audit-grade trail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/evidence?subject_type=Lending&subject_id={{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "evidence"
+              ],
+              "query": [
+                {
+                  "key": "subject_type",
+                  "value": "Lending"
+                },
+                {
+                  "key": "subject_id",
+                  "value": "{{lendingId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "const kinds = (b.items || b).map(e => e.evidence_kind);",
+                  "console.log('evidence:', kinds.join(', '));",
+                  "pm.test('cp_cs_completion was MINTED by the approval', () => pm.expect(kinds).to.include('cp_cs_completion'));",
+                  "pm.test('executed agreement on file', () => pm.expect(kinds).to.include('executed_agreement'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/entities/{id}/dossier",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/entities/{{entityId}}/dossier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "entities",
+                "{{entityId}}",
+                "dossier"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "console.log('dossier:', Object.keys(pm.response.json()).join(', '));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/audit \u2014 every write recorded",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/audit?resource_id={{lendingId}}&limit=200",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "resource_id",
+                  "value": "{{lendingId}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "200"
+                }
+              ]
+            },
+            "description": "Filtered by resource_id ONLY. `resource_type` in the audit log is the TABLE name (`CRUDRepository.resource = model.__tablename__`, i.e. 'lending_tracker'), not the URL segment 'lending' nor the subject_type 'Lending' \u2014 and different writers use different values, so filtering on it silently returns []. The row id is unique, so it is the reliable filter."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = pm.response.json();",
+                  "pm.test('audit trail exists for this lending line', () => pm.expect(rows.length).to.be.above(0));",
+                  "console.log('audited resource_type values:', [...new Set(rows.map(r => r.resource_type))].join(', '));",
+                  "console.log('actions:', [...new Set(rows.map(r => r.action))].join(', '));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

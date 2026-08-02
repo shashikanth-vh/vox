@@ -44,3 +44,6 @@ client_secret.json
 vocx_tokens/
 deploy/vocx-secrets/*
 !deploy/vocx-secrets/README.md
+
+# Frontend
+node_modules/

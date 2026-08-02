@@ -1,0 +1,97 @@
+import axiosClient, { USE_REAL_API } from './axiosClient';
+import type { TableQuery } from '../services/types';
+
+export { USE_REAL_API };
+
+// Map the table query into backend query params (server-side paging — req 16).
+export function toParams(q: TableQuery): Record<string, any> {
+  const p: Record<string, any> = { page: q.pageIndex, size: q.pageSize };
+  if (q.globalFilter) p.q = q.globalFilter;
+  if (q.sorting?.length) { p.sortBy = q.sorting[0].id; p.sortDir = q.sorting[0].desc ? 'desc' : 'asc'; }
+  (q.columnFilters ?? []).forEach((c) => { if (c.value != null && c.value !== '') p['filter.' + c.id] = c.value; });
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// Cursor-paged list endpoints (/v1/leads, /v1/deals): they take q, limit, cursor,
+// include_deleted, include_reconciliation and with_total — and NOT the page/size/sortBy
+// that toParams() builds. Their filters fail closed, so an unrecognised param rejects
+// the whole list rather than being ignored.
+// ---------------------------------------------------------------------------
+
+/** The query param that carries the cursor for the next page. */
+export const CURSOR_PARAM = 'next_cursor';
+
+/**
+ * Ceiling on `limit`. The table asks for a huge page size when it builds filter-option
+ * lists (it wants "everything"); this stops that becoming a request for 100000 rows.
+ */
+export const LIST_MAX_LIMIT = 200;
+
+/**
+ * Query params for a cursor-paged list: one page's worth. The total row count comes back
+ * on its own, so with_total is not sent — every param here is one the endpoint accepts,
+ * which matters when unrecognised ones fail the whole request.
+ */
+export function toCursorParams(q: TableQuery): Record<string, any> {
+  const p: Record<string, any> = {
+    limit: Math.min(Math.max(1, q.pageSize || 25), LIST_MAX_LIMIT),
+  };
+  if (q.cursor) p[CURSOR_PARAM] = q.cursor;
+  const search = q.globalFilter?.trim();
+  if (search) p.q = search;
+  return p;
+}
+
+/** List payloads differ by service; accept a bare array or the usual envelopes. */
+export function asRows(data: any, key?: string): any[] {
+  if (Array.isArray(data)) return data;
+  return data?.items ?? data?.results ?? data?.data ?? (key ? data?.[key] : undefined) ?? [];
+}
+
+/** The cursor for the page after this one — null when there isn't one. */
+export function nextCursorOf(data: any): string | null {
+  return data?.next_cursor ?? data?.nextCursor ?? data?.cursor ?? null;
+}
+
+/** The server's total row count, falling back to what this page actually holds. */
+export function totalOf(data: any, fallback: number): number {
+  const t = data?.total ?? data?.total_count ?? data?.count;
+  return Number.isFinite(Number(t)) ? Number(t) : fallback;
+}
+
+// Reads: hit the API when enabled, otherwise (or on failure) fall back to mock.
+export async function withFallback<T>(real: () => Promise<T>, mock: () => T | Promise<T>): Promise<T> {
+  if (!USE_REAL_API) return mock();
+  try { return await real(); } catch (e) { console.warn('[api] falling back to mock:', e); return mock(); }
+}
+
+export const api = {
+  get: <T>(url: string, params?: Record<string, any>) => axiosClient.get<T>(url, { params }).then((r) => r.data),
+  post: <T>(url: string, data?: any) => axiosClient.post<T>(url, data).then((r) => r.data),
+  patch: <T>(url: string, data?: any) => axiosClient.patch<T>(url, data).then((r) => r.data),
+  del: <T>(url: string, data?: any) => axiosClient.delete<T>(url, { data }).then((r) => r.data),
+};
+
+// The gateway wraps failures as {"error":{"type","title","detail"}}; the services behind
+// it use FastAPI's bare {"detail":[…]} for validation. Read both, and keep the `loc` path
+// from Pydantic entries so a 422 names the offending FIELD rather than saying "invalid".
+export function errText(data: any): string {
+  const d = data?.error?.detail ?? data?.detail ?? data?.error?.title ?? data?.message;
+  if (Array.isArray(d)) {
+    return d.map((x: any) => {
+      const loc = Array.isArray(x?.loc) ? x.loc.filter((p: any) => p !== 'body').join('.') : '';
+      const msg = x?.msg || x?.type || JSON.stringify(x);
+      return loc ? `${loc}: ${msg}` : msg;
+    }).join('; ');
+  }
+  if (typeof d === 'string') return d;
+  return d ? JSON.stringify(d) : '';
+}
+
+// Writes: dispatch to the backend when enabled (fire-and-forget so the optimistic
+// local-store mutation keeps the UI responsive). No-op in mock mode.
+export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any): void {
+  if (!USE_REAL_API) return;
+  api[method](url, data).catch((e) => console.warn('[api] write failed:', method, url, e));
+}

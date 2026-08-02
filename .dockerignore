@@ -19,3 +19,6 @@ services/register/data/*.csv
 docs/
 postman/
 deploy/
+**/node_modules/
+# The UI image build needs its plumbing from deploy/ despite the exclusion above.
+!deploy/ui-image/
