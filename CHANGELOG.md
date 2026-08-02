@@ -6,6 +6,35 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Real data now renders with real names — four display gaps closed.** After the
+  first full E2E run the grids showed the journey but not the joins:
+  * **Lead company "(unknown)" (backend).** A VOX capture carrying `entity_id` but no
+    `company_name` (exactly what E2E folder 03 sends) wrote the literal placeholder
+    into `leads.company`. `create_lead` now backfills the name from the entity's
+    `legal_name`/`display_name`; only a capture with neither name nor resolvable
+    entity still gets "(unknown)". Existing rows keep their stored value — fix an old
+    lead with `PATCH /v1/leads/{id} {"company": "…"}` (or re-run the capture).
+  * **VOX touchpoints missing from the lead drawer's INTERACTIONS (backend).**
+    `log_touchpoint` logged the interaction with subject *Entity*, but the drawer
+    reads the LEAD timeline (`GET /v1/leads/{id}/interactions`, which filters
+    `subject_type = "Lead"`). It now logs against the lead whenever the run linked
+    one — the register still derives `entity_id` from the subject, so the entity
+    360° timeline aggregates it exactly as before, and the register additionally
+    rolls `last_interaction_date`/`next_action` onto the lead server-side.
+    Interactions already written stay entity-level (visible on the company drawer
+    and `/v1/entities/{id}/dossier`, just not in the lead drawer).
+  * **Deals / Lending / Asset-Mon COMPANY + GROUP CODE columns blank (UI).** The wire
+    rows are normalised (a deal carries `entity_id`, a tracker row `deal_id` — no
+    denormalised names), but the grids bound to `company`/`deal_no` fields that never
+    arrive. New `services/nameResolver.ts` fetches two small lookup maps (entities,
+    deals; 60s cache, fail-soft) and joins the names/deal numbers client-side in the
+    three list services.
+  * **Asset-Monetisation summary tiles showed MOCK aggregates over a real grid (UI).**
+    `assetMonService.summary()` always computed from the bundled demo store ("18 live
+    mandates · ₹3,321 Cr" beside one real row). It now computes the same tiles from
+    the real register rows on platform builds; mock mode keeps the demo store.
+  Rebuild `ui` to pick up the frontend part: `docker compose build ui && up -d ui`.
+
 - **The approver triad is now uniform: every human gate offers approve / return /
   reject.** Return = "amend and come back" (loop continues, reasons mandatory, next
   version); Reject = "this should not proceed" (terminal, note mandatory); only

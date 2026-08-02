@@ -1,6 +1,7 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
+import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, LIST_MAX_LIMIT } from '../api/http';
+import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
 import type { TableQuery, Paged } from './types';
@@ -35,6 +36,27 @@ export function toAmRow(r: any): AmRow {
   };
 }
 
+/** Live/closed/dropped totals + investor & status spreads, from whichever rows exist. */
+export function computeAmSummary(rows: AmRow[]) {
+  const live = rows.filter((a) => !['Closed', 'Dropped'].includes(a.status));
+  const closed = rows.filter((a) => a.status === 'Closed');
+  const dropped = rows.filter((a) => a.status === 'Dropped');
+  const totVal = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.val) || 0), 0);
+  const totMW = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.mw) || 0), 0);
+  const tally = (key: (a: AmRow) => string) => {
+    const m: Record<string, number> = {};
+    live.forEach((a) => { const k = key(a); m[k] = (m[k] || 0) + 1; });
+    return Object.entries(m);
+  };
+  return {
+    live: { n: live.length, val: totVal(live), mw: totMW(live) },
+    closed: { n: closed.length, val: totVal(closed) },
+    dropped: { n: dropped.length, val: totVal(dropped) },
+    investors: tally((a) => a.itype || 'Other'),
+    statuses: tally((a) => a.status || '—'),
+  };
+}
+
 export const assetMonService = {
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<AmRow>>(
@@ -43,6 +65,8 @@ export const assetMonService = {
         // Next carries the previous page's cursor, so applyQuery must NOT re-slice it.
         const data = await api.get<any>(AM_PATH, toCursorParams(q));
         const rows = asRows(data, 'asset_monetisation').map(toAmRow).filter((r) => inScope(scope ?? null, r));
+        // The wire row carries deal_id only — join the deal number + company in.
+        await fillFromDeal(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {
@@ -53,25 +77,16 @@ export const assetMonService = {
     );
   },
   // v12 vAM overlay strip: live/closed/dropped totals + investor & status spreads.
-  summary() {
-    const rows: AmRow[] = db().am;
-    const live = rows.filter((a) => !['Closed', 'Dropped'].includes(a.status));
-    const closed = rows.filter((a) => a.status === 'Closed');
-    const dropped = rows.filter((a) => a.status === 'Dropped');
-    const totVal = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.val) || 0), 0);
-    const totMW = (n: AmRow[]) => n.reduce((a, x) => a + (Number(x.mw) || 0), 0);
-    const tally = (key: (a: AmRow) => string) => {
-      const m: Record<string, number> = {};
-      live.forEach((a) => { const k = key(a); m[k] = (m[k] || 0) + 1; });
-      return Object.entries(m);
-    };
-    return {
-      live: { n: live.length, val: totVal(live), mw: totMW(live) },
-      closed: { n: closed.length, val: totVal(closed) },
-      dropped: { n: dropped.length, val: totVal(dropped) },
-      investors: tally((a) => a.itype || 'Other'),
-      statuses: tally((a) => a.status || '—'),
-    };
+  // Computed over the REAL register rows on the platform (mock's tiles beside a real
+  // grid read as phantom mandates); mock mode keeps the bundled store.
+  async summary() {
+    return withFallback(
+      async () => {
+        const data = await api.get<any>(AM_PATH, { limit: LIST_MAX_LIMIT });
+        return computeAmSummary(asRows(data, 'asset_monetisation').map(toAmRow));
+      },
+      async () => { await delay(); return computeAmSummary(db().am as AmRow[]); },
+    );
   },
   byCode(code: string): AmRow[] { return db().am.filter((r: AmRow) => r.code === code); },
   find(id: string): AmRow | undefined { return db().am.find((r: AmRow) => r.id === id); },

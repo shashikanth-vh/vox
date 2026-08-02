@@ -53,6 +53,9 @@ async def test_log_touchpoint_carries_full_fidelity(mock_register):
     env = ActivityEnvironment()
     await env.run(activities.log_touchpoint, tp, "e-1", "l-1", "wf:test:interaction")
     written = mock_register.state.written[-1]
+    # Logged against the LEAD (the register rolls it up to the entity timeline itself),
+    # so the lead drawer's own timeline shows the touchpoint.
+    assert written["subject_type"] == "Lead" and written["subject_id"] == "l-1"
     assert written["transcript"] == "All rooftops above P50."
     assert written["attachments"] == [{"kind": "audio", "uri": "s3://vox/cap-1.ogg"}]
     assert written["source"] == "VOX"
@@ -61,6 +64,18 @@ async def test_log_touchpoint_carries_full_fidelity(mock_register):
     assert written["meta"]["acting_rm"] == "Chetan"
     assert written["meta"]["calendar"]["status"] == "pending"
     assert written["key_intel"] == {"dscr": 1.8}
+
+
+async def test_create_lead_backfills_company_from_entity(mock_register):
+    """An entity_id-only capture (no company_name) names the lead after the entity's
+    legal name — not the '(unknown)' placeholder the grids would otherwise display."""
+    mock_register.state.entities.append(
+        {"id": "e-77", "code": "SUNRISE", "legal_name": "Sunrise Green Power LLP",
+         "display_name": None})
+    tp = VoxTouchpoint(entity_id="e-77", performed_by="Chetan")
+    env = ActivityEnvironment()
+    lead = await env.run(activities.create_lead, tp, "e-77", "wf:test:lead")
+    assert lead["company"] == "Sunrise Green Power LLP"
 
 
 async def test_create_lead_defaults_rm_to_acting_rm(mock_register):

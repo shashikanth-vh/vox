@@ -243,9 +243,18 @@ async def create_lead(tp: VoxTouchpoint, entity_id: str,
     """Open a lead for the company (new-company scenario, or existing company with no
     active lead). The assigned RM defaults to the acting RM who captured it."""
     async with _client(tp.caller) as reg:
+        company = (tp.company_name or "").strip()
+        if not company:
+            # entity_id-only captures name no company, but the lead's `company` column
+            # is the grid's display text — take it from the entity itself rather than
+            # writing an "(unknown)" placeholder into every list the lead appears in.
+            entity = await reg.get("entities", entity_id,
+                                   request_id=activity.info().workflow_id)
+            company = ((entity.get("legal_name") or entity.get("display_name") or "")
+                       .strip())
         return await reg.create("leads", {
             "entity_id": entity_id,
-            "company": (tp.company_name or "").strip() or "(unknown)",
+            "company": company or "(unknown)",
             "sector": tp.sector,
             "lens": tp.lens,
             "source": "RM",
@@ -318,9 +327,14 @@ async def log_touchpoint(tp: VoxTouchpoint, entity_id: str, lead_id: str | None,
         # interactions with meta.calendar.status == "pending" and writes back the event id.
         meta["calendar"] = {"status": "pending", "date": tp.next_meeting_date,
                             "title": tp.next_action or "Follow-up meeting"}
+    # Address the LEAD when the run linked one: the register derives entity_id from the
+    # subject, so the entity-level timeline still aggregates it — but only a Lead-subject
+    # row appears in the lead drawer's own timeline (GET /v1/leads/{id}/interactions),
+    # and the register then also rolls last_interaction/next_action onto the lead.
+    subject_type, subject_id = ("Lead", lead_id) if lead_id else ("Entity", entity_id)
     async with _client(tp.caller) as reg:
         return await reg.log_interaction(
-            "Entity", entity_id, tp.interaction_type,
+            subject_type, subject_id, tp.interaction_type,
             source="VOX",
             direction=tp.direction,
             occurred_at=tp.occurred_at,

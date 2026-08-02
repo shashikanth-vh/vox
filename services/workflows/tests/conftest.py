@@ -85,6 +85,15 @@ def build_mock() -> FastAPI:
         # the activity's canonical comparison do the matching.
         return {"items": app.state.entities, "next_cursor": None}
 
+    @app.get("/v1/entities/{eid}")
+    async def get_entity(eid: str):
+        for row in app.state.entities:
+            if str(row.get("id")) == eid:
+                return row
+        return JSONResponse(
+            {"error": {"type": "not_found", "title": "missing", "status": 404,
+                       "detail": "no entity", "request_id": None}}, status_code=404)
+
     @app.post("/v1/entities", status_code=201)
     async def create_entity(request: Request):
         body = await request.json()

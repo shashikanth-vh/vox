@@ -1,6 +1,7 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
 import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
+import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
 import type { TableQuery, Paged } from './types';
@@ -48,6 +49,8 @@ export const lendingService = {
         // load is exactly the request the collection makes.
         const data = await api.get<any>('/lending', toCursorParams(q));
         const rows = asRows(data, 'lending').map(toLendingRow).filter((r) => inScope(scope ?? null, r));
+        // The wire row carries deal_id only — join the deal number + company in.
+        await fillFromDeal(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {
