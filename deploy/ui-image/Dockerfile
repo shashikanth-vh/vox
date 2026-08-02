@@ -19,9 +19,14 @@ COPY services/atlas/ui/ .
 ARG VITE_PRISM_BASE_URL=""
 ARG VITE_DEX_URL=""
 ARG VITE_TENANT="EVAM"
+# The app ships a full MOCK data store for standalone demos and only calls the real
+# APIs when this compiles in as 'true'. On the platform the backend IS present, so
+# real is the default here — override to 'false' only for a data-free demo build.
+ARG VITE_USE_REAL_API="true"
 ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
     VITE_DEX_URL=$VITE_DEX_URL \
-    VITE_TENANT=$VITE_TENANT
+    VITE_TENANT=$VITE_TENANT \
+    VITE_USE_REAL_API=$VITE_USE_REAL_API
 RUN npm run build -- --base=/ui/
 
 # --- serve ------------------------------------------------------------------------

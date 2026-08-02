@@ -373,6 +373,9 @@ services:
         # proxies /dex to Dex, so the SPA's token call stays same-origin.
         VITE_DEX_URL: "${UI_DEX_URL:-}"
         VITE_TENANT: "EVAM"
+        # true = the app calls the REAL APIs (this platform). 'false' compiles the
+        # standalone mock-data demo — never what you want behind this edge.
+        VITE_USE_REAL_API: "${UI_USE_REAL_API:-true}"
     restart: unless-stopped
 
   nginx:
