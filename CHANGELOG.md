@@ -6,6 +6,17 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The approver's Today list: `GET /orchestrator/v1/workflows/pending`.** One call
+  returns EVERY run in the tenant currently parked on an approval — all leads'
+  conversions, committee decisions, syndication/AM decisions, handover checker
+  approvals — oldest first, each with subject, requester, waiting stage and the
+  same ready-made action URLs as the per-subject lookup. Backed by Temporal's
+  BUILT-IN visibility attributes (WorkflowType + ExecutionStatus), so it needs no
+  custom search-attribute registration. Mid-flight runs (still circulating a
+  note/IM) are excluded; production posture scopes the list to the verticals the
+  caller holds an approver role for (RM → empty; Credit Head → committee +
+  handover; Management → all). Optional `kind=` filter.
+
 - **Workflow discovery: `GET /orchestrator/v1/workflows?kind=…&subject_id=…`.** The
   production-grade way for a UI to re-find a run after the start response is gone:
   given a business subject ("this lead's conversion"), the orchestrator returns every

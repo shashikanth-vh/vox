@@ -2086,6 +2086,119 @@ def create_app() -> FastAPI:
         "ews-case": ("ews", None),
     }
 
+    def _action_urls(decide: str | None, workflow_id: str, subject_id: str) -> dict[str, str]:
+        """The ready-made URLs a client acts on — one construction site for the lookup
+        AND the pending list, so the two can never drift."""
+        urls = {"status_url": f"/v1/workflows/{workflow_id}"}
+        if decide == "approve/reject":
+            urls["approve_url"] = f"/v1/workflows/{workflow_id}/approve"
+            urls["reject_url"] = f"/v1/workflows/{workflow_id}/reject"
+        elif decide is not None and decide.startswith("subject:"):
+            urls["approve_url"] = ("/v1/workflows/"
+                                   + decide.removeprefix("subject:").format(
+                                       subject_id=subject_id))
+        elif decide is not None:
+            urls["decision_url"] = f"/v1/workflows/{workflow_id}/{decide}"
+        return urls
+
+    # The approval-bearing kinds and their Temporal workflow TYPE names — the pending
+    # list filters on WorkflowType + ExecutionStatus, both BUILT-IN search attributes,
+    # so it needs no custom search-attribute registration on the server.
+    _PENDING_TYPES: dict[str, str] = {
+        "lead-conversion": "LeadConversionWorkflow",
+        "deal-structuring": "DealStructuringWorkflow",
+        "syndication": "SyndicationMandateWorkflow",
+        "asset-monetisation": "AssetMonetisationWorkflow",
+        "advaya-handover": "AdvayaHandoffWorkflow",
+    }
+
+    @app.get("/v1/workflows/pending", tags=["Workflows"],
+             summary="Every run parked awaiting an approval, tenant-wide (the Today list)")
+    async def pending_approvals(request: Request, kind: str | None = None,
+                                x_api_key: str | None = Header(default=None,
+                                                               alias="X-API-Key"),
+                                ) -> Any:
+        """The approver's landing list: every RUNNING run in this tenant that is parked
+        on a decision, across ALL subjects, each with its subject, requester, waiting
+        stage and ready-made action URLs. Mid-flight runs (circulating a note/IM, not
+        yet parked) are excluded. Under the production identity posture the list is
+        scoped to the verticals the CALLER holds an approver role for — an RM gets an
+        empty list, a Credit Head sees committee + handover items, Management sees all.
+        Optional ``kind`` narrows to one workflow kind. Oldest waiting first."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        _who, err = await _verified_email(request, "")
+        if err is not None:
+            return err
+        if _auth_enforced() and not _who:
+            return _problem(401, "Unauthorized",
+                            "A verified identity is required to list pending approvals.")
+        if kind is not None and kind not in _PENDING_TYPES:
+            return _problem(422, "Validation failed",
+                            f"Unknown kind '{kind}'; one of: "
+                            f"{', '.join(sorted(_PENDING_TYPES))}.")
+        tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
+        slug = _tenant_slug(tenant)
+        caller_roles: set[str] | None = None
+        if _auth_enforced():
+            caller_roles = set()
+            if settings.access_url and _who:
+                with contextlib.suppress(httpx.HTTPError):
+                    role_resp = await request.app.state.http.get(
+                        f"{settings.access_url.rstrip('/')}/v1/resolve",
+                        params={"email": _who},
+                        headers={"X-API-Key": settings.access_api_key,
+                                 "X-Tenant": tenant})
+                    if role_resp.status_code == 200:
+                        caller_roles = set(role_resp.json().get("roles", []))
+        client: Client = request.app.state.temporal
+        pending: list[dict[str, Any]] = []
+        for k, wtype in _PENDING_TYPES.items():
+            if kind is not None and k != kind:
+                continue
+            prefix, decide = _LOOKUP_KINDS[k]
+            if (caller_roles is not None
+                    and not (caller_roles & _APPROVER_ROLES.get(prefix, set()))):
+                continue
+            try:
+                listing = client.list_workflows(
+                    f"WorkflowType = '{wtype}' AND ExecutionStatus = 'Running'")
+                async for ex in listing:
+                    wf_id = ex.id
+                    if not wf_id.startswith(f"{prefix}-{slug}-"):
+                        continue  # another tenant's run
+                    subject_id = re.sub(r"-r\d+$", "",
+                                        wf_id[len(prefix) + len(slug) + 2:])
+                    handle = client.get_workflow_handle(wf_id)
+                    stage: Any = None
+                    requested_by: str | None = None
+                    with contextlib.suppress(RPCError, TemporalError):
+                        desc = await handle.describe()
+                        requested_by = (str(await desc.memo_value("initiator", "") or "")
+                                        or None)
+                    with contextlib.suppress(RPCError, TemporalError):
+                        stage = await handle.query("status")
+                    # A conversion is pending its whole RUNNING life; the others are
+                    # pending only once parked ("Awaiting …" / "… awaiting checker …").
+                    # An unanswerable stage query stays listed (fail open: visibility
+                    # only — the decision POST still enforces authority).
+                    if (k != "lead-conversion" and stage is not None
+                            and "awaiting" not in str(stage).lower()):
+                        continue
+                    pending.append({
+                        "kind": k, "subject_id": subject_id, "workflow_id": wf_id,
+                        "status": "RUNNING", "stage": stage,
+                        "requested_by": requested_by,
+                        "started_at": (ex.start_time.isoformat()
+                                       if ex.start_time else None),
+                        **_action_urls(decide, wf_id, subject_id)})
+            except RPCError as exc:
+                return _problem(502, "Bad gateway",
+                                "Temporal visibility refused the pending-approvals "
+                                f"query for {wtype}: {exc.message}")
+        pending.sort(key=lambda r: r["started_at"] or "")
+        return {"count": len(pending), "pending": pending}
+
     @app.get("/v1/workflows", tags=["Workflows"],
              summary="Find a subject's runs (newest attempt first) — clients never build ids")
     async def find_workflows(kind: str, subject_id: str, request: Request,
@@ -2130,17 +2243,8 @@ def create_app() -> FastAPI:
                 "status": desc.status.name if desc.status else "UNKNOWN",
                 "started_at": desc.start_time.isoformat() if desc.start_time else None,
                 "closed_at": desc.close_time.isoformat() if desc.close_time else None,
-                "status_url": f"/v1/workflows/{candidate}",
+                **_action_urls(decide, candidate, subject_id),
             }
-            if decide == "approve/reject":
-                row["approve_url"] = f"/v1/workflows/{candidate}/approve"
-                row["reject_url"] = f"/v1/workflows/{candidate}/reject"
-            elif decide is not None and decide.startswith("subject:"):
-                row["approve_url"] = ("/v1/workflows/"
-                                      + decide.removeprefix("subject:").format(
-                                          subject_id=subject_id))
-            elif decide is not None:
-                row["decision_url"] = f"/v1/workflows/{candidate}/{decide}"
             if desc.status == WorkflowExecutionStatus.RUNNING:
                 with contextlib.suppress(RPCError, TemporalError):
                     row["stage"] = await handle.query("status")

@@ -153,6 +153,21 @@ attempt a decision can still land on. Kinds: `lead-conversion`, `lead-qualificat
 `advaya-handover`, `ews-case`. Same read protection as the status route: initiator
 or approver-role holders.
 
+**The Today tab / approver landing list** is one call:
+
+```
+GET /orchestrator/v1/workflows/pending          (optional &kind=lead-conversion)
+```
+
+→ `{count, pending[]}` — every run in the tenant currently parked on an approval,
+across all subjects, oldest first; each row has `kind`, `subject_id`,
+`requested_by`, the waiting `stage`, `started_at`, and the same ready-made action
+URLs as the lookup. In the production posture the list is scoped to the verticals
+the caller holds an approver role for (an RM sees an empty list; a Credit Head
+sees committee + handover; Management sees everything) — so the UI can render it
+for any user without role logic of its own. Decision authority is still enforced
+at the POST.
+
 ### 3.4 Committee approval (folder 06 — your screenshot)
 
 * **Analyst**: deal workspace button **"Send to committee"** →

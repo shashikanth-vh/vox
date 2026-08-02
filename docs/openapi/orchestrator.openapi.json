@@ -2791,6 +2791,72 @@
         ]
       }
     },
+    "/v1/workflows/pending": {
+      "get": {
+        "description": "The approver's landing list: every RUNNING run in this tenant that is parked\non a decision, across ALL subjects, each with its subject, requester, waiting\nstage and ready-made action URLs. Mid-flight runs (circulating a note/IM, not\nyet parked) are excluded. Under the production identity posture the list is\nscoped to the verticals the CALLER holds an approver role for \u2014 an RM gets an\nempty list, a Credit Head sees committee + handover items, Management sees all.\nOptional ``kind`` narrows to one workflow kind. Oldest waiting first.",
+        "operationId": "pending_approvals_v1_workflows_pending_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Pending Approvals V1 Workflows Pending Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Every run parked awaiting an approval, tenant-wide (the Today list)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/syndications": {
       "post": {
         "operationId": "start_syndication_v1_workflows_syndications_post",

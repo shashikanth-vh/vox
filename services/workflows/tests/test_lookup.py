@@ -21,14 +21,19 @@ pytestmark = pytest.mark.asyncio
 
 
 class _Desc:
-    def __init__(self, status: WorkflowExecutionStatus) -> None:
+    def __init__(self, status: WorkflowExecutionStatus,
+                 stage: str = "Awaiting committee decision",
+                 initiator: str = "rm@evamfinance.com",
+                 started: datetime | None = None) -> None:
         self.status = status
+        self.stage = stage
+        self.initiator = initiator
         self.run_id = "run-1"
-        self.start_time = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+        self.start_time = started or datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
         self.close_time = None
 
     async def memo_value(self, key, default=None):  # noqa: ANN001
-        return default
+        return self.initiator if key == "initiator" else default
 
 
 class _Handle:
@@ -41,17 +46,38 @@ class _Handle:
         return self._desc
 
     async def query(self, name):  # noqa: ANN001
-        return "Awaiting committee decision"
+        return self._desc.stage if self._desc else None
+
+
+class _Listed:
+    """One row of a WorkflowType listing — the shape /pending reads (id, start_time)."""
+
+    def __init__(self, wf_id: str, desc: _Desc) -> None:
+        self.id = wf_id
+        self.start_time = desc.start_time
 
 
 class _FakeTemporal:
-    """Knows a fixed set of workflow ids; every other id is a Temporal NOT_FOUND."""
+    """Knows a fixed set of workflow ids; every other id is a Temporal NOT_FOUND.
+    ``list_workflows`` serves the same ids grouped by workflow-type name."""
 
-    def __init__(self, known: dict[str, _Desc]) -> None:
+    def __init__(self, known: dict[str, _Desc],
+                 types: dict[str, list[str]] | None = None) -> None:
         self.known = known
+        self.types = types or {}
 
     def get_workflow_handle(self, wf_id):  # noqa: ANN001
         return _Handle(self.known.get(wf_id))
+
+    def list_workflows(self, query: str):
+        import re as _re
+        wtype = _re.search(r"WorkflowType = '([^']+)'", query).group(1)
+        rows = [_Listed(wf_id, self.known[wf_id]) for wf_id in self.types.get(wtype, [])]
+
+        async def _gen():
+            for row in rows:
+                yield row
+        return _gen()
 
 
 def _app(monkeypatch, temporal):  # noqa: ANN001
@@ -138,3 +164,65 @@ async def test_lookup_refuses_an_unknown_kind(monkeypatch):
                    {"kind": "bogus", "subject_id": "X"})
     assert r.status_code == 422
     assert "lead-conversion" in r.json()["error"]["detail"]
+
+
+# ---------------------------------------------------------------------------------------- #
+# GET /v1/workflows/pending — the tenant-wide approver Today list
+# ---------------------------------------------------------------------------------------- #
+async def _get_pending(app, params=None):  # noqa: ANN001
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://orch"
+    ) as c:
+        return await c.get("/v1/workflows/pending", params=params or {},
+                           headers={"X-Tenant": "EVAM"})
+
+
+async def test_pending_lists_every_parked_approval_across_subjects(monkeypatch):
+    slug = _slug()
+    conv1 = f"leadconv-{slug}-LEAD1"
+    conv2 = f"leadconv-{slug}-LEAD2-r2"          # retry attempt of another lead
+    parked = f"struct-{slug}-DEAL1"
+    midflight = f"struct-{slug}-DEAL2"
+    other_tenant = "leadconv-OTHERffffffffff-LEADX"
+    temporal = _FakeTemporal(
+        known={
+            conv1: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending",
+                         started=datetime(2026, 8, 1, 9, 0, tzinfo=UTC)),
+            conv2: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending",
+                         started=datetime(2026, 8, 1, 11, 0, tzinfo=UTC)),
+            parked: _Desc(WorkflowExecutionStatus.RUNNING,
+                          stage="Awaiting committee decision",
+                          started=datetime(2026, 8, 1, 10, 0, tzinfo=UTC)),
+            midflight: _Desc(WorkflowExecutionStatus.RUNNING,
+                             stage="Circulating credit note"),
+            other_tenant: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending"),
+        },
+        types={"LeadConversionWorkflow": [conv1, conv2, other_tenant],
+               "DealStructuringWorkflow": [parked, midflight]})
+    r = await _get_pending(_app(monkeypatch, temporal))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The mid-flight structuring and the other tenant's run are excluded.
+    assert body["count"] == 3
+    assert [p["workflow_id"] for p in body["pending"]] == [conv1, parked, conv2]  # oldest first
+    lead2 = next(p for p in body["pending"] if p["workflow_id"] == conv2)
+    assert lead2["subject_id"] == "LEAD2"        # retry suffix stripped from the subject
+    assert lead2["approve_url"] == f"/v1/workflows/{conv2}/approve"
+    deal = next(p for p in body["pending"] if p["kind"] == "deal-structuring")
+    assert deal["decision_url"] == f"/v1/workflows/{parked}/committee-decision"
+    assert deal["requested_by"] == "rm@evamfinance.com"
+
+
+async def test_pending_kind_filter_and_unknown_kind(monkeypatch):
+    slug = _slug()
+    conv = f"leadconv-{slug}-LEAD1"
+    temporal = _FakeTemporal(
+        known={conv: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending")},
+        types={"LeadConversionWorkflow": [conv]})
+    app = _app(monkeypatch, temporal)
+    r = await _get_pending(app, {"kind": "deal-structuring"})
+    assert r.status_code == 200 and r.json()["count"] == 0
+    r = await _get_pending(app, {"kind": "lead-conversion"})
+    assert r.status_code == 200 and r.json()["count"] == 1
+    r = await _get_pending(app, {"kind": "bogus"})
+    assert r.status_code == 422

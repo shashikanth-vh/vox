@@ -11254,7 +11254,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (37 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (38 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Decisions",
@@ -12038,6 +12038,50 @@
                     }
                   }
                 }
+              }
+            },
+            {
+              "name": "GET /orchestrator/v1/workflows/pending \u2014 Every run parked awaiting an approval, tenant-wide (the Today list)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "pending"
+                  ],
+                  "query": [
+                    {
+                      "key": "kind",
+                      "value": "sample",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "The approver's landing list: every RUNNING run in this tenant that is parked\non a decision, across ALL subjects, each with its subject, requester, waiting\nstage and ready-made action URLs. Mid-flight runs (circulating a note/IM, not\nyet parked) are excluded. Under the production identity posture the list is\nscoped to the verticals the CALLER holds an approver role for \u2014 an RM gets an\nempty list, a Credit Head sees committee + handover items, Management sees all.\nOptional ``kind`` narrows to one workflow kind. Oldest waiting first."
               }
             },
             {
