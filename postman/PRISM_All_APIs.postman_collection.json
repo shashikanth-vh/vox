@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (227 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (228 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -359,11 +359,79 @@
                       "disabled": true
                     },
                     {
+                      "key": "actor",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "action",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "since",
+                      "value": "2026-01-31T10:00:00Z",
+                      "disabled": true
+                    },
+                    {
+                      "key": "until",
+                      "value": "2026-01-31T10:00:00Z",
+                      "disabled": true
+                    },
+                    {
                       "key": "limit",
                       "value": "1",
                       "disabled": true
                     }
                   ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/session-events \u2014 Record a session event (the UI calls this once after login)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/session-events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "session-events"
+                  ]
+                },
+                "description": "Token issuance happens at the IdP (Dex/Google), outside PRISM \u2014 so sign-ins\nwould otherwise be invisible to the Activity screen. The UI calls this once after\na successful login (and optionally on logout). The event is recorded as the\nCALLER's own audited row \u2014 you cannot write a session event for someone else.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             }
@@ -13236,7 +13304,7 @@
               }
             },
             {
-              "name": "GET /atlas/v1/today \u2014 What needs a human today: due actions, lender chases, covenants",
+              "name": "GET /atlas/v1/today \u2014 What needs a human today: due actions, stuck stages, chases, covenants",
               "request": {
                 "method": "GET",
                 "header": [
@@ -13270,6 +13338,16 @@
                   "query": [
                     {
                       "key": "horizon_days",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "amber_days",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "red_days",
                       "value": "1",
                       "disabled": true
                     }

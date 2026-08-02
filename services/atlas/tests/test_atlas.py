@@ -106,3 +106,25 @@ async def test_today_view_surfaces_due_lead_and_covenant(atlas, register_direct)
     summary = await atlas.get(f"/v1/entities/{ent['id']}/summary")
     assert summary.status_code == 200
     assert summary.json()["entity"]["id"] == ent["id"]
+
+
+def test_stage_bottlenecks_severity_terminal_exclusion_and_order():
+    today = date(2026, 8, 2)
+    rows = [
+        {"id": "a", "tracker_no": "L-1", "stage": "Diligence",
+         "stage_updated_at": "2026-05-07", "pending_with": None, "analyst": "Prateek"},
+        {"id": "b", "tracker_no": "L-2", "stage": "Data Awaited",
+         "stage_updated_at": "2026-07-15"},                       # 18d → amber
+        {"id": "c", "tracker_no": "L-3", "stage": "Diligence",
+         "stage_updated_at": "2026-07-30"},                       # 3d → fine
+        {"id": "d", "tracker_no": "L-4", "stage": "Disbursed",
+         "stage_updated_at": "2025-01-01"},                       # terminal → ignored
+        {"id": "e", "tracker_no": "L-5", "stage": "On Hold",
+         "stage_updated_at": "2025-01-01"},                       # parked → ignored
+    ]
+    out = agg.stage_bottlenecks(rows, today, amber_days=14, red_days=30)
+    assert [r["lending_id"] for r in out["red"]] == ["a"]         # 87 days
+    assert out["red"][0]["days_in_stage"] == 87
+    assert out["red"][0]["severity"] == "red"
+    assert [r["lending_id"] for r in out["amber"]] == ["b"]
+    assert out["thresholds"] == {"amber_days": 14, "red_days": 30}

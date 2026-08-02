@@ -326,6 +326,9 @@ services:
       ATLAS_REGISTER_TENANT: "EVAM"
       ATLAS_ACCESS_URL: "http://access:8000"
       ATLAS_ACCESS_API_KEY: "dev-local-key"
+      # Today-view attention thresholds (BN-02 "stage stuck"): amber/red days-in-stage.
+      ATLAS_STAGE_AMBER_DAYS: "${ATLAS_STAGE_AMBER_DAYS:-14}"
+      ATLAS_STAGE_RED_DAYS: "${ATLAS_STAGE_RED_DAYS:-30}"
       # Must match the Register's REGISTER_GATEWAY_SHARED_SECRET so the Register trusts
       # the user identity ATLAS forwards (otherwise user-attributed reads are rejected).
       ATLAS_GATEWAY_SHARED_SECRET: "compose-gateway-secret"

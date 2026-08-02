@@ -278,6 +278,33 @@ freeze (server trigger) — render terminal events read-only.
   whole book, one sheet per register, view-scoped to the caller. `GET /v1/export/counts`
   powers an admin "what's in the register" widget.
 
+### 3.14 Activity tab (Activity Log + Audit trail) & the Today tab
+
+Both sub-tabs render from **`GET /v1/audit`** (Admin-only), filterable by
+`resource_type`, `resource_id`, `actor`, `action`, `since`, `until`, `limit`. Every row
+now carries what the screen needs without joins:
+
+* `changes.values` — before→after per changed field (`{"stage": {"from": "Data
+  Awaited", "to": "Diligence"}}`) → the Audit trail's Detail column and the Activity
+  Log's "Moved X's lending stage A → B" sentence.
+* `changes.label` — the row's human name (`PIONEER`, `L-0001`) → the Company/Code
+  columns, no per-row lookup.
+* **Area chips** = a static map from `resource_type` (lending_trackers → Lending,
+  entities → Clients, session → Session; `actor` = system/import → System).
+* **Session rows**: after a successful login the UI calls
+  `POST /v1/session-events {"event": "signin"}` once (optionally `signout`) — that
+  writes the caller's own audited row; sign-ins otherwise happen at the IdP and would
+  be invisible. Stat chips (N activities / today / people / companies) are counts over
+  the fetched rows.
+
+The **Today tab's red/amber triage** is served by `GET /atlas/v1/today`:
+`stage_bottlenecks.{red,amber}` (BN-02 — lending lines stuck in a working stage, with
+`days_in_stage`, `pending_with`, `analyst`; longest-stuck first) plus
+`attention_counts` for the "21 red, 195 amber" headline, alongside the existing
+`leads_due`, `lender_chases`, `monitoring_due`. Thresholds are deployment config
+(`ATLAS_STAGE_AMBER_DAYS`/`ATLAS_STAGE_RED_DAYS`, default 14/30), narrowable per
+request with `?amber_days=&red_days=`.
+
 ---
 
 ## 4. Dashboards (ATLAS BFF)

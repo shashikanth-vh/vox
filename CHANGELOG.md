@@ -6,6 +6,28 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Activity & Today parity — the v19 Activity tab and Today triage now render from
+  the backend alone.** Four pieces:
+  * **Audit rows carry values and a label.** Every update's `changes` now includes
+    `values` (before→after per changed field — "Data Awaited → Diligence" straight
+    from the row) and `label` (the row's natural key: `PIONEER`, `L-0001`), on create/
+    delete/restore too. Size-bounded, jsonb-only — no schema change, old rows stay
+    valid.
+  * **`GET /v1/audit` grows filters**: `actor`, `action`, `since`, `until` (with the
+    existing resource filters) so the Activity screen's chips and filters are
+    server-backed. Still Admin-only.
+  * **`POST /v1/session-events`** (`{"event": "signin"|"signout"}`): the UI calls it
+    once after login; it writes the caller's own audited session row — the source for
+    the "Signed in to ATLAS" category, which otherwise has none (tokens are issued at
+    the IdP, invisible to PRISM).
+  * **`GET /atlas/v1/today` now serves the BN-02 red/amber triage**:
+    `stage_bottlenecks.{red,amber}` (lending lines stuck in a working stage —
+    `days_in_stage` from `stage_updated_at`; Disbursed/Rejected/On Hold excluded) and
+    `attention_counts` for the headline. Thresholds:
+    `ATLAS_STAGE_AMBER_DAYS`/`ATLAS_STAGE_RED_DAYS` (14/30 default; Helm
+    `atlas.stageAmberDays/stageRedDays`; per-request override via query).
+  UI mapping documented in docs/UI_INTEGRATION_GUIDE.md §3.14.
+
 - **The ATLAS UI is now hosted at the edge, and cross-origin browsers are supported.**
   Drop the SPA build (or the single-file prototype as `index.html`) into `deploy/ui/`
   and NGINX serves it at `https://<host>:8443/ui/` (`/` redirects; deep links fall

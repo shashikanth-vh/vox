@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # How long resolved permissions are cached before re-asking the Access service.
     permission_cache_ttl_s: float = 30.0
 
+    # Today-view attention thresholds (the prototype's BN-02 "stage stuck" rule):
+    # a working lending line becomes AMBER after this many days in one stage, RED
+    # after red. Tune per deployment; a request may narrow with query params.
+    stage_amber_days: int = 14
+    stage_red_days: int = 30
+
     # ATLAS forwards the CALLER's verified identity to the Register so row-level scope
     # applies to reads (not just the view gate). The shared secret must match the
     # Register's REGISTER_GATEWAY_SHARED_SECRET (same trust as the gateway). Empty =

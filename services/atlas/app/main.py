@@ -240,9 +240,11 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/v1/today", tags=["Dashboard"],
-             summary="What needs a human today: due actions, lender chases, covenants")
+             summary="What needs a human today: due actions, stuck stages, chases, covenants")
     async def today_view(request: Request, tenant: str = Depends(tenant_of),
-                         horizon_days: int = Query(default=7, ge=0, le=90)) -> Any:
+                         horizon_days: int = Query(default=7, ge=0, le=90),
+                         amber_days: int | None = Query(default=None, ge=1, le=365),
+                         red_days: int | None = Query(default=None, ge=1, le=730)) -> Any:
         try:
             email = await _trusted_email(request)
         except OidcError as exc:
@@ -254,12 +256,21 @@ def create_app() -> FastAPI:
             leads = await _rows(client, "leads", status="Active")
             lenders = await _rows(client, "syndication-lenders")
             monitoring = await _rows(client, "monitoring")
+            lending = await _rows(client, "lending")
+        # BN-02 "stage stuck": deployment thresholds, narrowable per request.
+        bottlenecks = agg.stage_bottlenecks(
+            lending, today,
+            amber_days=amber_days or settings.stage_amber_days,
+            red_days=red_days or settings.stage_red_days)
         return {
             "tenant": tenant,
             "date": today.isoformat(),
             "leads_due": agg.leads_due_today(leads, today),
             "lender_chases": agg.lender_chases(lenders),
             "monitoring_due": agg.monitoring_due(monitoring, today, horizon_days),
+            "stage_bottlenecks": bottlenecks,
+            "attention_counts": {"red": len(bottlenecks["red"]),
+                                 "amber": len(bottlenecks["amber"])},
         }
 
     @app.get("/v1/pipeline/{vertical}", tags=["Dashboard"],

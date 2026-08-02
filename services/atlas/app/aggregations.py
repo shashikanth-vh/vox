@@ -120,6 +120,38 @@ def lender_chases(rows: list[Row]) -> list[Row]:
              "last_chased": r.get("chased_date")} for r in waiting]
 
 
+def stage_bottlenecks(rows: list[Row], today: date, *, amber_days: int = 14,
+                      red_days: int = 30) -> dict[str, Any]:
+    """The prototype's BN-02 rule: lending lines STUCK in a working stage. Days-in-stage
+    comes from ``stage_updated_at``; a line past ``red_days`` is red, past ``amber_days``
+    amber. Terminal/parked stages (Disbursed / Rejected / On Hold) don't count — being
+    old is their normal state. Longest-stuck first."""
+    stuck: list[Row] = []
+    for r in rows:
+        stage = r.get("stage") or ""
+        if stage in ("Disbursed", "Rejected", "On Hold"):
+            continue
+        updated = r.get("stage_updated_at") or r.get("updated_at")
+        if not updated:
+            continue
+        try:
+            days = today.toordinal() - date.fromisoformat(str(updated)[:10]).toordinal()
+        except ValueError:
+            continue
+        if days < amber_days:
+            continue
+        stuck.append({
+            "lending_id": r["id"], "tracker_no": r.get("tracker_no"),
+            "entity_id": r.get("entity_id"), "stage": stage, "days_in_stage": days,
+            "severity": "red" if days >= red_days else "amber",
+            "pending_with": r.get("pending_with"), "rm": r.get("rm"),
+            "analyst": r.get("analyst")})
+    stuck.sort(key=lambda r: -r["days_in_stage"])
+    return {"red": [r for r in stuck if r["severity"] == "red"],
+            "amber": [r for r in stuck if r["severity"] == "amber"],
+            "thresholds": {"amber_days": amber_days, "red_days": red_days}}
+
+
 def monitoring_due(rows: list[Row], today: date, horizon_days: int = 7) -> list[Row]:
     """Covenants / submissions due within the horizon and not yet submitted."""
     due = [r for r in rows if not r.get("submitted_date")

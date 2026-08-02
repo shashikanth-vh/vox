@@ -134,6 +134,33 @@ async def test_lead_no_is_auto_assigned_when_omitted(client: AsyncClient):
     assert r5.json()["error"]["constraint"] == "leads_tenant_lead_no"
 
 
+async def test_audit_rows_carry_values_label_and_filters(client: AsyncClient):
+    """The Activity screen renders from the audit row ALONE: an update records each
+    changed field's before→after and the row's human label; the read side filters by
+    actor/action/time; and the UI's post-login call lands a 'signin' session row."""
+    ent = await _create_entity(client, "AUD1", state="KA")
+    r = await client.patch(f"/v1/entities/{ent['id']}", json={"state": "TN"})
+    assert r.status_code == 200
+    r = await client.get("/v1/audit", params={
+        "resource_type": "entities", "resource_id": ent["id"], "action": "update"})
+    assert r.status_code == 200
+    row = r.json()[0]
+    assert row["changes"]["values"]["state"] == {"from": "KA", "to": "TN"}
+    assert row["changes"]["label"] == "AUD1"
+    # The create row is labelled too, and the action filter separates the two.
+    r = await client.get("/v1/audit", params={
+        "resource_type": "entities", "resource_id": ent["id"], "action": "create"})
+    assert r.json()[0]["changes"]["label"] == "AUD1"
+    # Session events: recorded as the CALLER's own audited row.
+    r = await client.post("/v1/session-events", json={"event": "signin"})
+    assert r.status_code == 201 and r.json()["recorded"] is True
+    r = await client.get("/v1/audit", params={"resource_type": "session",
+                                              "action": "signin"})
+    assert r.status_code == 200 and len(r.json()) >= 1
+    r = await client.post("/v1/session-events", json={"event": "reboot"})
+    assert r.status_code == 422
+
+
 async def test_entity_lifecycle_is_the_vistaar_journey(client: AsyncClient):
     """The client RELATIONSHIP journey (ATLAS 'Vistaar journey') is its own field —
     distinct from register_status (the origination marker) — and its vocabulary is

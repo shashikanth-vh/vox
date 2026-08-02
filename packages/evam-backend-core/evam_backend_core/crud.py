@@ -39,6 +39,30 @@ M = TypeVar("M", bound=RegisterBase)
 # last-write-wins under concurrency and could drop events).
 _HISTORY_FIELDS = (("stage", "stage_history"), ("status", "status_history"))
 
+# Natural-key / display fields, in preference order — the first non-empty one becomes
+# the audit row's human ``label`` so an activity screen can say "PIONEER" instead of a
+# UUID without a join per row.
+_LABEL_FIELDS = ("code", "tracker_no", "lead_no", "deal_no", "company", "legal_name",
+                 "name", "full_name", "title", "email")
+
+
+def _json_safe(value: Any, cap: int = 300) -> Any:
+    """A JSONB-storable, size-bounded rendering of a changed value. Primitives pass
+    through; everything else (dates, UUIDs, Decimals, nested structures) becomes its
+    string form, truncated so one giant field can never bloat the audit trail."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = value if isinstance(value, str) else str(value)
+    return text if len(text) <= cap else text[: cap - 1] + "…"
+
+
+def _label_of(obj: Any) -> str | None:
+    for field_name in _LABEL_FIELDS:
+        value = getattr(obj, field_name, None)
+        if value:
+            return str(value)[:120]
+    return None
+
 
 class CRUDRepository(Generic[M]):
     def __init__(
@@ -106,7 +130,8 @@ class CRUDRepository(Generic[M]):
         obj.updated_by = actor
         session.add(obj)
         await session.flush()  # surfaces integrity errors now, within the transaction
-        await self._audit(session, tenant_id, actor, "create", obj.id)
+        await self._audit(session, tenant_id, actor, "create", obj.id,
+                          changes={"label": _label_of(obj)})
         await session.refresh(obj)
         return obj
 
@@ -219,10 +244,12 @@ class CRUDRepository(Generic[M]):
         }
 
         changed: dict[str, Any] = {}
+        before: dict[str, Any] = {}
         for key, value in data.items():
             if key in {"id", "tenant_id", "version", "created_at", "created_by"}:
                 continue
             if getattr(obj, key) != value:
+                before[key] = getattr(obj, key)
                 changed[key] = value
                 setattr(obj, key, value)
 
@@ -245,7 +272,14 @@ class CRUDRepository(Generic[M]):
         except StaleDataError as exc:
             # A concurrent writer won the race between our read and flush.
             raise VersionConflictError(expected=expected_version, actual=None) from exc
-        await self._audit(session, tenant_id, actor, "update", obj.id, changes={"fields": list(changed)})
+        # ``fields`` (names) stays for backward compatibility; ``values`` carries the
+        # before→after pairs so an activity screen can render "Data Awaited → Diligence"
+        # from the audit row alone, and ``label`` names the row in human terms.
+        await self._audit(session, tenant_id, actor, "update", obj.id, changes={
+            "fields": list(changed),
+            "values": {k: {"from": _json_safe(before[k]), "to": _json_safe(changed[k])}
+                       for k in changed},
+            "label": _label_of(obj)})
         await session.refresh(obj)
         return obj
 
@@ -263,7 +297,8 @@ class CRUDRepository(Generic[M]):
             await session.flush()
         except StaleDataError as exc:
             raise VersionConflictError(expected=expected_version, actual=None) from exc
-        await self._audit(session, tenant_id, actor, "delete", obj.id)
+        await self._audit(session, tenant_id, actor, "delete", obj.id,
+                          changes={"label": _label_of(obj)})
 
     async def restore(
         self, session: AsyncSession, tenant_id: uuid.UUID, obj_id: uuid.UUID, actor: str
@@ -274,6 +309,7 @@ class CRUDRepository(Generic[M]):
         obj.deleted_at = None
         obj.updated_by = actor
         await session.flush()
-        await self._audit(session, tenant_id, actor, "restore", obj.id)
+        await self._audit(session, tenant_id, actor, "restore", obj.id,
+                          changes={"label": _label_of(obj)})
         await session.refresh(obj)
         return obj

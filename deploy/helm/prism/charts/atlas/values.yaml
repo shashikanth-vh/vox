@@ -19,6 +19,11 @@ register:
     existingSecretKey: api-key
     value: "change-me-in-prod"
 
+# Today-view attention thresholds (the BN-02 "stage stuck" rule): a working lending
+# line becomes AMBER after this many days in one stage, RED after red.
+stageAmberDays: 14
+stageRedDays: 30
+
 # The Access service — gates ATLAS views by the caller's RBAC view matrix.
 # Empty url = gating off (dev only). requireUser: refuse anonymous view calls.
 access:

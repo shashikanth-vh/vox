@@ -378,6 +378,10 @@ async def read_audit(
     ctx: RequestContext = Depends(get_context),
     resource_type: str | None = Query(default=None),
     resource_id: str | None = Query(default=None),
+    actor: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> list[dict]:
     # RBAC guardrail: the audit view is Admin-only (immutable even in the live matrix).
@@ -394,6 +398,14 @@ async def read_audit(
         conds.append(AuditLog.resource_type == resource_type)
     if resource_id:
         conds.append(AuditLog.resource_id == resource_id)
+    if actor:
+        conds.append(AuditLog.actor == actor)
+    if action:
+        conds.append(AuditLog.action == action)
+    if since:
+        conds.append(AuditLog.at >= since)
+    if until:
+        conds.append(AuditLog.at < until)
     rows = (
         await ctx.session.execute(
             select(AuditLog).where(*conds).order_by(AuditLog.at.desc()).limit(limit)
@@ -407,6 +419,33 @@ async def read_audit(
         }
         for r in rows
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Session events — the Activity screen's "Signed in to ATLAS" rows
+# --------------------------------------------------------------------------- #
+@router.post("/v1/session-events", tags=["Audit"], status_code=201,
+             summary="Record a session event (the UI calls this once after login)")
+async def record_session_event(
+    payload: dict,
+    ctx: RequestContext = Depends(get_context),
+) -> dict:
+    """Token issuance happens at the IdP (Dex/Google), outside PRISM — so sign-ins
+    would otherwise be invisible to the Activity screen. The UI calls this once after
+    a successful login (and optionally on logout). The event is recorded as the
+    CALLER's own audited row — you cannot write a session event for someone else."""
+    event = str(payload.get("event") or "").strip().lower()
+    if event not in {"signin", "signout"}:
+        from app.core.errors import ValidationAppError
+
+        raise ValidationAppError("event must be 'signin' or 'signout'.")
+    from evam_backend_core.logging import request_id_ctx
+
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action=event,
+        resource_type="session", resource_id=ctx.actor,
+        request_id=request_id_ctx.get(), changes={"label": ctx.actor}))
+    return {"recorded": True, "event": event, "actor": ctx.actor}
 
 
 # --------------------------------------------------------------------------- #
