@@ -17,6 +17,9 @@ COPY services/atlas/ui/ .
 # public origin to switch the login screen to the OIDC password grant (the edge
 # proxies /dex to the sso-profile Dex); empty = dev posture (header trust, no sign-in).
 ARG VITE_PRISM_BASE_URL=""
+# The register axios client expects its base to CARRY the /v1 prefix (service paths
+# are written without it) — origin-relative on the platform.
+ARG VITE_API_BASE_URL="/v1"
 # The Access/Orchestrator URLs are DERIVED from the base when it is set — but the
 # platform build keeps the base EMPTY (origin-relative calls), so name the prefixes
 # explicitly; a leading-slash URL resolves against the page's own origin.
@@ -33,6 +36,7 @@ ARG VITE_USE_REAL_API="true"
 # set 'true' to restore the soft fallback.
 ARG VITE_MOCK_FALLBACK="false"
 ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
+    VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_MOCK_FALLBACK=$VITE_MOCK_FALLBACK \
     VITE_ACCESS_URL=$VITE_ACCESS_URL \
     VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \

@@ -5,11 +5,14 @@ import { ROLE_TABS } from '../auth/rbac';
 
 export const referenceService = {
   async getRef() {
-    return withFallback(() => api.get<any>('/reference'), async () => { await delay(); return db().ref; });
+    return withFallback(() => api.get<any>('/ref'), async () => { await delay(); return db().ref; });
   },
   // requirement 23: roles come from the backend
   async getRoles() {
-    return withFallback(() => api.get<any>('/roles'), async () => { await delay(); return { roles: Object.keys(ROLE_TABS), roleTabs: ROLE_TABS }; });
+    // The role→tab mapping is a frontend concern; the role CATALOGUE ships in /v1/ref
+    // ("RBAC Role"). No legacy /roles endpoint exists on the platform.
+    await delay();
+    return { roles: Object.keys(ROLE_TABS), roleTabs: ROLE_TABS };
   },
   getRefSync(key: string): string[] { return db().ref[key] ?? []; },
   getThresholds() { return db().th; },

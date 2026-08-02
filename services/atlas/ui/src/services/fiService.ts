@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, toParams, remote } from '../api/http';
+import { api, withFallback, toCursorParams, remote } from '../api/http';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
 import type { FiRow, FiDeal, FiLedgerRow } from '../pages/FIMaster/fi.types';
@@ -10,7 +10,7 @@ interface FiEng { pursued: number; sanc: number; ip: number; decl: number; live:
 export const fiService = {
   async list(q: TableQuery) {
     return withFallback(
-      () => api.get<any>('/fi', toParams(q)),
+      () => api.get<any>('/counterparties', toCursorParams(q)),
       async () => {
         await delay();
         const rows = fiService.rollup();

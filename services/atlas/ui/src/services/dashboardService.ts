@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { delay } from '../api/queryEngine';
-import { api, USE_REAL_API } from '../api/http';
+import { api, gwApi, USE_REAL_API } from '../api/http';
 import { num } from '../utils/format';
 import { LEND_GREEN } from './lendingService';
 import { SYN_TERM, SYN_CLOSED } from './syndicationService';
@@ -11,7 +11,7 @@ import type { DashboardData } from '../pages/Dashboard/dashboard.types';
 export const dashboardService = {
   async getDashboard(): Promise<DashboardData> {
     if (USE_REAL_API) {
-      try { return await api.get<DashboardData>('/dashboard'); } catch (e) { console.warn('[api] dashboard fallback:', e); }
+      try { return await gwApi.get<DashboardData>('/atlas/v1/dashboard'); } catch (e) { console.warn('[api] dashboard fallback:', e); }
     }
     await delay();
     const D = db();

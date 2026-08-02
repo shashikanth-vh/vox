@@ -56,4 +56,17 @@ axiosClient.interceptors.response.use(
   (err) => Promise.reject(err),
 );
 
+// A second client rooted at the ORIGIN (PRISM_BASE_URL, '' = same origin) rather than
+// the /v1 register base — for gateway prefixes like /atlas/v1/* that must not inherit
+// the register prefix. Same identity interceptor.
+export const gwClient = axios.create({
+  baseURL: PRISM_BASE_URL || '',
+  timeout: 15000,
+  headers: { 'Content-Type': 'application/json' },
+});
+gwClient.interceptors.request.use((cfg) => {
+  Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
+  return cfg;
+});
+
 export default axiosClient;

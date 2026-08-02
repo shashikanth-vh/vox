@@ -1,4 +1,4 @@
-import axiosClient, { USE_REAL_API } from './axiosClient';
+import axiosClient, { gwClient, USE_REAL_API } from './axiosClient';
 import type { TableQuery } from '../services/types';
 
 export { USE_REAL_API };
@@ -74,6 +74,11 @@ export async function withFallback<T>(real: () => Promise<T>, mock: () => T | Pr
     return mock();
   }
 }
+
+// Origin-rooted calls (gateway prefixes such as /atlas/v1/*).
+export const gwApi = {
+  get: <T>(url: string, params?: Record<string, any>) => gwClient.get<T>(url, { params }).then((r) => r.data),
+};
 
 export const api = {
   get: <T>(url: string, params?: Record<string, any>) => axiosClient.get<T>(url, { params }).then((r) => r.data),
