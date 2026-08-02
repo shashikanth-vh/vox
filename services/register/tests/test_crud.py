@@ -113,6 +113,27 @@ async def test_dossier(client: AsyncClient):
     assert r.json()["counts"]["deals"] == 1
 
 
+async def test_lead_no_is_auto_assigned_when_omitted(client: AsyncClient):
+    """Creating leads without a lead_no never 409s: the register mints the next free
+    L-NNNN per tenant. Explicit numbers pass through and the sequence skips them."""
+    r1 = await client.post("/v1/leads", json={"company": "Auto One"})
+    assert r1.status_code == 201, r1.text
+    r2 = await client.post("/v1/leads", json={"company": "Auto Two"})
+    assert r2.status_code == 201, r2.text
+    n1, n2 = r1.json()["lead_no"], r2.json()["lead_no"]
+    assert n1 == "L-0001" and n2 == "L-0002"
+    # An explicit number is honoured verbatim...
+    r3 = await client.post("/v1/leads", json={"company": "Manual", "lead_no": "L-0007"})
+    assert r3.status_code == 201 and r3.json()["lead_no"] == "L-0007"
+    # ...and the generator continues past it instead of colliding.
+    r4 = await client.post("/v1/leads", json={"company": "Auto Three"})
+    assert r4.status_code == 201 and r4.json()["lead_no"] == "L-0008"
+    # Reusing a taken number still fails loudly — the natural key stays protected.
+    r5 = await client.post("/v1/leads", json={"company": "Dup", "lead_no": "L-0007"})
+    assert r5.status_code == 409
+    assert r5.json()["error"]["constraint"] == "leads_tenant_lead_no"
+
+
 async def test_entity_lifecycle_is_the_vistaar_journey(client: AsyncClient):
     """The client RELATIONSHIP journey (ATLAS 'Vistaar journey') is its own field —
     distinct from register_status (the origination marker) — and its vocabulary is

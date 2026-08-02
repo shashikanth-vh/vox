@@ -172,7 +172,10 @@ class CounterpartyRead(ReadModel):
 # Leads
 # --------------------------------------------------------------------------- #
 class LeadCreate(CreateModel):
-    lead_no: str | None = Field(default=None, max_length=40)
+    lead_no: str | None = Field(
+        default=None, max_length=40,
+        description="The lead's business number, unique per tenant. Omit it and the "
+                    "register assigns the next free L-0001, L-0002, … automatically.")
     entity_id: uuid.UUID | None = None
     company: str = Field(max_length=300)
     sector: str | None = Field(default=None, max_length=60)

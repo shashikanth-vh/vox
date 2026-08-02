@@ -8782,6 +8782,7 @@
                 "type": "null"
               }
             ],
+            "description": "The lead's business number, unique per tenant. Omit it and the register assigns the next free L-0001, L-0002, \u2026 automatically.",
             "title": "Lead No"
           },
           "lens": {

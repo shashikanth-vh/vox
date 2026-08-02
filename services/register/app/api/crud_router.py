@@ -26,6 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, select
+from sqlalchemy import text as sa_text
 
 from app.core import reconciliation as recon
 from app.core.config import get_settings
@@ -56,6 +57,7 @@ class ResourceSpec:
         company_scoped: bool = False,
         write_operation: str | None = None,
         parent_scope: tuple | None = None,
+        auto_number: tuple | None = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -85,6 +87,10 @@ class ResourceSpec:
         # For a child resource with no entity_id of its own (syndication lenders), scope
         # by the PARENT line's company: (parent_model, fk_attr_name).
         self.parent_scope = parent_scope
+        # (field, prefix): when the create body omits the field, assign the next free
+        # "{prefix}{NNNN}" for the tenant (e.g. lead_no "L-0001"). Explicit values pass
+        # through untouched and keep the natural-key uniqueness guarantee.
+        self.auto_number = auto_number
 
 
 def _hash_body(payload: dict) -> str:
@@ -328,6 +334,27 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
                          "by": ctx.user.email if ctx.user else None}))
 
 
+async def _next_auto_number(ctx: "RequestContext", model: Any, field: str,
+                            prefix: str) -> str:
+    """The next free ``{prefix}{NNNN}`` for this tenant. Concurrent creators are
+    serialized by a transaction-scoped advisory lock (released at commit), so two
+    simultaneous creates can never mint the same number. Soft-deleted rows still
+    count — the UNIQUE constraint covers them too."""
+    await ctx.session.execute(
+        sa_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"autonum:{model.__tablename__}:{field}:{ctx.tenant_id}"})
+    col = getattr(model, field)
+    used = (await ctx.session.execute(
+        select(col).where(model.tenant_id == ctx.tenant_id,
+                          col.like(f"{prefix}%")))).scalars()
+    top = 0
+    for value in used:
+        suffix = value[len(prefix):]
+        if suffix.isdigit():
+            top = max(top, int(suffix))
+    return f"{prefix}{top + 1:04d}"
+
+
 def _recon_included(ctx: "RequestContext", include_reconciliation: bool) -> bool:
     """Whether still-'Required' rows may be returned. Only an ADMIN human may opt in explicitly;
     a service caller (no user) can NEVER include them — operational reads fail closed."""
@@ -454,6 +481,10 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                     response.headers["Idempotency-Replay"] = "true"
                     return existing.response_body
 
+            if spec.auto_number is not None and not body.get(spec.auto_number[0]):
+                field_name, prefix = spec.auto_number
+                body[field_name] = await _next_auto_number(
+                    ctx, repo.model, field_name, prefix)
             obj = await repo.create(ctx.session, ctx.tenant_id, ctx.actor, body)
 
             # Spec: the creator AUTOMATICALLY owns the new line when they hold its

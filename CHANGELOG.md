@@ -6,6 +6,15 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **`lead_no` is auto-assigned when omitted.** Creating a lead without a `lead_no`
+  now mints the tenant's next free `L-0001, L-0002, …` instead of leaving the field
+  empty — so back-to-back creates from the UI can simply omit it and never hit the
+  `leads_tenant_lead_no` 409. Explicit numbers still pass through verbatim (and still
+  409 loudly on reuse — the natural key stays protected); the generator skips past any
+  number already taken, including on soft-deleted rows, and concurrent creates are
+  serialized by a transaction-scoped advisory lock so two requests can never mint the
+  same number. No schema change — this is create-path behaviour only.
+
 - **Approvers are now told when a run parks awaiting their decision.** Until now the
   four governance parks (lead conversion, committee/deal structuring, syndication
   mandate, asset-monetisation closure) waited silently — SLA reminders went only to

@@ -66,6 +66,8 @@ _SPECS: list[ResourceSpec] = [
         filterable=["status", "temperature", "sector", "rm", "source", "entity_id",
                     "converted_deal_id"],
         subject_type="Lead", view_name="leads",
+        # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.
+        auto_number=("lead_no", "L-"),
     ),
     ResourceSpec(
         name="deal", prefix="/v1/deals", tags=["Deals"],
