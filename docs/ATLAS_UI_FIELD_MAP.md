@@ -117,6 +117,25 @@ tracked implicitly.
 
 ## Fields with no prototype counterpart
 
+The mapping above is COMPLETE in one direction: **every prototype field, in every
+register, lands in the schema** — no register has a legacy column without a home. What
+varies is only how much PRISM added on top:
+
+| Register | Prototype fields mapped | PRISM-only additions |
+|---|---|---|
+| Entities | all 7 dataset keys | `display_name`, `entity_type`, `cin`, `pan`, `gstin`, `sub_sector`, `location`, `promoter_group_code`, `tags`, `register_status` |
+| Leads | all 16 | `entity_id`, `converted_deal_id`, `designation` |
+| Deals | all 14 | `stage` + `stage_history` (governed funnel), `product_type`, `ic_date`, `sanction_date`, `disbursement_date`, `exit_date`, `reconciliation_status` |
+| Lending | all 12 | `proposed_disbursement_amount/date`, `disbursed_amount`, `disbursement_date`, `reconciliation_status` |
+| Syndication | all 28 | `reconciliation_status` (closest to 1:1) |
+| Asset Monetisation | all 13 | `status_history`, `reconciliation_status` |
+
+The additions cluster into three deliberate groups: **linkage** the spreadsheet could
+not express (`entity_id` / `deal_id` / `converted_deal_id`); **governance & lifecycle**
+introduced by Release 1 (the deal funnel, histories, sanction/disbursement dates); and
+**`reconciliation_status`** on every business register — the MIS-import bookkeeping
+column that matches a re-imported spreadsheet row against what PRISM already holds.
+
 Every register row also carries the PRISM platform columns — `tenant_id` (multi-tenancy +
 row-level security), `version` (optimistic locking), `created_at/by`, `updated_at/by`,
 `deleted_at` (soft delete) — plus the Release-1 operational registers the prototype never
