@@ -23,6 +23,11 @@ def test_retry_policy():
     assert should_retry(method="GET", status=503, is_network_error=False, idempotent_write=False)
     assert should_retry(method="POST", status=503, is_network_error=False, idempotent_write=True)
     assert not should_retry(method="POST", status=503, is_network_error=False, idempotent_write=False)
+    # A Register 500 (internal_error) is transient in practice — retried under the same
+    # idempotent-write gate, so a replay can never duplicate.
+    assert should_retry(method="GET", status=500, is_network_error=False, idempotent_write=False)
+    assert should_retry(method="POST", status=500, is_network_error=False, idempotent_write=True)
+    assert not should_retry(method="POST", status=500, is_network_error=False, idempotent_write=False)
     # non-transient never retries
     assert not should_retry(method="GET", status=404, is_network_error=False, idempotent_write=False)
 

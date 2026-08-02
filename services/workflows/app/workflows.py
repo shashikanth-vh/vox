@@ -66,7 +66,11 @@ _RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=30),
-    maximum_attempts=5,
+    # 8 attempts ≈ a 90-second window (1+2+4+8+16+30+30), enough to ride out a DB
+    # restart or connection-pool flush; 5 gave up after ~15s, which turned every brief
+    # Register blip into a dead run. All _IO activities are idempotency-keyed, so the
+    # extra attempts are replay-safe.
+    maximum_attempts=8,
 )
 _IO: dict[str, Any] = {"start_to_close_timeout": timedelta(seconds=30), "retry_policy": _RETRY}
 

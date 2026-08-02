@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Intermittent VOX 502 ("workflow_run_failed <- ServerError HTTP 500") hardened
+  against.** The failure signature — the `?wait=true` call dying after ~16 s — is the
+  old retry budget exactly: the register client did NOT retry 500s (only 429/502/503/
+  504), so each activity attempt failed instantly, and the Temporal policy's 5 attempts
+  with 1+2+4+8 s backoff gave up after ~15 s. Any Register blip lasting longer than
+  that (a Postgres restart, a connection-pool flush, an OOM'd container coming back)
+  killed the capture. Now: (1) the client retries 500s under the same idempotent-write
+  gate (replays carry the Idempotency-Key, so they can never duplicate), and (2) the
+  activity retry budget is 8 attempts ≈ a 90-second window. A `?wait=true` caller rides
+  through the blip (slower response, completed run) instead of getting a 502. The root
+  blip itself is environmental — grep the register log for the failing run's id to see
+  the actual traceback (`docker compose logs register | grep -B5 -A30 <workflow-id>`)
+  and check `docker inspect --format '{{.RestartCount}}' <postgres-container>`.
+
 - **Real data now renders with real names — four display gaps closed.** After the
   first full E2E run the grids showed the journey but not the joins:
   * **Lead company "(unknown)" (backend).** A VOX capture carrying `entity_id` but no

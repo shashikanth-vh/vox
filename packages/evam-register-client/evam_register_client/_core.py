@@ -5,8 +5,11 @@ from __future__ import annotations
 import random
 import uuid
 
-# HTTP statuses worth retrying: rate-limit + transient gateway/unavailable.
-RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
+# HTTP statuses worth retrying: rate-limit + transient gateway/unavailable — and 500,
+# because the Register's internal_error is overwhelmingly transient (a DB connection
+# dropping mid-request, a restart window) and the write-retry gate below already
+# restricts replays to idempotency-keyed requests, so retrying can never duplicate.
+RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
