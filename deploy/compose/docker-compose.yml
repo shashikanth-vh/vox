@@ -359,9 +359,9 @@ services:
   #     scripts/gen_dev_certs.sh
   # (nginx will not start without deploy/nginx/certs/tls.{crt,key}.) :8080 serves only a
   # 301 to HTTPS plus the health probes; real traffic goes to :8443.
-  # The ATLAS UI, built FROM SOURCE (frontend/ — the React app) into its own image.
+  # The ATLAS UI, built FROM SOURCE (services/atlas/ui/ — the React app) into its own image.
   # No host port: the edge proxies /ui/ here, so the UI shares the ONE origin with
-  # every API (no CORS, no browser-held secrets). Update: change frontend/, then
+  # every API (no CORS, no browser-held secrets). Update: change services/atlas/ui/, then
   #   docker compose build ui && docker compose up -d ui
   ui:
     build:

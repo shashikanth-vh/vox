@@ -1,17 +1,17 @@
-# The ATLAS UI image, built FROM SOURCE (frontend/ — the React app) in two stages.
+# The ATLAS UI image, built FROM SOURCE (services/atlas/ui/ — the React app) in two stages.
 # Build context = the REPO ROOT (like every service image); compose passes this file
 # via `dockerfile:`. CI equivalent:
 #   docker build -f deploy/ui-image/Dockerfile . -t <registry>/prism-ui:<tag>
 #
-# Update the UI: change frontend/, then
+# Update the UI: change services/atlas/ui/, then
 #   docker compose build ui && docker compose up -d ui
 
 # --- build: tsc + vite, based under /ui/ (the edge serves the app there) ----------
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY frontend/package.json frontend/package-lock.json ./
+COPY services/atlas/ui/package.json services/atlas/ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY frontend/ .
+COPY services/atlas/ui/ .
 # Compile-time endpoints. EMPTY = same-origin relative paths — the PRISM edge shape,
 # where the UI and every API share https://<host>:8443. Set VITE_DEX_URL to that same
 # public origin to switch the login screen to the OIDC password grant (the edge

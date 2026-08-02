@@ -21,7 +21,7 @@ gateway). The gateway routes by prefix:
 | `/access/v1/*` | Access | user & role governance screens (admin only) |
 | `/vocx/*` | VocX | voice capture |
 
-Serve the SPA from the same origin — the React app lives in `frontend/` and ships as
+Serve the SPA from the same origin — the React app lives in `services/atlas/ui/` and ships as
 its own image (`deploy/ui-image/`), served at `https://<host>:8443/ui/` (`/`
 redirects there; SPA deep links fall back to index.html; the edge also proxies
 `/dex/` so sign-in stays same-origin). Same origin as every API ⇒ CORS never exists,

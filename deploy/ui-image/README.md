@@ -1,6 +1,6 @@
 # deploy/ui-image — how the ATLAS UI ships
 
-The React app lives in **`frontend/`**; this folder holds the image build (two-stage
+The React app lives in **`services/atlas/ui/`**; this folder holds the image build (two-stage
 Dockerfile: node build with `--base=/ui/`, then nginx) and the container's server
 block. The compose `ui` service builds it from the repo root and the edge proxies
 **`https://<host>:8443/ui/`** to it (`/` redirects there). No host port — the UI and
