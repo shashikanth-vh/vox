@@ -17,6 +17,11 @@ COPY services/atlas/ui/ .
 # public origin to switch the login screen to the OIDC password grant (the edge
 # proxies /dex to the sso-profile Dex); empty = dev posture (header trust, no sign-in).
 ARG VITE_PRISM_BASE_URL=""
+# The Access/Orchestrator URLs are DERIVED from the base when it is set — but the
+# platform build keeps the base EMPTY (origin-relative calls), so name the prefixes
+# explicitly; a leading-slash URL resolves against the page's own origin.
+ARG VITE_ACCESS_URL="/access"
+ARG VITE_ORCHESTRATOR_URL="/orchestrator"
 ARG VITE_DEX_URL=""
 ARG VITE_TENANT="EVAM"
 # The app ships a full MOCK data store for standalone demos and only calls the real
@@ -24,6 +29,8 @@ ARG VITE_TENANT="EVAM"
 # real is the default here — override to 'false' only for a data-free demo build.
 ARG VITE_USE_REAL_API="true"
 ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
+    VITE_ACCESS_URL=$VITE_ACCESS_URL \
+    VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \
     VITE_DEX_URL=$VITE_DEX_URL \
     VITE_TENANT=$VITE_TENANT \
     VITE_USE_REAL_API=$VITE_USE_REAL_API
