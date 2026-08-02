@@ -2064,6 +2064,61 @@
           ]
         },
         {
+          "name": "GET /orchestrator/v1/workflows/pending \u2014 the APPROVER's Today list shows it",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/pending?kind=lead-conversion",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "lead-conversion"
+                }
+              ]
+            },
+            "description": "DISCOVERY: an approver who just logged in finds every waiting decision here \u2014 kind, subject, requester, waiting stage and ready-made approve/reject URLs. The UI never needs the start response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "pm.test('the pending conversion is discoverable \u2014 no stored 202 needed', () => pm.expect(b.pending.some(p => p.subject_id === pm.environment.get('leadId'))).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "POST /orchestrator \u2026/approve \u2014 by the RM is REFUSED",
           "request": {
             "method": "POST",
@@ -3052,6 +3107,61 @@
           ]
         },
         {
+          "name": "GET /orchestrator/v1/workflows/pending \u2014 the CHECKER discovers v1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/pending?kind=cpcs-checklist",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "cpcs-checklist"
+                }
+              ]
+            },
+            "description": "A maker-finished checklist is status 'Completed' \u2014 the Today list reads the REGISTER queue, so it appears whichever lane prepared it, and carries the checklist_id + ready-made approve URL."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "pm.test('the Completed checklist awaits its check in the Today list', () => pm.expect(b.pending.some(p => p.checklist_id === pm.environment.get('checklistId'))).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "POST \u2026/cpcs-checklists/{id}/return \u2014 CHECKER RETURNS v1 (reasons mandatory)",
           "request": {
             "method": "POST",
@@ -3170,6 +3280,68 @@
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
                   "pm.environment.set('checklistId2', pm.response.json().id);",
                   "console.log('checklistId2 =', pm.environment.get('checklistId2'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/internal/cpcs-checklists?status=Completed \u2014 v2 back in the queue",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists?status=Completed&lending_id={{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "Completed"
+                },
+                {
+                  "key": "lending_id",
+                  "value": "{{lendingId}}"
+                }
+              ]
+            },
+            "description": "The register-side checker queue: only maker-finished ('Completed') versions are pending \u2014 Returned/Approved versions drop out automatically."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = pm.response.json();",
+                  "pm.test('v2 awaits the check; the Returned v1 is NOT pending', () => {",
+                  "  pm.expect(rows.some(r => r.id === pm.environment.get('checklistId2'))).to.be.true;",
+                  "  pm.expect(rows.some(r => r.id === pm.environment.get('checklistId'))).to.be.false;",
+                  "});"
                 ]
               }
             }
@@ -3473,6 +3645,61 @@
                   "const p = pm.response.json();",
                   "pm.test('Prepared \u2014 stage NOT advanced', () => pm.expect(p.status).to.eql('Prepared'));",
                   "pm.environment.set('pkgSha', p.package_sha256);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /orchestrator/v1/workflows/pending \u2014 the CHECKER discovers the package",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/pending?kind=advaya-handover",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "advaya-handover"
+                }
+              ]
+            },
+            "description": "Handover packages awaiting their check are 'Prepared' \u2014 same Today list, same pattern: subject, requester and the ready-made approve URL."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const b = pm.response.json();",
+                  "pm.test('the Prepared package awaits checker approval', () => pm.expect(b.pending.some(p => p.subject_id === pm.environment.get('lendingId'))).to.be.true);"
                 ]
               }
             }

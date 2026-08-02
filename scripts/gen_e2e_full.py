@@ -506,6 +506,15 @@ F.append(("05 · Convert → deal (REQUEST + APPROVE, human-in-the-loop)", [
                "console.log('approve_url:', b.approve_url);"],
         desc="The request parks durably (days if needed) until a Head decides. SLA reminders "
              "fire while it waits; run-control (cancel/return/resubmit) is available."),
+    req("GET /orchestrator/v1/workflows/pending — the APPROVER's Today list shows it", "GET",
+        ORC, "/v1/workflows/pending?kind=lead-conversion", headers=_CHECKER,
+        tests=[OK, "const b = pm.response.json();",
+               "pm.test('the pending conversion is discoverable — no stored 202 needed', () => "
+               "pm.expect(b.pending.some(p => p.subject_id === "
+               "pm.environment.get('leadId'))).to.be.true);"],
+        desc="DISCOVERY: an approver who just logged in finds every waiting decision here — "
+             "kind, subject, requester, waiting stage and ready-made approve/reject URLs. "
+             "The UI never needs the start response."),
     req("POST /orchestrator …/approve — by the RM is REFUSED", "POST", ORC,
         "/v1/workflows/{{convWorkflowId}}/approve", headers=_RM,
         body={"by": "{{rmEmail}}", "note": "self-serve attempt"},
@@ -612,6 +621,15 @@ F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPR
                    "condition_type": "CP", "required": True, "status": "Completed"}],
               "note": "E2E: v1 — insurance CP has no evidence reference yet."},
         tests=cap("checklistId")),
+    req("GET /orchestrator/v1/workflows/pending — the CHECKER discovers v1", "GET", ORC,
+        "/v1/workflows/pending?kind=cpcs-checklist", headers=_CHECKER,
+        tests=[OK, "const b = pm.response.json();",
+               "pm.test('the Completed checklist awaits its check in the Today list', () => "
+               "pm.expect(b.pending.some(p => p.checklist_id === "
+               "pm.environment.get('checklistId'))).to.be.true);"],
+        desc="A maker-finished checklist is status 'Completed' — the Today list reads the "
+             "REGISTER queue, so it appears whichever lane prepared it, and carries the "
+             "checklist_id + ready-made approve URL."),
     req("POST …/cpcs-checklists/{id}/return — CHECKER RETURNS v1 (reasons mandatory)",
         "POST", REG, "/v1/internal/cpcs-checklists/{{checklistId}}/return", headers=_CHECKER,
         body={"note": "Insurance CP carries no evidence reference — attach and resubmit."},
@@ -634,6 +652,18 @@ F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPR
                    "condition_type": "CS", "required": False, "status": "Pending"}],
               "note": "E2E: v2 — insurance evidence attached as returned for."},
         tests=cap("checklistId2")),
+    req("GET /v1/internal/cpcs-checklists?status=Completed — v2 back in the queue", "GET",
+        REG, "/v1/internal/cpcs-checklists?status=Completed&lending_id={{lendingId}}",
+        headers=_CHECKER,
+        tests=[OK, "const rows = pm.response.json();",
+               "pm.test('v2 awaits the check; the Returned v1 is NOT pending', () => {",
+               "  pm.expect(rows.some(r => r.id === "
+               "pm.environment.get('checklistId2'))).to.be.true;",
+               "  pm.expect(rows.some(r => r.id === "
+               "pm.environment.get('checklistId'))).to.be.false;",
+               "});"],
+        desc="The register-side checker queue: only maker-finished ('Completed') versions "
+             "are pending — Returned/Approved versions drop out automatically."),
     req("POST …/cpcs-checklists/{id}/approve — CHECKER APPROVES v2", "POST", REG,
         "/v1/internal/cpcs-checklists/{{checklistId2}}/approve", headers=_CHECKER, tests=[OK],
         desc="A DIFFERENT authenticated user — self-approval is refused. Approving makes "
@@ -669,6 +699,14 @@ F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's 
                "pm.test('Prepared — stage NOT advanced', () => "
                "pm.expect(p.status).to.eql('Prepared'));",
                "pm.environment.set('pkgSha', p.package_sha256);"]),
+    req("GET /orchestrator/v1/workflows/pending — the CHECKER discovers the package", "GET",
+        ORC, "/v1/workflows/pending?kind=advaya-handover", headers=_CHECKER,
+        tests=[OK, "const b = pm.response.json();",
+               "pm.test('the Prepared package awaits checker approval', () => "
+               "pm.expect(b.pending.some(p => p.subject_id === "
+               "pm.environment.get('lendingId'))).to.be.true);"],
+        desc="Handover packages awaiting their check are 'Prepared' — same Today list, "
+             "same pattern: subject, requester and the ready-made approve URL."),
     req("POST …/approve — CHECKER APPROVES (stage still does not move)", "POST",
         REG, "/v1/internal/handover-packages/{{lendingId}}/approve", headers=_CHECKER,
         tests=[OK, "pm.test('Approved — PRISM has decided, Advaya has not', () => "
