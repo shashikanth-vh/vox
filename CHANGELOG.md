@@ -6,6 +6,21 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The ATLAS UI is now hosted at the edge, and cross-origin browsers are supported.**
+  Drop the SPA build (or the single-file prototype as `index.html`) into `deploy/ui/`
+  and NGINX serves it at `https://<host>:8443/ui/` (`/` redirects; deep links fall
+  back to index.html; live-mounted, no restart). Because the UI and every API share
+  that one origin, browser calls need NO CORS from any machine — the production
+  shape. For a UI hosted on a *different* origin (separate host, localhost dev
+  server), the gateway gains `GATEWAY_CORS_ORIGINS` (comma-separated origins; Helm
+  `gateway.corsOrigins`; off by default): preflights + response grants at the single
+  trust boundary, `allow_credentials` deliberately off (auth is a bearer header,
+  never a cookie — an allowed origin still needs a valid token per request).
+  Google sign-in is covered either way via the existing multi-issuer support
+  (`GATEWAY_OIDC_ISSUERS` / `WORKFLOWS_OIDC_ISSUERS` + `ALLOWED_DOMAINS`); the setup
+  — including Google's Authorized JavaScript origins — is documented in
+  `deploy/ui/README.md`.
+
 - **The approver's Today list: `GET /orchestrator/v1/workflows/pending`.** One call
   returns EVERY run in the tenant currently parked on an approval — all leads'
   conversions, committee decisions, syndication/AM decisions, handover checker

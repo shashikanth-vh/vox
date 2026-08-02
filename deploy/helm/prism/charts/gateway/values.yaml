@@ -120,3 +120,9 @@ oidc:
   # REQUIRED when the issuer is public (Google/Microsoft) — the chart refuses to render
   # otherwise, because those IdPs authenticate any account they host, not just yours.
   allowedDomains: ""
+
+# Origins allowed to call the APIs from a browser when the UI is hosted on a DIFFERENT
+# origin than the edge (e.g. "https://ui.example.com,http://localhost:5173"). Empty =
+# no CORS headers; a UI served behind the same ingress needs none. Bearer-header auth
+# means no cookies — an allowed origin still needs a valid token on every request.
+corsOrigins: ""

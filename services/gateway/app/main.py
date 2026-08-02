@@ -125,6 +125,21 @@ def create_app() -> FastAPI:
                   default_response_class=ORJSONResponse, lifespan=lifespan,
                   docs_url="/docs", openapi_url="/openapi.json")
     app.add_middleware(RequestContextMiddleware)
+    if settings.cors_origin_list():
+        # Cross-origin UI support (GATEWAY_CORS_ORIGINS). One implementation at the
+        # single trust boundary covers every routed service. Bearer-header auth means
+        # no cookies are ever in play, so allow_credentials stays False — an allowed
+        # origin can ask, but every request still needs its own valid token.
+        from starlette.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list(),
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["ETag", "X-Request-ID", "Idempotency-Replay"],
+            max_age=3600,
+        )
     register_exception_handlers(app)
 
     @app.get("/healthz", include_in_schema=False)

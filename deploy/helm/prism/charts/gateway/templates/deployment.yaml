@@ -136,6 +136,11 @@ spec:
               value: {{ .Values.oidc.allowedDomains | default "" | quote }}
             - name: GATEWAY_REQUIRE_AUTH
               value: {{ .Values.oidc.requireAuth | default false | quote }}
+            # Origins allowed to call the APIs from a browser when the UI is hosted on a
+            # DIFFERENT origin. Empty (default) = no CORS headers — a same-origin UI
+            # (served behind the same ingress) needs none.
+            - name: GATEWAY_CORS_ORIGINS
+              value: {{ .Values.corsOrigins | default "" | quote }}
             - name: GATEWAY_GATEWAY_SHARED_SECRET
               valueFrom:
                 secretKeyRef:

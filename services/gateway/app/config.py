@@ -103,6 +103,18 @@ class Settings(BaseSettings):
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0
 
+    # CORS — for a UI served from a DIFFERENT origin than this edge (a separate static
+    # host, a local dev server). Comma-separated origins, e.g.
+    # "https://ui.example.com,http://localhost:5173"; "*" allows any origin. Empty =
+    # no CORS headers (the default: the UI is served same-origin from the edge NGINX,
+    # where the browser needs none). Auth is a bearer HEADER, never a cookie, so
+    # allowing an origin here grants nothing by itself — every request still needs a
+    # valid token; credentials-mode CORS is deliberately not offered.
+    cors_origins: str = ""
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:

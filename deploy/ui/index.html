@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRISM — ATLAS UI slot</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 46rem; margin: 4rem auto;
+           padding: 0 1.5rem; color: #1a2b3c; line-height: 1.55; }
+    code { background: #f0f3f6; padding: .15em .4em; border-radius: 4px; }
+    h1 { color: #0d5c63; }
+  </style>
+</head>
+<body>
+  <h1>PRISM edge is up — this is the ATLAS UI slot</h1>
+  <p>You are seeing this placeholder because no UI build has been deployed yet.
+     To publish the ATLAS UI at this address:</p>
+  <ol>
+    <li>Copy your UI into <code>deploy/ui/</code> on the server —
+        either the SPA build output, or the single-file prototype renamed to
+        <code>index.html</code>.</li>
+    <li>Reload this page. (No container restart needed — the folder is live-mounted.)</li>
+  </ol>
+  <p>The UI is served from the <strong>same origin</strong> as every PRISM API
+     (<code>/v1/…</code>, <code>/access</code>, <code>/orchestrator</code>,
+     <code>/atlas</code>), so browser calls need no CORS configuration.
+     See <code>deploy/ui/README.md</code> for the cross-origin and Google sign-in notes.</p>
+</body>
+</html>

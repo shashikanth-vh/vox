@@ -193,6 +193,11 @@ services:
       # and X-User-Email is ignored. Override the two ${...} to point at a real IdP.
       GATEWAY_OIDC_ISSUER: "${GATEWAY_OIDC_ISSUER:-}"
       GATEWAY_OIDC_AUDIENCE: "${GATEWAY_OIDC_AUDIENCE:-prism}"
+      # Cross-origin UI support: origins allowed to call the APIs from the browser.
+      # Leave EMPTY when the UI is served from deploy/ui/ (same origin, no CORS
+      # needed). Set e.g. "https://ui.example.com,http://localhost:5173" for a UI
+      # hosted elsewhere or a local dev server.
+      GATEWAY_CORS_ORIGINS: "${GATEWAY_CORS_ORIGINS:-}"
       GATEWAY_REQUIRE_AUTH: "${GATEWAY_REQUIRE_AUTH:-false}"
       GATEWAY_LOG_JSON: "true"
     ports:
@@ -356,6 +361,9 @@ services:
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro
+      # The ATLAS UI — static files served same-origin at https://<host>:8443/ui/
+      # (drop the SPA build or the single-file ATLAS html into deploy/ui/).
+      - ../ui:/usr/share/nginx/html/ui:ro
     ports:
       - "8080:80"     # HTTP → 301 redirect to HTTPS (+ /healthz, /readyz)
       - "8443:443"    # HTTPS — the real front door

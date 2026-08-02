@@ -21,7 +21,15 @@ gateway). The gateway routes by prefix:
 | `/access/v1/*` | Access | user & role governance screens (admin only) |
 | `/vocx/*` | VocX | voice capture |
 
-Serve the SPA from the same origin (NGINX static block) — then CORS never exists.
+Serve the SPA from the same origin — the edge now has a ready slot: drop the build
+into `deploy/ui/` and it's served at `https://<host>:8443/ui/` (`/` redirects there;
+SPA deep links fall back to index.html). Same origin as every API ⇒ CORS never exists,
+from any browser on any machine. A UI hosted on a *different* origin (separate static
+host, `localhost:5173` dev server) is also supported: allow it with
+`GATEWAY_CORS_ORIGINS` (comma-separated; Helm `gateway.corsOrigins`) — bearer-header
+auth means no cookies, so an allowed origin still needs a valid token on every call.
+Sign-in works with Dex or Google either way; the Google specifics (multi-issuer env +
+Authorized JavaScript origins) are in `deploy/ui/README.md`.
 
 **Auth.** Production posture: OIDC. The SPA runs the standard authorization-code flow
 against the IdP (Dex locally; Entra/Okta/Google later), attaches `Authorization: Bearer
