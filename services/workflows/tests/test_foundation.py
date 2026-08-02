@@ -149,3 +149,31 @@ def test_next_wakeup_is_the_earliest_due_moment():
     assert f.next_wakeup(60 * h, 40 * h, 24.0, 72.0) == 12 * h
     # Never sleeps a non-positive interval.
     assert f.next_wakeup(80 * h, 1 * h, 24.0, 72.0) >= timedelta(seconds=1)
+
+
+# ---------------------------------------------------------------------------------------- #
+# Approver notification for parked decisions (the "committee-review task" seam)
+# ---------------------------------------------------------------------------------------- #
+def test_approver_notify_parses_the_comma_list(monkeypatch):
+    from app.config import Settings
+    monkeypatch.setenv("WORKFLOWS_APPROVER_NOTIFY",
+                       " credit.head@evamfinance.com, checker@evamfinance.com ,")
+    assert Settings().approver_notify_list() == [
+        "credit.head@evamfinance.com", "checker@evamfinance.com"]
+    monkeypatch.delenv("WORKFLOWS_APPROVER_NOTIFY")
+    assert Settings().approver_notify_list() == []      # empty → requester-only fallback
+
+
+def test_decision_awaiting_inputs_carry_the_approver_list():
+    """Every workflow that parks awaiting a governance decision takes the deployment's
+    approver list in its INPUT (deterministic-workflow pattern: the orchestrator reads
+    settings; workers never do). The schema bump keeps old histories replayable."""
+    from app import types as t
+    for inp in (t.LeadConversionInput(lead_id="L1", requested_by="rm@x"),
+                t.DealStructuringInput(deal_id="D1", requested_by="rm@x"),
+                t.SyndicationMandateInput(syndication_id="S1", deal_id="D1",
+                                          requested_by="rm@x"),
+                t.AssetMonetisationInput(asset_mon_id="A1", deal_id="D1",
+                                         requested_by="rm@x")):
+        assert inp.approver_notify == []                # default: notify the requester
+        assert inp.schema_version == 2, type(inp).__name__

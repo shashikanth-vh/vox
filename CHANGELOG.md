@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Approvers are now told when a run parks awaiting their decision.** Until now the
+  four governance parks (lead conversion, committee/deal structuring, syndication
+  mandate, asset-monetisation closure) waited silently — SLA reminders went only to
+  the requester, so the "create a committee-review task" step of the journey had no
+  notification leg. Each park now emits an `awaiting_*_decision` operational event
+  (log + ops webhook + durable in-app notification when notifications are enabled)
+  addressed to the deployment's approver list — `WORKFLOWS_APPROVER_NOTIFY`
+  (comma-separated emails; Helm `foundation.approverNotify`), read by the
+  orchestrator and threaded into each run's input (workers never read settings).
+  Empty list = the requester is notified, so a park is never silent. The parked,
+  queryable run itself remains the work item — PRISM deliberately has no separate
+  task table. Input contracts bump to `schema_version: 2` (old histories replay
+  fine; the new field defaults to empty).
+
 - **Entity lifecycle = the Vistaar journey (the parked vocabulary decision, settled).**
   The prototype's Lifecycle dropdown answers the open question from the v19 cross-check:
   the vocabulary is `Prospect → Onboarded → Active → Serviced → Vistaar — Expansion →

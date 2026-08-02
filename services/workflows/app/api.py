@@ -680,6 +680,7 @@ def create_app() -> FastAPI:
                              LeadConversionInput(
                                  caller=caller,
                                  emit_search_attributes=settings.search_attributes_enabled,
+                                 approver_notify=settings.approver_notify_list(),
                                  **payload.model_dump()),
                              wf_id, restart_if_closed=True, memo=memo)
         wf_id = handle.id  # may be the #n retry id if a prior attempt had closed
@@ -1281,9 +1282,12 @@ def create_app() -> FastAPI:
         memo = {"initiator": (caller.email or requested_by or ""), "tenant": caller.tenant,
                 **extra_memo}
         import dataclasses as _dc
-        if "emit_search_attributes" in {f.name for f in _dc.fields(arg_cls)}:
+        field_names = {f.name for f in _dc.fields(arg_cls)}
+        if "emit_search_attributes" in field_names:
             arg_fields.setdefault("emit_search_attributes",
                                   settings.search_attributes_enabled)
+        if "approver_notify" in field_names:
+            arg_fields.setdefault("approver_notify", settings.approver_notify_list())
         handle = await start(request, workflow_cls, arg_cls(caller=caller, **arg_fields), wf_id,
                              restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={

@@ -66,6 +66,10 @@ spec:
               value: {{ .Values.foundation.voxConfirmLeadSelection | quote }}
             - name: WORKFLOWS_QUALIFICATION_CHECKLIST
               value: {{ .Values.foundation.qualificationChecklist | quote }}
+            # Approver list for runs parked awaiting a governance decision (threaded
+            # into each run's input here — workers never read this setting).
+            - name: WORKFLOWS_APPROVER_NOTIFY
+              value: {{ .Values.foundation.approverNotify | quote }}
             # Increment 7: VOX calendar events + document-expiry monitor defaults.
             - name: WORKFLOWS_CALENDAR_EVENTS_ENABLED
               value: {{ .Values.foundation.calendarEventsEnabled | quote }}

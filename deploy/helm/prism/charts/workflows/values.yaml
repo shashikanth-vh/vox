@@ -34,6 +34,10 @@ foundation:
   voxConfirmLeadSelection: false
   # Deployment-wide qualification checklist definitions (JSON list; empty = legacy flag).
   qualificationChecklist: ""
+  # WHO is notified when a run parks awaiting a governance decision (committee /
+  # conversion / syndication / closure): comma-separated emails, e.g. the Credit Head
+  # + checkers. Empty = the requester only.
+  approverNotify: ""
   # Increment 7: VOX captures with a next-meeting date create a first-class Register
   # calendar event (per-run idempotent) instead of only the meta.calendar note.
   calendarEventsEnabled: false

@@ -522,6 +522,13 @@ class LeadConversionWorkflow:
         start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
         _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
                        f"Lead:{inp.lead_id}")
+        # The "committee-review task": tell the deployment's approvers a decision is now
+        # awaited (falling back to the requester so the park is never silent). The parked
+        # run itself is the queryable work item; SLA reminders below keep it alive.
+        await _emit_ops("awaiting_conversion_decision", {
+            "subject": f"Lead:{inp.lead_id}", "requested_by": inp.requested_by,
+            "business_status": self._fnd.business_status},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         while self._decision is None:
             waited = workflow.now() - start
             remaining = total - waited
@@ -866,6 +873,13 @@ class DealStructuringWorkflow:
         total = timedelta(hours=inp.decision_timeout_hours)
         start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
         _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
+        # The "committee-review task": notify the deployment's approvers that the note is
+        # circulated and a committee decision is now awaited (fallback: the requester).
+        await _emit_ops("awaiting_committee_decision", {
+            "subject": subject, "requested_by": inp.requested_by,
+            "note_reference": inp.credit_note_reference,
+            "business_status": self._fnd.business_status},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         verified: dict[str, Any] | None = None
         facility_outcomes: dict[str, dict[str, Any]] = {}
         while verified is None:
@@ -1216,6 +1230,12 @@ class SyndicationMandateWorkflow:
         self._stage = "Awaiting syndication decision"
         total = timedelta(hours=inp.decision_timeout_hours)
         start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        # Tell the deployment's approvers the mandate now awaits their decision
+        # (fallback: the requester) — the parked run is the queryable work item.
+        await _emit_ops("awaiting_syndication_decision", {
+            "subject": subject, "requested_by": inp.requested_by,
+            "business_status": self._fnd.business_status},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         verified: dict[str, Any] | None = None
         while verified is None:
             waited = workflow.now() - start
@@ -1543,6 +1563,12 @@ class AssetMonetisationWorkflow:
         self._stage = "Awaiting closure decision"
         total = timedelta(hours=inp.decision_timeout_hours)
         start = workflow.now() - timedelta(hours=inp.resumed_elapsed_hours)
+        # Tell the deployment's approvers the monetisation now awaits the closure
+        # decision (fallback: the requester) — the parked run is the work item.
+        await _emit_ops("awaiting_am_decision", {
+            "subject": subject, "requested_by": inp.requested_by,
+            "business_status": self._fnd.business_status},
+            notify_to=(inp.approver_notify or [inp.requested_by]))
         verified: dict[str, Any] | None = None
         while verified is None:
             waited = workflow.now() - start

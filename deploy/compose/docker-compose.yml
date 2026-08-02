@@ -513,6 +513,11 @@ services:
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
       # Verify the gateway's signed caller context and thread the human into the workflow.
       WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
+      # WHO is notified when a run parks awaiting a governance decision (committee /
+      # conversion / syndication / closure): comma-separated emails, e.g. the Credit
+      # Head + checkers. Empty = the requester only. Threaded into each run's input
+      # here (the orchestrator builds workflow inputs; workers never read settings).
+      WORKFLOWS_APPROVER_NOTIFY: "${WORKFLOWS_APPROVER_NOTIFY:-}"
       # Approver role checks resolve against the Access service.
       WORKFLOWS_ACCESS_URL: "http://access:8000"
       WORKFLOWS_ACCESS_API_KEY: "dev-local-key"

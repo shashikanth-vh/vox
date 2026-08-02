@@ -143,6 +143,10 @@ class Settings(BaseServiceSettings):
     # The document-expiry monitor workflow: sweep cadence and the warn-ahead window.
     doc_expiry_interval_hours: float = 24.0
     doc_expiry_warn_days: int = 7
+    # WHO is told when a run parks awaiting a governance decision (committee /
+    # conversion / syndication / closure) — comma-separated recipient identities
+    # (emails). Empty = fall back to notifying the requester only.
+    approver_notify: str = ""
 
     # --- Increment 8: covenants + EWS ------------------------------------------------- #
     # The covenant monitor workflow: sweep cadence and how far ahead observations are
@@ -158,6 +162,9 @@ class Settings(BaseServiceSettings):
 
     def notify_channel_list(self) -> list[str]:
         return [c.strip() for c in self.notify_channels.split(",") if c.strip()]
+
+    def approver_notify_list(self) -> list[str]:
+        return [c.strip() for c in self.approver_notify.split(",") if c.strip()]
 
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]

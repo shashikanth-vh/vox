@@ -173,9 +173,12 @@ class LeadConversionInput:
     note: str | None = None
     # The tenant + human this conversion acts for (set by the orchestrator from the request).
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the run parks awaiting this decision — the deployment's
+    # governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty → the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
     # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
     # SLA reminders while the run waits on a human: every N hours an operational event
     # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"
@@ -280,9 +283,12 @@ class DealStructuringInput:
     credit_note_reference: str = ""     # the structured credit note circulated to committee
     decision_timeout_hours: int = 24 * 14
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the run parks awaiting this decision — the deployment's
+    # governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty → the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
     # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
     # SLA reminders while the run waits on a human: every N hours an operational event
     # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"
@@ -339,9 +345,12 @@ class SyndicationMandateInput:
     emit_search_attributes: bool = False
     resumed_elapsed_hours: float = 0.0
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the run parks awaiting this decision — the deployment's
+    # governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty → the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
 
 
 @dataclass
@@ -376,9 +385,12 @@ class AssetMonetisationInput:
     emit_search_attributes: bool = False
     resumed_elapsed_hours: float = 0.0
     caller: CallerContext = field(default_factory=CallerContext)
+    # WHO to notify when the run parks awaiting this decision — the deployment's
+    # governance approver list (WORKFLOWS_APPROVER_NOTIFY). Empty → the requester.
+    approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 1
+    schema_version: int = 2   # v2: + approver_notify
 
 
 @dataclass
