@@ -111,3 +111,24 @@ async def test_dossier(client: AsyncClient):
     r = await client.get(f"/v1/entities/{eid}/dossier")
     assert r.status_code == 200
     assert r.json()["counts"]["deals"] == 1
+
+
+async def test_entity_lifecycle_is_the_vistaar_journey(client: AsyncClient):
+    """The client RELATIONSHIP journey (ATLAS 'Vistaar journey') is its own field —
+    distinct from register_status (the origination marker) — and its vocabulary is
+    served from refdata so the UI dropdown never hard-codes it."""
+    import uuid as _uuid
+    code = "LC" + _uuid.uuid4().hex[:6].upper()
+    r = await client.post("/v1/entities", json={
+        "code": code, "legal_name": "Lifecycle Co", "entity_type": "Company",
+        "register_status": "Pipeline", "lifecycle": "Prospect"})
+    assert r.status_code == 201, r.text
+    row = r.json()
+    assert (row["register_status"], row["lifecycle"]) == ("Pipeline", "Prospect")
+    r = await client.patch(f"/v1/entities/{row['id']}",
+                           json={"lifecycle": "Vistaar — Expansion"})
+    assert r.status_code == 200 and r.json()["lifecycle"] == "Vistaar — Expansion"
+    # The vocabulary ships as refdata (served by /v1/ref on a bootstrapped deployment).
+    from app.seed.refdata import REF_VALUES
+    assert REF_VALUES["Entity Lifecycle"] == [
+        "Prospect", "Onboarded", "Active", "Serviced", "Vistaar — Expansion", "Dormant"]

@@ -54,7 +54,11 @@ class Entity(RegisterBase):
     state: Mapped[str | None] = mapped_column(String(60))
     location: Mapped[str | None] = mapped_column(String(200))
 
-    register_status: Mapped[str | None] = mapped_column(String(40), index=True)  # backfill lifecycle
+    register_status: Mapped[str | None] = mapped_column(String(40), index=True)  # origination marker
+    # The client's RELATIONSHIP journey (the ATLAS "Vistaar journey"): Prospect →
+    # Onboarded → Active → Serviced → Vistaar — Expansion → Dormant. Distinct from
+    # register_status, which marks how the record entered the book.
+    lifecycle: Mapped[str | None] = mapped_column(String(40), index=True)
     promoter_group_code: Mapped[str | None] = mapped_column(String(60), index=True)
 
     about: Mapped[str | None] = mapped_column(Text)

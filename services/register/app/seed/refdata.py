@@ -25,6 +25,10 @@ REF_VALUES: dict[str, list[str]] = {
         "OEM Bundle Equipment Finance",
     ],
     "Register Status": ["Pipeline", "Sanctioned", "Rejected", "Market Intelligence"],
+    # The client RELATIONSHIP journey (ATLAS "Vistaar journey") — the vocabulary the
+    # prototype's Lifecycle dropdown uses, adopted verbatim as entities.lifecycle.
+    "Entity Lifecycle": ["Prospect", "Onboarded", "Active", "Serviced",
+                         "Vistaar — Expansion", "Dormant"],
     "Entity Type": ["Company", "Promoter", "Director", "Related Party"],
     "Person Role": ["Admin", "Management", "RM", "Analyst", "Ops"],
     # The Deal ORIGINATION-FUNNEL vocabulary (verbatim Evam MIS terms) — a separate

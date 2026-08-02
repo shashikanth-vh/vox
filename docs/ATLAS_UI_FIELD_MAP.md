@@ -28,7 +28,7 @@ field names** — the mapping below is applied only in the UI's column definitio
 | Sector | `sector` | `sector` | |
 | — | — | `sub_sector` | Finer grain; new in PRISM. |
 | Lens | `lens` | `lens` | |
-| Lifecycle | — | `register_status` | Same concept, clearer storage name (Pipeline / Client / Market Intelligence / …). |
+| Lifecycle (Vistaar journey) | — | `lifecycle` | Its own field: Prospect → Onboarded → Active → Serviced → Vistaar — Expansion → Dormant (refdata "Entity Lifecycle"). Distinct from `register_status`, the origination marker (Pipeline / Sanctioned / Market Intelligence). |
 | State | `state` | `state` | |
 | About | `about` | `about` | The curated company blurb. |
 | — | `toi` | `toi` | Carried verbatim from the ATLAS sheet's `toi` column. |

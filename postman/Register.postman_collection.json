@@ -5005,7 +5005,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"about\": \"sample about\",\n  \"cin\": \"sample cin\",\n  \"code\": \"sample code\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"gstin\": \"sample gstin\",\n  \"legal_name\": \"sample legal_name\",\n  \"lens\": \"sample lens\",\n  \"location\": \"sample location\",\n  \"notes\": \"sample notes\",\n  \"pan\": \"sample pan\",\n  \"promoter_group_code\": \"sample promoter_group_code\",\n  \"register_status\": \"sample register_status\",\n  \"sector\": \"sample sector\"\n}",
+              "raw": "{\n  \"about\": \"sample about\",\n  \"cin\": \"sample cin\",\n  \"code\": \"sample code\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"gstin\": \"sample gstin\",\n  \"legal_name\": \"sample legal_name\",\n  \"lens\": \"sample lens\",\n  \"lifecycle\": \"sample lifecycle\",\n  \"location\": \"sample location\",\n  \"notes\": \"sample notes\",\n  \"pan\": \"sample pan\",\n  \"promoter_group_code\": \"sample promoter_group_code\",\n  \"register_status\": \"sample register_status\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5230,7 +5230,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"about\": \"sample about\",\n  \"cin\": \"sample cin\",\n  \"code\": \"sample code\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"gstin\": \"sample gstin\",\n  \"legal_name\": \"sample legal_name\",\n  \"lens\": \"sample lens\",\n  \"location\": \"sample location\",\n  \"notes\": \"sample notes\",\n  \"pan\": \"sample pan\",\n  \"promoter_group_code\": \"sample promoter_group_code\",\n  \"register_status\": \"sample register_status\",\n  \"sector\": \"sample sector\"\n}",
+              "raw": "{\n  \"about\": \"sample about\",\n  \"cin\": \"sample cin\",\n  \"code\": \"sample code\",\n  \"display_name\": \"sample display_name\",\n  \"entity_type\": \"sample entity_type\",\n  \"gstin\": \"sample gstin\",\n  \"legal_name\": \"sample legal_name\",\n  \"lens\": \"sample lens\",\n  \"lifecycle\": \"sample lifecycle\",\n  \"location\": \"sample location\",\n  \"notes\": \"sample notes\",\n  \"pan\": \"sample pan\",\n  \"promoter_group_code\": \"sample promoter_group_code\",\n  \"register_status\": \"sample register_status\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

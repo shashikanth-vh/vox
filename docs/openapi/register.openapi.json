@@ -5514,6 +5514,18 @@
             ],
             "title": "Lens"
           },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
           "location": {
             "anyOf": [
               {
@@ -5744,6 +5756,17 @@
             ],
             "title": "Lens"
           },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
           "location": {
             "anyOf": [
               {
@@ -5902,6 +5925,7 @@
           "state",
           "location",
           "register_status",
+          "lifecycle",
           "promoter_group_code",
           "about",
           "toi",
@@ -6019,6 +6043,18 @@
               }
             ],
             "title": "Lens"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
           },
           "location": {
             "anyOf": [

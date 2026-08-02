@@ -176,6 +176,7 @@ def _base_0001_initial_schema() -> None:
             state varchar(60),
             location varchar(200),
             register_status varchar(40),
+            lifecycle varchar(40),
             promoter_group_code varchar(60),
             about text,
             toi text,

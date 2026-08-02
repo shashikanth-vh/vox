@@ -80,6 +80,7 @@ class EntityCreate(CreateModel):
     state: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=200)
     register_status: str | None = Field(default=None, max_length=40)
+    lifecycle: str | None = Field(default=None, max_length=40)
     promoter_group_code: str | None = Field(default=None, max_length=60)
     about: str | None = None
     toi: str | None = None
@@ -101,6 +102,7 @@ class EntityUpdate(UpdateModel):
     state: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=200)
     register_status: str | None = Field(default=None, max_length=40)
+    lifecycle: str | None = Field(default=None, max_length=40)
     promoter_group_code: str | None = Field(default=None, max_length=60)
     about: str | None = None
     toi: str | None = None
@@ -122,6 +124,7 @@ class EntityRead(ReadModel):
     state: str | None
     location: str | None
     register_status: str | None
+    lifecycle: str | None
     promoter_group_code: str | None
     about: str | None
     toi: str | None

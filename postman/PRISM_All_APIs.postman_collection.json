@@ -4388,7 +4388,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"sample\",\n  \"legal_name\": \"sample\",\n  \"display_name\": \"sample\",\n  \"entity_type\": \"sample\",\n  \"cin\": \"sample\",\n  \"pan\": \"sample\",\n  \"gstin\": \"sample\",\n  \"sector\": \"sample\",\n  \"sub_sector\": \"sample\",\n  \"lens\": \"sample\",\n  \"state\": \"sample\",\n  \"location\": \"sample\",\n  \"register_status\": \"sample\",\n  \"promoter_group_code\": \"sample\",\n  \"about\": \"sample\",\n  \"toi\": \"sample\",\n  \"notes\": \"sample\",\n  \"tags\": [\n    \"sample\"\n  ]\n}",
+                  "raw": "{\n  \"code\": \"sample\",\n  \"legal_name\": \"sample\",\n  \"display_name\": \"sample\",\n  \"entity_type\": \"sample\",\n  \"cin\": \"sample\",\n  \"pan\": \"sample\",\n  \"gstin\": \"sample\",\n  \"sector\": \"sample\",\n  \"sub_sector\": \"sample\",\n  \"lens\": \"sample\",\n  \"state\": \"sample\",\n  \"location\": \"sample\",\n  \"register_status\": \"sample\",\n  \"lifecycle\": \"sample\",\n  \"promoter_group_code\": \"sample\",\n  \"about\": \"sample\",\n  \"toi\": \"sample\",\n  \"notes\": \"sample\",\n  \"tags\": [\n    \"sample\"\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4623,7 +4623,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"code\": \"sample\",\n  \"legal_name\": \"sample\",\n  \"display_name\": \"sample\",\n  \"entity_type\": \"sample\",\n  \"cin\": \"sample\",\n  \"pan\": \"sample\",\n  \"gstin\": \"sample\",\n  \"sector\": \"sample\",\n  \"sub_sector\": \"sample\",\n  \"lens\": \"sample\",\n  \"state\": \"sample\",\n  \"location\": \"sample\",\n  \"register_status\": \"sample\",\n  \"promoter_group_code\": \"sample\",\n  \"about\": \"sample\",\n  \"toi\": \"sample\",\n  \"notes\": \"sample\",\n  \"tags\": [\n    \"sample\"\n  ]\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"code\": \"sample\",\n  \"legal_name\": \"sample\",\n  \"display_name\": \"sample\",\n  \"entity_type\": \"sample\",\n  \"cin\": \"sample\",\n  \"pan\": \"sample\",\n  \"gstin\": \"sample\",\n  \"sector\": \"sample\",\n  \"sub_sector\": \"sample\",\n  \"lens\": \"sample\",\n  \"state\": \"sample\",\n  \"location\": \"sample\",\n  \"register_status\": \"sample\",\n  \"lifecycle\": \"sample\",\n  \"promoter_group_code\": \"sample\",\n  \"about\": \"sample\",\n  \"toi\": \"sample\",\n  \"notes\": \"sample\",\n  \"tags\": [\n    \"sample\"\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"

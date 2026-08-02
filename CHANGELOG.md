@@ -6,6 +6,15 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Entity lifecycle = the Vistaar journey (the parked vocabulary decision, settled).**
+  The prototype's Lifecycle dropdown answers the open question from the v19 cross-check:
+  the vocabulary is `Prospect → Onboarded → Active → Serviced → Vistaar — Expansion →
+  Dormant`. It lands as its OWN field — `entities.lifecycle` (+ schemas, baseline DDL,
+  refdata "Entity Lifecycle") — because it is the client RELATIONSHIP journey, distinct
+  from `register_status` (the origination marker: Pipeline / Sanctioned / Market
+  Intelligence), which the earlier field map had wrongly conflated with it (doc
+  corrected). Existing dev DBs: the usual one-time recreate.
+
 - **The Advaya boundary: PRISM now stops at CONFIRMED ACCEPTANCE, not at its own
   approval.** Evam is the NBFC; Advaya is the payment/servicing platform — so PRISM's
   workflow ends when Advaya has validated and accepted the disbursement-ready case,
