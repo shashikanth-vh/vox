@@ -6868,7 +6868,7 @@
               }
             },
             {
-              "name": "GET /v1/internal/cpcs-checklists \u2014 List CP/CS checklists (the checker's queue: ?status=Prepared)",
+              "name": "GET /v1/internal/cpcs-checklists \u2014 List CP/CS checklists (the checker's queue: ?status=Completed)",
               "request": {
                 "method": "GET",
                 "header": [
@@ -6917,7 +6917,7 @@
                     }
                   ]
                 },
-                "description": "How a CHECKER discovers work: ``?status=Prepared`` is everything awaiting a\ncheck, newest first \u2014 regardless of whether the maker prepared it through the\norchestrator lane or this register surface. ``lending_id`` narrows to one line\n(all its versions)."
+                "description": "How a CHECKER discovers work: ``?status=Completed`` is every maker-finished\nchecklist awaiting a check (the vocabulary is Draft | Completed | Approved |\nReturned), newest first \u2014 regardless of whether the maker prepared it through the\norchestrator lane or this register surface. ``lending_id`` narrows to one line\n(all its versions)."
               }
             },
             {

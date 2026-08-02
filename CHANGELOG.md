@@ -11,7 +11,8 @@ bundle, or just check that the newest item below is present in your copy).
   REGISTER row, not a parked run), so they were invisible to the Today list and no
   notification fired. Now:
   * `GET /v1/internal/cpcs-checklists` and `GET /v1/internal/handover-packages` — the
-    checker queues (`?status=Prepared`), filterable, newest first, both lanes.
+    checker queues (checklists: `?status=Completed`, the maker-finished state;
+    packages: `?status=Prepared`), filterable, newest first, both lanes.
   * `GET /orchestrator/v1/workflows/pending` merges those queues as kinds
     `cpcs-checklist` / `advaya-handover` (register-sourced rows with checklist/package
     ids and ready-made orchestrator approve URLs; role-scoped to Credit Head /

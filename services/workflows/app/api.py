@@ -2117,9 +2117,11 @@ def create_app() -> FastAPI:
         "asset-monetisation": "AssetMonetisationWorkflow",
     }
 
-    # Register-sourced pending kinds: (queue path, approver-role prefix).
+    # Register-sourced pending kinds: (queue path, approver-role prefix). NB the two
+    # vocabularies differ: a maker's finished CHECKLIST is 'Completed' (awaiting the
+    # check); a handover PACKAGE awaiting its check is 'Prepared'.
     _PENDING_REGISTER_QUEUES: dict[str, tuple[str, str]] = {
-        "cpcs-checklist": ("/v1/internal/cpcs-checklists?status=Prepared", "cpcs"),
+        "cpcs-checklist": ("/v1/internal/cpcs-checklists?status=Completed", "cpcs"),
         "advaya-handover": ("/v1/internal/handover-packages?status=Prepared", "handover"),
     }
 
@@ -2237,8 +2239,8 @@ def create_app() -> FastAPI:
                     extra = {"package_id": row.get("id")}
                 pending.append({
                     "kind": k, "subject_id": lending_id, "workflow_id": None,
-                    "status": "Prepared",
-                    "stage": "Prepared — awaiting checker approval",
+                    "status": row.get("status"),
+                    "stage": "Awaiting checker approval",
                     "requested_by": row.get("prepared_by"),
                     "started_at": row.get("created_at"),
                     "approve_url": approve, **extra})

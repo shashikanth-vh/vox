@@ -195,7 +195,9 @@ at the POST.
 > **How the checker finds out:** a Prepared checklist appears in
 > `GET /orchestrator/v1/workflows/pending` as kind `cpcs-checklist` (with the
 > `checklist_id` and a ready-made approve URL), and in the direct queue
-> `GET /v1/internal/cpcs-checklists?status=Prepared`. Started through the
+> `GET /v1/internal/cpcs-checklists?status=Completed` (a maker-finished checklist is
+> 'Completed' — the vocabulary is Draft | Completed | Approved | Returned). Started
+> through the
 > orchestrator lane it ALSO notifies `WORKFLOWS_APPROVER_NOTIFY`. Same pattern for
 > handover packages (kind `advaya-handover`,
 > `GET /v1/internal/handover-packages?status=Prepared`). The approval itself can

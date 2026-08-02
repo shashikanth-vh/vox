@@ -44578,7 +44578,7 @@
     },
     "/v1/internal/cpcs-checklists": {
       "get": {
-        "description": "How a CHECKER discovers work: ``?status=Prepared`` is everything awaiting a\ncheck, newest first \u2014 regardless of whether the maker prepared it through the\norchestrator lane or this register surface. ``lending_id`` narrows to one line\n(all its versions).",
+        "description": "How a CHECKER discovers work: ``?status=Completed`` is every maker-finished\nchecklist awaiting a check (the vocabulary is Draft | Completed | Approved |\nReturned), newest first \u2014 regardless of whether the maker prepared it through the\norchestrator lane or this register surface. ``lending_id`` narrows to one line\n(all its versions).",
         "operationId": "list_checklists_v1_internal_cpcs_checklists_get",
         "parameters": [
           {
@@ -44828,7 +44828,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List CP/CS checklists (the checker's queue: ?status=Prepared)",
+        "summary": "List CP/CS checklists (the checker's queue: ?status=Completed)",
         "tags": [
           "Internal"
         ]

@@ -81,15 +81,20 @@ class _FakeTemporal:
 
 
 class _FakeHttp:
-    """Serves the register checker queues by URL fragment; everything else 404s."""
+    """Serves the register checker queues by URL fragment — and HONOURS the ?status=
+    filter like the real register does, so a wrong status in the query surfaces as an
+    empty queue here too (that exact mock drift once hid a Prepared-vs-Completed bug)."""
 
     def __init__(self, queues: dict[str, list] | None = None) -> None:
         self.queues = queues or {}
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        parsed = httpx.URL(url)
+        want = parsed.params.get("status")
         for frag, rows in self.queues.items():
-            if frag in url:
-                return httpx.Response(200, json=rows,
+            if frag in parsed.path:
+                hits = [r for r in rows if not want or r.get("status") == want]
+                return httpx.Response(200, json=hits,
                                       request=httpx.Request("GET", url))
         return httpx.Response(404, json={"error": "nope"},
                               request=httpx.Request("GET", url))
@@ -249,14 +254,24 @@ async def test_pending_includes_the_register_checker_queues(monkeypatch):
     rows (their prepare-workflows complete immediately) — the Today list reads them
     from the Register so the checker sees them regardless of which lane prepared them."""
     http = _FakeHttp({
+        # A maker-finished checklist is 'Completed' (vocabulary: Draft | Completed |
+        # Approved | Returned); a package awaiting its check is 'Prepared'. The extra
+        # rows prove the queues filter: a Returned checklist and an Accepted package
+        # must NOT appear as pending.
         "/v1/internal/cpcs-checklists": [
             {"id": "chk-1", "lending_id": "LEND9", "checklist_version": 2,
-             "status": "Prepared", "prepared_by": "maker@evamfinance.com",
-             "created_at": "2026-08-01T09:00:00+00:00"}],
+             "status": "Completed", "prepared_by": "maker@evamfinance.com",
+             "created_at": "2026-08-01T09:00:00+00:00"},
+            {"id": "chk-0", "lending_id": "LEND9", "checklist_version": 1,
+             "status": "Returned", "prepared_by": "maker@evamfinance.com",
+             "created_at": "2026-07-30T09:00:00+00:00"}],
         "/v1/internal/handover-packages": [
             {"id": "pkg-1", "lending_id": "LEND9", "status": "Prepared",
              "prepared_by": "maker@evamfinance.com",
-             "created_at": "2026-08-01T10:00:00+00:00"}]})
+             "created_at": "2026-08-01T10:00:00+00:00"},
+            {"id": "pkg-0", "lending_id": "LEND8", "status": "Accepted",
+             "prepared_by": "maker@evamfinance.com",
+             "created_at": "2026-07-29T10:00:00+00:00"}]})
     app = _app(monkeypatch, _FakeTemporal({}), http)
     r = await _get_pending(app)
     assert r.status_code == 200, r.text
@@ -265,7 +280,7 @@ async def test_pending_includes_the_register_checker_queues(monkeypatch):
     cp = next(p for p in body["pending"] if p["kind"] == "cpcs-checklist")
     assert cp["subject_id"] == "LEND9" and cp["checklist_version"] == 2
     assert cp["approve_url"] == "/v1/workflows/cpcs-checklists/chk-1/approve"
-    assert cp["stage"] == "Prepared — awaiting checker approval"
+    assert cp["status"] == "Completed" and cp["stage"] == "Awaiting checker approval"
     ho = next(p for p in body["pending"] if p["kind"] == "advaya-handover")
     assert ho["approve_url"] == "/v1/workflows/advaya-handover/LEND9/approve"
     # The kind filter reaches the register-sourced kinds too.

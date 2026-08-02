@@ -112,13 +112,14 @@ def _serialize(row: CpcsChecklist) -> dict[str, Any]:
 
 
 @router.get("/v1/internal/cpcs-checklists", tags=["Internal"],
-            summary="List CP/CS checklists (the checker's queue: ?status=Prepared)")
+            summary="List CP/CS checklists (the checker's queue: ?status=Completed)")
 async def list_checklists(ctx: RequestContext = Depends(get_context),
                           lending_id: str | None = Query(default=None),
                           status: str | None = Query(default=None),
                           limit: int = Query(default=100, ge=1, le=500)) -> list[dict]:
-    """How a CHECKER discovers work: ``?status=Prepared`` is everything awaiting a
-    check, newest first — regardless of whether the maker prepared it through the
+    """How a CHECKER discovers work: ``?status=Completed`` is every maker-finished
+    checklist awaiting a check (the vocabulary is Draft | Completed | Approved |
+    Returned), newest first — regardless of whether the maker prepared it through the
     orchestrator lane or this register surface. ``lending_id`` narrows to one line
     (all its versions)."""
     conds = [CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.deleted_at.is_(None)]
