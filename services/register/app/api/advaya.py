@@ -28,7 +28,7 @@ from app.models.advaya import AdvayaHandoff
 
 router = api_router()
 
-_ALLOWED_SERVICES = {"svc_workflows"}
+_ALLOWED_SERVICES = {"svc_workflows", "svc_advaya"}
 
 
 class HandoffIn(BaseModel):
@@ -74,12 +74,39 @@ async def record_handoff(payload: HandoffIn, ctx: RequestContext = Depends(get_c
         .on_conflict_do_nothing(constraint="advaya_handoffs_tenant_key")
         .returning(AdvayaHandoff.id))).scalar_one_or_none()
     if won is not None:
+        # Advaya's answer SETTLES the submitted handover package — this is PRISM's
+        # workflow boundary. Accepted freezes the package and stores the acknowledgement
+        # as the one-time advaya_reference; Rejected reopens the prepare→approve→submit
+        # loop. A handoff for a package that was never submitted is a sequencing bug.
+        from app.models.advaya import AdvayaHandoverPackage
+        pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
+            AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+            AdvayaHandoverPackage.lending_id == payload.lending_id,
+            AdvayaHandoverPackage.deleted_at.is_(None)).with_for_update())
+            ).scalar_one_or_none()
+        if pkg is None:
+            raise ConflictError(
+                f"No handover package exists for Lending line {payload.lending_id!r}; "
+                "an Advaya outcome cannot be recorded for a package PRISM never made.")
+        if pkg.status != "Submitted":
+            raise ConflictError(
+                f"Handover package is {pkg.status!r}, not 'Submitted'; Advaya outcomes "
+                "apply only to a submitted package (prepare → approve → submit first).")
+        pkg.status = "Accepted" if payload.status == "Accepted" else "Rejected"
+        if payload.status == "Accepted" and payload.acknowledgement_id:
+            pkg.advaya_reference = payload.acknowledgement_id
+        pkg.updated_by = ctx.actor
+        if isinstance(pkg.snapshot, dict):
+            pkg.snapshot = {**pkg.snapshot, "advaya_outcome": payload.status,
+                            "advaya_acknowledgement_id": payload.acknowledgement_id,
+                            "advaya_note": payload.note}
         ctx.session.add(AuditLog(
             tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handoff",
             resource_type="advaya_handoffs", resource_id=str(won),
             request_id=request_id_ctx.get(),
             changes={"handoff_key": payload.handoff_key, "lending_id": payload.lending_id,
-                     "status": payload.status, "acknowledgement_id": payload.acknowledgement_id}))
+                     "status": payload.status, "acknowledgement_id": payload.acknowledgement_id,
+                     "package_id": str(pkg.id), "package_status": pkg.status}))
         row = (await ctx.session.execute(
             select(AdvayaHandoff).where(AdvayaHandoff.id == won))).scalar_one()
         return _serialize(row)

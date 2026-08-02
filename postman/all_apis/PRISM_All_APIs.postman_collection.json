@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (224 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (227 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -6667,6 +6667,90 @@
           "name": "Internal",
           "item": [
             {
+              "name": "POST /v1/internal/advaya-handoffs \u2014 Record an Advaya handoff outcome (single-winner)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "advaya-handoffs"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"handoff_key\": \"sample\",\n  \"lending_id\": \"sample\",\n  \"payload_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"status\": \"REPLACE-to-match-^(Accepted|Rejected)\",\n  \"acknowledgement_id\": \"sample\",\n  \"workflow_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/advaya-handoffs/{handoff_key} \u2014 Read a recorded Advaya handoff outcome",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs/{{handoff_key}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "advaya-handoffs",
+                    "{{handoff_key}}"
+                  ]
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/covenants/run-sweep \u2014 Covenant sweep: generate due observations, mark overdue, expire lapsed waivers (idempotent)",
               "request": {
                 "method": "POST",
@@ -7307,7 +7391,7 @@
               }
             },
             {
-              "name": "POST /v1/internal/handover-packages/{lending_id}/approve \u2014 CHECKER approves the handover (different person) and advances the stage",
+              "name": "POST /v1/internal/handover-packages/{lending_id}/approve \u2014 CHECKER approves the handover (different person) \u2014 the stage does NOT move",
               "request": {
                 "method": "POST",
                 "header": [
@@ -7340,7 +7424,8 @@
                     "{{lending_id}}",
                     "approve"
                   ]
-                }
+                },
+                "description": "Internal approval only. PRISM's boundary is Advaya's ACCEPTANCE: approving the\npackage makes it submittable; it does not assert that anything reached Advaya, and it\nnever advances the Lending stage \u2014 'Disbursed' is set only by Advaya's own\ndisbursement callbacks once the handoff is Accepted."
               }
             },
             {
@@ -7392,6 +7477,44 @@
                     }
                   }
                 }
+              }
+            },
+            {
+              "name": "POST /v1/internal/handover-packages/{lending_id}/submit \u2014 SUBMIT the approved package to Advaya (recorded intent, not acceptance)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lending_id}}/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "handover-packages",
+                    "{{lending_id}}",
+                    "submit"
+                  ]
+                },
+                "description": "Marks the approved package as sent to Advaya. Submission is PRISM's claim; the\nboundary state is Advaya's answer \u2014 ``/v1/internal/advaya-handoffs`` records the\nAccepted/Rejected outcome and only THAT settles the package."
               }
             },
             {

@@ -116,32 +116,55 @@ async def test_handover_return_reprepare_and_approve(client):
     assert re_prep.json()["recipient"] == "advaya-ops-corrected"
     assert re_prep.json()["package_sha256"] != sha_v1   # the manifest genuinely changed
 
-    # A DIFFERENT checker approves the rebuilt package → the line is handed over.
+    # A DIFFERENT checker approves the rebuilt package. The STAGE does not move —
+    # PRISM's boundary is Advaya's acceptance; 'Disbursed' comes only from Advaya's
+    # disbursement callbacks after that (test_advaya_boundary_* covers the full loop).
     appr = await client.post(f"/v1/internal/handover-packages/{lid}/approve",
                              headers=CREDIT_HEAD)
-    assert appr.status_code == 200 and appr.json()["status"] == "HandedOver"
+    assert appr.status_code == 200 and appr.json()["status"] == "Approved"
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed"
+    assert line["stage"] == "Ready for Disbursement"
 
 
 # --------------------------------------------------------------------------------------- #
 # Tranche-level disbursement callbacks
 # --------------------------------------------------------------------------------------- #
-async def _disbursed_line(client) -> str:  # noqa: ANN001
+async def _accepted_line(client, monkeypatch) -> str:  # noqa: ANN001
+    """A line at 'Ready for Disbursement' whose handover Advaya has ACCEPTED — the
+    boundary state from which tranche callbacks are legal (the first one flips the
+    stage to 'Disbursed')."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import create_app
+
+    s = get_settings()
+    monkeypatch.setattr(s, "advaya_integration_enabled", True)
+    monkeypatch.setattr(s, "advaya_integration_url", "https://advaya.simulated.local/api")
     eid = await _entity(client)
     lid = await _ready_lending(client, eid)
     assert (await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
                               headers=ADMIN)).status_code == 201
     appr = await client.post(f"/v1/internal/handover-packages/{lid}/approve",
                              headers=CREDIT_HEAD)
-    assert appr.status_code == 200 and appr.json()["status"] == "HandedOver"
+    assert appr.status_code == 200 and appr.json()["status"] == "Approved"
+    sub = await client.post(f"/v1/internal/handover-packages/{lid}/submit",
+                            headers=CREDIT_HEAD)
+    assert sub.status_code == 200 and sub.json()["status"] == "Submitted"
+    svc_adv = {"X-API-Key": "trn-key", "X-Tenant": "EVAM", "X-Actor": "advaya"}
+    async with AsyncClient(transport=ASGITransport(app=create_app()),
+                           base_url="http://adv", headers=svc_adv) as adv:
+        acc = await adv.post("/v1/internal/advaya-handoffs", json={
+            "handoff_key": f"advaya-handoff:{lid}:r1", "lending_id": lid,
+            "payload_sha256": sub.json()["package_sha256"], "status": "Accepted",
+            "acknowledgement_id": f"ADV-{lid[:8]}"})
+        assert acc.status_code == 201, acc.text
     return lid
 
 
 async def test_tranche_callbacks_idempotent_bounded_and_reconciled(client, monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "service_api_keys", {"trn-key": "svc_workflows"})
-    lid = await _disbursed_line(client)      # ceiling: proposed_disbursement_amount = 8.0
+    lid = await _accepted_line(client, monkeypatch)   # ceiling: proposed amount = 8.0
 
     # A human key cannot record tranches — machine plumbing only.
     r = await client.post(f"/v1/internal/lending/{lid}/tranches",
@@ -175,11 +198,11 @@ async def test_tranche_callbacks_idempotent_bounded_and_reconciled(client, monke
     assert [t["tranche_ref"] for t in totals["items"]] == ["T1", "T2"]
 
 
-async def test_tranches_refused_before_disbursed(client, monkeypatch):
+async def test_tranches_refused_before_advaya_acceptance(client, monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "service_api_keys", {"trn-key": "svc_workflows"})
-    lid = await _lending(client)             # still at 'Diligence'
+    lid = await _lending(client)             # still at 'Diligence', no package at all
     r = await client.post(f"/v1/internal/lending/{lid}/tranches",
                           json={"tranche_ref": f"T-{uuid.uuid4().hex[:6]}", "amount": 1.0},
                           headers=SVC)
-    assert r.status_code == 409 and "disbursed" in r.text.lower()
+    assert r.status_code == 409 and "accepted" in r.text.lower()

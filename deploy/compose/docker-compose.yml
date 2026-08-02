@@ -91,7 +91,13 @@ services:
       # locally: each service presents its OWN key and is bound to its allowlist. svc_gateway
       # carries no authority of its own (it only ever delegates a user). dev-local-key stays
       # as a generic direct-access key for the curl examples below.
-      REGISTER_SERVICE_API_KEYS: "svc_atlas:${SVC_ATLAS_KEY:-compose-svc-atlas},svc_vox:${SVC_VOX_KEY:-compose-svc-vox},svc_pulse:${SVC_PULSE_KEY:-compose-svc-pulse},svc_workflows:${SVC_WORKFLOWS_KEY:-compose-svc-workflows},svc_gateway:${SVC_GATEWAY_KEY:-compose-svc-gateway}"
+      REGISTER_SERVICE_API_KEYS: "svc_atlas:${SVC_ATLAS_KEY:-compose-svc-atlas},svc_vox:${SVC_VOX_KEY:-compose-svc-vox},svc_pulse:${SVC_PULSE_KEY:-compose-svc-pulse},svc_workflows:${SVC_WORKFLOWS_KEY:-compose-svc-workflows},svc_gateway:${SVC_GATEWAY_KEY:-compose-svc-gateway},svc_advaya:${SVC_ADVAYA_KEY:-compose-svc-advaya}"
+      # PRISM's workflow boundary is Advaya's ACCEPTANCE of the handover: the acknowledgement
+      # path (/v1/internal/advaya-handoffs, svc_advaya lane) is live here so the E2E journey
+      # exercises submit → accept/reject for real. Point the URL at the actual Advaya
+      # endpoint when the integration goes live — locally it names the simulated peer.
+      REGISTER_ADVAYA_INTEGRATION_ENABLED: "true"
+      REGISTER_ADVAYA_INTEGRATION_URL: "${ADVAYA_URL:-https://advaya.simulated.local/api}"
       REGISTER_WEB_CONCURRENCY: "4"
       REGISTER_DB_POOL_SIZE: "20"
       REGISTER_LOG_JSON: "true"

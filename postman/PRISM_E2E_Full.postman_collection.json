@@ -3322,7 +3322,7 @@
       ]
     },
     {
-      "name": "08 \u00b7 LENDING \u25b8 handover APPROVED \u2192 Disbursed + tranches",
+      "name": "08 \u00b7 LENDING \u25b8 handover \u2192 SUBMITTED \u2192 Advaya ACCEPTS (PRISM's boundary)",
       "item": [
         {
           "name": "PATCH lending \u2014 \u2192 Ready for Disbursement",
@@ -3442,14 +3442,16 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.test('Prepared \u2014 stage NOT advanced yet', () => pm.expect(JSON.stringify(pm.response.json())).to.include('Prepared'));"
+                  "const p = pm.response.json();",
+                  "pm.test('Prepared \u2014 stage NOT advanced', () => pm.expect(p.status).to.eql('Prepared'));",
+                  "pm.environment.set('pkgSha', p.package_sha256);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "POST \u2026/handover-packages/{lending_id}/approve \u2014 CHECKER APPROVES",
+          "name": "POST \u2026/approve \u2014 CHECKER APPROVES (stage still does not move)",
           "request": {
             "method": "POST",
             "header": [
@@ -3483,7 +3485,113 @@
                 "approve"
               ]
             },
-            "description": "Freezes the package and advances the stage in one transaction."
+            "description": "Internal maker-checker only. PRISM's workflow boundary is Advaya's ACCEPTANCE \u2014 approval never asserts a disbursement."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('Approved \u2014 PRISM has decided, Advaya has not', () => pm.expect(pm.response.json().status).to.eql('Approved'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST \u2026/submit \u2014 the package goes TO Advaya",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lendingId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages",
+                "{{lendingId}}",
+                "submit"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('Submitted', () => pm.expect(pm.response.json().status).to.eql('Submitted'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MACHINE LANE \u00b7 Advaya REJECTS attempt 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{svcAdvayaKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "advaya-simulated"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{registerDirectUrl}}/v1/internal/advaya-handoffs",
+              "host": [
+                "{{registerDirectUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "advaya-handoffs"
+              ]
+            },
+            "description": "MACHINE LANE (svc_advaya key): Advaya's validation answer, simulated. A rejection reopens PRISM's prepare \u2192 approve \u2192 submit loop; nothing downstream may happen off a rejected package.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"handoff_key\": \"advaya-handoff:{{lendingId}}:r1\",\n  \"lending_id\": \"{{lendingId}}\",\n  \"payload_sha256\": \"{{pkgSha}}\",\n  \"status\": \"Rejected\",\n  \"note\": \"Simulated: KYC document illegible \\u2014 correct and resubmit.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [
             {
@@ -3498,7 +3606,443 @@
           ]
         },
         {
-          "name": "GET /v1/lending/{id} \u2014 Disbursed (TERMINAL)",
+          "name": "GET /v1/lending/{id}/handover-package \u2014 Rejected, loop reopened",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/handover-package",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}",
+                "handover-package"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('package Rejected', () => pm.expect(pm.response.json().status).to.eql('Rejected'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/handover-packages \u2014 MAKER re-prepares (corrected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lending_id\": \"{{lendingId}}\",\n  \"executed_document_refs\": [\n    {\n      \"reference\": \"AGR/ECOSOCH/{{runSuffix}}\",\n      \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n    }\n  ],\n  \"cpcs_checklist_version\": 2,\n  \"delivery_method\": \"Secure email\",\n  \"recipient\": \"advaya-ops@evamfinance.com\",\n  \"note\": \"E2E: corrected KYC scan attached; resubmission.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const p = pm.response.json();",
+                  "pm.test('re-Prepared (same single-winner row)', () => pm.expect(p.status).to.eql('Prepared'));",
+                  "pm.environment.set('pkgSha', p.package_sha256);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST \u2026/approve \u2014 CHECKER approves the resubmission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lendingId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages",
+                "{{lendingId}}",
+                "approve"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST \u2026/submit \u2014 resubmitted to Advaya",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lendingId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages",
+                "{{lendingId}}",
+                "submit"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MACHINE LANE \u00b7 Advaya ACCEPTS attempt 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{svcAdvayaKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "advaya-simulated"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{registerDirectUrl}}/v1/internal/advaya-handoffs",
+              "host": [
+                "{{registerDirectUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "advaya-handoffs"
+              ]
+            },
+            "description": "Advaya validates and ACCEPTS \u2014 THIS is where PRISM's workflow stops. The acknowledgement becomes the package's one-time advaya_reference and the package freezes (database trigger).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"handoff_key\": \"advaya-handoff:{{lendingId}}:r2\",\n  \"lending_id\": \"{{lendingId}}\",\n  \"payload_sha256\": \"{{pkgSha}}\",\n  \"status\": \"Accepted\",\n  \"acknowledgement_id\": \"ADV-ACK/{{runSuffix}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET handover-package \u2014 ACCEPTED, acknowledgement stored, package frozen",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/handover-package",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}",
+                "handover-package"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const p = pm.response.json();",
+                  "pm.test('Accepted + Advaya reference stored', () => {",
+                  "  pm.expect(p.status).to.eql('Accepted');",
+                  "  pm.expect(p.advaya_reference).to.eql('ADV-ACK/{{runSuffix}}'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 acceptance is NOT fund movement",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "\u2550\u2550\u2550\u2550 PRISM workflow boundary \u2550\u2550\u2550\u2550 Everything after this folder's end is Advaya's side: disbursement, repayment, collections, reconciliation, operational loan closure. PRISM only consumes Advaya's events."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('stage still Ready for Disbursement', () => pm.expect(pm.response.json().stage).to.eql('Ready for Disbursement'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08b \u00b7 ADVAYA SIMULATION \u25b8 the downstream system's events (NOT PRISM operations)",
+      "item": [
+        {
+          "name": "MACHINE LANE \u00b7 Advaya disburses tranche T1 (30 Cr) \u2192 stage flips",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{svcAdvayaKey}}"
+              },
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "advaya-simulated"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{registerDirectUrl}}/v1/internal/lending/{{lendingId}}/tranches",
+              "host": [
+                "{{registerDirectUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "lending",
+                "{{lendingId}}",
+                "tranches"
+              ]
+            },
+            "description": "SIMULATED DOWNSTREAM EVENT: in production this is Advaya's callback after money actually moved. The FIRST tranche \u2014 not any PRISM approval \u2014 is what advances the line to 'Disbursed' and writes the actuals. Idempotent per ref; append-only; ceiling-bounded. Repayments, collections, penalties and operational loan closure remain wholly in Advaya and are not modelled here \u2014 PRISM would consume those as read-only status events.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tranche_ref\": \"T1-{{runSuffix}}\",\n  \"amount\": 30.0,\n  \"disbursed_on\": \"2026-04-30\",\n  \"advaya_reference\": \"ADV/{{runSuffix}}/1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/lending/{id} \u2014 Disbursed BY ADVAYA'S EVENT",
           "request": {
             "method": "GET",
             "header": [
@@ -3542,20 +4086,24 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.test('LENDING terminal = Disbursed', () => pm.expect(pm.response.json().stage).to.eql('Disbursed'));"
+                  "const l = pm.response.json();",
+                  "pm.test('Disbursed via advaya-disbursement', () => {",
+                  "  pm.expect(l.stage).to.eql('Disbursed');",
+                  "  const h = l.stage_history || [];",
+                  "  pm.expect(h[h.length-1].source).to.eql('advaya-disbursement'); });"
                 ]
               }
             }
           ]
         },
         {
-          "name": "MACHINE LANE \u00b7 POST tranche T1 (30 Cr)",
+          "name": "MACHINE LANE \u00b7 Advaya disburses tranche T2 (15 Cr)",
           "request": {
             "method": "POST",
             "header": [
               {
                 "key": "X-API-Key",
-                "value": "{{svcWorkflowsKey}}"
+                "value": "{{svcAdvayaKey}}"
               },
               {
                 "key": "X-Tenant",
@@ -3563,65 +4111,7 @@
               },
               {
                 "key": "X-Actor",
-                "value": "e2e-machine"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{registerDirectUrl}}/v1/internal/lending/{{lendingId}}/tranches",
-              "host": [
-                "{{registerDirectUrl}}"
-              ],
-              "path": [
-                "v1",
-                "internal",
-                "lending",
-                "{{lendingId}}",
-                "tranches"
-              ]
-            },
-            "description": "MACHINE LANE (direct Register, svc key): in production Advaya (or ops on its behalf) reports each tranche. Idempotent per ref; append-only; ceiling-bounded.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tranche_ref\": \"T1-{{runSuffix}}\",\n  \"amount\": 30.0,\n  \"disbursed_on\": \"2026-04-30\",\n  \"advaya_reference\": \"ADV/{{runSuffix}}/1\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "MACHINE LANE \u00b7 POST tranche T2 (15 Cr)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{svcWorkflowsKey}}"
-              },
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-machine"
+                "value": "advaya-simulated"
               },
               {
                 "key": "Content-Type",
@@ -3664,13 +4154,13 @@
           ]
         },
         {
-          "name": "MACHINE LANE \u00b7 GET tranches \u2014 reconciliation totals",
+          "name": "MACHINE LANE \u00b7 GET tranches \u2014 read-only reconciliation view",
           "request": {
             "method": "GET",
             "header": [
               {
                 "key": "X-API-Key",
-                "value": "{{svcWorkflowsKey}}"
+                "value": "{{svcAdvayaKey}}"
               },
               {
                 "key": "X-Tenant",
@@ -3678,7 +4168,7 @@
               },
               {
                 "key": "X-Actor",
-                "value": "e2e-machine"
+                "value": "advaya-simulated"
               }
             ],
             "url": {
@@ -3693,7 +4183,8 @@
                 "{{lendingId}}",
                 "tranches"
               ]
-            }
+            },
+            "description": "PRISM's synchronized VIEW of Advaya's servicing facts \u2014 Advaya stays the system of record for fund movement."
           },
           "event": [
             {

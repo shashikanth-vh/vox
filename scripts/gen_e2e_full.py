@@ -263,6 +263,12 @@ _RM = [*_H, {"key": "Authorization", "value": "Bearer {{rmToken}}"},
 _SVC = [{"key": "X-API-Key", "value": "{{svcWorkflowsKey}}"},
         {"key": "X-Tenant", "value": "{{tenant}}"},
         {"key": "X-Actor", "value": "e2e-machine"}]
+# The SIMULATED Advaya peer: its own least-privilege service principal (svc_advaya) —
+# exactly the credential the real integration will present for handoff outcomes and
+# disbursement callbacks.
+_SVC_ADVAYA = [{"key": "X-API-Key", "value": "{{svcAdvayaKey}}"},
+               {"key": "X-Tenant", "value": "{{tenant}}"},
+               {"key": "X-Actor", "value": "advaya-simulated"}]
 
 
 def poll_kinds(name, subject_type, id_var, kind):
@@ -638,7 +644,7 @@ F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPR
           "CP/CS Completed", extra={"remarks": "E2E: CP/CS complete (v2), agreement executed."}),
 ]))
 
-F.append(("08 · LENDING ▸ handover APPROVED → Disbursed + tranches", [
+F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's boundary)", [
     stage("PATCH lending — → Ready for Disbursement", "/v1/lending/{{lendingId}}", "stage",
           "Ready for Disbursement",
           extra={"proposed_disbursement_amount": 45.0,
@@ -652,32 +658,109 @@ F.append(("08 · LENDING ▸ handover APPROVED → Disbursed + tranches", [
               "cpcs_checklist_version": 2, "delivery_method": "Secure email",
               "recipient": "advaya-ops@evamfinance.com",
               "note": "E2E: handover package for disbursement."},
-        tests=[OK, "pm.test('Prepared — stage NOT advanced yet', () => "
-                   "pm.expect(JSON.stringify(pm.response.json())).to.include('Prepared'));"]),
-    req("POST …/handover-packages/{lending_id}/approve — CHECKER APPROVES", "POST",
+        tests=[OK, "const p = pm.response.json();",
+               "pm.test('Prepared — stage NOT advanced', () => "
+               "pm.expect(p.status).to.eql('Prepared'));",
+               "pm.environment.set('pkgSha', p.package_sha256);"]),
+    req("POST …/approve — CHECKER APPROVES (stage still does not move)", "POST",
         REG, "/v1/internal/handover-packages/{{lendingId}}/approve", headers=_CHECKER,
-        tests=[OK], desc="Freezes the package and advances the stage in one transaction."),
-    req("GET /v1/lending/{id} — Disbursed (TERMINAL)", "GET", REG, "/v1/lending/{{lendingId}}",
-        tests=[OK, "pm.test('LENDING terminal = Disbursed', () => "
-                   "pm.expect(pm.response.json().stage).to.eql('Disbursed'));"]),
-    req("MACHINE LANE · POST tranche T1 (30 Cr)", "POST", MREG,
-        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC,
+        tests=[OK, "pm.test('Approved — PRISM has decided, Advaya has not', () => "
+                   "pm.expect(pm.response.json().status).to.eql('Approved'));"],
+        desc="Internal maker-checker only. PRISM's workflow boundary is Advaya's "
+             "ACCEPTANCE — approval never asserts a disbursement."),
+    req("POST …/submit — the package goes TO Advaya", "POST",
+        REG, "/v1/internal/handover-packages/{{lendingId}}/submit", headers=_CHECKER,
+        tests=[OK, "pm.test('Submitted', () => "
+                   "pm.expect(pm.response.json().status).to.eql('Submitted'));"]),
+    req("MACHINE LANE · Advaya REJECTS attempt 1", "POST", MREG,
+        "/v1/internal/advaya-handoffs", headers=_SVC_ADVAYA,
+        body={"handoff_key": "advaya-handoff:{{lendingId}}:r1",
+              "lending_id": "{{lendingId}}", "payload_sha256": "{{pkgSha}}",
+              "status": "Rejected",
+              "note": "Simulated: KYC document illegible — correct and resubmit."},
+        tests=[OK],
+        desc="MACHINE LANE (svc_advaya key): Advaya's validation answer, simulated. A "
+             "rejection reopens PRISM's prepare → approve → submit loop; nothing "
+             "downstream may happen off a rejected package."),
+    req("GET /v1/lending/{id}/handover-package — Rejected, loop reopened", "GET", REG,
+        "/v1/lending/{{lendingId}}/handover-package",
+        tests=[OK, "pm.test('package Rejected', () => "
+                   "pm.expect(pm.response.json().status).to.eql('Rejected'));"]),
+    req("POST /v1/internal/handover-packages — MAKER re-prepares (corrected)", "POST", REG,
+        "/v1/internal/handover-packages", headers=_MAKER,
+        body={"lending_id": "{{lendingId}}",
+              "executed_document_refs": [
+                  {"reference": "AGR/ECOSOCH/{{runSuffix}}", "sha256": SHA}],
+              "cpcs_checklist_version": 2, "delivery_method": "Secure email",
+              "recipient": "advaya-ops@evamfinance.com",
+              "note": "E2E: corrected KYC scan attached; resubmission."},
+        tests=[OK, "const p = pm.response.json();",
+               "pm.test('re-Prepared (same single-winner row)', () => "
+               "pm.expect(p.status).to.eql('Prepared'));",
+               "pm.environment.set('pkgSha', p.package_sha256);"]),
+    req("POST …/approve — CHECKER approves the resubmission", "POST",
+        REG, "/v1/internal/handover-packages/{{lendingId}}/approve", headers=_CHECKER,
+        tests=[OK]),
+    req("POST …/submit — resubmitted to Advaya", "POST",
+        REG, "/v1/internal/handover-packages/{{lendingId}}/submit", headers=_CHECKER,
+        tests=[OK]),
+    req("MACHINE LANE · Advaya ACCEPTS attempt 2", "POST", MREG,
+        "/v1/internal/advaya-handoffs", headers=_SVC_ADVAYA,
+        body={"handoff_key": "advaya-handoff:{{lendingId}}:r2",
+              "lending_id": "{{lendingId}}", "payload_sha256": "{{pkgSha}}",
+              "status": "Accepted", "acknowledgement_id": "ADV-ACK/{{runSuffix}}"},
+        tests=[OK],
+        desc="Advaya validates and ACCEPTS — THIS is where PRISM's workflow stops. The "
+             "acknowledgement becomes the package's one-time advaya_reference and the "
+             "package freezes (database trigger)."),
+    req("GET handover-package — ACCEPTED, acknowledgement stored, package frozen", "GET",
+        REG, "/v1/lending/{{lendingId}}/handover-package",
+        tests=[OK, "const p = pm.response.json();",
+               "pm.test('Accepted + Advaya reference stored', () => {",
+               "  pm.expect(p.status).to.eql('Accepted');",
+               "  pm.expect(p.advaya_reference).to.eql('ADV-ACK/{{runSuffix}}'); });"]),
+    req("GET /v1/lending/{id} — acceptance is NOT fund movement", "GET", REG,
+        "/v1/lending/{{lendingId}}",
+        tests=[OK, "pm.test('stage still Ready for Disbursement', () => "
+                   "pm.expect(pm.response.json().stage)"
+                   ".to.eql('Ready for Disbursement'));"],
+        desc="════ PRISM workflow boundary ════ Everything after this folder's end is "
+             "Advaya's side: disbursement, repayment, collections, reconciliation, "
+             "operational loan closure. PRISM only consumes Advaya's events."),
+]))
+
+F.append(("08b · ADVAYA SIMULATION ▸ the downstream system's events (NOT PRISM operations)", [
+    req("MACHINE LANE · Advaya disburses tranche T1 (30 Cr) → stage flips", "POST", MREG,
+        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,
         body={"tranche_ref": "T1-{{runSuffix}}", "amount": 30.0,
               "disbursed_on": "2026-04-30", "advaya_reference": "ADV/{{runSuffix}}/1"},
         tests=[OK],
-        desc="MACHINE LANE (direct Register, svc key): in production Advaya (or ops on its "
-             "behalf) reports each tranche. Idempotent per ref; append-only; ceiling-bounded."),
-    req("MACHINE LANE · POST tranche T2 (15 Cr)", "POST", MREG,
-        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC,
+        desc="SIMULATED DOWNSTREAM EVENT: in production this is Advaya's callback after "
+             "money actually moved. The FIRST tranche — not any PRISM approval — is what "
+             "advances the line to 'Disbursed' and writes the actuals. Idempotent per "
+             "ref; append-only; ceiling-bounded. Repayments, collections, penalties and "
+             "operational loan closure remain wholly in Advaya and are not modelled "
+             "here — PRISM would consume those as read-only status events."),
+    req("GET /v1/lending/{id} — Disbursed BY ADVAYA'S EVENT", "GET", REG,
+        "/v1/lending/{{lendingId}}",
+        tests=[OK, "const l = pm.response.json();",
+               "pm.test('Disbursed via advaya-disbursement', () => {",
+               "  pm.expect(l.stage).to.eql('Disbursed');",
+               "  const h = l.stage_history || [];",
+               "  pm.expect(h[h.length-1].source).to.eql('advaya-disbursement'); });"]),
+    req("MACHINE LANE · Advaya disburses tranche T2 (15 Cr)", "POST", MREG,
+        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,
         body={"tranche_ref": "T2-{{runSuffix}}", "amount": 15.0,
               "disbursed_on": "2026-05-15", "advaya_reference": "ADV/{{runSuffix}}/2"},
         tests=[OK]),
-    req("MACHINE LANE · GET tranches — reconciliation totals", "GET", MREG,
-        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC,
+    req("MACHINE LANE · GET tranches — read-only reconciliation view", "GET", MREG,
+        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,
         tests=[OK, "const t = pm.response.json();",
                "pm.test('45 of 45 Cr disbursed — fully reconciled', () => {",
                "  pm.expect(t.total_disbursed).to.eql(45);",
-               "  pm.expect(t.fully_disbursed).to.eql(true); });"]),
+               "  pm.expect(t.fully_disbursed).to.eql(true); });"],
+        desc="PRISM's synchronized VIEW of Advaya's servicing facts — Advaya stays the "
+             "system of record for fund movement."),
 ]))
 
 F.append(("09 · SYNDICATION ▸ mandate run: IM → lender → DECISION → allocation", [
@@ -1166,6 +1249,8 @@ env = {"name": "PRISM — Full (via NGINX)", "values": [
     # compose publishes the Register on :8000 and defaults the key to compose-svc-workflows.
     {"key": "registerDirectUrl", "value": "http://localhost:8000", "enabled": True},
     {"key": "svcWorkflowsKey", "value": "compose-svc-workflows", "enabled": True},
+    {"key": "svcAdvayaKey", "value": "compose-svc-advaya", "enabled": True},
+    {"key": "pkgSha", "value": "", "enabled": True},
     # EMPTY by default = dev posture: folder 00b skips itself and identity comes from header
     # trust. For the prod posture set it to Dex as reachable from YOUR machine.
     {"key": "dexUrl", "value": "", "enabled": True},

@@ -147,11 +147,18 @@ adminApiKeys: ""
 # live grant it carries. Must equal gateway.internalSigningSecret. Empty = legacy header
 # propagation. Rendered into the chart Secret (never plaintext env).
 internalSigningSecret: ""
-# Named SERVICE principals: "svc_pulse:key,svc_vox:key,svc_workflows:key,svc_atlas:key".
-# Each machine caller presenting its key is bound to that service's operation allowlist
-# (least privilege). Rendered into the chart Secret. Each service must send its own key as
-# its Register API key.
+# Named SERVICE principals: "svc_pulse:key,svc_vox:key,svc_workflows:key,svc_atlas:key,
+# svc_advaya:key". Each machine caller presenting its key is bound to that service's
+# operation allowlist (least privilege). Rendered into the chart Secret. Each service must
+# send its own key as its Register API key.
 serviceApiKeys: ""
+
+# Advaya integration — PRISM hands the disbursement-ready case to Advaya and stops at
+# Advaya's ACCEPTANCE; disbursement/servicing events flow back on the svc_advaya lane.
+# Set url to the real Advaya endpoint when enabling (fail-closed at startup otherwise).
+advayaIntegration:
+  enabled: false
+  url: ""
 
 # Access service — when a url is set, the Register VERIFIES an assignee's identity + role
 # there before placing an assignment (closes "services can assign arbitrary UUIDs"). Empty

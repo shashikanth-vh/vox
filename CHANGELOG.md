@@ -6,6 +6,37 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The Advaya boundary: PRISM now stops at CONFIRMED ACCEPTANCE, not at its own
+  approval.** Evam is the NBFC; Advaya is the payment/servicing platform — so PRISM's
+  workflow ends when Advaya has validated and accepted the disbursement-ready case,
+  and everything after (fund movement, repayment, collections, reconciliation,
+  operational loan closure) is Advaya's, consumed by PRISM only as events.
+  * **Handover states**: `Prepared → Approved → Submitted → Accepted / Rejected` (+ the
+    existing checker `Returned`). Approval NO LONGER advances the Lending stage — it
+    only makes the package submittable. A new `…/submit` endpoint records the send;
+    `/v1/internal/advaya-handoffs` (svc lane, now also `svc_advaya`) records Advaya's
+    answer and SETTLES the package: Accepted freezes it (database trigger) and stores
+    the acknowledgement as the one-time `advaya_reference`; Rejected reopens
+    prepare→approve→submit for correction (same single-winner row, full audit).
+  * **'Disbursed' comes only from Advaya**: the FIRST disbursement tranche callback
+    (svc_advaya/svc_workflows lane; refused until the handover is Accepted) advances
+    `Ready for Disbursement → Disbursed` and writes the actuals
+    (`disbursed_amount` cumulative, first `disbursement_date`) — PRISM never asserts
+    fund movement on its own authority. The senior-locked interactive PATCH remains as
+    the audited manual override ("ops on Advaya's behalf") until the live integration.
+  * **Deployment**: compose now runs with `REGISTER_ADVAYA_INTEGRATION_ENABLED=true`
+    and a named `svc_advaya` principal (`compose-svc-advaya`); Helm gains
+    `advayaIntegration.{enabled,url}` (off by default — point at the real endpoint).
+  * **E2E collection**: folder 08 walks the REAL boundary — prepare → approve (stage
+    provably does not move) → submit → Advaya REJECTS → correct → resubmit → Advaya
+    ACCEPTS (acknowledgement stored, package frozen, stage still not moved) — and a new
+    clearly-marked "08b · ADVAYA SIMULATION" folder holds the downstream events
+    (tranches → stage flips → reconciliation view), labelled as Advaya's side, not
+    PRISM operations. Deal closure later in the journey remains PRISM's COMMERCIAL
+    mandate closure; operational loan closure belongs to Advaya.
+  * Existing dev DBs: the usual one-time recreate (status CHECK + trigger changed in
+    the baseline).
+
 - **ATLAS v19 cross-check: AM mandate ownership + the impact assessment.** The latest
   prototype (`ATLAS_EVAM_v19`) was inventoried in full (grids, field keys, dataset shape,
   computed columns, forms, RBAC v2.1, audit taxonomy, integrations) and diffed against

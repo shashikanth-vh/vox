@@ -11,8 +11,10 @@ TRANCHE against a Lending line. The record is:
 * **bounded** — cumulative tranches may never exceed the line's proposed disbursement
   amount (falling back to the facility amount); an over-disbursement callback is refused
   loudly rather than silently absorbed;
-* **stage-aware** — tranches only make sense once the line has been handed over
-  ('Disbursed'); anything earlier is a sequencing bug upstream and is refused.
+* **boundary-aware** — tranches are accepted only after Advaya ACCEPTED the handover
+  package; the FIRST tranche (money actually moving) is what advances the line to
+  'Disbursed', and the line's actuals (disbursed_amount / disbursement_date) are
+  written ONLY from these callbacks — PRISM never asserts them on its own authority.
 
     POST /v1/internal/lending/{lending_id}/tranches       record one tranche
     GET  /v1/internal/lending/{lending_id}/tranches       list + totals (reconciliation)
@@ -77,7 +79,7 @@ async def _line(ctx: RequestContext, lending_id: str) -> LendingTracker:
         raise ValidationAppError("lending_id must be a valid id.") from None
     line = (await ctx.session.execute(select(LendingTracker).where(
         LendingTracker.tenant_id == ctx.tenant_id, LendingTracker.id == lid,
-        LendingTracker.deleted_at.is_(None)))).scalar_one_or_none()
+        LendingTracker.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
     if line is None:
         raise NotFoundError(f"No Lending line {lending_id!r}.")
     return line
@@ -105,10 +107,24 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
                          ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     _require_service(ctx)
     line = await _line(ctx, lending_id)
-    if line.stage != "Disbursed":
+    # Tranches are ADVAYA's disbursement evidence. They are recorded only after Advaya
+    # ACCEPTED the handover (PRISM's workflow boundary), and it is the FIRST tranche —
+    # money actually moving — that advances the line to 'Disbursed', never a PRISM
+    # approval. Anything earlier is a sequencing bug upstream and is refused.
+    from app.models.advaya import AdvayaHandoverPackage
+    pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
+        AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+        AdvayaHandoverPackage.lending_id == lending_id,
+        AdvayaHandoverPackage.deleted_at.is_(None)))).scalar_one_or_none()
+    accepted = pkg is not None and pkg.status in ("Accepted", "HandedOver")
+    if not accepted:
         raise ConflictError(
-            f"Lending line is {line.stage!r}; disbursement tranches are recorded only "
-            "once the line is 'Disbursed' (handed over).")
+            f"Handover package is {pkg.status if pkg else 'absent'!r}; disbursement "
+            "tranches are recorded only after Advaya ACCEPTED the handover.")
+    if line.stage not in ("Ready for Disbursement", "Disbursed"):
+        raise ConflictError(
+            f"Lending line is {line.stage!r}; disbursement tranches apply only to a "
+            "line at 'Ready for Disbursement' (first tranche) or 'Disbursed'.")
     rows = await _existing(ctx, lending_id)
     prior = next((r for r in rows if r.tranche_ref == payload.tranche_ref), None)
     if prior is not None:
@@ -143,12 +159,26 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
         raise ConflictError(
             f"Tranche {payload.tranche_ref!r} was recorded concurrently with a different "
             "amount.")
+    # ACTUALS come only from here — Advaya's reports: cumulative disbursed amount, the
+    # first drawdown date, and (on the FIRST tranche) the stage move to 'Disbursed'.
+    line.disbursed_amount = already + payload.amount
+    if line.disbursement_date is None:
+        line.disbursement_date = payload.disbursed_on or date.today()
+    if line.stage != "Disbursed":
+        history = list(line.stage_history or [])
+        history.append({"from": line.stage, "to": "Disbursed",
+                        "source": "advaya-disbursement",
+                        "tranche_ref": payload.tranche_ref, "by": ctx.actor})
+        line.stage = "Disbursed"
+        line.stage_history = history
+    line.updated_by = ctx.actor
     ctx.session.add(AuditLog(
         tenant_id=ctx.tenant_id, actor=ctx.actor, action="disbursement.tranche",
         resource_type="disbursement_tranches", resource_id=str(won),
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "tranche_ref": payload.tranche_ref,
-                 "amount": payload.amount}))
+                 "amount": payload.amount, "cumulative": already + payload.amount,
+                 "stage": line.stage}))
     row = (await ctx.session.execute(select(DisbursementTranche).where(
         DisbursementTranche.id == won))).scalar_one()
     return _serialize(row)

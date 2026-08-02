@@ -15,9 +15,14 @@ Two phases, distinct authenticated identities, package integrity verified server
   authenticated context, never a submitted name.
 
 * **Approve** (`POST /v1/internal/handover-packages/{lending_id}/approve`, ``approve_advaya_handover``).
-  A DIFFERENT CHECKER (authenticated) approves. The Register requires the checker's user id to differ
-  from the maker's, records the approver from context, sets the package 'HandedOver' (freezing it),
-  and ONLY THEN advances the Lending line to 'Disbursed' — all in one transaction.
+  A DIFFERENT CHECKER (authenticated) approves — package 'Approved'. The Lending stage does
+  NOT move: PRISM's workflow boundary is Advaya's ACCEPTANCE, not PRISM's own approval.
+
+* **Submit** (`POST /v1/internal/handover-packages/{lending_id}/submit`). The approved package is
+  marked 'Submitted' to Advaya. Advaya's answer arrives on ``/v1/internal/advaya-handoffs``
+  (service lane): **Accepted** settles the package (freezing it, storing the acknowledgement as
+  the one-time ``advaya_reference``); **Rejected** reopens the loop — correct, re-prepare,
+  resubmit. 'Disbursed' is set ONLY by Advaya's disbursement tranches after acceptance.
 
     GET  /v1/lending/{id}/handover-package           read it (workspace / audit timeline)
     POST /v1/lending/{id}/handover-package/download   the generated package document + digest
@@ -32,7 +37,6 @@ import uuid
 from datetime import date
 from typing import Any
 
-from evam_backend_core.rbac import transition_error
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -51,7 +55,6 @@ from app.models.trackers import LendingTracker
 router = api_router()
 
 _READY = "Ready for Disbursement"
-_HANDED_OVER = "Disbursed"
 _REQUIRED_EVIDENCE = {"cp_cs_completion", "executed_agreement"}
 
 
@@ -142,7 +145,7 @@ async def prepare_handover_package(payload: HandoverIn,
         raise ValidationAppError("lending_id must be a valid id.") from None
 
     existing = await _package_for_lending(ctx, payload.lending_id)
-    if existing is not None and existing.status != "Returned":
+    if existing is not None and existing.status not in ("Returned", "Rejected"):
         # A handover is already in flight for this line — idempotent for the maker.
         return _serialize(existing)
 
@@ -220,7 +223,7 @@ async def prepare_handover_package(payload: HandoverIn,
     package_document = base64.b64encode(manifest_bytes).decode()
 
     snapshot = {**manifest, "package_reference": package_reference,
-                "package_sha256": package_sha256, "from_stage": _READY, "to_stage": _HANDED_OVER,
+                "package_sha256": package_sha256, "stage_at_preparation": _READY,
                 "request_id": request_id_ctx.get()}
     if existing is not None:
         # RE-PREPARE after a checker return: the same row is rebuilt (fresh manifest,
@@ -269,17 +272,16 @@ async def prepare_handover_package(payload: HandoverIn,
 
 
 @router.post("/v1/internal/handover-packages/{lending_id}/approve", tags=["Internal"],
-             summary="CHECKER approves the handover (different person) and advances the stage")
+             summary="CHECKER approves the handover (different person) — the stage does NOT move")
 async def approve_handover_package(lending_id: str,
                                    ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Internal approval only. PRISM's boundary is Advaya's ACCEPTANCE: approving the
+    package makes it submittable; it does not assert that anything reached Advaya, and it
+    never advances the Lending stage — 'Disbursed' is set only by Advaya's own
+    disbursement callbacks once the handoff is Accepted."""
     from app.authz.engine import enforce_operation
 
     enforce_operation(ctx.user, "approve_advaya_handover")
-    try:
-        lid = uuid.UUID(lending_id)
-    except (ValueError, AttributeError):
-        raise ValidationAppError("lending_id must be a valid id.") from None
-
     pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
         AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
         AdvayaHandoverPackage.lending_id == lending_id,
@@ -287,7 +289,7 @@ async def approve_handover_package(lending_id: str,
     if pkg is None:
         raise NotFoundError(f"No prepared handover package for Lending line {lending_id!r}.")
     if pkg.status != "Prepared":
-        # Already handed over — idempotent for the checker.
+        # Already approved / further along — idempotent for the checker.
         return _serialize(pkg)
 
     checker_name, checker_id = _ident(ctx)
@@ -296,34 +298,55 @@ async def approve_handover_package(lending_id: str,
         raise ValidationAppError(
             "The handover must be approved by a DIFFERENT checker than the maker who prepared it.")
 
-    line = (await ctx.session.execute(select(LendingTracker).where(
-        LendingTracker.tenant_id == ctx.tenant_id, LendingTracker.id == lid,
-        LendingTracker.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
-    if line is None:
-        raise NotFoundError(f"No Lending line {lending_id!r}.")
-    terr = transition_error("Lending", "stage", line.stage, _HANDED_OVER)
-    if terr is not None:
-        raise ConflictError(terr)
-
     pkg.approved_by = checker_name
     pkg.approved_by_id = checker_id
-    pkg.status = "HandedOver"
+    pkg.status = "Approved"
     pkg.updated_by = ctx.actor
     if isinstance(pkg.snapshot, dict):
         pkg.snapshot = {**pkg.snapshot, "approved_by": checker_name}
-
-    history = list(line.stage_history or [])
-    history.append({"from": line.stage, "to": _HANDED_OVER, "source": "advaya-handover",
-                    "handover_package_id": str(pkg.id), "by": ctx.actor})
-    line.stage = _HANDED_OVER
-    line.stage_history = history
-    line.updated_by = ctx.actor
     ctx.session.add(AuditLog(
         tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.approve",
         resource_type="advaya_handover_packages", resource_id=str(pkg.id),
         request_id=request_id_ctx.get(),
-        changes={"lending_id": lending_id, "from": _READY, "to": _HANDED_OVER,
+        changes={"lending_id": lending_id, "from": "Prepared", "to": "Approved",
                  "maker": pkg.initiated_by, "checker": checker_name}))
+    return _serialize(pkg)
+
+
+@router.post("/v1/internal/handover-packages/{lending_id}/submit", tags=["Internal"],
+             summary="SUBMIT the approved package to Advaya (recorded intent, not acceptance)")
+async def submit_handover_package(lending_id: str,
+                                  ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Marks the approved package as sent to Advaya. Submission is PRISM's claim; the
+    boundary state is Advaya's answer — ``/v1/internal/advaya-handoffs`` records the
+    Accepted/Rejected outcome and only THAT settles the package."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "approve_advaya_handover")
+    pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
+        AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+        AdvayaHandoverPackage.lending_id == lending_id,
+        AdvayaHandoverPackage.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if pkg is None:
+        raise NotFoundError(f"No handover package for Lending line {lending_id!r}.")
+    if pkg.status == "Submitted":
+        return _serialize(pkg)                      # idempotent resend
+    if pkg.status != "Approved":
+        raise ConflictError(
+            f"Package is {pkg.status!r}; only an Approved package can be submitted "
+            "(prepare → approve → submit → Advaya accepts/rejects).")
+    submitter, _submitter_id = _ident(ctx)
+    pkg.status = "Submitted"
+    pkg.updated_by = ctx.actor
+    if isinstance(pkg.snapshot, dict):
+        pkg.snapshot = {**pkg.snapshot, "submitted_by": submitter,
+                        "submitted_request_id": request_id_ctx.get()}
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.submit",
+        resource_type="advaya_handover_packages", resource_id=str(pkg.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, "from": "Approved", "to": "Submitted",
+                 "submitted_by": submitter}))
     return _serialize(pkg)
 
 

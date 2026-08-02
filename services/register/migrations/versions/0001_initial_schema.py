@@ -1775,7 +1775,8 @@ def _base_0016_handover_package_and_cpcs() -> None:
                 advaya_reference             varchar(200),
                 status                       varchar(20) NOT NULL DEFAULT 'Prepared',
                 CONSTRAINT advaya_handover_packages_status
-                    CHECK (status IN ('Prepared', 'HandedOver', 'Returned')),
+                    CHECK (status IN ('Prepared', 'Approved', 'Submitted', 'Accepted',
+                                      'Rejected', 'HandedOver', 'Returned')),
                 note                         text,
                 snapshot                     jsonb,
                 tenant_id  uuid        NOT NULL,
@@ -1791,9 +1792,11 @@ def _base_0016_handover_package_and_cpcs() -> None:
         )
         op.execute("CREATE INDEX ix_advaya_handover_packages_lending "
                    "ON advaya_handover_packages (tenant_id, lending_id);")
-        # Two-phase: mutable while 'Prepared' (the maker's draft + the checker's approval transition),
-        # then FROZEN once 'HandedOver' — except the manual advaya_reference, which may be set ONCE from
-        # NULL (operator's Advaya-side reference, available only later). DELETE is always refused.
+        # Mutable through the working loop — 'Prepared' / 'Approved' / 'Submitted' /
+        # 'Returned' / 'Rejected' (prepare, approve, submit, checker return, Advaya reject →
+        # re-prepare). FROZEN once Advaya ACCEPTED ('Accepted'; legacy 'HandedOver' rows the
+        # same) — except the advaya_reference, which may be set ONCE from NULL (the
+        # acknowledgement, when it was not captured at acceptance). DELETE is always refused.
         op.execute(
             """
         CREATE OR REPLACE FUNCTION advaya_handover_package_guard() RETURNS trigger AS $$
@@ -1801,10 +1804,11 @@ def _base_0016_handover_package_and_cpcs() -> None:
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'advaya_handover_packages rows cannot be deleted';
             END IF;
-            IF OLD.status IN ('Prepared', 'Returned') THEN
-                RETURN NEW;   -- preparation / return / re-prepare / approval transitions
+            IF OLD.status IN ('Prepared', 'Approved', 'Submitted', 'Returned', 'Rejected') THEN
+                RETURN NEW;   -- the prepare/approve/submit/return/reject working loop
             END IF;
-            -- OLD.status = 'HandedOver' → frozen except a one-time advaya_reference set.
+            -- OLD.status = 'Accepted' (or legacy 'HandedOver') → frozen except a one-time
+            -- advaya_reference set.
             IF OLD.advaya_reference IS NOT NULL OR NEW.advaya_reference IS NULL THEN
                 RAISE EXCEPTION 'advaya_handover_packages row % is immutable once handed over', OLD.id;
             END IF;

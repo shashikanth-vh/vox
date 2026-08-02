@@ -113,12 +113,20 @@ async def test_two_phase_maker_checker_and_package_integrity(client):
     self_appr = await client.post(f"/v1/internal/handover-packages/{lid}/approve", headers=ADMIN)
     assert self_appr.status_code == 422 and "different checker" in self_appr.text.lower()
 
-    # A DIFFERENT checker approves → package HandedOver + stage advances (transactionally).
+    # A DIFFERENT checker approves → package Approved. The STAGE DOES NOT MOVE:
+    # PRISM's boundary is Advaya's acceptance, and 'Disbursed' only ever comes from
+    # Advaya's own disbursement callbacks after that.
     appr = await client.post(f"/v1/internal/handover-packages/{lid}/approve", headers=CREDIT_HEAD)
     assert appr.status_code == 200, appr.text
-    assert appr.json()["status"] == "HandedOver"
+    assert appr.json()["status"] == "Approved"
     assert appr.json()["approved_by"] == "ch@evamfinance.com"
-    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Disbursed"
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
+
+    # Submit requires an Approved package and records the SENT intent — still no stage move.
+    sub = await client.post(f"/v1/internal/handover-packages/{lid}/submit", headers=CREDIT_HEAD)
+    assert sub.status_code == 200, sub.text
+    assert sub.json()["status"] == "Submitted"
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
 
     # The download returns the GENERATED document; its digest self-verifies server-side.
     dl = await client.post(f"/v1/lending/{lid}/handover-package/download")
@@ -172,3 +180,78 @@ async def test_dormant_advaya_acknowledgement_path_is_disabled(client):
         headers=ADMIN)
     assert ev.status_code in (403, 422), ev.text
     assert "advaya" in ev.text.lower()
+
+
+async def test_advaya_boundary_reject_resubmit_accept_then_disbursement(client, monkeypatch):
+    """PRISM stops at Advaya's ACCEPTANCE. Approve/submit never move the stage; a
+    Rejected outcome reopens prepare→approve→submit; Accepted freezes the package and
+    stores the acknowledgement as advaya_reference; and only Advaya's tranche callbacks
+    flip the line to 'Disbursed' and write the actuals."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import get_settings
+    from app.main import create_app as _mk
+
+    s = get_settings()
+    monkeypatch.setattr(s, "advaya_integration_enabled", True)
+    monkeypatch.setattr(s, "advaya_integration_url", "https://advaya.simulated.local/api")
+    monkeypatch.setattr(s, "service_api_keys", {"adv-key": "svc_advaya"})
+    eid = await _entity(client)
+    lid = await _ready_lending(client, eid)
+
+    assert (await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
+                              headers=ADMIN)).status_code == 201
+    assert (await client.post(f"/v1/internal/handover-packages/{lid}/approve",
+                              headers=CREDIT_HEAD)).json()["status"] == "Approved"
+    sub = await client.post(f"/v1/internal/handover-packages/{lid}/submit",
+                            headers=CREDIT_HEAD)
+    assert sub.status_code == 200 and sub.json()["status"] == "Submitted"
+
+    svc_adv = {"X-API-Key": "adv-key", "X-Tenant": "EVAM", "X-Actor": "advaya"}
+    async with AsyncClient(transport=ASGITransport(app=_mk()),
+                           base_url="http://adv", headers=svc_adv) as adv:
+        # A tranche BEFORE acceptance is refused — the boundary in one line.
+        early = await adv.post(f"/v1/internal/lending/{lid}/tranches",
+                               json={"tranche_ref": "T0", "amount": 1.0})
+        assert early.status_code == 409 and "accepted" in early.text.lower()
+
+        # Advaya REJECTS attempt 1 → the package reopens for correction.
+        rej = await adv.post("/v1/internal/advaya-handoffs", json={
+            "handoff_key": f"advaya-handoff:{lid}:r1", "lending_id": lid,
+            "payload_sha256": sub.json()["package_sha256"], "status": "Rejected",
+            "note": "KYC document illegible; resubmit."})
+        assert rej.status_code == 201, rej.text
+        assert (await client.get(
+            f"/v1/lending/{lid}/handover-package")).json()["status"] == "Rejected"
+
+        # Correct → RE-prepare → approve → resubmit (the same single-winner row).
+        assert (await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
+                                  headers=ADMIN)).json()["status"] == "Prepared"
+        assert (await client.post(f"/v1/internal/handover-packages/{lid}/approve",
+                                  headers=CREDIT_HEAD)).json()["status"] == "Approved"
+        sub2 = await client.post(f"/v1/internal/handover-packages/{lid}/submit",
+                                 headers=CREDIT_HEAD)
+        assert sub2.json()["status"] == "Submitted"
+
+        # Advaya ACCEPTS attempt 2: package frozen, acknowledgement stored.
+        acc = await adv.post("/v1/internal/advaya-handoffs", json={
+            "handoff_key": f"advaya-handoff:{lid}:r2", "lending_id": lid,
+            "payload_sha256": sub2.json()["package_sha256"], "status": "Accepted",
+            "acknowledgement_id": "ADV-ACK-0042"})
+        assert acc.status_code == 201, acc.text
+        pkg = (await client.get(f"/v1/lending/{lid}/handover-package")).json()
+        assert pkg["status"] == "Accepted" and pkg["advaya_reference"] == "ADV-ACK-0042"
+        # Acceptance is NOT fund movement — the stage has still not moved.
+        assert (await client.get(
+            f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
+
+        # Only Advaya's FIRST disbursement tranche flips the stage and writes actuals.
+        t1 = await adv.post(f"/v1/internal/lending/{lid}/tranches",
+                            json={"tranche_ref": "T1", "amount": 5.0,
+                                  "disbursed_on": "2026-03-05"})
+        assert t1.status_code == 201, t1.text
+    line = (await client.get(f"/v1/lending/{lid}")).json()
+    assert line["stage"] == "Disbursed"
+    assert float(line["disbursed_amount"]) == 5.0
+    assert line["disbursement_date"] == "2026-03-05"
+    assert (line["stage_history"] or [])[-1]["source"] == "advaya-disbursement"

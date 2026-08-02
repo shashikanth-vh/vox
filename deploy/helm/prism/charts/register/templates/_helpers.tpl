@@ -173,6 +173,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 # Access cannot answer. On in the umbrella's production posture.
 - name: REGISTER_ONLINE_REVALIDATION
   value: {{ .Values.onlineRevalidation | quote }}
+# Advaya integration — PRISM's workflow boundary is Advaya's ACCEPTANCE of the handover.
+# Enabling mounts /v1/internal/advaya-handoffs (svc_advaya lane); the URL must name the
+# real Advaya endpoint (fail-closed: enabled without a URL refuses to start).
+- name: REGISTER_ADVAYA_INTEGRATION_ENABLED
+  value: {{ .Values.advayaIntegration.enabled | quote }}
+- name: REGISTER_ADVAYA_INTEGRATION_URL
+  value: {{ .Values.advayaIntegration.url | quote }}
 # Object storage (document bytes) — only wired when the backend is "s3".
 - name: REGISTER_STORAGE_BACKEND
   value: {{ .Values.storage.backend | quote }}

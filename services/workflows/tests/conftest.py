@@ -253,10 +253,9 @@ def build_mock() -> FastAPI:
             return JSONResponse(
                 {"error": {"type": "not_found", "title": "not found", "status": 404,
                            "detail": "no package", "request_id": None}}, status_code=404)
-        pkg["status"] = "HandedOver"
-        row = app.state.lending.get(lid)
-        if row is not None:
-            app.state.lending[lid] = {**row, "stage": "Disbursed"}
+        # Boundary semantics: approval readies the package for submission — the STAGE
+        # does not move; 'Disbursed' comes only from Advaya's disbursement callbacks.
+        pkg["status"] = "Approved"
         return pkg
 
     app.state.cpcs = {}   # checklist id -> record
