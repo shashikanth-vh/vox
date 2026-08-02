@@ -359,14 +359,16 @@ services:
   #     scripts/gen_dev_certs.sh
   # (nginx will not start without deploy/nginx/certs/tls.{crt,key}.) :8080 serves only a
   # 301 to HTTPS plus the health probes; real traffic goes to :8443.
-  # The ATLAS UI as its own image (deploy/ui/Dockerfile bakes whatever is in deploy/ui
-  # — the SPA build output, or the single-file prototype as index.html). No host port:
-  # the edge proxies /ui/ here, so the UI shares the ONE origin with every API.
-  # Update the UI: replace the files in deploy/ui, then
+  # The ATLAS UI as its own image. The CONTENT lives in deploy/ui/ (the SPA build
+  # output, or the single-file prototype as index.html); the build plumbing lives in
+  # deploy/ui-image/ — so wiping/replacing deploy/ui/ can never break this build.
+  # No host port: the edge proxies /ui/ here, so the UI shares the ONE origin with
+  # every API. Update the UI: replace the files in deploy/ui, then
   #   docker compose build ui && docker compose up -d ui
   ui:
     build:
-      context: ../ui
+      context: ../
+      dockerfile: ui-image/Dockerfile
     restart: unless-stopped
 
   nginx:

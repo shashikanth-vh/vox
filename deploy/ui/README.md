@@ -1,9 +1,14 @@
-# deploy/ui — the ATLAS UI image
+# deploy/ui — the ATLAS UI content (CONTENT ONLY — safe to wipe and replace)
 
-The UI ships as its **own Docker image** (the `Dockerfile` here bakes this folder's
-contents into an nginx), and the edge proxies **`https://<host>:8443/ui/`** to it
-(`/` redirects there). The UI container publishes no host port — like every service,
-it is reachable only through the one door, so the UI and all APIs share ONE origin.
+This folder holds nothing but the UI files. The build plumbing lives in
+`deploy/ui-image/` (Dockerfile + the container's nginx conf), so replacing this
+folder's contents wholesale — even deleting everything in it — can never break the
+image build.
+
+The UI ships as its **own Docker image**, and the edge proxies
+**`https://<host>:8443/ui/`** to it (`/` redirects there). The UI container
+publishes no host port — like every service, it is reachable only through the one
+door, so the UI and all APIs share ONE origin.
 
 ## Publish / update the UI
 
@@ -18,8 +23,10 @@ it is reachable only through the one door, so the UI and all APIs share ONE orig
    docker compose -f deploy/compose/docker-compose.yml up -d ui
    ```
 
-CI can equally `docker build deploy/ui -t <registry>/prism-ui:<tag>` and push; point
-the compose service at the tag instead of the build context.
+CI can equally `docker build -f deploy/ui-image/Dockerfile deploy -t
+<registry>/prism-ui:<tag>` and push; point the compose service at the tag instead of
+the build context. (`deploy/.dockerignore` allow-lists only `ui/` and `ui-image/`
+into the context — the TLS material in `deploy/nginx/certs` never reaches a build.)
 
 Configure the UI to call the APIs at **relative paths** (`/v1/…`, `/access/…`,
 `/orchestrator/…`, `/atlas/…`) — same origin as the page, which is why no CORS setup

@@ -1,0 +1,6 @@
+# The UI image build uses deploy/ as its context (so it can COPY both ui/ and
+# ui-image/). Everything else in deploy/ — nginx TLS keys above all — must NEVER
+# reach a build context. Allow-list only what the Dockerfile copies.
+*
+!ui/**
+!ui-image/**
