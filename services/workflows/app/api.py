@@ -433,6 +433,16 @@ class CpcsApproveIn(BaseModel):
     approved_by: str = Field(max_length=200)
 
 
+class CheckerRejectIn(BaseModel):
+    """The checker's TERMINAL refusal (CP/CS checklist or handover package). The decider
+    is the AUTHENTICATED caller; ``rejected_by`` is only a dev fallback. Note mandatory —
+    a terminal refusal must say why, permanently."""
+
+    model_config = ConfigDict(extra="forbid")
+    rejected_by: str = Field(max_length=200)
+    note: str = Field(min_length=1, max_length=2000)
+
+
 class AdvayaHandoverApproveIn(BaseModel):
     """CHECKER approves a prepared handover. The checker is the AUTHENTICATED caller (resolved from
     the verified identity), and must be a different person than the maker (enforced by the
@@ -1508,6 +1518,29 @@ def create_app() -> FastAPI:
                             "Register refused the request", str(detail))
         return ORJSONResponse(status_code=200, content=rr.json())
 
+
+    @app.post("/v1/workflows/advaya-handover/{lending_id}/reject", tags=["Workflows"],
+              summary="CHECKER rejects the prepared handover (terminal for this attempt)")
+    async def reject_advaya_handover(lending_id: str, payload: CheckerRejectIn, request: Request,
+                                     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                     ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        rejected_by, err = await _verified_email(request, payload.rejected_by)
+        if err is not None:
+            return err
+        checker, verified = _caller_context(request, rejected_by)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound checker identity is required to reject.")
+        if not await _authorised_for("handover", request, rejected_by, checker.tenant):
+            return _problem(403, "Forbidden",
+                            "Rejecting a handover requires Credit Head / Management / Admin "
+                            "authority.")
+        return await _register_post_as(
+            request, f"/v1/internal/handover-packages/{lending_id}/reject", rejected_by,
+            checker, {"note": payload.note})
+
     @app.post("/v1/workflows/cpcs-checklists", status_code=202, tags=["Workflows"],
               summary="MAKER prepares the CP/CS checklist")
     async def start_cpcs_checklist(payload: CpcsChecklistIn, request: Request,
@@ -1558,6 +1591,29 @@ def create_app() -> FastAPI:
                             "authority.")
         return await _register_post_as(
             request, f"/v1/internal/cpcs-checklists/{checklist_id}/approve", approved_by, checker, {})
+
+
+    @app.post("/v1/workflows/cpcs-checklists/{checklist_id}/reject", tags=["Workflows"],
+              summary="CHECKER rejects the CP/CS checklist (terminal — the loop breaks)")
+    async def reject_cpcs_checklist(checklist_id: str, payload: CheckerRejectIn, request: Request,
+                                    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                    ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        rejected_by, err = await _verified_email(request, payload.rejected_by)
+        if err is not None:
+            return err
+        checker, verified = _caller_context(request, rejected_by)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound checker identity is required to reject.")
+        if not await _authorised_for("cpcs", request, rejected_by, checker.tenant):
+            return _problem(403, "Forbidden",
+                            "Rejecting a CP/CS checklist requires Credit Head / Management / "
+                            "Admin authority.")
+        return await _register_post_as(
+            request, f"/v1/internal/cpcs-checklists/{checklist_id}/reject", rejected_by,
+            checker, {"note": payload.note})
 
     @app.post("/v1/workflows/{workflow_id}/committee-decision", tags=["Workflows"],
               summary="Record the Credit Committee decision (durable) and signal the workflow")

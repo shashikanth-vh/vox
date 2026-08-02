@@ -6,6 +6,26 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The approver triad is now uniform: every human gate offers approve / return /
+  reject.** Return = "amend and come back" (loop continues, reasons mandatory, next
+  version); Reject = "this should not proceed" (terminal, note mandatory); only
+  Approve advances anything. What changed:
+  * **CP/CS checklist + handover package gain the terminal REJECT** (register:
+    `POST …/cpcs-checklists/{id}/reject`, `POST …/handover-packages/{lending_id}/reject`;
+    orchestrator passthroughs with checker-role checks). Maker≠checker enforced; only
+    a maker-finished version can be rejected; a rejected version leaves the checker
+    queue permanently; a revival is a fresh version/cycle — approve can never
+    resurrect a rejected attempt.
+  * **The parked workflows' RETURN verb is now first-class end-to-end**: run-control
+    (`control {action: return|resubmit|cancel}`, initiator or approver) already
+    parked/relaunched runs — it now also NOTIFIES: return/cancel → the requester,
+    resubmit → the approver list (`WORKFLOWS_APPROVER_NOTIFY`), so the loop is never
+    silent in either direction.
+  * **E2E collection** demonstrates the full triad: folder 06 committee RETURNS →
+    maker revises the credit note v2 → RESUBMITS → approval; folder 07 ends with a
+    v3 checklist REJECTED terminally; folder 08 opens with the checker REJECTING the
+    first package attempt → re-prepare → approve (135 → 142 requests).
+
 - **The ATLAS UI is now its own Docker image, behind :8443.** `deploy/ui/Dockerfile`
   bakes the folder's contents (SPA build or single-file prototype as `index.html`)
   into an nginx; a new compose `ui` service runs it with NO host port, and the edge

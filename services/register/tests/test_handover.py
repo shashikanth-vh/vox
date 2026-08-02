@@ -255,3 +255,37 @@ async def test_advaya_boundary_reject_resubmit_accept_then_disbursement(client, 
     assert float(line["disbursed_amount"]) == 5.0
     assert line["disbursement_date"] == "2026-03-05"
     assert (line["stage_history"] or [])[-1]["source"] == "advaya-disbursement"
+
+
+async def test_checker_reject_is_terminal_then_fresh_cycle_allowed(client):
+    """The checker's third verb on a handover: REJECT ends this attempt (note mandatory,
+    maker≠checker); the line does not move; the queue drops it; a genuine later revival
+    is a FRESH prepare→approve cycle on the same single-winner row."""
+    eid = await _entity(client)
+    lid = await _ready_lending(client, eid)
+    prep = await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
+                             headers=ADMIN)
+    assert prep.status_code == 201, prep.text
+    # Note mandatory; the maker cannot reject their own package.
+    assert (await client.post(f"/v1/internal/handover-packages/{lid}/reject",
+                              json={}, headers=CREDIT_HEAD)).status_code == 422
+    self_rej = await client.post(f"/v1/internal/handover-packages/{lid}/reject",
+                                 json={"note": "no"}, headers=ADMIN)
+    assert self_rej.status_code == 422 and "different checker" in self_rej.text.lower()
+    r = await client.post(f"/v1/internal/handover-packages/{lid}/reject",
+                          json={"note": "Facility should not be handed over yet."},
+                          headers=CREDIT_HEAD)
+    assert r.status_code == 200 and r.json()["status"] == "Rejected"
+    # The line did not move, and a later approve CANNOT resurrect the rejected attempt —
+    # the endpoint's idempotent echo returns the row still Rejected.
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
+    echo = await client.post(f"/v1/internal/handover-packages/{lid}/approve",
+                             headers=CREDIT_HEAD)
+    assert echo.status_code == 200 and echo.json()["status"] == "Rejected"
+    q = await client.get("/v1/internal/handover-packages", params={"status": "Prepared"},
+                         headers=ADMIN)
+    assert all(row["lending_id"] != lid for row in q.json())
+    # A fresh cycle is allowed: re-prepare puts it back to Prepared for a new check.
+    re_prep = await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
+                                headers=ADMIN)
+    assert re_prep.status_code == 201 and re_prep.json()["status"] == "Prepared"

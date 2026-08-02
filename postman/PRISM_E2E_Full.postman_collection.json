@@ -69,7 +69,7 @@
                   "// ONLY derived state belongs here. The fixed identities (rmEmail, makerEmail,",
                   "// checkerEmail) are CONFIGURATION \u2014 clearing them breaks downstream requests.",
                   "['entityId','leadId','dealId','lendingId','syndicationId','amId','checklistId',",
-                  " 'checklistId2','assignmentId','interactionId','financialId','documentId',",
+                  " 'checklistId2','checklistId3','assignmentId','interactionId','financialId','documentId',",
                   " 'synLenderId','bdrmUserId','makerUserId','checkerUserId','structWorkflowId',",
                   " 'convWorkflowId','qualWorkflowId','voxWorkflowId','synWorkflowId','amWorkflowId',",
                   " 'synRowId','buyerRowId','calEventId','covenantId','covObsId','ewsCaseId',",
@@ -2726,6 +2726,191 @@
           ]
         },
         {
+          "name": "POST /orchestrator \u2026/control \u2014 committee RETURNS for revision (loop continues)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{structWorkflowId}}/control",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{structWorkflowId}}",
+                "control"
+              ]
+            },
+            "description": "The approver's middle verb: not approve, not reject \u2014 'amend and come back'. Reasons travel with it, the maker is notified, the run keeps waiting, and the iteration goes on the durable record.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"return\",\n  \"by\": \"{{checkerEmail}}\",\n  \"note\": \"Committee: quantify the DSRA assumption before we decide.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('returned for information', () => pm.expect(pm.response.json().action).to.eql('ReturnedForInformation'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orchestrator \u2026/revise-credit-note \u2014 MAKER files the revised note v2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{structWorkflowId}}/revise-credit-note",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{structWorkflowId}}",
+                "revise-credit-note"
+              ]
+            },
+            "description": "The amendment is the NEXT immutable credit-note version on every lending line \u2014 v1 stays reviewable forever.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference\": \"CN/ECOSOCH/{{runSuffix}}-v2\",\n  \"by\": \"{{makerEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /orchestrator \u2026/control \u2014 MAKER RESUBMITS (SLA clock restarts)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/{{structWorkflowId}}/control",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "{{structWorkflowId}}",
+                "control"
+              ]
+            },
+            "description": "Back in the approvers' queue with a FRESH decision window; the approvers are notified. The loop can repeat any number of times \u2014 every round auditable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"resubmit\",\n  \"by\": \"{{makerEmail}}\",\n  \"note\": \"DSRA assumption quantified in the v2 note.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('resubmitted', () => pm.expect(pm.response.json().action).to.eql('Resubmitted'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "POST /orchestrator \u2026/committee-decision \u2014 CONDITIONAL approval",
           "request": {
             "method": "POST",
@@ -3518,6 +3703,131 @@
               }
             }
           ]
+        },
+        {
+          "name": "POST /v1/internal/cpcs-checklists \u2014 MAKER drafts v3 (reject demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists"
+              ]
+            },
+            "description": "A hypothetical late amendment, prepared only to demonstrate the checker's THIRD verb below. The approved v2 (already cited by cp_cs_completion) is untouched.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lending_id\": \"{{lendingId}}\",\n  \"deal_id\": \"{{dealId}}\",\n  \"checklist_version\": 3,\n  \"status\": \"Completed\",\n  \"items\": [\n    {\n      \"key\": \"cp_extra_collateral\",\n      \"label\": \"Additional collateral offer\",\n      \"condition_type\": \"CP\",\n      \"required\": true,\n      \"status\": \"Completed\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.environment.set('checklistId3', pm.response.json().id);",
+                  "console.log('checklistId3 =', pm.environment.get('checklistId3'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST \u2026/cpcs-checklists/{id}/reject \u2014 CHECKER REJECTS v3 (terminal)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{checklistId3}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists",
+                "{{checklistId3}}",
+                "reject"
+              ]
+            },
+            "description": "RETURN means 'amend and come back'; REJECT means 'this should not proceed' \u2014 terminal for the version, note mandatory, out of the checker queue for good. A genuine revival would be v4 with its own cycle.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Not required \\u2014 the sanctioned structure already covers this.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('v3 is Rejected \u2014 the loop BREAKS', () => pm.expect(pm.response.json().status).to.eql('Rejected'));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -3700,6 +4010,132 @@
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
                   "const b = pm.response.json();",
                   "pm.test('the Prepared package awaits checker approval', () => pm.expect(b.pending.some(p => p.subject_id === pm.environment.get('lendingId'))).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST \u2026/handover-packages/{id}/reject \u2014 CHECKER REJECTS the first attempt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lendingId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages",
+                "{{lendingId}}",
+                "reject"
+              ]
+            },
+            "description": "The checker's terminal verb: this attempt ends, the line does NOT move, the rejection stays on record. A revival is a FRESH prepare\u2192approve cycle.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Executed-agreement bundle incomplete \\u2014 do not hand over as is.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('attempt Rejected \u2014 terminal for THIS package', () => pm.expect(pm.response.json().status).to.eql('Rejected'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/internal/handover-packages \u2014 MAKER RE-PREPARES (fresh cycle)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{makerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{makerEmail}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/handover-packages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "handover-packages"
+              ]
+            },
+            "description": "Same single-winner row, new manifest + digest; a DIFFERENT checker must now approve the rebuilt package.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lending_id\": \"{{lendingId}}\",\n  \"executed_document_refs\": [\n    {\n      \"reference\": \"AGR/ECOSOCH/{{runSuffix}}\",\n      \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n    }\n  ],\n  \"cpcs_checklist_version\": 2,\n  \"delivery_method\": \"Secure email\",\n  \"recipient\": \"advaya-ops@evamfinance.com\",\n  \"note\": \"E2E: rebuilt package after the checker's rejection.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const p = pm.response.json();",
+                  "pm.test('back to Prepared for a new check', () => pm.expect(p.status).to.eql('Prepared'));",
+                  "pm.environment.set('pkgSha', p.package_sha256);"
                 ]
               }
             }

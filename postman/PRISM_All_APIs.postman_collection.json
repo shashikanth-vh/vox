@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (230 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (232 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -7042,6 +7042,57 @@
               }
             },
             {
+              "name": "POST /v1/internal/cpcs-checklists/{checklist_id}/reject \u2014 REJECT the CP/CS checklist (checker; terminal \u2014 the loop breaks)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{checklist_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cpcs-checklists",
+                    "{{checklist_id}}",
+                    "reject"
+                  ]
+                },
+                "description": "The third checker verb. RETURN means \"amend and come back\" (the loop continues\nwith the next version); REJECT means \"this should not proceed\" \u2014 terminal for the\nchecklist. A later revival is a NEW version with its own cycle, never a resurrection,\nso the rejection stays permanently on record.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/cpcs-checklists/{checklist_id}/return \u2014 Return the CP/CS checklist to its maker (checker; with reasons)",
               "request": {
                 "method": "POST",
@@ -7595,6 +7646,57 @@
                   ]
                 },
                 "description": "Internal approval only. PRISM's boundary is Advaya's ACCEPTANCE: approving the\npackage makes it submittable; it does not assert that anything reached Advaya, and it\nnever advances the Lending stage \u2014 'Disbursed' is set only by Advaya's own\ndisbursement callbacks once the handoff is Accepted."
+              }
+            },
+            {
+              "name": "POST /v1/internal/handover-packages/{lending_id}/reject \u2014 CHECKER rejects the handover package (terminal for this attempt)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/handover-packages/{{lending_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "handover-packages",
+                    "{{lending_id}}",
+                    "reject"
+                  ]
+                },
+                "description": "The third checker verb. RETURN means \"amend and come back\"; REJECT means \"this\nfacility should not be handed over\" \u2014 terminal for the attempt. The line does NOT\nmove; a genuine later revival is a fresh prepare\u2192approve cycle (same single-winner\nrow, new manifest), with this rejection permanently on record. Note mandatory.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               }
             },
             {
@@ -11423,7 +11525,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (38 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (40 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Decisions",
@@ -11815,6 +11917,57 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/advaya-handover/{lending_id}/reject \u2014 CHECKER rejects the prepared handover (terminal for this attempt)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/advaya-handover/{{lending_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "advaya-handover",
+                    "{{lending_id}}",
+                    "reject"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rejected_by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/asset-monetisations \u2014 Start an asset-monetisation workflow (teaser \u2192 offers \u2192 closure)",
               "request": {
                 "method": "POST",
@@ -11955,6 +12108,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"approved_by\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/cpcs-checklists/{checklist_id}/reject \u2014 CHECKER rejects the CP/CS checklist (terminal \u2014 the loop breaks)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/cpcs-checklists/{{checklist_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "cpcs-checklists",
+                    "{{checklist_id}}",
+                    "reject"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rejected_by\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

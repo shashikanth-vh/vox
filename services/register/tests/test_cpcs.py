@@ -120,3 +120,34 @@ async def test_cpcs_deferral_requires_cp_reason_and_expiry(client):
                          "reason": "post-close registration", "expiry_date": "2026-12-31"}]},
         headers=ADMIN)
     assert ok.status_code == 201, ok.text
+
+
+async def test_cpcs_reject_is_terminal_and_four_eyed(client):
+    """The third checker verb: REJECT breaks the loop (vs RETURN, which continues it).
+    Note mandatory, maker≠checker, only a maker-finished ('Completed') version can be
+    rejected, and a rejected version leaves the checker queue permanently."""
+    lid = await _lending(client)
+    cid = (await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": lid, "status": "Completed",
+              "items": [{"key": "charge", "condition_type": "CP", "status": "Completed"}]},
+        headers=ADMIN)).json()["id"]
+    # Note is mandatory; the maker cannot reject their own checklist.
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/reject",
+                              json={}, headers=CREDIT_HEAD)).status_code == 422
+    self_rej = await client.post(f"/v1/internal/cpcs-checklists/{cid}/reject",
+                                 json={"note": "no"}, headers=ADMIN)
+    assert self_rej.status_code == 422 and "different checker" in self_rej.text.lower()
+    r = await client.post(f"/v1/internal/cpcs-checklists/{cid}/reject",
+                          json={"note": "Security structure unacceptable — do not proceed."},
+                          headers=CREDIT_HEAD)
+    assert r.status_code == 200 and r.json()["status"] == "Rejected"
+    # Terminal: it can be neither approved nor re-rejected...
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/approve",
+                              headers=CREDIT_HEAD)).status_code == 409
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/reject",
+                              json={"note": "again"}, headers=CREDIT_HEAD)).status_code == 409
+    # ...and it is out of the checker queue.
+    q = await client.get("/v1/internal/cpcs-checklists",
+                         params={"lending_id": lid, "status": "Completed"}, headers=ADMIN)
+    assert all(row["id"] != cid for row in q.json())

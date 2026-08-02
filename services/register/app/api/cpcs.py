@@ -253,6 +253,53 @@ async def return_checklist(checklist_id: str, payload: ReturnIn,
     return _serialize(row)
 
 
+class RejectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # A terminal refusal must say why — the note is mandatory and permanent.
+    note: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/v1/internal/cpcs-checklists/{checklist_id}/reject", tags=["Internal"],
+             summary="REJECT the CP/CS checklist (checker; terminal — the loop breaks)")
+async def reject_checklist(checklist_id: str, payload: RejectIn,
+                           ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The third checker verb. RETURN means "amend and come back" (the loop continues
+    with the next version); REJECT means "this should not proceed" — terminal for the
+    checklist. A later revival is a NEW version with its own cycle, never a resurrection,
+    so the rejection stays permanently on record."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "approve_cpcs_checklist")   # checker authority, like approve
+    try:
+        cid = uuid.UUID(checklist_id)
+    except (ValueError, AttributeError):
+        raise ValidationAppError("checklist_id must be a valid id.") from None
+    row = (await ctx.session.execute(select(CpcsChecklist).where(
+        CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.id == cid,
+        CpcsChecklist.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No CP/CS checklist {checklist_id!r}.")
+    if row.status != "Completed":
+        raise ConflictError(
+            f"The CP/CS checklist is {row.status!r}; only a 'Completed' checklist can be "
+            "rejected.")
+    checker_id = _actor_id(ctx)
+    if (checker_id is not None and checker_id == row.prepared_by_id) or (
+            checker_id is None and ctx.actor == row.prepared_by):
+        raise ValidationAppError(
+            "The CP/CS checklist must be rejected by a DIFFERENT checker than its preparer.")
+    row.status = "Rejected"
+    row.note = payload.note
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="cpcs.reject",
+        resource_type="cp_cs_checklists", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
+                 "status": "Rejected", "label": row.lending_id}))
+    return _serialize(row)
+
+
 @router.get("/v1/internal/cpcs-checklists/{checklist_id}", tags=["Internal"],
             summary="Read a CP/CS checklist")
 async def get_checklist(checklist_id: str,

@@ -581,9 +581,13 @@ class LeadConversionWorkflow:
                     self._fnd.escalated = False
                 _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
                                f"Lead:{inp.lead_id}")
+                # A RETURN is the maker's to-do (amend and resubmit); a RESUBMIT puts
+                # the run back in the approvers' queue; a CANCEL confirms to the maker.
                 await _emit_ops("run_control", {
                     "subject": f"Lead:{inp.lead_id}", "action": verified_action,
-                    "by": v.get("by"), "note": v.get("note")})
+                    "by": v.get("by"), "note": v.get("note")},
+                    notify_to=(inp.approver_notify or [inp.requested_by])
+                    if verified_action == "Resubmitted" else [inp.requested_by])
             if self._fnd.business_status == "Cancelled":
                 self._stage = "Cancelled"
                 await workflow.execute_activity(
@@ -952,9 +956,13 @@ class DealStructuringWorkflow:
                     self._fnd.reminders_sent = 0
                     self._fnd.escalated = False
                 _upsert_search(inp.emit_search_attributes, self._fnd.business_status, subject)
+                # A RETURN is the maker's to-do (amend and resubmit); a RESUBMIT puts
+                # the run back in the approvers' queue; a CANCEL confirms to the maker.
                 await _emit_ops("run_control", {
                     "subject": subject, "action": verified_action,
-                    "by": v.get("by"), "note": v.get("note")})
+                    "by": v.get("by"), "note": v.get("note")},
+                    notify_to=(inp.approver_notify or [inp.requested_by])
+                    if verified_action == "Resubmitted" else [inp.requested_by])
             if self._fnd.business_status == "Cancelled":
                 self._stage = "Cancelled"
                 return DealStructuringResult(
@@ -1313,9 +1321,13 @@ class SyndicationMandateWorkflow:
                     self._fnd.escalated = False
                 _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
                                subject)
+                # A RETURN is the maker's to-do (amend and resubmit); a RESUBMIT puts
+                # the run back in the approvers' queue; a CANCEL confirms to the maker.
                 await _emit_ops("run_control", {
                     "subject": subject, "action": verified_action, "by": v.get("by"),
-                    "note": v.get("note")})
+                    "note": v.get("note")},
+                    notify_to=(inp.approver_notify or [inp.requested_by])
+                    if verified_action == "Resubmitted" else [inp.requested_by])
             if self._fnd.business_status == "Cancelled":
                 self._stage = "Cancelled"
                 return SyndicationMandateResult(
@@ -1680,9 +1692,13 @@ class AssetMonetisationWorkflow:
                     self._fnd.escalated = False
                 _upsert_search(inp.emit_search_attributes, self._fnd.business_status,
                                subject)
+                # A RETURN is the maker's to-do (amend and resubmit); a RESUBMIT puts
+                # the run back in the approvers' queue; a CANCEL confirms to the maker.
                 await _emit_ops("run_control", {
                     "subject": subject, "action": verified_action, "by": v.get("by"),
-                    "note": v.get("note")})
+                    "note": v.get("note")},
+                    notify_to=(inp.approver_notify or [inp.requested_by])
+                    if verified_action == "Resubmitted" else [inp.requested_by])
             if self._fnd.business_status == "Cancelled":
                 self._stage = "Cancelled"
                 return AssetMonetisationResult(

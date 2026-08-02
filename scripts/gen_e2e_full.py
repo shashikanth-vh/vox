@@ -309,7 +309,7 @@ F.append(("00 · Health & run setup", [
              "// ONLY derived state belongs here. The fixed identities (rmEmail, makerEmail,",
              "// checkerEmail) are CONFIGURATION — clearing them breaks downstream requests.",
              "['entityId','leadId','dealId','lendingId','syndicationId','amId','checklistId',",
-             " 'checklistId2','assignmentId','interactionId','financialId','documentId',",
+             " 'checklistId2','checklistId3','assignmentId','interactionId','financialId','documentId',",
              " 'synLenderId','bdrmUserId','makerUserId','checkerUserId','structWorkflowId',",
              " 'convWorkflowId','qualWorkflowId','voxWorkflowId','synWorkflowId','amWorkflowId',",
              " 'synRowId','buyerRowId','calEventId','covenantId','covObsId','ewsCaseId',",
@@ -566,6 +566,29 @@ F.append(("06 · LENDING ▸ committee APPROVES (conditional) via Temporal", [
                "pm.environment.set('structWorkflowId', b.workflow_id);"],
         desc="Walks the LENDING line to 'Note Circulated', files the credit note as versioned "
              "evidence, then WAITS for the committee."),
+    req("POST /orchestrator …/control — committee RETURNS for revision (loop continues)",
+        "POST", ORC, "/v1/workflows/{{structWorkflowId}}/control", headers=_CHECKER,
+        body={"action": "return", "by": "{{checkerEmail}}",
+              "note": "Committee: quantify the DSRA assumption before we decide."},
+        tests=[OK, "pm.test('returned for information', () => "
+                   "pm.expect(pm.response.json().action).to.eql('ReturnedForInformation'));"],
+        desc="The approver's middle verb: not approve, not reject — 'amend and come back'. "
+             "Reasons travel with it, the maker is notified, the run keeps waiting, and the "
+             "iteration goes on the durable record."),
+    req("POST /orchestrator …/revise-credit-note — MAKER files the revised note v2", "POST",
+        ORC, "/v1/workflows/{{structWorkflowId}}/revise-credit-note", headers=_MAKER,
+        body={"reference": "CN/ECOSOCH/{{runSuffix}}-v2", "by": "{{makerEmail}}"},
+        tests=[OK],
+        desc="The amendment is the NEXT immutable credit-note version on every lending "
+             "line — v1 stays reviewable forever."),
+    req("POST /orchestrator …/control — MAKER RESUBMITS (SLA clock restarts)", "POST",
+        ORC, "/v1/workflows/{{structWorkflowId}}/control", headers=_MAKER,
+        body={"action": "resubmit", "by": "{{makerEmail}}",
+              "note": "DSRA assumption quantified in the v2 note."},
+        tests=[OK, "pm.test('resubmitted', () => "
+                   "pm.expect(pm.response.json().action).to.eql('Resubmitted'));"],
+        desc="Back in the approvers' queue with a FRESH decision window; the approvers are "
+             "notified. The loop can repeat any number of times — every round auditable."),
     req("POST /orchestrator …/committee-decision — CONDITIONAL approval", "POST",
         ORC, "/v1/workflows/{{structWorkflowId}}/committee-decision", headers=_MAKER,
         body={"approved": True, "by": "{{makerEmail}}",
@@ -679,6 +702,24 @@ F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPR
                    "pm.expect(pm.response.json().workflow_id).to.include('cpcs:'));"]),
     stage("PATCH lending — → CP/CS Completed", "/v1/lending/{{lendingId}}", "stage",
           "CP/CS Completed", extra={"remarks": "E2E: CP/CS complete (v2), agreement executed."}),
+    req("POST /v1/internal/cpcs-checklists — MAKER drafts v3 (reject demo)", "POST", REG,
+        "/v1/internal/cpcs-checklists", headers=_MAKER,
+        body={"lending_id": "{{lendingId}}", "deal_id": "{{dealId}}", "checklist_version": 3,
+              "status": "Completed",
+              "items": [{"key": "cp_extra_collateral", "label": "Additional collateral offer",
+                         "condition_type": "CP", "required": True, "status": "Completed"}]},
+        tests=cap("checklistId3"),
+        desc="A hypothetical late amendment, prepared only to demonstrate the checker's "
+             "THIRD verb below. The approved v2 (already cited by cp_cs_completion) is "
+             "untouched."),
+    req("POST …/cpcs-checklists/{id}/reject — CHECKER REJECTS v3 (terminal)", "POST", REG,
+        "/v1/internal/cpcs-checklists/{{checklistId3}}/reject", headers=_CHECKER,
+        body={"note": "Not required — the sanctioned structure already covers this."},
+        tests=[OK, "pm.test('v3 is Rejected — the loop BREAKS', () => "
+                   "pm.expect(pm.response.json().status).to.eql('Rejected'));"],
+        desc="RETURN means 'amend and come back'; REJECT means 'this should not proceed' — "
+             "terminal for the version, note mandatory, out of the checker queue for good. "
+             "A genuine revival would be v4 with its own cycle."),
 ]))
 
 F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's boundary)", [
@@ -707,6 +748,27 @@ F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's 
                "pm.environment.get('lendingId'))).to.be.true);"],
         desc="Handover packages awaiting their check are 'Prepared' — same Today list, "
              "same pattern: subject, requester and the ready-made approve URL."),
+    req("POST …/handover-packages/{id}/reject — CHECKER REJECTS the first attempt", "POST",
+        REG, "/v1/internal/handover-packages/{{lendingId}}/reject", headers=_CHECKER,
+        body={"note": "Executed-agreement bundle incomplete — do not hand over as is."},
+        tests=[OK, "pm.test('attempt Rejected — terminal for THIS package', () => "
+                   "pm.expect(pm.response.json().status).to.eql('Rejected'));"],
+        desc="The checker's terminal verb: this attempt ends, the line does NOT move, the "
+             "rejection stays on record. A revival is a FRESH prepare→approve cycle."),
+    req("POST /v1/internal/handover-packages — MAKER RE-PREPARES (fresh cycle)", "POST", REG,
+        "/v1/internal/handover-packages", headers=_MAKER,
+        body={"lending_id": "{{lendingId}}",
+              "executed_document_refs": [
+                  {"reference": "AGR/ECOSOCH/{{runSuffix}}", "sha256": SHA}],
+              "cpcs_checklist_version": 2, "delivery_method": "Secure email",
+              "recipient": "advaya-ops@evamfinance.com",
+              "note": "E2E: rebuilt package after the checker's rejection."},
+        tests=[OK, "const p = pm.response.json();",
+               "pm.test('back to Prepared for a new check', () => "
+               "pm.expect(p.status).to.eql('Prepared'));",
+               "pm.environment.set('pkgSha', p.package_sha256);"],
+        desc="Same single-winner row, new manifest + digest; a DIFFERENT checker must now "
+             "approve the rebuilt package."),
     req("POST …/approve — CHECKER APPROVES (stage still does not move)", "POST",
         REG, "/v1/internal/handover-packages/{{lendingId}}/approve", headers=_CHECKER,
         tests=[OK, "pm.test('Approved — PRISM has decided, Advaya has not', () => "

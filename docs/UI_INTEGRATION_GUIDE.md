@@ -71,6 +71,13 @@ temperatures, interaction types…). Never hard-code an enum.
   `Idempotency-Key` UUID header on creates so a retried request can't double-insert.
 * **Concurrency**: every row carries `version`. A conflicting concurrent edit returns
   `409` — refetch, merge, retry; never blind-overwrite.
+* **Every human gate offers the same three verbs.** Approve (terminal success),
+  **Return** (non-terminal: reasons mandatory, the maker amends as the NEXT version /
+  resubmits, the loop repeats), **Reject** (terminal: note mandatory, the loop breaks;
+  a revival is a fresh cycle, never a resurrection). Parked workflow runs use
+  `POST /orchestrator/v1/workflows/{id}/control {action: return|resubmit|cancel}`;
+  CP/CS checklists and handover packages use their `/return` and `/reject` routes.
+  One decision-dialog component covers the whole platform.
 * **Refusals are UI states.** Any transition the server refuses for role/state reasons
   should have been disabled in the UI (from `/v1/me` + row state). The refusal responses
   in the collection (`…REFUSED` requests) enumerate exactly which controls to disable:

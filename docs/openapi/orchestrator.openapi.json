@@ -234,6 +234,29 @@
         "title": "BuyerUpdateIn",
         "type": "object"
       },
+      "CheckerRejectIn": {
+        "additionalProperties": false,
+        "description": "The checker's TERMINAL refusal (CP/CS checklist or handover package). The decider\nis the AUTHENTICATED caller; ``rejected_by`` is only a dev fallback. Note mandatory \u2014\na terminal refusal must say why, permanently.",
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "rejected_by": {
+            "maxLength": 200,
+            "title": "Rejected By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rejected_by",
+          "note"
+        ],
+        "title": "CheckerRejectIn",
+        "type": "object"
+      },
       "ChecklistItemIn": {
         "additionalProperties": false,
         "description": "One qualification checklist RESULT from the caller. The item definitions (which keys\nexist, which are required) come from deployment config \u2014 the caller only says what\npassed; unknown keys are refused at merge time.",
@@ -2309,6 +2332,74 @@
         ]
       }
     },
+    "/v1/workflows/advaya-handover/{lending_id}/reject": {
+      "post": {
+        "operationId": "reject_advaya_handover_v1_workflows_advaya_handover__lending_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckerRejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Reject Advaya Handover V1 Workflows Advaya Handover  Lending Id  Reject Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "CHECKER rejects the prepared handover (terminal for this attempt)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/asset-monetisations": {
       "post": {
         "operationId": "start_asset_mon_v1_workflows_asset_monetisations_post",
@@ -2490,6 +2581,74 @@
           }
         },
         "summary": "CHECKER approves the CP/CS checklist (different person, senior authority)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/cpcs-checklists/{checklist_id}/reject": {
+      "post": {
+        "operationId": "reject_cpcs_checklist_v1_workflows_cpcs_checklists__checklist_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "checklist_id",
+            "required": true,
+            "schema": {
+              "title": "Checklist Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckerRejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Reject Cpcs Checklist V1 Workflows Cpcs Checklists  Checklist Id  Reject Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "CHECKER rejects the CP/CS checklist (terminal \u2014 the loop breaks)",
         "tags": [
           "Workflows"
         ]

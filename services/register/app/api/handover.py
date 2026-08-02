@@ -394,6 +394,44 @@ async def return_handover_package(lending_id: str, payload: HandoverReturnIn,
     return _serialize(pkg)
 
 
+@router.post("/v1/internal/handover-packages/{lending_id}/reject", tags=["Internal"],
+             summary="CHECKER rejects the handover package (terminal for this attempt)")
+async def reject_handover_package(lending_id: str, payload: HandoverReturnIn,
+                                  ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The third checker verb. RETURN means "amend and come back"; REJECT means "this
+    facility should not be handed over" — terminal for the attempt. The line does NOT
+    move; a genuine later revival is a fresh prepare→approve cycle (same single-winner
+    row, new manifest), with this rejection permanently on record. Note mandatory."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "approve_advaya_handover")   # checker authority, like approve
+    pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
+        AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
+        AdvayaHandoverPackage.lending_id == lending_id,
+        AdvayaHandoverPackage.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if pkg is None:
+        raise NotFoundError(f"No prepared handover package for Lending line {lending_id!r}.")
+    if pkg.status != "Prepared":
+        raise ConflictError(
+            f"The handover package is {pkg.status!r}; only a 'Prepared' package can be "
+            "rejected by the checker.")
+    checker_name, checker_id = _ident(ctx)
+    if checker_id == pkg.initiated_by_id:
+        raise ValidationAppError(
+            "The handover must be rejected by a DIFFERENT checker than the maker who "
+            "prepared it.")
+    pkg.status = "Rejected"
+    pkg.note = payload.note
+    pkg.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.reject",
+        resource_type="advaya_handover_packages", resource_id=str(pkg.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, "status": "Rejected", "checker": checker_name,
+                 "note": payload.note, "label": lending_id}))
+    return _serialize(pkg)
+
+
 @router.get("/v1/internal/handover-packages", tags=["Internal"],
             summary="List handover packages (the checker's queue: ?status=Prepared)")
 async def list_handover_packages(ctx: RequestContext = Depends(get_context),
