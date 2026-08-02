@@ -16,6 +16,7 @@ Run it:  python -m app.api   (same image as the worker; a second container/deplo
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import re
@@ -2067,6 +2068,88 @@ def create_app() -> FastAPI:
                                        "by": acted_by})
         return {"workflow_id": workflow_id, "action": outcome, "by": acted_by,
                 "control_ref": ref}
+
+    # kind → (workflow-id prefix, how its decision is delivered: "approve/reject" =
+    # the generic approve/reject routes; a name = a dedicated decision route; None =
+    # signal-driven, no single decision URL). CP/CS is deliberately absent: its ids
+    # are checklist-versioned (…-v{n}) and already returned by the checklist APIs.
+    _LOOKUP_KINDS: dict[str, tuple[str, str | None]] = {
+        "lead-conversion": ("leadconv", "approve/reject"),
+        "lead-qualification": ("qual", None),
+        "deal-structuring": ("struct", "committee-decision"),
+        "document-collection": ("docs", None),
+        "syndication": ("synd", "syndication-decision"),
+        "asset-monetisation": ("amon", "am-decision"),
+        "advaya-handover": ("handover", None),
+        "ews-case": ("ews", None),
+    }
+
+    @app.get("/v1/workflows", tags=["Workflows"],
+             summary="Find a subject's runs (newest attempt first) — clients never build ids")
+    async def find_workflows(kind: str, subject_id: str, request: Request,
+                             x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                             ) -> Any:
+        """DISCOVERY for UIs: given a business subject ("this lead's conversion"), return
+        every attempt — the base id plus any ``-r2, -r3, …`` retries — each with its live
+        status and ready-made action URLs. The id-construction and retry-suffix rules live
+        HERE, server-side, so no client ever encodes them. ``current`` is the newest
+        attempt (the only one a decision can still land on when RUNNING)."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        _who, err = await _verified_email(request, "")
+        if err is not None:
+            return err
+        if _auth_enforced() and not _who:
+            return _problem(401, "Unauthorized",
+                            "A verified identity is required to look up workflow runs.")
+        if (entry := _LOOKUP_KINDS.get(kind)) is None:
+            return _problem(422, "Validation failed",
+                            f"Unknown kind '{kind}'; one of: "
+                            f"{', '.join(sorted(_LOOKUP_KINDS))}.")
+        prefix, decide = entry
+        tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
+        base = f"{prefix}-{_tenant_slug(tenant)}-{subject_id}"
+        client: Client = request.app.state.temporal
+        runs: list[dict[str, Any]] = []
+        newest_desc: Any = None
+        # Attempts are strictly sequential (base, -r2, -r3, …) with no gaps — the start
+        # path guarantees it — so scan until the first miss. The cap is a safety bound,
+        # far above any plausible retry count.
+        for n in range(1, 51):
+            candidate = base if n == 1 else f"{base}-r{n}"
+            handle = client.get_workflow_handle(candidate)
+            try:
+                desc = await handle.describe()
+            except RPCError:
+                break
+            row: dict[str, Any] = {
+                "workflow_id": candidate,
+                "run_id": desc.run_id,
+                "status": desc.status.name if desc.status else "UNKNOWN",
+                "started_at": desc.start_time.isoformat() if desc.start_time else None,
+                "closed_at": desc.close_time.isoformat() if desc.close_time else None,
+                "status_url": f"/v1/workflows/{candidate}",
+            }
+            if decide == "approve/reject":
+                row["approve_url"] = f"/v1/workflows/{candidate}/approve"
+                row["reject_url"] = f"/v1/workflows/{candidate}/reject"
+            elif decide is not None:
+                row["decision_url"] = f"/v1/workflows/{candidate}/{decide}"
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                with contextlib.suppress(RPCError, TemporalError):
+                    row["stage"] = await handle.query("status")
+            runs.append(row)
+            newest_desc = desc
+        # Same read protection as the per-run status route, applied to the newest
+        # attempt: its initiator or an approver-role holder may look the subject up.
+        if runs and _auth_enforced():
+            scope_err = await _status_scope_denied(
+                request, runs[-1]["workflow_id"], newest_desc, _who)
+            if scope_err is not None:
+                return scope_err
+        runs.reverse()
+        return {"kind": kind, "subject_id": subject_id, "count": len(runs),
+                "current": runs[0] if runs else None, "runs": runs}
 
     @app.get("/v1/workflows/{workflow_id}", tags=["Workflows"],
              summary="A run's live status (execution state + in-workflow stage)")

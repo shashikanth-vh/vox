@@ -136,6 +136,23 @@ This is the canonical **request → approve** shape every governance action reus
 * UI polls the lead until `status == "Converted"`, then reads `converted_deal_id` and
   deep-links to the new deal. Render the decision on the deal's governance tab.
 
+**Losing the 202 response is fine — never store or construct workflow ids.** At any
+later point (page reload, the approver arriving from their inbox), rediscover the run
+server-side:
+
+```
+GET /orchestrator/v1/workflows?kind=lead-conversion&subject_id={lead_id}
+```
+
+→ `{count, current, runs[]}` — every attempt newest-first (retries after a rejection
+get `-r2, -r3, …` ids; the server knows that rule so you don't have to), each with
+`status`, live `stage`, and ready-made `status_url` / `approve_url` / `reject_url`
+(or `decision_url` for kinds with a dedicated decision route). `current` is the
+attempt a decision can still land on. Kinds: `lead-conversion`, `lead-qualification`,
+`deal-structuring`, `document-collection`, `syndication`, `asset-monetisation`,
+`advaya-handover`, `ews-case`. Same read protection as the status route: initiator
+or approver-role holders.
+
 ### 3.4 Committee approval (folder 06 — your screenshot)
 
 * **Analyst**: deal workspace button **"Send to committee"** →

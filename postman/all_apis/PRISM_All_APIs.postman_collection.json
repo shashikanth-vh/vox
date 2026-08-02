@@ -11254,7 +11254,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (36 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (37 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Decisions",
@@ -11497,6 +11497,54 @@
         {
           "name": "Workflows",
           "item": [
+            {
+              "name": "GET /orchestrator/v1/workflows \u2014 Find a subject's runs (newest attempt first) \u2014 clients never build ids",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows"
+                  ],
+                  "query": [
+                    {
+                      "key": "kind",
+                      "value": "sample",
+                      "disabled": false
+                    },
+                    {
+                      "key": "subject_id",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
+                },
+                "description": "DISCOVERY for UIs: given a business subject (\"this lead's conversion\"), return\nevery attempt \u2014 the base id plus any ``-r2, -r3, \u2026`` retries \u2014 each with its live\nstatus and ready-made action URLs. The id-construction and retry-suffix rules live\nHERE, server-side, so no client ever encodes them. ``current`` is the newest\nattempt (the only one a decision can still land on when RUNNING)."
+              }
+            },
             {
               "name": "POST /orchestrator/v1/workflows/advaya-handover \u2014 MAKER prepares the Advaya handover (senior credit authority)",
               "request": {

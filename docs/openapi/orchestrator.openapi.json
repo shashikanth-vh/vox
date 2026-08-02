@@ -2114,6 +2114,74 @@
         ]
       }
     },
+    "/v1/workflows": {
+      "get": {
+        "description": "DISCOVERY for UIs: given a business subject (\"this lead's conversion\"), return\nevery attempt \u2014 the base id plus any ``-r2, -r3, \u2026`` retries \u2014 each with its live\nstatus and ready-made action URLs. The id-construction and retry-suffix rules live\nHERE, server-side, so no client ever encodes them. ``current`` is the newest\nattempt (the only one a decision can still land on when RUNNING).",
+        "operationId": "find_workflows_v1_workflows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_id",
+            "required": true,
+            "schema": {
+              "title": "Subject Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Find Workflows V1 Workflows Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Find a subject's runs (newest attempt first) \u2014 clients never build ids",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/advaya-handover": {
       "post": {
         "operationId": "start_advaya_handover_v1_workflows_advaya_handover_post",

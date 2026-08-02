@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Workflow discovery: `GET /orchestrator/v1/workflows?kind=…&subject_id=…`.** The
+  production-grade way for a UI to re-find a run after the start response is gone:
+  given a business subject ("this lead's conversion"), the orchestrator returns every
+  attempt newest-first — the id-construction (`{prefix}-{tenantSlug}-{subject}`) and
+  retry-suffix (`-r2, -r3, …`) rules now live server-side only — each with live
+  status/stage and ready-made `status_url` + `approve_url`/`reject_url` (or
+  `decision_url`). `current` = the attempt a decision can still land on; no runs is
+  an empty 200, not a 404. Same read protection as the per-run status route
+  (initiator or approver role). Kinds: lead-conversion, lead-qualification,
+  deal-structuring, document-collection, syndication, asset-monetisation,
+  advaya-handover, ews-case.
+
 - **`lead_no` is auto-assigned when omitted.** Creating a lead without a `lead_no`
   now mints the tenant's next free `L-0001, L-0002, …` instead of leaving the field
   empty — so back-to-back creates from the UI can simply omit it and never hit the
