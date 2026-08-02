@@ -63,7 +63,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"tracker_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample\",\n  \"deal_type\": \"sample\",\n  \"investor\": \"sample\",\n  \"investor_type\": \"sample\",\n  \"status\": \"sample\",\n  \"teaser_date\": \"2026-01-31\",\n  \"notes\": \"sample\"\n}",
+                  "raw": "{\n  \"tracker_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample\",\n  \"deal_type\": \"sample\",\n  \"investor\": \"sample\",\n  \"investor_type\": \"sample\",\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"status\": \"sample\",\n  \"teaser_date\": \"2026-01-31\",\n  \"notes\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -224,7 +224,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"tracker_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample\",\n  \"deal_type\": \"sample\",\n  \"investor\": \"sample\",\n  \"investor_type\": \"sample\",\n  \"status\": \"sample\",\n  \"teaser_date\": \"2026-01-31\",\n  \"notes\": \"sample\"\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"tracker_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"deal_id\": \"{{id}}\",\n  \"state\": \"sample\",\n  \"indicative_value_cr\": 1.0,\n  \"size_mw\": 1.0,\n  \"nature\": \"sample\",\n  \"deal_type\": \"sample\",\n  \"investor\": \"sample\",\n  \"investor_type\": \"sample\",\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"status\": \"sample\",\n  \"teaser_date\": \"2026-01-31\",\n  \"notes\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **ATLAS v19 cross-check: AM mandate ownership + the impact assessment.** The latest
+  prototype (`ATLAS_EVAM_v19`) was inventoried in full (grids, field keys, dataset shape,
+  computed columns, forms, RBAC v2.1, audit taxonomy, integrations) and diffed against
+  the backend — see `docs/ATLAS_V19_CROSSCHECK.md`. Verdict: one real schema gap, fixed
+  here — `asset_monetisation` gains `rm` + `analyst` (model, schemas, baseline DDL, MIS
+  importer maps the workbook's RM/Analyst columns, test) so the AM desk's book scopes and
+  scores like lending/syndication. Everything else v19 stores is already covered (often
+  more robustly); its derived analytics (Today rules, Dashboard v4, scorecards) need BFF
+  read endpoints later, not storage. Two open vocabulary decisions are recorded in the
+  doc (client lifecycle list; state-mandatory-at-push). Existing dev DBs: the usual
+  one-time recreate applies (baseline schema changed).
+
 - **Access: first-boot bootstrap + a single baseline migration.** Two changes born from
   the same discovery (a fresh prod-posture stack came up with EMPTY access tables and
   every request 502'd):

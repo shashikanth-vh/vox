@@ -364,6 +364,8 @@ def _base_0001_initial_schema() -> None:
             deal_type varchar(80),
             investor text,
             investor_type varchar(60),
+            rm varchar(120),
+            analyst varchar(120),
             status varchar(40),
             teaser_date date,
             notes text,

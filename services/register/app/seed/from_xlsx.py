@@ -861,6 +861,7 @@ async def import_workbook(
             "size_mw": _float(r.get("Size (MW)")), "nature": _s(r.get("Nature")),
             "deal_type": _s(r.get("Deal Type")), "investor": _s(r.get("Investor")),
             "investor_type": _s(r.get("Investor Type")),
+            "rm": _s(r.get("RM")), "analyst": _s(r.get("Analyst")),
             "status": _c("AssetMonetisation", "Asset Mon", nm, _s(r.get("Status"))),
             "teaser_date": _date(r.get("Date Teaser Shared")), "notes": notes or None,
         }

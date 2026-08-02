@@ -4,6 +4,18 @@
       "AssetMonCreate": {
         "additionalProperties": false,
         "properties": {
+          "analyst": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst"
+          },
           "deal_id": {
             "anyOf": [
               {
@@ -90,6 +102,18 @@
             ],
             "title": "Notes"
           },
+          "rm": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rm"
+          },
           "size_mw": {
             "anyOf": [
               {
@@ -158,6 +182,17 @@
       },
       "AssetMonRead": {
         "properties": {
+          "analyst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -285,6 +320,17 @@
             ],
             "title": "Reconciliation Status"
           },
+          "rm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rm"
+          },
           "size_mw": {
             "anyOf": [
               {
@@ -407,6 +453,18 @@
       "AssetMonUpdate": {
         "additionalProperties": false,
         "properties": {
+          "analyst": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst"
+          },
           "deal_id": {
             "anyOf": [
               {
@@ -510,6 +568,18 @@
               }
             ],
             "title": "Notes"
+          },
+          "rm": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rm"
           },
           "size_mw": {
             "anyOf": [

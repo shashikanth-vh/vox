@@ -92,3 +92,23 @@ async def test_closure_gate_requires_verified_am_evidence(client):
             "evidence_kind": kind, "reference": ref,
             "workflow_id": wf, "run_id": "run-1"}, headers=AM_HEAD)
         assert r.status_code == 201, f"{kind}: {r.text}"
+
+
+async def test_am_tracker_carries_its_own_rm_and_analyst(client):
+    """ATLAS v19 parity: the AM desk's ownership lives ON the mandate row (like the
+    lending/syndication trackers) — team scoping, scorecards, and book rollups key on
+    it, so it must persist through create, patch, and the read schema."""
+    code = "AMO" + uuid.uuid4().hex[:6].upper()
+    eid = (await client.post("/v1/entities",
+                             json={"code": code, "legal_name": "AM Owned Co",
+                                   "entity_type": "Company"})).json()["id"]
+    r = await client.post("/v1/asset-monetisation",
+                          json={"entity_id": eid, "status": "Teaser Prepared",
+                                "rm": "Kiran Rao", "analyst": "Dev Mehta"})
+    assert r.status_code == 201, r.text
+    row = r.json()
+    assert (row["rm"], row["analyst"]) == ("Kiran Rao", "Dev Mehta")
+    r = await client.patch(f"/v1/asset-monetisation/{row['id']}",
+                           json={"analyst": "Nisha Iyer"})
+    assert r.status_code == 200, r.text
+    assert r.json()["analyst"] == "Nisha Iyer"

@@ -124,7 +124,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"deal_type\": \"sample deal_type\",\n  \"entity_id\": \"{{entityId}}\",\n  \"indicative_value_cr\": 1.0,\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"nature\": \"sample nature\",\n  \"notes\": \"sample notes\",\n  \"size_mw\": 1.0,\n  \"state\": \"sample state\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\",\n  \"tracker_no\": \"sample tracker_no\"\n}",
+              "raw": "{\n  \"analyst\": \"sample analyst\",\n  \"deal_id\": \"{{id}}\",\n  \"deal_type\": \"sample deal_type\",\n  \"entity_id\": \"{{entityId}}\",\n  \"indicative_value_cr\": 1.0,\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"nature\": \"sample nature\",\n  \"notes\": \"sample notes\",\n  \"rm\": \"sample rm\",\n  \"size_mw\": 1.0,\n  \"state\": \"sample state\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -265,7 +265,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"deal_type\": \"sample deal_type\",\n  \"entity_id\": \"{{entityId}}\",\n  \"indicative_value_cr\": 1.0,\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"nature\": \"sample nature\",\n  \"notes\": \"sample notes\",\n  \"size_mw\": 1.0,\n  \"state\": \"sample state\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\",\n  \"tracker_no\": \"sample tracker_no\"\n}",
+              "raw": "{\n  \"analyst\": \"sample analyst\",\n  \"deal_id\": \"{{id}}\",\n  \"deal_type\": \"sample deal_type\",\n  \"entity_id\": \"{{entityId}}\",\n  \"indicative_value_cr\": 1.0,\n  \"investor\": \"sample investor\",\n  \"investor_type\": \"sample investor_type\",\n  \"nature\": \"sample nature\",\n  \"notes\": \"sample notes\",\n  \"rm\": \"sample rm\",\n  \"size_mw\": 1.0,\n  \"state\": \"sample state\",\n  \"status\": \"sample status\",\n  \"teaser_date\": \"2026-03-31\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

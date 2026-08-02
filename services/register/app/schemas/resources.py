@@ -535,6 +535,8 @@ class AssetMonCreate(CreateModel):
     deal_type: str | None = Field(default=None, max_length=80)
     investor: str | None = None
     investor_type: str | None = Field(default=None, max_length=60)
+    rm: str | None = Field(default=None, max_length=120)
+    analyst: str | None = Field(default=None, max_length=120)
     status: str | None = Field(default=None, max_length=40)
     teaser_date: date | None = None
     notes: str | None = None
@@ -551,6 +553,8 @@ class AssetMonUpdate(UpdateModel):
     deal_type: str | None = Field(default=None, max_length=80)
     investor: str | None = None
     investor_type: str | None = Field(default=None, max_length=60)
+    rm: str | None = Field(default=None, max_length=120)
+    analyst: str | None = Field(default=None, max_length=120)
     status: str | None = Field(default=None, max_length=40)
     teaser_date: date | None = None
     notes: str | None = None
@@ -567,6 +571,8 @@ class AssetMonRead(ReadModel):
     deal_type: str | None
     investor: str | None
     investor_type: str | None
+    rm: str | None = None
+    analyst: str | None = None
     status: str | None
     status_history: list[dict[str, Any]] | None = None
     reconciliation_status: str | None = None

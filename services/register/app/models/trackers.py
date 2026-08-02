@@ -173,6 +173,10 @@ class AssetMonetisation(RegisterBase):
     deal_type: Mapped[str | None] = mapped_column(String(80))  # Capital Market / Project Advisory
     investor: Mapped[str | None] = mapped_column(Text)
     investor_type: Mapped[str | None] = mapped_column(String(60))
+    # Ownership, at parity with the lending/syndication trackers: the AM desk's RM and
+    # analyst. Team scoping, scorecards, and book rollups all key on these.
+    rm: Mapped[str | None] = mapped_column(String(120))
+    analyst: Mapped[str | None] = mapped_column(String(120))
     status: Mapped[str | None] = mapped_column(String(40))
     status_history: Mapped[list | None] = mapped_column(JSONB)
     reconciliation_status: Mapped[str | None] = mapped_column(String(20))
