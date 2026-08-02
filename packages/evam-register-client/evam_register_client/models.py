@@ -31,7 +31,12 @@ class Page:
         return len(self.items)
 
     @classmethod
-    def from_body(cls, body: dict[str, Any]) -> "Page":
+    def from_body(cls, body: dict[str, Any] | list[Any]) -> "Page":
+        # A few Register endpoints (e.g. GET /v1/assignments) answer a BARE JSON array
+        # rather than the {"items": [...]} envelope — normalise instead of crashing
+        # with "'list' object has no attribute 'get'" inside a workflow activity.
+        if isinstance(body, list):
+            return cls(items=body, count=len(body), next_cursor=None, total=None)
         return cls(
             items=body.get("items", []),
             count=body.get("count", len(body.get("items", []))),

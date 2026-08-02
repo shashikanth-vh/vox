@@ -146,3 +146,17 @@ def test_sync_client(mock_app):
 def _plan(method, path):
     from evam_register_client.client import _Plan
     return _Plan(method, path)
+
+
+def test_page_from_body_accepts_a_bare_json_array():
+    """GET /v1/assignments answers a BARE array, not the {"items": [...]} envelope —
+    Page must normalise it (this exact mismatch crashed the VOX lead-owner activity
+    with \"'list' object has no attribute 'get'\" on every fresh-lead capture)."""
+    from evam_register_client.models import Page
+
+    page = Page.from_body([{"id": "a1", "user_id": "u1"}, {"id": "a2", "user_id": "u2"}])
+    assert [r["id"] for r in page.items] == ["a1", "a2"]
+    assert page.count == 2 and page.next_cursor is None and page.total is None
+
+    enveloped = Page.from_body({"items": [{"id": "a3"}], "next_cursor": "c1"})
+    assert enveloped.items == [{"id": "a3"}] and enveloped.next_cursor == "c1"
