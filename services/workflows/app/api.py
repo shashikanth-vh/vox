@@ -2080,7 +2080,9 @@ def create_app() -> FastAPI:
         "document-collection": ("docs", None),
         "syndication": ("synd", "syndication-decision"),
         "asset-monetisation": ("amon", "am-decision"),
-        "advaya-handover": ("handover", None),
+        # The handover CHECKER approval is keyed by the LENDING id (the subject),
+        # not the workflow id — a sentinel marks that so the URL is still served.
+        "advaya-handover": ("handover", "subject:advaya-handover/{subject_id}/approve"),
         "ews-case": ("ews", None),
     }
 
@@ -2133,6 +2135,10 @@ def create_app() -> FastAPI:
             if decide == "approve/reject":
                 row["approve_url"] = f"/v1/workflows/{candidate}/approve"
                 row["reject_url"] = f"/v1/workflows/{candidate}/reject"
+            elif decide is not None and decide.startswith("subject:"):
+                row["approve_url"] = ("/v1/workflows/"
+                                      + decide.removeprefix("subject:").format(
+                                          subject_id=subject_id))
             elif decide is not None:
                 row["decision_url"] = f"/v1/workflows/{candidate}/{decide}"
             if desc.status == WorkflowExecutionStatus.RUNNING:

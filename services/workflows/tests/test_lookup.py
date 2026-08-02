@@ -113,6 +113,18 @@ async def test_lookup_names_the_dedicated_decision_route(monkeypatch):
     assert "approve_url" not in current
 
 
+async def test_lookup_serves_the_subject_keyed_handover_approve_url(monkeypatch):
+    # The handover checker approval is keyed by the LENDING id, not the workflow id —
+    # the lookup still serves it ready-made so no client constructs it.
+    base = f"handover-{_slug()}-LEND1"
+    temporal = _FakeTemporal({base: _Desc(WorkflowExecutionStatus.RUNNING)})
+    r = await _get(_app(monkeypatch, temporal),
+                   {"kind": "advaya-handover", "subject_id": "LEND1"})
+    assert r.status_code == 200
+    assert (r.json()["current"]["approve_url"]
+            == "/v1/workflows/advaya-handover/LEND1/approve")
+
+
 async def test_lookup_with_no_runs_is_an_empty_200_not_a_404(monkeypatch):
     r = await _get(_app(monkeypatch, _FakeTemporal({})),
                    {"kind": "lead-conversion", "subject_id": "NOPE"})
