@@ -28,7 +28,12 @@ ARG VITE_TENANT="EVAM"
 # APIs when this compiles in as 'true'. On the platform the backend IS present, so
 # real is the default here — override to 'false' only for a data-free demo build.
 ARG VITE_USE_REAL_API="true"
+# On the platform, a failed API call must LOOK failed — never silently render the
+# bundled mock instead (that masquerade cost two debugging rounds). Demo builds may
+# set 'true' to restore the soft fallback.
+ARG VITE_MOCK_FALLBACK="false"
 ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
+    VITE_MOCK_FALLBACK=$VITE_MOCK_FALLBACK \
     VITE_ACCESS_URL=$VITE_ACCESS_URL \
     VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \
     VITE_DEX_URL=$VITE_DEX_URL \

@@ -60,10 +60,19 @@ export function totalOf(data: any, fallback: number): number {
   return Number.isFinite(Number(t)) ? Number(t) : fallback;
 }
 
-// Reads: hit the API when enabled, otherwise (or on failure) fall back to mock.
+// Reads: hit the API when enabled, otherwise fall back to mock. Whether a FAILED real
+// call may also fall back to mock is a build choice: 'false' (the platform image) lets
+// failures surface as failures — silent mock-on-error twice masqueraded as "the UI
+// shows mock data" when the true problem was auth. Demo builds keep the soft fallback.
+const MOCK_ON_ERROR = import.meta.env.VITE_MOCK_FALLBACK !== 'false';
+
 export async function withFallback<T>(real: () => Promise<T>, mock: () => T | Promise<T>): Promise<T> {
   if (!USE_REAL_API) return mock();
-  try { return await real(); } catch (e) { console.warn('[api] falling back to mock:', e); return mock(); }
+  try { return await real(); } catch (e) {
+    if (!MOCK_ON_ERROR) throw e;
+    console.warn('[api] falling back to mock:', e);
+    return mock();
+  }
 }
 
 export const api = {
