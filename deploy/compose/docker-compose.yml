@@ -18,8 +18,10 @@
 # If a previous run errors with "network ... not found" (stale containers from an older
 # compose layout), reset once:  docker compose -f deploy/compose/docker-compose.yml down --remove-orphans
 #
-# Edge (NGINX): :8080 · Gateway: :8001 · Register: :8000 · Access: :8002 · VocX: :8003
-# PULSE (news radar): :8004 · ATLAS (dashboard): :8005 · Orchestrator (workflows): :8006
+# Published ports — Edge (NGINX): :8443 https / :8080 http-redirect · Gateway: :8001 (dev)
+# Register: :8000 (dev) · Access: :8002 (dev) · Dex: :5556 · Temporal UI: :8088
+# ATLAS / PULSE / VocX / Orchestrator / UI publish NO host port: they are reachable only
+# through the edge → gateway (https://<host>:8443/atlas, /pulse, /vocx, /orchestrator, /ui).
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # Temporal Web UI: http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
@@ -357,16 +359,24 @@ services:
   #     scripts/gen_dev_certs.sh
   # (nginx will not start without deploy/nginx/certs/tls.{crt,key}.) :8080 serves only a
   # 301 to HTTPS plus the health probes; real traffic goes to :8443.
+  # The ATLAS UI as its own image (deploy/ui/Dockerfile bakes whatever is in deploy/ui
+  # — the SPA build output, or the single-file prototype as index.html). No host port:
+  # the edge proxies /ui/ here, so the UI shares the ONE origin with every API.
+  # Update the UI: replace the files in deploy/ui, then
+  #   docker compose build ui && docker compose up -d ui
+  ui:
+    build:
+      context: ../ui
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.27-alpine
     depends_on:
       - gateway
+      - ui
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro
-      # The ATLAS UI — static files served same-origin at https://<host>:8443/ui/
-      # (drop the SPA build or the single-file ATLAS html into deploy/ui/).
-      - ../ui:/usr/share/nginx/html/ui:ro
     ports:
       - "8080:80"     # HTTP → 301 redirect to HTTPS (+ /healthz, /readyz)
       - "8443:443"    # HTTPS — the real front door

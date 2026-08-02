@@ -1,13 +1,25 @@
-# deploy/ui — the ATLAS UI slot
+# deploy/ui — the ATLAS UI image
 
-Anything in this folder is served by the edge NGINX at **`https://<host>:8443/ui/`**
-(`/` redirects here). The compose file live-mounts it read-only, so replacing files
-takes effect on the next browser reload — no container restart.
+The UI ships as its **own Docker image** (the `Dockerfile` here bakes this folder's
+contents into an nginx), and the edge proxies **`https://<host>:8443/ui/`** to it
+(`/` redirects there). The UI container publishes no host port — like every service,
+it is reachable only through the one door, so the UI and all APIs share ONE origin.
 
-## Publish the UI
+## Publish / update the UI
 
-* **SPA build**: copy the build output (`index.html` + assets) into this folder.
-* **Single-file prototype**: copy it here **renamed to `index.html`**.
+1. Put the UI in this folder:
+   * **SPA build**: copy the build output (`index.html` + assets) here. Build the SPA
+     with base path `/ui/` (e.g. Vite: `base: '/ui/'`) so asset URLs resolve.
+   * **Single-file prototype**: copy it here **renamed to `index.html`**.
+2. Rebuild and roll just the UI:
+
+   ```
+   docker compose -f deploy/compose/docker-compose.yml build ui
+   docker compose -f deploy/compose/docker-compose.yml up -d ui
+   ```
+
+CI can equally `docker build deploy/ui -t <registry>/prism-ui:<tag>` and push; point
+the compose service at the tag instead of the build context.
 
 Configure the UI to call the APIs at **relative paths** (`/v1/…`, `/access/…`,
 `/orchestrator/…`, `/atlas/…`) — same origin as the page, which is why no CORS setup

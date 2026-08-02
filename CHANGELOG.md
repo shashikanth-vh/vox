@@ -6,6 +6,15 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The ATLAS UI is now its own Docker image, behind :8443.** `deploy/ui/Dockerfile`
+  bakes the folder's contents (SPA build or single-file prototype as `index.html`)
+  into an nginx; a new compose `ui` service runs it with NO host port, and the edge
+  proxies `/ui/` to it — same one-origin posture as every API. Update = replace the
+  files, `docker compose build ui && up -d ui` (the previous live-mount is replaced
+  by the image so the UI is a versionable, CI-shippable artifact). Also corrected
+  the stale port-map header comment: ATLAS/PULSE/VocX/Orchestrator publish no host
+  ports — they are reachable only via `https://<host>:8443/{atlas,pulse,vocx,orchestrator}`.
+
 - **The CHECKER now finds CP/CS checklists and handover packages — the last silent
   waits.** Their prepare-workflows complete immediately (the wait lives as a Prepared
   REGISTER row, not a parked run), so they were invisible to the Today list and no
