@@ -225,13 +225,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  const b = pm.response.json();",
-                  "  pm.environment.set('adminToken', b.id_token || '');",
+                  "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                  "if (b.id_token) {",
+                  "  pm.environment.set('adminToken', b.id_token);",
                   "  pm.test('ADMIN signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
                   "} else {",
-                  "  pm.environment.set('adminToken', '');",
-                  "  console.log('Dex unavailable (ADMIN) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "  // NEVER wipe a previously-captured token on a failed re-sign-in \u2014 a",
+                  "  // stale-but-valid token beats an empty one (an empty token turns EVERY",
+                  "  // ADMIN-lane request into a 401). This request only ran because",
+                  "  // dexUrl is set, so a failure here is a REAL problem \u2014 fail loudly",
+                  "  // instead of silently poisoning the rest of the run.",
+                  "  const prev = pm.environment.get('adminToken');",
+                  "  pm.test('ADMIN sign-in FAILED (status ' + pm.response.code + ') \u2014 ' +",
+                  "          (prev ? 'previous token kept' : 'NO token available'), () =>",
+                  "    pm.expect.fail('Dex returned no id_token; check ssoPassword, dexUrl and the dex container logs.'));",
                   "}"
                 ]
               }
@@ -307,13 +314,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  const b = pm.response.json();",
-                  "  pm.environment.set('makerToken', b.id_token || '');",
+                  "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                  "if (b.id_token) {",
+                  "  pm.environment.set('makerToken', b.id_token);",
                   "  pm.test('MAKER signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
                   "} else {",
-                  "  pm.environment.set('makerToken', '');",
-                  "  console.log('Dex unavailable (MAKER) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "  // NEVER wipe a previously-captured token on a failed re-sign-in \u2014 a",
+                  "  // stale-but-valid token beats an empty one (an empty token turns EVERY",
+                  "  // MAKER-lane request into a 401). This request only ran because",
+                  "  // dexUrl is set, so a failure here is a REAL problem \u2014 fail loudly",
+                  "  // instead of silently poisoning the rest of the run.",
+                  "  const prev = pm.environment.get('makerToken');",
+                  "  pm.test('MAKER sign-in FAILED (status ' + pm.response.code + ') \u2014 ' +",
+                  "          (prev ? 'previous token kept' : 'NO token available'), () =>",
+                  "    pm.expect.fail('Dex returned no id_token; check ssoPassword, dexUrl and the dex container logs.'));",
                   "}"
                 ]
               }
@@ -389,13 +403,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  const b = pm.response.json();",
-                  "  pm.environment.set('checkerToken', b.id_token || '');",
+                  "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                  "if (b.id_token) {",
+                  "  pm.environment.set('checkerToken', b.id_token);",
                   "  pm.test('CHECKER signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
                   "} else {",
-                  "  pm.environment.set('checkerToken', '');",
-                  "  console.log('Dex unavailable (CHECKER) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "  // NEVER wipe a previously-captured token on a failed re-sign-in \u2014 a",
+                  "  // stale-but-valid token beats an empty one (an empty token turns EVERY",
+                  "  // CHECKER-lane request into a 401). This request only ran because",
+                  "  // dexUrl is set, so a failure here is a REAL problem \u2014 fail loudly",
+                  "  // instead of silently poisoning the rest of the run.",
+                  "  const prev = pm.environment.get('checkerToken');",
+                  "  pm.test('CHECKER sign-in FAILED (status ' + pm.response.code + ') \u2014 ' +",
+                  "          (prev ? 'previous token kept' : 'NO token available'), () =>",
+                  "    pm.expect.fail('Dex returned no id_token; check ssoPassword, dexUrl and the dex container logs.'));",
                   "}"
                 ]
               }
@@ -471,13 +492,20 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
-                  "  const b = pm.response.json();",
-                  "  pm.environment.set('rmToken', b.id_token || '');",
+                  "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                  "if (b.id_token) {",
+                  "  pm.environment.set('rmToken', b.id_token);",
                   "  pm.test('RM signed in (id_token)', () => pm.expect(b.id_token).to.be.a('string'));",
                   "} else {",
-                  "  pm.environment.set('rmToken', '');",
-                  "  console.log('Dex unavailable (RM) \u2014 dev posture, header trust. status=' + pm.response.code);",
+                  "  // NEVER wipe a previously-captured token on a failed re-sign-in \u2014 a",
+                  "  // stale-but-valid token beats an empty one (an empty token turns EVERY",
+                  "  // RM-lane request into a 401). This request only ran because",
+                  "  // dexUrl is set, so a failure here is a REAL problem \u2014 fail loudly",
+                  "  // instead of silently poisoning the rest of the run.",
+                  "  const prev = pm.environment.get('rmToken');",
+                  "  pm.test('RM sign-in FAILED (status ' + pm.response.code + ') \u2014 ' +",
+                  "          (prev ? 'previous token kept' : 'NO token available'), () =>",
+                  "    pm.expect.fail('Dex returned no id_token; check ssoPassword, dexUrl and the dex container logs.'));",
                   "}"
                 ]
               }

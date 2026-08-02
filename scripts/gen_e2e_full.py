@@ -195,15 +195,22 @@ def token(label, mail_var, tok_var):
                     "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
                     "}"]}},
                 {"listen": "test", "script": {"type": "text/javascript", "exec": [
-                    "if (pm.response.code === 200) {",
-                    "  const b = pm.response.json();",
-                    f"  pm.environment.set('{tok_var}', b.id_token || '');",
+                    "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                    "if (b.id_token) {",
+                    f"  pm.environment.set('{tok_var}', b.id_token);",
                     f"  pm.test('{label} signed in (id_token)', () => "
                     "pm.expect(b.id_token).to.be.a('string'));",
                     "} else {",
-                    f"  pm.environment.set('{tok_var}', '');",
-                    f"  console.log('Dex unavailable ({label}) — dev posture, header trust. status=' "
-                    "+ pm.response.code);",
+                    "  // NEVER wipe a previously-captured token on a failed re-sign-in — a",
+                    "  // stale-but-valid token beats an empty one (an empty token turns EVERY",
+                    f"  // {label}-lane request into a 401). This request only ran because",
+                    "  // dexUrl is set, so a failure here is a REAL problem — fail loudly",
+                    "  // instead of silently poisoning the rest of the run.",
+                    f"  const prev = pm.environment.get('{tok_var}');",
+                    f"  pm.test('{label} sign-in FAILED (status ' + pm.response.code + ') — ' +",
+                    "          (prev ? 'previous token kept' : 'NO token available'), () =>",
+                    "    pm.expect.fail('Dex returned no id_token; check ssoPassword, dexUrl "
+                    "and the dex container logs.'));",
                     "}"]}}]}
 
 
