@@ -297,6 +297,26 @@ now carries what the screen needs without joins:
   be invisible. Stat chips (N activities / today / people / companies) are counts over
   the fetched rows.
 
+**Prototype-parity recipe** (one fetch, two renderers):
+
+1. On tab open `GET /v1/audit?limit=500` (Admin bearer; gate the tab on `views.audit`
+   from `/v1/me` — the server 403s anyway, the check keeps the nav honest).
+2. Map each row to a view-model: `area` = `session` → Session; actor `system`/`svc_*`
+   → System; else a static `resource_type` map (lending_trackers → Lending, entities →
+   Clients, …). `code` = `changes.label`; detail pairs = `changes.values`.
+3. **Audit trail** renders the view-model verbatim; Detail = each `values` entry as
+   `from → to`, falling back to the `fields` name list for pre-upgrade rows.
+4. **Activity Log** renders a sentence per row keyed on (resource_type, action), with
+   `values.stage`/`values.status` specialised ("Moved {label}'s lending stage {from} →
+   {to}"); Session/System rows get their fixed sentences.
+5. Chips = counts over the fetched array (total / at ≥ midnight / distinct actors /
+   distinct labels); pills = client-side `area` filter (or server-side
+   `?resource_type=`); Who column resolves actor e-mail → "Name (Role)" via a cached
+   `GET /v1/people` map; CSV/PDF export = serialize the current filtered view.
+6. After a successful login the UI calls `POST /v1/session-events {"event":"signin"}`
+   ONCE per session (sessionStorage guard; optional `signout` on logout). Everything
+   else appears automatically — auditing rides inside every write transaction.
+
 The **Today tab's red/amber triage** is served by `GET /atlas/v1/today`:
 `stage_bottlenecks.{red,amber}` (BN-02 — lending lines stuck in a working stage, with
 `days_in_stage`, `pending_with`, `analyst`; longest-stuck first) plus
