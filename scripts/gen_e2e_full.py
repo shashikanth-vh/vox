@@ -349,7 +349,9 @@ F.append(("00 · Health & run setup", [
              "if (!pm.environment.get('rmEmail')) pm.environment.set('rmEmail', 'e2e.rm@evamfinance.com');",
              "if (!pm.environment.get('makerEmail')) pm.environment.set('makerEmail', 'e2e.maker@evamfinance.com');",
              "if (!pm.environment.get('checkerEmail')) pm.environment.set('checkerEmail', 'e2e.checker@evamfinance.com');",
-             "if (!pm.environment.get('registerDirectUrl')) pm.environment.set('registerDirectUrl', 'http://localhost:8000');",
+             "// The machine lane rides the SAME one door: /machine on the edge. Derived",
+             "// from baseUrl so any host works with zero extra configuration.",
+             "if (!pm.environment.get('registerDirectUrl')) pm.environment.set('registerDirectUrl', pm.environment.get('baseUrl') + '/machine');",
              "if (!pm.environment.get('svcWorkflowsKey')) pm.environment.set('svcWorkflowsKey', 'compose-svc-workflows');",
              "pm.environment.set('runSuffix', String(Date.now()).slice(-6));",
              "// The covenant is defined due YESTERDAY, so the very first sweep generates the",
@@ -1370,9 +1372,10 @@ col = {"info": {
         "### Requirements\\n"
         "Full stack up (`docker compose up -d --build`, including `temporal`, `workflows`, "
         "`orchestrator`), TLS certs generated (`scripts/gen_dev_certs.sh`), SSL verification "
-        "OFF in Postman, and `registerDirectUrl` reachable (default `http://localhost:8000`) "
-        "for the machine lane. Run **in order** with the Collection Runner; WAIT requests "
-        "poll themselves until Temporal settles.\\n\\n"
+        "OFF in Postman. EVERY request — human lane, machine lane and Dex sign-in — goes "
+        "through the ONE public door `https://<host>:8443` (the machine lane rides "
+        "`/machine/v1/internal/`, derived from baseUrl). Run **in order** with the "
+        "Collection Runner; WAIT requests poll themselves until Temporal settles.\\n\\n"
         "Several requests MUST fail (self-approvals, hand-typed milestones, blocked closure, "
         "maker validating their own document) — their tests pass on refusal.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
@@ -1392,9 +1395,10 @@ env = {"name": "PRISM — Full (via NGINX)", "values": [
     {"key": "baseUrl", "value": "https://localhost:8443", "enabled": True},
     {"key": "accessUrl", "value": "https://localhost:8443/access", "enabled": True},
     {"key": "orchestratorUrl", "value": "https://localhost:8443/orchestrator", "enabled": True},
-    # The MACHINE LANE door (service-principal plumbing) + the workflow service key —
-    # compose publishes the Register on :8000 and defaults the key to compose-svc-workflows.
-    {"key": "registerDirectUrl", "value": "http://localhost:8000", "enabled": True},
+    # The MACHINE LANE (service-principal plumbing) rides the SAME :8443 door — the
+    # edge proxies /machine/v1/internal/ to the register's service-key-gated routes,
+    # so no request in this collection ever needs a direct service port.
+    {"key": "registerDirectUrl", "value": "https://localhost:8443/machine", "enabled": True},
     {"key": "svcWorkflowsKey", "value": "compose-svc-workflows", "enabled": True},
     {"key": "svcAdvayaKey", "value": "compose-svc-advaya", "enabled": True},
     {"key": "pkgSha", "value": "", "enabled": True},
@@ -1439,9 +1443,10 @@ def main() -> None:
     with open(OUT / "PRISM_Full.postman_environment.json", "w") as fh:
         json.dump(env, fh, indent=2)
     # A second, ready-made environment for the Dex/prod-posture run. Identical except dexUrl is
-    # FILLED, which is the one switch that turns folder 00b on.
+    # FILLED, which is the one switch that turns folder 00b on. Same one door: the edge
+    # proxies /dex/ to Dex, so sign-in also goes through :8443 — no internal port.
     dex_env = {"name": "PRISM — Full (via NGINX) · Dex prod posture",
-               "values": [dict(v, value="http://localhost:5556") if v["key"] == "dexUrl"
+               "values": [dict(v, value="https://localhost:8443") if v["key"] == "dexUrl"
                           else dict(v) for v in env["values"]]}
     with open(OUT / "PRISM_Full_Dex.postman_environment.json", "w") as fh:
         json.dump(dex_env, fh, indent=2)

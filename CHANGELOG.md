@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Every Postman request now goes through the ONE door — `https://<host>:8443` —
+  nothing internal.** Two lanes still defaulted to direct service ports: the Dex
+  sign-in (`dexUrl` → `:5556`) and the MACHINE lane (`registerDirectUrl` → `:8000`
+  for Advaya's boundary calls, the document/covenant sweeps and the notifier). The
+  edge gains `location /machine/v1/internal/` → the register's service-key-gated
+  internal routes (scoped to `/v1/internal/` ONLY — human CRUD stays gateway-only;
+  request-time DNS like `/dex/`), and every environment default is now
+  edge-relative: `dexUrl = https://<host>:8443` (the edge already proxies `/dex/`),
+  `registerDirectUrl = {{baseUrl}}/machine` (derived, so any host works),
+  `accessUrl`/`orchestratorDirectUrl` likewise. Verified: **zero** internal-port
+  defaults remain across all environments, and every collection request builds on
+  those variables. Redeploy note: rebuild/restart `nginx` and re-import the
+  regenerated environments.
+
 - **The E2E collection is now THE one finalized end-to-end run: entry GATES +
   runbook.** Folders 06/07/08 open with a GATE request that reads the lending line
   and fails fast with "complete folder N first — current stage: X" when a

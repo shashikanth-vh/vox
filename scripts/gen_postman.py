@@ -195,12 +195,14 @@ def build_environment() -> dict:
                 {"key": "baseUrl", "value": "https://localhost:8443", "enabled": True},
                 {"key": "orchestratorUrl", "value": "https://localhost:8443/orchestrator",
                  "enabled": True},
-                {"key": "registerDirectUrl", "value": "http://localhost:8000", "enabled": True},
-                {"key": "orchestratorDirectUrl", "value": "http://localhost:8006",
+                # ONE DOOR: every lane goes through the edge on :8443 — the machine lane
+                # rides /machine/v1/internal/, Access is prefix-routed at /access, and the
+                # orchestrator at /orchestrator. No collection needs a direct service port.
+                {"key": "registerDirectUrl", "value": "https://localhost:8443/machine",
                  "enabled": True},
-                # The Access service is NOT prefix-routed by the gateway (the gateway consumes it
-                # internally), so user provisioning in the E2E journey talks to it directly.
-                {"key": "accessUrl", "value": "http://localhost:8002", "enabled": True},
+                {"key": "orchestratorDirectUrl", "value": "https://localhost:8443/orchestrator",
+                 "enabled": True},
+                {"key": "accessUrl", "value": "https://localhost:8443/access", "enabled": True},
                 # Verified OIDC bearer — the real identity once GATEWAY_OIDC_ISSUER is set.
                 {"key": "bearerToken", "value": "", "enabled": True},
                 # Direct-port debugging only; the gateway injects the correct upstream key.
