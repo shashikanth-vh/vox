@@ -60,6 +60,17 @@ export function totalOf(data: any, fallback: number): number {
   return Number.isFinite(Number(t)) ? Number(t) : fallback;
 }
 
+/**
+ * Is this a REGISTER-issued id (a UUID), or a leftover local one?
+ *
+ * The prototype minted ids like `L`+timestamp for optimistically-inserted rows. A screen
+ * that renders one of those addresses a row the register has never had, so every write
+ * comes back `422 uuid_parsing on path.obj_id`. Anything reading the shared store must be
+ * able to tell the two apart.
+ */
+export const isRegisterId = (id?: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''));
+
 // Reads: hit the API when enabled, otherwise fall back to mock. Whether a FAILED real
 // call may also fall back to mock is a build choice: 'false' (the platform image) lets
 // failures surface as failures — silent mock-on-error twice masqueraded as "the UI

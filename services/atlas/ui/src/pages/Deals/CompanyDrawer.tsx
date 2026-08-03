@@ -17,7 +17,7 @@ import DataRegisterDialog from './DataRegisterDialog';
 import StageChangeDialog from './StageChangeDialog';
 import type { StageLine } from '../../services/stageRequestService';
 import { useAuth } from '../../auth/AuthContext';
-import { USE_REAL_API } from '../../api/http';
+import { USE_REAL_API, isRegisterId } from '../../api/http';
 import { db } from '../../api/atlasStore';
 import ActionsPanel from '../../components/workflow/ActionsPanel';
 import { can } from '../../auth/rbac';
@@ -71,9 +71,12 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
     const page = { pageIndex: 0, pageSize: 200, globalFilter: '', sorting: [], columnFilters: [] };
     const jobs: Promise<any>[] = [];
     if (!db().clients[code]) jobs.push(clientsService.list(page as any));
-    if (!lendingService.byCode(code).length) jobs.push(lendingService.list(page as any));
-    if (!assetMonService.byCode(code).length) jobs.push(assetMonService.list(page as any));
-    if (!syndicationService.byCode(code).length) jobs.push(syndicationService.hydrate());
+    // `.some(isRegisterId)` and not `.length`: a stale optimistic row would otherwise
+    // count as loaded, and the drawer would go on editing a row the register never had.
+    const loaded = (rows: { id: string }[]) => rows.some((r) => isRegisterId(r.id));
+    if (!loaded(lendingService.byCode(code))) jobs.push(lendingService.list(page as any));
+    if (!loaded(assetMonService.byCode(code))) jobs.push(assetMonService.list(page as any));
+    if (!loaded(syndicationService.byCode(code))) jobs.push(syndicationService.hydrate());
     if (jobs.length) Promise.allSettled(jobs).then(() => force((n) => n + 1));
   }, [code]);
   if (!code) return null;

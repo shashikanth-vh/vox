@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Belt and braces on the phantom-row bug: a leftover local row can no longer be acted
+  on.** The previous fix stops the optimistic insert being created, but a browser session
+  that already held one kept using it — the drawer's "have I loaded this company's lines?"
+  test was `byCode(code).length`, which a phantom satisfies, so it never fetched the real
+  rows. Now:
+  * `isRegisterId()` tells a register-issued UUID from a prototype-minted `L`+timestamp,
+  * the drawer treats a company as loaded only when at least one row carries a real id,
+    so a stale store self-heals on open,
+  * and a stage change on a row without one is refused in the client with *"This row has
+    not finished saving to the register yet — refresh the page and try again."* instead of
+    spending a round trip to be told `uuid_parsing on path.obj_id`.
+
 - **Changing a lending stage from the company drawer answered "One or more fields are
   invalid", while the same control in the grid worked.** The drawer reads a company's
   product lines out of the shared store, and the rows there had been minted by the

@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API } from '../api/http';
+import { api, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, isRegisterId, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -107,6 +107,10 @@ export const lendingService = {
   async updateStage(id: string, stage: string, by: string): Promise<{ ok: boolean; error?: string }> {
     const r = this.find(id);
     const from = r?.stage;
+    if (USE_REAL_API && !isRegisterId(id)) {
+      return { ok: false, error: 'This row has not finished saving to the register yet — '
+        + 'refresh the page and try again.' };
+    }
     if (USE_REAL_API) {
       try {
         await api.patch('/lending/' + id, { stage });
