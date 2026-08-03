@@ -73,6 +73,254 @@ from app.workflows import (
 
 log = get_logger("orchestrator")
 
+# --------------------------------------------------------------------------------------- #
+# THE MAKER CATALOGUE — "what can I do next on this line, and if not, why not?"
+#
+# The approver's half of every governed flow has always been server-described: the pending
+# list hands back the verbs, and Today renders whatever it is given. The MAKER's half was
+# not, so ATLAS had no way to start a committee run, prepare a checklist or attest a
+# handover — the whole spine lived in Postman.
+#
+# This is the same idea pointed the other way. The sequencing rules stay HERE, next to the
+# workflows that enforce them, and the UI renders what it is handed. A UI that keeps its
+# own copy of these rules drifts: the Lending stage dropdown offered four stages the
+# register would always refuse, because it was guessing.
+#
+# An unavailable action is still RETURNED, with a reason. "Available once the committee has
+# sanctioned this facility" teaches the process; a hidden button teaches nothing.
+# --------------------------------------------------------------------------------------- #
+
+# Roles that may do MAKER work in each vertical. Wider than the approver sets in
+# _APPROVER_ROLES — preparing is not deciding — and deliberately so: the four-eyes rules
+# that stop a preparer approving their own work are enforced at the write, not here.
+_CREDIT_MAKERS = {"Credit Head", "Deal Analyst", "BD Head", "BDRM", "Management", "Admin"}
+_SYN_MAKERS = {"Syn Head", "Syn RM", "Management", "Admin"}
+_AM_MAKERS = {"AM Head", "AM RM", "Management", "Admin"}
+
+
+def _f(name: str, label: str, kind: str = "text", *, required: bool = False,
+       options: list[str] | None = None, placeholder: str | None = None,
+       default: Any = None, help_text: str | None = None) -> dict[str, Any]:
+    """One field of an action's form. `kind` is text | textarea | number | date | select."""
+    field: dict[str, Any] = {"name": name, "label": label, "type": kind,
+                             "required": required}
+    if options is not None:
+        field["options"] = options
+    if placeholder:
+        field["placeholder"] = placeholder
+    if default is not None:
+        field["default"] = default
+    if help_text:
+        field["help"] = help_text
+    return field
+
+
+_NOTE = _f("note", "Note", "textarea", placeholder="Context for the approver (optional)")
+
+# run gate: None = don't care · "none" = no live run · "live" = a run is open ·
+#           "returned" = a run is open and parked back with the maker.
+_MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
+    "Lending": (
+        {
+            "key": "deal-structuring.start",
+            "label": "Send to credit committee",
+            "method": "POST", "url": "/v1/workflows/deal-structurings",
+            "roles": _CREDIT_MAKERS, "run": "none",
+            "stages": {"Data Awaited", "Diligence", "Note Circulated"},
+            "stage_reason": "The committee decision has already been taken on this facility.",
+            "run_reason": "A committee run is already open on this deal.",
+            "prefill": {"deal_id": "deal_id"},
+            "form": [_f("credit_note_reference", "Credit note reference", required=True,
+                        placeholder="CN/<COMPANY>/2026-01"),
+                     _f("amount_cr", "Amount ₹ Cr", "number", required=True),
+                     _NOTE],
+        },
+        {
+            "key": "deal-structuring.revise-credit-note",
+            "label": "File a revised credit note",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/revise-credit-note",
+            "roles": _CREDIT_MAKERS, "run": "returned",
+            "run_reason": "Available when the committee has returned this run for revision.",
+            "form": [_f("credit_note_reference", "Revised credit note reference",
+                        required=True, placeholder="CN/<COMPANY>/2026-01-v2"),
+                     _f("summary", "What changed", "textarea", required=True)],
+        },
+        {
+            "key": "run.resubmit",
+            "label": "Send back for decision",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/control",
+            "roles": _CREDIT_MAKERS, "run": "returned",
+            "run_reason": "Available once this run has been returned to you.",
+            "constant": {"action": "resubmit"},
+            "form": [_f("by", "Your name", required=True),
+                     _f("note", "What you changed", "textarea", required=True)],
+        },
+        {
+            "key": "cpcs.prepare",
+            "label": "Prepare CP/CS checklist",
+            "method": "POST", "url": "/v1/workflows/cpcs-checklists",
+            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
+            "stage_reason": "Available once the committee has sanctioned this facility.",
+            "prefill": {"lending_id": "id"},
+            "form": [_f("checklist_version", "Version", "number", required=True, default=1,
+                        help_text="Raise the version when re-preparing after a return."),
+                     _NOTE],
+        },
+        {
+            "key": "handover.prepare",
+            "label": "Prepare the Advaya handover package",
+            "method": "POST", "url": "/v1/workflows/advaya-handover",
+            "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            "stage_reason": "Available once the CP/CS checklist has been approved.",
+            "prefill": {"lending_id": "id"},
+            "form": [_NOTE],
+        },
+        {
+            "key": "handover.submit",
+            "label": "Submit the handover to Advaya",
+            "method": "POST",
+            "url": "/v1/internal/handover-packages/{subject_id}/submit",
+            "roles": {"Credit Head", "Management", "Admin"},
+            "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            "stage_reason": "Available once the handover package has been approved.",
+            "form": [_f("submitted_by", "Your name", required=True), _NOTE],
+        },
+        {
+            "key": "advaya.attest",
+            "label": "Record an Advaya confirmation",
+            "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
+            "roles": {"Credit Head", "Management", "Admin"},
+            "stages": {"Ready for Disbursement", "CP/CS Completed"},
+            "stage_reason": "Available once the handover has been submitted to Advaya.",
+            "form": [_f("event", "Confirmation", "select", required=True,
+                        options=["accepted", "rejected", "disbursed"]),
+                     _f("reference", "Advaya reference / UTR", required=True,
+                        help_text="The reference on the confirmation you received. "
+                                  "Recorded as the evidence for this step."),
+                     _f("amount_cr", "Amount ₹ Cr", "number"),
+                     _f("disbursed_on", "Value date", "date"),
+                     _NOTE],
+        },
+    ),
+    "Syndication": (
+        {
+            "key": "syndication.start",
+            "label": "Start the mandate run",
+            "method": "POST", "url": "/v1/workflows/syndications",
+            "roles": _SYN_MAKERS, "run": "none",
+            "run_reason": "A mandate run is already open on this line.",
+            "prefill": {"syndication_id": "id", "deal_id": "deal_id"},
+            "form": [_f("amount_cr", "Ask ₹ Cr", "number", required=True), _NOTE],
+        },
+        {
+            "key": "syndication.lender-update",
+            "label": "Record a lender response",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/lender-update",
+            "roles": _SYN_MAKERS, "run": "live",
+            "run_reason": "Start the mandate run first.",
+            "form": [_f("lender_name", "Lender", required=True),
+                     _f("status", "Status", "select", required=True,
+                        options=["Identified", "IM Circulated", "Queries Received",
+                                 "IP Received", "Sanctioned", "Declined"]),
+                     _f("amount_cr", "Indicated ₹ Cr", "number"), _NOTE],
+        },
+        {
+            "key": "syndication.allocate",
+            "label": "Allocate the sanctioned amounts",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/allocate",
+            "roles": _SYN_MAKERS, "run": "live",
+            "run_reason": "Start the mandate run first.",
+            "form": [_f("allocations", "Allocations", "textarea", required=True,
+                        placeholder='[{"lender_name": "HDFC", "amount_cr": 25}]',
+                        help_text="One JSON array of {lender_name, amount_cr}.")],
+        },
+    ),
+    "AssetMonetisation": (
+        {
+            "key": "asset-monetisation.start",
+            "label": "Start the mandate run",
+            "method": "POST", "url": "/v1/workflows/asset-monetisations",
+            "roles": _AM_MAKERS, "run": "none",
+            "run_reason": "A mandate run is already open on this asset.",
+            "prefill": {"asset_mon_id": "id", "deal_id": "deal_id"},
+            "form": [_f("indicative_value_cr", "Indicative value ₹ Cr", "number",
+                        required=True), _NOTE],
+        },
+        {
+            "key": "asset-monetisation.record-nda",
+            "label": "Record an NDA",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/record-nda",
+            "roles": _AM_MAKERS, "run": "live",
+            "run_reason": "Start the mandate run first.",
+            "form": [_f("buyer_name", "Counterparty", required=True),
+                     _f("signed_on", "Signed on", "date", required=True), _NOTE],
+        },
+        {
+            "key": "asset-monetisation.record-offer",
+            "label": "Record an offer",
+            "method": "POST", "url": "/v1/workflows/{workflow_id}/record-offer",
+            "roles": _AM_MAKERS, "run": "live",
+            "run_reason": "Start the mandate run first.",
+            "form": [_f("buyer_name", "Counterparty", required=True),
+                     _f("offer_type", "Offer", "select", required=True,
+                        options=["NBO", "BO"]),
+                     _f("amount_cr", "Offer ₹ Cr", "number", required=True), _NOTE],
+        },
+    ),
+}
+
+# The deterministic workflow id a subject's run carries, by subject type. Same construction
+# the start routes use, so the lookup cannot drift from the thing it looks up.
+_RUN_ID_FOR: dict[str, tuple[str, str]] = {
+    "Lending": ("struct", "deal_id"),          # the committee run lives on the DEAL
+    "Syndication": ("synd", "id"),
+    "AssetMonetisation": ("amon", "id"),
+}
+
+# Business statuses that mean "the maker has it back".
+_RETURNED_STATES = {"ReturnedForInformation", "Returned", "ReturnedToMaker"}
+
+
+def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
+                     run_state: str) -> tuple[bool, str]:
+    """Is this action available, and if not, what does the user need to know?
+
+    Order matters: the role answer is about WHO you are and never changes with the
+    subject, so it is checked first; the stage answer is the one that teaches the
+    sequence, so it comes before the run-state answer.
+    """
+    needed = action.get("roles")
+    if needed is not None and roles and not (roles & needed):
+        return False, ("This step is done by " + ", ".join(sorted(needed)) + ".")
+    stages = action.get("stages")
+    if stages is not None and stage and stage not in stages:
+        return False, action.get("stage_reason", f"Not available at stage '{stage}'.")
+    want_run = action.get("run")
+    if want_run == "none" and run_state != "none":
+        return False, action.get("run_reason", "A run is already open on this subject.")
+    if want_run == "live" and run_state == "none":
+        return False, action.get("run_reason", "No run is open on this subject yet.")
+    if want_run == "returned" and run_state != "returned":
+        return False, action.get("run_reason",
+                                 "Available when this run is returned to you.")
+    return True, ""
+
+
+
+# Where a subject is read from, and which of its fields carries the stage the catalogue
+# gates on. Kept beside the catalogue so adding a subject type is one edit, not three.
+_SUBJECT_PATH: dict[str, str] = {
+    "Lending": "/v1/lending",
+    "Syndication": "/v1/syndication",
+    "AssetMonetisation": "/v1/asset-monetisation",
+}
+_STAGE_FIELD: dict[str, str] = {
+    "Lending": "stage",
+    "Syndication": "status",
+    "AssetMonetisation": "status",
+}
+
+
 # Who may decide which workflow, keyed by the workflow-id PREFIX. leadconv is a lead→deal
 # conversion (a BD decision); struct is the Credit Committee's sanction decision on a structured
 # deal (credit authority only).
@@ -1711,6 +1959,40 @@ def create_app() -> FastAPI:
                             "Handover approval refused", str(detail))
         return ORJSONResponse(status_code=200, content=reg_resp.json())
 
+    async def _register_get_as(request: Request, path: str, who: str,
+                               caller: CallerContext) -> tuple[dict, Any]:
+        """GET from the Register AS the verified human, so the register's own row scope
+        decides what this caller may see. Returns (row, None) or ({}, _problem())."""
+        tenant = caller.tenant or (request.headers.get("X-Tenant") or settings.register_tenant)
+        headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+        if settings.internal_signing_secret:
+            from evam_backend_core.internal_token import mint_internal_context
+            headers["X-Internal-Context"] = mint_internal_context(
+                signing_key=settings.internal_signing_secret,
+                algorithm=settings.internal_signing_algorithm,
+                ttl_seconds=max(settings.internal_token_ttl_seconds, 120),
+                tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
+                roles=list(caller.roles), effective_views=caller.effective_views,
+                effective_operations=caller.effective_operations, decision="FULL",
+                method="GET", path=path)
+        else:
+            headers["X-User-Email"] = who
+            if caller.user_id:
+                headers["X-User-Id"] = caller.user_id
+            if caller.roles:
+                headers["X-User-Roles"] = ",".join(caller.roles)
+        try:
+            rr = await request.app.state.http.get(
+                f"{settings.register_base_url.rstrip('/')}{path}", headers=headers)
+        except httpx.HTTPError as exc:
+            return {}, _problem(502, "Upstream unavailable", f"Register unreachable: {exc}")
+        if rr.status_code == 404:
+            return {}, _problem(404, "Not found", f"No such record: {path}.")
+        if rr.status_code >= 300:
+            return {}, _problem(rr.status_code if rr.status_code < 500 else 502,
+                                "Register refused the read", _upstream_detail(rr))
+        return (rr.json() or {}), None
+
     async def _register_post_as(request: Request, path: str, who: str, caller: CallerContext,
                                 body: dict) -> Any:
         """POST to the Register AS the verified human (server-minted delegated context in prod, or
@@ -2475,6 +2757,119 @@ def create_app() -> FastAPI:
         "cpcs-checklist": ("/v1/internal/cpcs-checklists?status=Completed", "cpcs"),
         "advaya-handover": ("/v1/internal/handover-packages?status=Prepared", "handover"),
     }
+
+    @app.get("/v1/workflows/actions", tags=["Workflows"],
+             summary="What this user can do NEXT on a subject (the maker's half)")
+    async def subject_actions(request: Request, subject_type: str, subject_id: str,
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key"),
+                              ) -> Any:
+        """The maker's counterpart to ``/v1/workflows/pending``.
+
+        Given one line — a lending facility, a syndication mandate, an asset-monetisation
+        mandate — answer what this caller may do to it right now, each with the URL, the
+        method and the form to collect. Unavailable steps come back too, with the reason,
+        because the sequence is the thing a user most needs to learn.
+
+        The point is that the sequencing rules stay on THIS side. A client that decides
+        for itself which buttons to show ends up offering steps the platform refuses —
+        which is exactly what the lending stage dropdown used to do.
+        """
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        who, err = await _verified_email(request, "")
+        if err is not None:
+            return err
+        if _auth_enforced() and not who:
+            return _problem(401, "Unauthorized",
+                            "A verified identity is required to list actions.")
+        if subject_type not in _MAKER_ACTIONS:
+            return _problem(422, "Validation failed",
+                            f"Unknown subject_type '{subject_type}'; one of: "
+                            f"{', '.join(sorted(_MAKER_ACTIONS))}.")
+        try:
+            if not _uuid_or_none(subject_id):
+                raise ValueError("empty")
+        except ValueError:
+            return _problem(422, "Validation failed",
+                            f"subject_id '{subject_id}' is not a valid id — was a "
+                            "client variable left unset?")
+        tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
+
+        # ROLES. Fail CLOSED and say so, rather than answering "nothing you can do" —
+        # an empty list that means "we could not ask" is indistinguishable from an empty
+        # list that means "you may do nothing", and that ambiguity cost a day once.
+        roles: set[str] = set()
+        if _auth_enforced():
+            if not settings.access_url:
+                return _problem(503, "Service unavailable",
+                                "Roles cannot be resolved: the Access service is not "
+                                "configured, so no action can be offered safely.")
+            try:
+                role_resp = await request.app.state.http.get(
+                    f"{settings.access_url.rstrip('/')}/v1/resolve",
+                    params={"email": who},
+                    headers={"X-API-Key": settings.access_api_key, "X-Tenant": tenant})
+            except httpx.HTTPError as exc:
+                return _problem(503, "Service unavailable",
+                                f"Roles cannot be resolved: {exc}")
+            if role_resp.status_code != 200:
+                return _problem(503, "Service unavailable",
+                                f"Roles cannot be resolved (HTTP "
+                                f"{role_resp.status_code}).")
+            roles = set(role_resp.json().get("roles", []))
+
+        # SUBJECT. Read as the human, so the register's own scope decides whether this
+        # caller may see the line at all.
+        caller, _v = _caller_context(request, who)
+        path = _SUBJECT_PATH[subject_type] + "/" + subject_id
+        row, read_err = await _register_get_as(request, path, who, caller)
+        if read_err is not None:
+            return read_err
+        stage = str(row.get(_STAGE_FIELD[subject_type]) or "")
+
+        # RUN. One describe against the deterministic id the start route would mint.
+        prefix, id_field = _RUN_ID_FOR[subject_type]
+        run_key = str(row.get(id_field) or "")
+        workflow_id = f"{prefix}-{_tenant_slug(tenant)}-{run_key}" if run_key else ""
+        run_state, run_info = "none", None
+        if workflow_id:
+            with contextlib.suppress(RPCError, TemporalError, AttributeError):
+                handle = request.app.state.temporal.get_workflow_handle(workflow_id)
+                desc = await handle.describe()
+                if desc.status == WorkflowExecutionStatus.RUNNING:
+                    run_state = "live"
+                    business = ""
+                    with contextlib.suppress(RPCError, TemporalError):
+                        business = str(await handle.query("status") or "")
+                    if business in _RETURNED_STATES or "return" in business.lower():
+                        run_state = "returned"
+                    run_info = {"workflow_id": workflow_id, "status": "RUNNING",
+                                "stage": business,
+                                "status_url": f"/v1/workflows/{workflow_id}"}
+
+        actions = []
+        for spec in _MAKER_ACTIONS[subject_type]:
+            enabled, reason = _evaluate_action(spec, roles=roles, stage=stage,
+                                               run_state=run_state)
+            url = spec["url"].format(workflow_id=workflow_id, subject_id=subject_id)
+            body = dict(spec.get("constant") or {})
+            for field, source in (spec.get("prefill") or {}).items():
+                value = row.get(source)
+                if value:
+                    body[field] = str(value)
+            actions.append({
+                "key": spec["key"], "label": spec["label"], "method": spec["method"],
+                "url": url, "enabled": enabled,
+                **({"reason": reason} if not enabled else {}),
+                "body": body, "form": spec["form"],
+            })
+        return {
+            "subject": {"type": subject_type, "id": subject_id, "stage": stage},
+            "run": run_info,
+            "scoped_to": {"email": who, "roles": sorted(roles)},
+            "actions": actions,
+        }
 
     @app.get("/v1/workflows/pending", tags=["Workflows"],
              summary="Every run parked awaiting an approval, tenant-wide (the Today list)")

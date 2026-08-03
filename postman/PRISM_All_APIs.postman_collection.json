@@ -11630,7 +11630,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (42 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (43 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Decisions",
@@ -11919,6 +11919,55 @@
                   ]
                 },
                 "description": "DISCOVERY for UIs: given a business subject (\"this lead's conversion\"), return\nevery attempt \u2014 the base id plus any ``-r2, -r3, \u2026`` retries \u2014 each with its live\nstatus and ready-made action URLs. The id-construction and retry-suffix rules live\nHERE, server-side, so no client ever encodes them. ``current`` is the newest\nattempt (the only one a decision can still land on when RUNNING)."
+              }
+            },
+            {
+              "name": "GET /orchestrator/v1/workflows/actions \u2014 What this user can do NEXT on a subject (the maker's half)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/actions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "actions"
+                  ],
+                  "query": [
+                    {
+                      "key": "subject_type",
+                      "value": "sample",
+                      "disabled": false
+                    },
+                    {
+                      "key": "subject_id",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
+                },
+                "description": "The maker's counterpart to ``/v1/workflows/pending``.\n\nGiven one line \u2014 a lending facility, a syndication mandate, an asset-monetisation\nmandate \u2014 answer what this caller may do to it right now, each with the URL, the\nmethod and the form to collect. Unavailable steps come back too, with the reason,\nbecause the sequence is the thing a user most needs to learn.\n\nThe point is that the sequencing rules stay on THIS side. A client that decides\nfor itself which buttons to show ends up offering steps the platform refuses \u2014\nwhich is exactly what the lending stage dropdown used to do."
               }
             },
             {

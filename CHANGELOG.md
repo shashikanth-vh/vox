@@ -6,6 +6,31 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The maker's half of the governance chain is now in the UI.** The approver's half has
+  always been server-described — `/v1/workflows/pending` hands back the verbs and Today
+  renders whatever it is given — but nothing described what the MAKER could do, so
+  starting a committee run, preparing a checklist, submitting a handover or attesting an
+  Advaya confirmation lived only in Postman.
+  * **New `GET /v1/workflows/actions?subject_type=&subject_id=`** on the orchestrator.
+    Given a lending / syndication / asset-monetisation line it answers what this caller
+    may do right now — label, method, URL, the form to collect, and the ids pre-filled —
+    for the whole catalogue: committee run, revised credit note, resubmit, CP/CS
+    preparation, handover prepare + submit, Advaya attestation, and the syndication and
+    AM signals. Roles come from Access and it **fails closed** (503) rather than
+    answering "nothing available" when they cannot be resolved.
+  * **Unavailable steps are returned too, with the reason.** "Available once the committee
+    has sanctioned this facility" teaches the sequence; a hidden button teaches nothing.
+    The gates are role → stage → run-state, in that order, and the reason names the one
+    that stopped you.
+  * **ATLAS renders it blind.** An `Actions` panel on each product line in the company
+    drawer, and one generic dialog built from the form the plane sends — so a new workflow
+    step is a catalogue entry on the orchestrator and *no UI change at all*. The
+    sequencing rules live in one place, next to the workflows that enforce them; a client
+    keeping its own copy is exactly how the stage dropdown came to offer four stages the
+    register would always refuse.
+  Still Postman-only, and next in line: the CP/CS checklist grid and handover package
+  assembly (both need bespoke screens), and document upload.
+
 - **Lending stage changes from the UI were cosmetic.** The Stage dropdown PATCHed
   `/v1/lending/{id}/stage` — **a route the register does not have** — fire-and-forget, then
   moved the row on screen regardless. Every stage change made in the browser advanced the

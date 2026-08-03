@@ -9,12 +9,13 @@ behind the click. Where the UI has no affordance, it says so and points at the P
 folder that does the job.
 
 **Short answer.** A lead can be raised, qualified, converted into a client + deal +
-product lines, and moved through the *operational* stages entirely from the UI. Everything
-from **committee sanction onwards is not in the UI** — no screen starts a deal-structuring
-run, prepares a CP/CS checklist, submits a handover package, or records an Advaya event.
-The approver's half of those flows *is* in the UI (Today ▸ Workflow approvals), so a
-mixed run — Postman to raise, browser to decide — works today and is the recommended way
-to exercise the whole governance chain.
+product lines, and moved through the *operational* stages entirely from the UI. The maker's
+half of the governance chain now has a home too — the **Actions** panel on each product line
+in the company drawer (§10) — served by `GET /v1/workflows/actions`, which answers what
+*this* user may do to *this* line right now and why the rest is not yet available. The two
+steps whose shape a generic form cannot carry (the CP/CS checklist grid and handover
+package assembly) are still Postman, as is document upload; Part 2 is the current register
+of those.
 
 ---
 
@@ -135,6 +136,38 @@ Inline status dropdown. `Closed` is governed server-side and refused here.
 
 **Clients** → `Add client` · **FI Master** → `Add bank / FI` → **Add FI**
 (`POST /v1/counterparties`) · **Employees** → `Add employee`.
+
+### 10. The maker's next steps — company drawer ▸ **Actions**
+
+Open the company drawer (row click on Deals, Lending, Platform Deals or Asset
+Monetisation). Each product line carries an **Actions** row underneath its fields, served
+by `GET /v1/workflows/actions?subject_type=…&subject_id=…`.
+
+Every step the platform knows about is shown. Ones you can take now are buttons; ones you
+cannot are **greyed, and hovering gives the reason** — *"Available once the committee has
+sanctioned this facility"*, *"This step is done by Credit Head, Management, Admin"*,
+*"A committee run is already open on this deal"*. The sequence is meant to be readable off
+the panel.
+
+Clicking one opens a dialog built from the form the plane sent — no per-step screen, so a
+new workflow step needs a catalogue entry on the orchestrator and no UI change at all.
+
+On a **Lending** line: `Send to credit committee` · `File a revised credit note` ·
+`Send back for decision` (both appear once a run is returned to you) ·
+`Prepare CP/CS checklist` · `Prepare the Advaya handover package` ·
+`Submit the handover to Advaya` · `Record an Advaya confirmation`.
+
+On **Platform Deals**: `Start the mandate run` · `Record a lender response` ·
+`Allocate the sanctioned amounts`.
+
+On **Asset Monetisation**: `Start the mandate run` · `Record an NDA` · `Record an offer`.
+
+The ids are pre-filled by the plane, so the form only ever asks for what a human actually
+knows. The gating lives on the orchestrator, beside the workflows that enforce it — which
+is the point: a client deciding for itself which buttons to show is how the stage dropdown
+came to offer four stages the register would always refuse.
+
+---
 
 ---
 

@@ -17,6 +17,7 @@ import DataRegisterDialog from './DataRegisterDialog';
 import StageChangeDialog from './StageChangeDialog';
 import type { StageLine } from '../../services/stageRequestService';
 import { useAuth } from '../../auth/AuthContext';
+import ActionsPanel from '../../components/workflow/ActionsPanel';
 import { can } from '../../auth/rbac';
 import { tokens } from '../../theme';
 
@@ -140,6 +141,9 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               <SelectFld label="Priority" value={r.pri} disabled={roSyn} onChange={(v) => updS(r.id, 'pri', v)} options={ref.getRefSync('Priority')} />
               <SelectFld label="Pending with" value={r.pendingWith} disabled={roSyn} onChange={(v) => updS(r.id, 'pendingWith', v)} options={ref.getRefSync('Pending With')} blank />
             </FieldGrid>
+            {/* What the workflow plane says this user may do next on this
+                line — served, not guessed. */}
+            <ActionsPanel subjectType="Syndication" subjectId={r.id} />
             <Stack spacing={1} sx={{ mt: 1 }}>
               <TextFld label="Potential lenders (after checking with client)" value={r.pot} disabled={roSyn} onChange={(v) => updS(r.id, 'pot', v)} multiline />
               <TextFld label="Sanctioned lenders" required={r.status === 'Sanctioned'} value={r.sancL} disabled={roSyn} onChange={(v) => updS(r.id, 'sancL', v)} />
@@ -167,6 +171,9 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
                 <TextFld label="Sanction date" required type="date" value={r.sanc || ''} disabled={roLend || (!isAdmin && !!r.sanc && r.sanc !== todayISO)} onChange={(v) => updL(r.id, 'sanc', v)} />}
               <TextFld label="Stage updated" value={r.updated} disabled onChange={() => {}} />
             </FieldGrid>
+            {/* What the workflow plane says this user may do next on this
+                line — served, not guessed. */}
+            <ActionsPanel subjectType="Lending" subjectId={r.id} />
             <Box sx={{ mt: 1 }}><TextFld label="Remarks" value={r.remarks} disabled={roLend} onChange={(v) => updL(r.id, 'remarks', v)} multiline /></Box>
           </DrawerSection>
         ))}
@@ -184,6 +191,9 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               <SelectFld label="Status" required value={r.status} disabled={roAM} onChange={(v) => updA(r.id, 'status', v)} options={ref.getRefSync('Asset Mon Status')} />
               <TextFld label="Date teaser shared" type="date" value={r.teaser || ''} disabled={roAM} onChange={(v) => updA(r.id, 'teaser', v)} />
             </FieldGrid>
+            {/* What the workflow plane says this user may do next on this
+                line — served, not guessed. */}
+            <ActionsPanel subjectType="AssetMonetisation" subjectId={r.id} />
             <Stack spacing={1} sx={{ mt: 1 }}>
               <TextFld label="Investor(s)" value={r.inv} disabled={roAM} onChange={(v) => updA(r.id, 'inv', v)} />
               <TextFld label="Notes" value={r.notes} disabled={roAM} onChange={(v) => updA(r.id, 'notes', v)} multiline />

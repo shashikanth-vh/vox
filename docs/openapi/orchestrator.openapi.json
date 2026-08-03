@@ -2299,6 +2299,74 @@
         ]
       }
     },
+    "/v1/workflows/actions": {
+      "get": {
+        "description": "The maker's counterpart to ``/v1/workflows/pending``.\n\nGiven one line \u2014 a lending facility, a syndication mandate, an asset-monetisation\nmandate \u2014 answer what this caller may do to it right now, each with the URL, the\nmethod and the form to collect. Unavailable steps come back too, with the reason,\nbecause the sequence is the thing a user most needs to learn.\n\nThe point is that the sequencing rules stay on THIS side. A client that decides\nfor itself which buttons to show ends up offering steps the platform refuses \u2014\nwhich is exactly what the lending stage dropdown used to do.",
+        "operationId": "subject_actions_v1_workflows_actions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subject_type",
+            "required": true,
+            "schema": {
+              "title": "Subject Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_id",
+            "required": true,
+            "schema": {
+              "title": "Subject Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Subject Actions V1 Workflows Actions Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "What this user can do NEXT on a subject (the maker's half)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
     "/v1/workflows/advaya-handover": {
       "post": {
         "operationId": "start_advaya_handover_v1_workflows_advaya_handover_post",

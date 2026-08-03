@@ -24,6 +24,7 @@ orchestratorClient.interceptors.request.use((cfg) => {
 export const orchestrator = {
   post: <T>(url: string, data?: any) => orchestratorClient.post<T>(url, data).then((r) => r.data),
   get: <T>(url: string, params?: Record<string, any>) => orchestratorClient.get<T>(url, { params }).then((r) => r.data),
+  patch: <T>(url: string, data?: any) => orchestratorClient.patch<T>(url, data).then((r) => r.data),
 };
 
 export default orchestratorClient;
