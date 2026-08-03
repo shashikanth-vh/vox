@@ -375,3 +375,56 @@ async def test_transactional_lead_convert(client: AsyncClient):
     assert deal["is_lending"] and deal["is_syndication"] and deal["stage"] == "In Pipeline"
     again = await client.post(f"/v1/leads/{lead['id']}/convert", json={"is_lending": True})
     assert again.status_code == 409
+
+
+async def test_convert_reports_an_access_outage_as_503_not_422(client: AsyncClient,
+                                                               monkeypatch):
+    """An unreachable Access service is a DEPENDENCY fault (503), never a bad request (422).
+
+    This one bit in production. The conversion runs inside a workflow whose durable retry
+    policy exists precisely to ride out a dependency outage — but that policy classifies a
+    422 as deterministic and stops retrying. So a momentary Access outage killed the run
+    after the approval had already been recorded: the approver was told the lead was
+    approved and no deal or lending line ever appeared behind it, with nothing but a
+    container log to say why. 503 keeps it retryable, and the lead stays convertible.
+    """
+    from app.core import access_client
+
+    ent = (await client.post("/v1/entities", json={
+        "code": f"AO-{uuid.uuid4().hex[:6]}", "legal_name": "Outage Co"})).json()
+    assert (await client.post("/v1/people", json={
+        "name": "Meera", "full_name": "Meera Rao", "role": "Deal Analyst"})).status_code == 201
+    lead = (await client.post("/v1/leads", json={
+        "company": "Outage Co", "entity_id": ent["id"], "status": "Active"})).json()
+
+    async def _down(tenant, user_id, role, expected_name=None):  # noqa: ANN001
+        raise access_client.AccessUnavailableError("connect timeout")
+    monkeypatch.setattr(access_client, "verify_assignee", _down)
+
+    r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
+        "is_lending": True, "product_type": "Term Loan", "amount_cr": 5,
+        "analyst": "Meera", "analyst_id": str(uuid.uuid4())})
+    assert r.status_code == 503, r.text
+    assert "Access service is not answering" in r.text
+    # Nothing was written, and the lead is still convertible once Access recovers.
+    assert (await client.get(f"/v1/leads/{lead['id']}")).json()["status"] == "Active"
+
+
+async def test_assignment_reports_an_access_outage_as_503_not_422(client: AsyncClient,
+                                                                  monkeypatch):
+    """Same rule on the assignment path — an outage is 'retry', not 'your request is wrong'."""
+    from app.core import access_client
+
+    ent = (await client.post("/v1/entities", json={
+        "code": f"AO-{uuid.uuid4().hex[:6]}", "legal_name": "Outage Two"})).json()
+
+    async def _down(tenant, user_id, role, expected_name=None):  # noqa: ANN001
+        raise access_client.AccessUnavailableError("connect timeout")
+    monkeypatch.setattr(access_client, "verify_assignee", _down)
+
+    r = await client.post("/v1/assignments", json={
+        "user_id": str(uuid.uuid4()), "subject_type": "Entity",
+        "subject_id": ent["id"], "assignment_role": "BDRM"},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert r.status_code == 503, r.text
+    assert "Access service is not answering" in r.text

@@ -469,6 +469,50 @@ async def test_api_transcriber_calls_the_stt_service(monkeypatch):
     assert seen["files"]["file"][1] == b"fake-bytes"
 
 
+async def test_api_transcriber_carries_the_upstream_reason(monkeypatch):
+    """A 5xx from STT must reach the capture log WITH the upstream's explanation.
+
+    Reported from a live run as `STT service unreachable after retries: 500` — a message
+    that cannot distinguish a model that never loaded from audio that could not be decoded,
+    so there was nothing in it to act on. The detail is what makes the log answerable.
+    """
+    from app.vocx.speech.stt import APITranscriber
+
+    def fake_post(url, headers=None, data=None, files=None, timeout=None):
+        return httpx.Response(
+            503, json={"error": {"type": "model_unavailable", "title": "Model not loaded",
+                                 "detail": "model 'medium' could not be loaded from "
+                                           "'/opt/models'"}},
+            request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr("time.sleep", lambda *_: None)     # no real backoff in a test
+    monkeypatch.setenv("VOCX_STT_API_URL", "http://stt:8000/v1/audio/transcriptions")
+    with pytest.raises(RuntimeError) as ei:
+        APITranscriber().transcribe(b"fake-bytes")
+    msg = str(ei.value)
+    assert "model 'medium' could not be loaded" in msg
+    assert "http://stt:8000/v1/audio/transcriptions" in msg
+
+
+async def test_api_transcriber_does_not_retry_a_4xx(monkeypatch):
+    """400 = these bytes will never decode. Retrying it three times only delays the error."""
+    from app.vocx.speech.stt import APITranscriber
+
+    calls = {"n": 0}
+
+    def fake_post(url, headers=None, data=None, files=None, timeout=None):
+        calls["n"] += 1
+        return httpx.Response(400, json={"error": {"detail": "clip could not be decoded"}},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setenv("VOCX_STT_API_URL", "http://stt:8000/v1/audio/transcriptions")
+    with pytest.raises(httpx.HTTPStatusError):
+        APITranscriber().transcribe(b"fake-bytes")
+    assert calls["n"] == 1
+
+
 async def test_report_print_view(stub_register, tmp_path, monkeypatch):
     """/v1/reports/print renders the stored report as print-ready HTML (the PoC's
     'Download PDF' is the browser printing this view) and escapes content."""

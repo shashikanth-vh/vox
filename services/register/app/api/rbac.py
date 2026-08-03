@@ -30,6 +30,7 @@ from app.core.errors import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    ServiceUnavailableError,
     ValidationAppError,
 )
 from app.core.router import api_router
@@ -111,8 +112,12 @@ async def create_assignment(payload: s.AssignmentCreate,
     try:
         problem = await verify_assignee(ctx.tenant_code, str(data["user_id"]), arole)
     except AccessUnavailableError as exc:
-        raise ValidationAppError(
-            f"Cannot verify assignee against the Access service: {exc}") from exc
+        # 503, NOT 422: nothing is wrong with the REQUEST — the dependency is down. A 422
+        # tells every caller "this will never work, stop", and a workflow's durable retry
+        # policy classifies it as deterministic and kills the run. Answer 'try again'.
+        raise ServiceUnavailableError(
+            f"Cannot verify the assignee: the Access service is not answering ({exc}). "
+            f"Nothing was changed — retry once Access is reachable.") from exc
     if problem is not None:
         raise ValidationAppError(problem)
 
@@ -525,8 +530,14 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             problem = await verify_assignee(ctx.tenant_code, str(uid), role,
                                             expected_name=name)
         except AccessUnavailableError as exc:
-            raise ValidationAppError(
-                f"Cannot verify assignee against the Access service: {exc}") from exc
+            # 503, NOT 422 — see the note on the assignment path above. This one matters
+            # more: the conversion runs inside a workflow whose DURABLE retry policy exists
+            # precisely to ride out a dependency outage. Reported as 422 it was classified
+            # deterministic, the run died, and the approver saw a successful approval with
+            # no deal and no lending line behind it.
+            raise ServiceUnavailableError(
+                f"Cannot verify the assignee: the Access service is not answering ({exc}). "
+                f"The lead was NOT converted — retry once Access is reachable.") from exc
         if problem is not None:
             raise ValidationAppError(problem)
 

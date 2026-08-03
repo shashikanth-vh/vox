@@ -265,3 +265,47 @@ async def test_lead_conversion_signal_approval(stack):
     deal = (await reg.get(f"/v1/deals/{result['deal_id']}")).json()
     # An approved conversion enters the COMMERCIAL funnel; credit starts on the lending line.
     assert deal["is_lending"] is True and deal["stage"] == "In Pipeline"
+
+
+async def test_refused_apply_fails_the_run_instead_of_hanging(stack):
+    """An approval whose APPLY is refused must end the run — visibly — not vanish.
+
+    Reported from a live deployment: an admin approved a push-to-deals and afterwards
+    neither Deals nor Lending held the row. Approval and application are two steps, and
+    the second one was refused (here: an RM who is not on the People roster). Two things
+    have to be true for that to be diagnosable, and both are asserted below:
+
+      * the run reaches a TERMINAL state rather than retrying a deterministic refusal
+        forever — an unbounded 'durable' policy is for OUTAGES, not for refusals;
+      * ``GET /v1/workflows/{id}`` reports the failure, since that is the single call the
+        approver's screen polls after a decision to find out what actually happened.
+    """
+    orch, reg, _ = stack
+    ent = (await reg.post("/v1/entities", json={
+        "code": f"RFS-{uuid.uuid4().hex[:6]}",
+        "legal_name": f"Refused Co {uuid.uuid4().hex[:6]} Pvt Ltd"})).json()
+    lead = (await reg.post("/v1/leads", json={
+        "company": "Refused Co", "entity_id": ent["id"], "status": "Active"})).json()
+
+    started = await orch.post("/v1/workflows/lead-conversions", json={
+        "lead_id": lead["id"], "requested_by": "chetan@evamfinance.com",
+        "is_lending": True, "product_type": "Term Loan", "amount_cr": 25,
+        # Not a person on record — the Register refuses this conversion with a 422.
+        "rm": f"Nobody {uuid.uuid4().hex[:6]}"})
+    assert started.status_code == 202, started.text
+    wf_id = started.json()["workflow_id"]
+
+    approved = await orch.post(f"/v1/workflows/{wf_id}/approve",
+                               json={"by": "credit.head@evamfinance.com", "note": "ok"})
+    assert approved.status_code == 200, approved.text
+
+    deadline = time.monotonic() + 30
+    final = None
+    while time.monotonic() < deadline:
+        final = (await orch.get(f"/v1/workflows/{wf_id}")).json()
+        if final["status"] in ("FAILED", "TERMINATED", "TIMED_OUT"):
+            break
+    assert final and final["status"] == "FAILED", final
+    assert final.get("failure"), "a dead run must carry the reason it died"
+    # And nothing partial was left behind: the lead is still open, not half-converted.
+    assert (await reg.get(f"/v1/leads/{lead['id']}")).json()["status"] == "Active"

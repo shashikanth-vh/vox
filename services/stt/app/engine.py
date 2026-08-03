@@ -43,11 +43,25 @@ class StubEngine:
         return _result(self.text, language or "en", None, [], "stub")
 
 
+class ModelUnavailable(RuntimeError):
+    """The model itself could not be loaded — a DEPLOYMENT fault, not a bad request.
+
+    Kept distinct from a decode failure so the API can answer 503 with something a person
+    can act on (the size, the directory, the offline flag) instead of a bare 500 that
+    reaches the caller's log as nothing more than the number 500.
+    """
+
+
+class AudioUndecodable(ValueError):
+    """The bytes were received but are not audio this build can decode."""
+
+
 class FasterWhisperEngine:
     def __init__(self, settings: Settings):
         self.s = settings
         self._model: Any = None
         self._lock = threading.Lock()
+        self.load_error: str = ""
 
     @property
     def loaded(self) -> bool:
@@ -60,9 +74,19 @@ class FasterWhisperEngine:
     def _load(self) -> Any:
         if self._model is None:
             from faster_whisper import WhisperModel  # heavy; lazy
-            self._model = WhisperModel(self.s.model_size, device=self.s.device,
-                                       compute_type=self.s.compute_type,
-                                       download_root=self.s.model_dir)
+            try:
+                self._model = WhisperModel(self.s.model_size, device=self.s.device,
+                                           compute_type=self.s.compute_type,
+                                           download_root=self.s.model_dir)
+            except Exception as exc:              # noqa: BLE001 - re-raised, typed
+                self.load_error = (
+                    f"model {self.s.model_size!r} could not be loaded from "
+                    f"{self.s.model_dir!r} on device {self.s.device!r} "
+                    f"(compute_type {self.s.compute_type!r}): {exc}. The image bakes the "
+                    f"model at build time and runs with HF_HUB_OFFLINE=1, so STT_MODEL_SIZE "
+                    f"must match the size the image was built with.")
+                raise ModelUnavailable(self.load_error) from exc
+            self.load_error = ""
         return self._model
 
     def transcribe(self, audio: bytes, language: str | None = None,
@@ -74,17 +98,26 @@ class FasterWhisperEngine:
         # so the caller puts the most valuable words (names) LAST.
         with self._lock:
             model = self._load()
-            segments, info = model.transcribe(
-                io.BytesIO(audio), language=language,
-                task=("translate" if task == "translate" else "transcribe"),
-                initial_prompt=(prompt or None),
-                beam_size=self.s.beam_size, vad_filter=self.s.vad_filter)
-            segs: list[dict[str, Any]] = []
-            parts: list[str] = []
-            for seg in segments:                      # generator — consume once
-                parts.append(seg.text)
-                segs.append({"start": round(seg.start, 2), "end": round(seg.end, 2),
-                             "text": seg.text.strip()})
+            try:
+                segments, info = model.transcribe(
+                    io.BytesIO(audio), language=language,
+                    task=("translate" if task == "translate" else "transcribe"),
+                    initial_prompt=(prompt or None),
+                    beam_size=self.s.beam_size, vad_filter=self.s.vad_filter)
+                segs: list[dict[str, Any]] = []
+                parts: list[str] = []
+                # faster-whisper decodes and infers LAZILY — the container is demuxed and
+                # the segments produced as this generator is consumed, so a clip in a codec
+                # this build cannot decode raises HERE, not at the call above. Both are the
+                # caller's payload, not a service fault; both must say which.
+                for seg in segments:                  # generator — consume once
+                    parts.append(seg.text)
+                    segs.append({"start": round(seg.start, 2), "end": round(seg.end, 2),
+                                 "text": seg.text.strip()})
+            except Exception as exc:                  # noqa: BLE001 - re-raised, typed
+                raise AudioUndecodable(
+                    f"the {len(audio)} byte clip could not be transcribed: "
+                    f"{type(exc).__name__}: {exc}") from exc
             return _result("".join(parts), getattr(info, "language", None),
                            getattr(info, "duration", None), segs, "faster_whisper")
 

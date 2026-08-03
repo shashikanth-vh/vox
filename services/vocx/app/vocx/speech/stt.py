@@ -130,6 +130,23 @@ class FasterWhisperTranscriber(Transcriber):
                        getattr(info, "duration", None), segs, backend="faster_whisper")
 
 
+def _detail(resp: Any) -> str:
+    """The upstream's explanation, from the problem envelope if it sent one."""
+    try:
+        body = resp.json()
+    except Exception:                             # noqa: BLE001 - not JSON; use the text
+        return (getattr(resp, "text", "") or "")[:400] or "no response body"
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            return str(err.get("detail") or err.get("title") or err)[:400]
+        if err:
+            return str(err)[:400]
+        if body.get("detail"):
+            return str(body["detail"])[:400]
+    return str(body)[:400]
+
+
 # --- remote API (the PRISM STT service, or any Whisper-compatible endpoint) ---
 class APITranscriber(Transcriber):
     """A remote Whisper-compatible endpoint (OpenAI-style multipart) — in PRISM this is
@@ -175,8 +192,14 @@ class APITranscriber(Transcriber):
                 resp = httpx.post(url, headers=headers, data=data,
                                   files={"file": (fname, blob)}, timeout=self.timeout)
                 if resp.status_code >= 500:
-                    raise httpx.HTTPStatusError(f"{resp.status_code}", request=resp.request,
-                                                response=resp)
+                    # Carry the upstream's own words. "STT service unreachable after
+                    # retries: 500" is unanswerable — it cannot distinguish a model that
+                    # failed to load from audio that could not be decoded from a service
+                    # that was killed mid-decode, and that is precisely what someone
+                    # reading the capture log needs to know.
+                    raise httpx.HTTPStatusError(
+                        f"{resp.status_code} from {url}: {_detail(resp)}",
+                        request=resp.request, response=resp)
                 resp.raise_for_status()   # 4xx = our bug/config — no retry, surface it
                 body = resp.json()
                 return _result(body.get("text", ""), body.get("language", language),
@@ -186,7 +209,7 @@ class APITranscriber(Transcriber):
                     raise
                 last = e
                 time.sleep(0.5 * (2 ** attempt))
-        raise RuntimeError(f"STT service unreachable after retries: {last}")
+        raise RuntimeError(f"STT service at {url} failed after 3 attempts: {last}")
 
 
 # --- factory ------------------------------------------------------------------

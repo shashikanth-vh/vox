@@ -687,10 +687,29 @@ class LeadConversionWorkflow:
         self._stage = "Applying"
         # Durable: the decision is accepted and recorded; a Register outage during apply must
         # reconcile (retry until it lands), never fail the run after acknowledgement.
-        applied = await workflow.execute_activity(
-            activities.convert_lead_txn,
-            args=[inp, f"wf:{wf_id}:convert", self._approver, self._decided_by],
-            **_DURABLE_IO)
+        #
+        # A DETERMINISTIC refusal (an unknown RM, a lead already closed, a scope the approver
+        # does not hold) is a different matter: it is non-retryable, so the run dies here. It
+        # must not die QUIETLY. Approval and application are separate steps, and when the
+        # second one is refused the approver has already been told "approved" and walked away
+        # — which is exactly how a conversion came to leave no rows in Deals or Lending with
+        # nothing but a container log to explain it. Announce it to both humans, then fail.
+        try:
+            applied = await workflow.execute_activity(
+                activities.convert_lead_txn,
+                args=[inp, f"wf:{wf_id}:convert", self._approver, self._decided_by],
+                **_DURABLE_IO)
+        except Exception as exc:                       # noqa: BLE001 — re-raised below
+            self._stage = "ApplyFailed"
+            self._fnd.business_status = "ApplyFailed"
+            _upsert_search(inp.emit_search_attributes, "ApplyFailed", f"Lead:{inp.lead_id}")
+            await _emit_ops("conversion_apply_failed", {
+                "subject": f"Lead:{inp.lead_id}", "workflow_id": wf_id,
+                "approved_by": self._decided_by, "requested_by": inp.requested_by,
+                "reason": str(exc)},
+                notify_to=[e for e in (self._decided_by, inp.requested_by) if e],
+                severity="error")
+            raise
         line_ids = {
             "lending": applied.get("lending_id"),
             "syndication": applied.get("syndication_id"),

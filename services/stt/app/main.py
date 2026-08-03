@@ -31,7 +31,7 @@ from fastapi.responses import ORJSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.config import Settings, get_settings
-from app.engine import Engine, build_engine
+from app.engine import AudioUndecodable, Engine, ModelUnavailable, build_engine
 
 log = get_logger("stt")
 
@@ -82,8 +82,16 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/readyz", include_in_schema=False)
-    async def readyz(request: Request) -> dict:
-        return {"status": "ok", "model_loaded": bool(getattr(_engine(request), "loaded", False))}
+    async def readyz(request: Request) -> Any:
+        eng = _engine(request)
+        loaded = bool(getattr(eng, "loaded", False))
+        problem = str(getattr(eng, "load_error", "") or "")
+        # Ready means "can transcribe". Answering ok while the model is absent makes an
+        # orchestrator route traffic to a container that can only 500.
+        if problem:
+            return _problem(503, "model_unavailable", "Model not loaded", problem)
+        return {"status": "ok" if loaded or not settings.preload else "loading",
+                "model_loaded": loaded}
 
     @app.post("/v1/audio/transcriptions", summary="Transcribe one audio clip")
     async def transcribe(request: Request,
@@ -105,9 +113,20 @@ def create_app() -> FastAPI:
         if task not in ("transcribe", "translate"):
             return _problem(400, "invalid_request", "Bad task",
                             "task must be 'transcribe' or 'translate'.")
-        result = await run_in_threadpool(_engine(request).transcribe, blob,
-                                         language or None, task,
-                                         (prompt or "")[:1500] or None)
+        try:
+            result = await run_in_threadpool(_engine(request).transcribe, blob,
+                                             language or None, task,
+                                             (prompt or "")[:1500] or None)
+        except ModelUnavailable as exc:
+            # 503, and SAY WHY. This reaches VocX's capture log; a bare 500 there is
+            # indistinguishable from a crash and leaves the operator with nothing to fix.
+            log.error("stt_model_unavailable", extra={"detail": str(exc)})
+            return _problem(503, "model_unavailable", "Model not loaded", str(exc))
+        except AudioUndecodable as exc:
+            log.warning("stt_audio_undecodable",
+                        extra={"bytes": len(blob), "detail": str(exc)})
+            return _problem(400, "invalid_request", "Audio could not be transcribed",
+                            str(exc))
         log.info("stt_transcribed", extra={
             "bytes": len(blob), "duration": result.get("duration"),
             "language": result.get("language"), "backend": result.get("backend")})

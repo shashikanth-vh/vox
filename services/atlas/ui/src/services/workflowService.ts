@@ -2,6 +2,7 @@ import { errText, USE_REAL_API } from '../api/http';
 import { orchestrator } from '../api/orchestratorClient';
 import { ORCHESTRATOR_URL } from '../api/axiosClient';
 import { runSuffix } from './entitiesService';
+import { settled } from './workflowRun';
 
 /**
  * Runs on the workflow plane that are parked on a HUMAN decision. The plane lists them
@@ -198,7 +199,14 @@ export const workflowService = {
     }
     if (!url) return { ok: false, error: `This item does not offer "${action}".` };
     try {
-      await orchestrator.post<any>(url, body);
+      const data = await orchestrator.post<any>(url, body);
+      // The POST only records the DECISION. Everything the approval is FOR — converting a
+      // lead into a deal and a lending line, minting the evidence, moving the stage — runs
+      // afterwards, inside the workflow. If one of those activities is refused the run dies
+      // and, without this watch, the approver is told the item was approved and never learns
+      // that Deals and Lending stayed empty. So follow the run briefly and report what it did.
+      const failure = await settled(data?.workflow_id || w.workflowId, w.statusUrl);
+      if (failure) return { ok: false, error: failure };
       return { ok: true };
     } catch (e: any) {
       return { ok: false, error: workflowError(e, `${action} this item`) };

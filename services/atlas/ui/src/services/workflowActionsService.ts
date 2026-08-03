@@ -1,5 +1,6 @@
 import { orchestrator } from '../api/orchestratorClient';
 import { errText, USE_REAL_API } from '../api/http';
+import { settled } from './workflowRun';
 
 /**
  * The MAKER's half of the workflow plane, mirroring `workflowService` (the approver's).
@@ -56,33 +57,6 @@ const NOTHING: SubjectActions = {
   subject: { type: '', id: '', stage: '' }, run: null,
   scoped_to: { email: '', roles: [] }, actions: [],
 };
-
-/**
- * Watch a just-started run long enough to catch an immediate refusal.
- *
- * Returns the failure text when the run has already died, or null — which covers both
- * "still running" (the normal, healthy case: it is parked awaiting a decision) and
- * "completed". Deliberately short: this is here to catch a step the register rejected on
- * its first activity, not to wait out a real approval.
- */
-async function settled(workflowId?: string): Promise<string | null> {
-  if (!workflowId) return null;
-  const DEAD = ['FAILED', 'TIMED_OUT', 'TERMINATED'];
-  for (const wait of [400, 900, 1800, 3000]) {
-    await new Promise((r) => setTimeout(r, wait));
-    try {
-      const run = await orchestrator.get<any>(`/v1/workflows/${workflowId}`);
-      if (DEAD.includes(String(run?.status))) {
-        return run?.failure
-          || `The run ended as ${run.status} — see the workflow log for ${workflowId}.`;
-      }
-      if (String(run?.status) === 'COMPLETED') return null;
-    } catch {
-      return null;                    // cannot watch it; do not invent a failure
-    }
-  }
-  return null;                        // still running: parked awaiting its decision
-}
 
 export const workflowActionsService = {
   async forSubject(subjectType: SubjectType, subjectId: string): Promise<SubjectActions> {
