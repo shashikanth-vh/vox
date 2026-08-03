@@ -6,6 +6,16 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Every document upload was refused: `422 missing body.file`, for a file that was
+  definitely attached.** Both axios clients set `Content-Type: application/json` as a
+  DEFAULT header — right for every JSON call, and wrong for exactly one thing. With the
+  header pinned, axios stops generating the `multipart/form-data; boundary=…` value the
+  browser would otherwise supply, so the register was handed a multipart body labelled
+  JSON, parsed no parts, and reported the file as absent. The interceptors now drop the
+  header when the body is `FormData` and let the browser set it, boundary and all.
+  Reproduced against a live multipart endpoint both ways: pinned → `422 ["body","file"]
+  Field required` (the exact error), dropped → `200` with the filename and byte count.
+
 - **A converted deal could not be opened from the Deals grid.** Its GROUP CODE column was
   blank, and the row click passes that code to the company drawer — so clicking the row
   asked the drawer to open `''` and nothing happened. The deal was on the register,

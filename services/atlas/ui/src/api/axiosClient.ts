@@ -37,6 +37,24 @@ export const GOOGLE_REFRESH_TOKEN: string = import.meta.env.VITE_GOOGLE_REFRESH_
 export const GOOGLE_TOKEN_URL: string =
   import.meta.env.VITE_GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
 
+
+/**
+ * A FormData body must NOT travel as application/json.
+ *
+ * Both clients default `Content-Type: application/json`, which is right for every JSON
+ * call and wrong for exactly one thing: a multipart upload. With the header pinned, axios
+ * stops generating the `multipart/form-data; boundary=…` value the browser would
+ * otherwise supply, so the server is handed a multipart body labelled JSON, parses no
+ * parts, and answers `422 missing: body.file` — a file that was definitely attached,
+ * reported as absent. Dropping the header lets the browser set it, boundary and all.
+ */
+function withBodyContentType<T extends { data?: unknown; headers: any }>(cfg: T): T {
+  if (typeof FormData !== 'undefined' && cfg.data instanceof FormData) {
+    cfg.headers.delete('Content-Type');
+  }
+  return cfg;
+}
+
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
@@ -48,7 +66,7 @@ const axiosClient = axios.create({
 // sign-in or sign-out takes effect immediately.
 axiosClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
-  return cfg;
+  return withBodyContentType(cfg);
 });
 
 axiosClient.interceptors.response.use(
@@ -66,7 +84,7 @@ export const gwClient = axios.create({
 });
 gwClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
-  return cfg;
+  return withBodyContentType(cfg);
 });
 
 export default axiosClient;
