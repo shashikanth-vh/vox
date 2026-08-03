@@ -53,10 +53,10 @@ async def run(tenant_code: str, tenant_name: str) -> None:
         ref_added = await seed_ref_values(session)
         checklist_added = await seed_document_checklist(session, tenant_id)
         await session.commit()
-    log.info("bootstrap complete: tenant=%s (%s), ref_values=+%d, checklist=+%d",
+    log.info("bootstrap complete: tenant=%s (%s), ref_values~%d, checklist=+%d",
              tenant_code, tenant_id, ref_added, checklist_added)
     print(f"Bootstrap complete. Tenant '{tenant_code}' ready ({tenant_id}). "
-          f"Reference values added: {ref_added}, checklist items added: {checklist_added}. "
+          f"Reference values reconciled: {ref_added}, checklist items added: {checklist_added}. "
           f"No business data loaded. (Users live in the Access service.)")
     await dispose_engine()
 

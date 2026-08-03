@@ -10,10 +10,22 @@ import { useAuth } from '../../auth/AuthContext';
 
 const ADAPT_SECT = ['Industrial Water', 'Water Treatment / WASH', 'Climate Data & IoT', 'Agri / Drone'];
 
+/**
+ * The BDRM a new lead opens with: the signed-in user when they ARE a BDRM, otherwise the
+ * first name on the Register's roster. Never a hard-coded name — the seeded 'Shubh' was
+ * offered on deployments whose people table had never heard of him, and the lead only
+ * failed much later, on conversion.
+ */
+function defaultRm(user: { roles: string[]; name: string }): string {
+  const roster = referenceService.getRefSync('RM');
+  if (user.roles.includes('BDRM') && roster.includes(user.name)) return user.name;
+  return roster[0] || '';
+}
+
 export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const { user } = useAuth();
   const ref = referenceService;
-  const blank = { company: '', contact: '', designation: '', sector: 'Other', lens: 'Mitigation', source: 'RM', sourceDetail: '', rm: user.roles.includes('BDRM') ? user.name : 'Shubh', temp: 'Warm', phone: '', notes: '' };
+  const blank = { company: '', contact: '', designation: '', sector: 'Other', lens: 'Mitigation', source: 'BDRM', sourceDetail: '', rm: defaultRm(user), temp: 'Warm', phone: '', notes: '' };
   const [f, setF] = useState(blank);
   const [dupes, setDupes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);

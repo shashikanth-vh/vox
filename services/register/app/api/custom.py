@@ -32,6 +32,7 @@ from app.models import (
     ExternalIntelligence,
     Financial,
     Interaction,
+    Person,
 )
 from app.models.system import RefValue, TenantSettings
 from app.models.trackers import (
@@ -367,6 +368,51 @@ _timeline_routes("asset-monetisation", "AssetMonetisation")
 # --------------------------------------------------------------------------- #
 # Reference vocabularies
 # --------------------------------------------------------------------------- #
+# The role-driven NAME lists (ATLAS Forms & Validations v2.1, "Reference lists"):
+#
+#   "BDRMs (dynamic) — Populated from Employees where Role = BDRM & Active = True.
+#    NO hardcoded names. Fetched from Employees table at runtime."
+#
+# category served -> the substring that must appear in ``people.role``. Roles stack
+# ("Admin, Management", "BD Head, BDRM"), so it is a match, not an equality. The legacy
+# "RM"/"Analyst" keys are kept because the ATLAS forms still ask for them by those names.
+_ROLE_LISTS: dict[str, tuple[str, ...]] = {
+    "BDRM": ("BDRM", "BD Head"),
+    "Deal Analyst": ("Deal Analyst",),
+    "Syn RM": ("Syn RM", "Syn Head"),
+    "AM RM": ("AM RM", "AM Head"),
+    "RM": ("BDRM", "BD Head", "Syn RM", "AM RM"),
+    "Analyst": ("Deal Analyst", "Credit Head"),
+}
+
+
+async def _role_name_lists(ctx: RequestContext) -> dict[str, list[dict]]:
+    """The person-name dropdowns, read LIVE from the people directory.
+
+    Seeding names as reference data is what made a UI offer people who were not on the
+    register; the directory is the only roster that can answer this correctly, so it is
+    the one asked. Value = the SHORT HANDLE the rest of the platform stores in
+    ``rm``/``analyst``; label = the full name, so the picker reads unambiguously.
+    """
+    people = (
+        await ctx.session.execute(
+            select(Person)
+            .where(Person.tenant_id == ctx.tenant_id,
+                   Person.inactive.is_(False),
+                   Person.deleted_at.is_(None))
+            .order_by(Person.name)
+        )
+    ).scalars().all()
+    out: dict[str, list[dict]] = {}
+    for category, wanted in _ROLE_LISTS.items():
+        named = [{"value": p.name, "label": p.full_name or p.name}
+                 for p in people
+                 if any(w.lower() in (p.role or "").lower() for w in wanted)]
+        if named:
+            out[category] = named
+    return out
+
+
 @router.get("/v1/ref", tags=["Reference"], summary="All reference vocabularies")
 async def list_ref(ctx: RequestContext = Depends(get_context)) -> dict[str, list[dict]]:
     rows = (
@@ -379,6 +425,8 @@ async def list_ref(ctx: RequestContext = Depends(get_context)) -> dict[str, list
     out: dict[str, list[dict]] = {}
     for r in rows:
         out.setdefault(r.category, []).append({"value": r.value, "label": r.label or r.value})
+    # Live, role-driven name lists last: they OVERRIDE any stale seeded list of names.
+    out.update(await _role_name_lists(ctx))
     return out
 
 
@@ -386,6 +434,8 @@ async def list_ref(ctx: RequestContext = Depends(get_context)) -> dict[str, list
 async def list_ref_category(
     category: str, ctx: RequestContext = Depends(get_context)
 ) -> list[dict]:
+    if category in _ROLE_LISTS:
+        return (await _role_name_lists(ctx)).get(category, [])
     rows = (
         await ctx.session.execute(
             select(RefValue)

@@ -204,6 +204,105 @@ async def test_new_reference_categories():
     from app.seed.refdata import REF_VALUES
 
     for cat in ["Syndication Type", "Mandate Status 3", "Yes/No", "Terminal (Lending)",
-                "RM", "Analyst", "Financial Section", "Scale", "Waiver Status"]:
+                "Financial Section", "Scale", "Waiver Status"]:
         assert cat in REF_VALUES, f"missing ref category {cat}"
     assert REF_VALUES["Yes/No"] == ["Yes", "No"]
+    # Names are NOT reference data — /v1/ref derives them from the people directory.
+    for names in ("RM", "Analyst", "BDRM", "Deal Analyst", "Syn RM", "AM RM"):
+        assert names not in REF_VALUES, f"{names} must not be a seeded NAME list"
+
+
+async def test_reference_lists_match_forms_and_validations_v2_1():
+    """The vocabularies the ATLAS forms spec fixes in v2.1 — each one was wrong in a way
+    users could hit."""
+    from app.seed.refdata import REF_VALUES
+
+    # Overlapping buckets: 3-36m and 12-36m both covered 12-36 months.
+    assert REF_VALUES["Tenor"] == ["<12m", "12-24m", "24-36m", "36-60m", ">60m"]
+    # A combined value posing as a third option.
+    assert REF_VALUES["Line of Lending"] == ["Referral", "Syndication"]
+    # Counterparty Type split in two; the union stays for the counterparties table.
+    assert REF_VALUES["Lender Type"] == [
+        "Bank", "NBFC", "DFI", "AIF / Fund", "Multilateral", "Other"]
+    assert "Financial Investor" in REF_VALUES["Investor Type"]
+    assert "Counterparty Type" in REF_VALUES
+    # The parties a file really waits on.
+    for who in ("Credit Committee", "Legal", "CFO", "Deal Analyst"):
+        assert who in REF_VALUES["Pending With"]
+    # Employee.Role drives RBAC, so it must BE the RBAC catalogue.
+    assert set(REF_VALUES["Person Role"]) == set(REF_VALUES["RBAC Role"])
+    assert REF_VALUES["Source"] == ["BDRM", "DSA", "Inbound", "Referral", "Event", "Other"]
+    assert REF_VALUES["Vistaar Journey"][0] == "Prospect"
+
+
+async def test_ref_serves_person_names_from_the_directory(client: AsyncClient):
+    """`GET /v1/ref` answers the role-driven NAME lists from `people`, live.
+
+    Seeding names as reference data is what let a form offer someone the register had
+    never heard of; the conversion then refused them long after the pick. Value is the
+    SHORT HANDLE (what leads and deals store), label the full name.
+    """
+    assert (await client.post("/v1/people", json={
+        "name": "Meera", "full_name": "Meera Iyer", "role": "BDRM"})).status_code == 201
+    assert (await client.post("/v1/people", json={
+        "name": "Rohit", "full_name": "Rohit Shah", "role": "Deal Analyst"})).status_code == 201
+    assert (await client.post("/v1/people", json={
+        "name": "Gone", "full_name": "Gone Away", "role": "BDRM",
+        "inactive": True})).status_code == 201
+
+    ref = (await client.get("/v1/ref")).json()
+    bdrms = {p["value"]: p["label"] for p in ref["BDRM"]}
+    assert bdrms.get("Meera") == "Meera Iyer"
+    assert "Rohit" not in bdrms
+    assert "Gone" not in bdrms, "an inactive employee must not be offered"
+    assert {p["value"] for p in ref["Deal Analyst"]} == {"Rohit"}
+    # The legacy keys the ATLAS forms still ask for resolve to the same directory.
+    assert "Meera" in {p["value"] for p in ref["RM"]}
+    assert "Rohit" in {p["value"] for p in ref["Analyst"]}
+    # ...and the single-category route agrees with the bundle.
+    one = (await client.get("/v1/ref/BDRM")).json()
+    assert {p["value"] for p in one} == set(bdrms)
+    # A plain vocabulary still comes from ref_values (unseeded here, hence possibly empty).
+    assert isinstance((await client.get("/v1/ref/Tenor")).json(), list)
+
+
+async def test_ref_seeding_reconciles_instead_of_only_adding(client: AsyncClient):
+    """Re-seeding must RETIRE values that left a vocabulary, not just add new ones.
+
+    Add-only seeding is why a corrected dropdown never reached anyone: the deployment had
+    already stored the old value, so every later release kept serving it alongside the
+    fix (the overlapping Tenor buckets survived that way).
+    """
+    from sqlalchemy import select
+
+    from app.db.session import get_sessionmaker
+    from app.models.system import RefValue
+    from app.seed.loader import seed_ref_values
+
+    sm = get_sessionmaker()
+    async with sm() as session:
+        # A deployment seeded before the fix: the retired bucket is present and active.
+        session.add(RefValue(category="Tenor", value="3-36m", label="3-36m", sort_order=1))
+        await session.commit()
+        await seed_ref_values(session)
+        await session.commit()
+
+        rows = (await session.execute(
+            select(RefValue).where(RefValue.category == "Tenor"))).scalars().all()
+        live = {r.value: r.sort_order for r in rows if r.is_active}
+        assert "3-36m" not in live, "a retired value must stop being offered"
+        assert live == {"<12m": 0, "12-24m": 1, "24-36m": 2, "36-60m": 3, ">60m": 4}
+        # Retired, NOT deleted — rows that already hold the old value stay readable.
+        assert any(r.value == "3-36m" and not r.is_active for r in rows)
+
+        # A category nobody manages here is left completely alone.
+        session.add(RefValue(category="Operator Custom", value="Hand added", sort_order=0))
+        await session.commit()
+        await seed_ref_values(session)
+        await session.commit()
+        mine = (await session.execute(select(RefValue).where(
+            RefValue.category == "Operator Custom"))).scalars().all()
+        assert [r.is_active for r in mine] == [True]
+
+        await session.execute(RefValue.__table__.delete())
+        await session.commit()

@@ -1,7 +1,28 @@
 """Reference-vocabulary seed data.
 
-Mirrors the ATLAS ``ref`` object so front-ends fetch identical dropdowns from the
-Register's ``/v1/ref`` endpoint.
+THE source of every dropdown in the UI: front-ends fetch these from the Register's
+``/v1/ref`` rather than shipping their own copy, so a vocabulary change is a data change
+and not a redeploy of the browser bundle.
+
+Aligned with **ATLAS Forms & Validations v2.1** ("Reference lists"), including the fixes
+that sheet calls out — the overlapping Tenor buckets, the duplicated Line of Lending
+entry, and the Counterparty Type split into Lender Type / Investor Type.
+
+TWO DELIBERATE DIVERGENCES from that sheet, both because PRISM enforces more than the
+sheet describes:
+
+* **Lending Stage.** The sheet lists "Documentation"; PRISM's credit pipeline names the
+  post-sanction milestones for the governed work that actually happens —
+  ``Sanctioned -> CP/CS Completed -> Ready for Disbursement -> Disbursed``. This
+  vocabulary is ENFORCED (``evam_backend_core.lifecycle``) and cross-checked by a test,
+  so it is not a free list; changing it changes what the platform will accept.
+* **Entity Lifecycle.** The sheet's "Vistaar Journey" is carried as its own category;
+  ``entities.lifecycle`` keeps the values already written to customer data.
+
+NAMES ARE NEVER SEEDED HERE. The sheet is explicit — "Employees table drives role-based
+lists (BDRM / Deal Analyst / Syn RM / AM RM / Heads). Do NOT hardcode names in the
+frontend." ``GET /v1/ref`` merges those lists in live from the people directory; see
+``app.api.custom.list_ref``.
 """
 
 from __future__ import annotations
@@ -18,7 +39,7 @@ REF_VALUES: dict[str, list[str]] = {
     "Temperature": ["Hot", "Warm", "Cold"],
     "Priority": ["High", "Medium", "Low"],
     "Lead Status": ["Active", "Converted", "Dropped"],
-    "Source": ["RM", "DSA", "OEM", "Inbound", "Referral", "Event", "Website", "Direct", "Other"],
+    "Source": ["BDRM", "DSA", "Inbound", "Referral", "Event", "Other"],
     "Product Type": [
         "Term Loan", "Working Capital", "Purchase Order Finance", "Mezzanine",
         "Co-lending", "Syndication", "Asset Monetisation Advisory",
@@ -30,7 +51,12 @@ REF_VALUES: dict[str, list[str]] = {
     "Entity Lifecycle": ["Prospect", "Onboarded", "Active", "Serviced",
                          "Vistaar — Expansion", "Dormant"],
     "Entity Type": ["Company", "Promoter", "Director", "Related Party"],
-    "Person Role": ["Admin", "Management", "RM", "Analyst", "Ops"],
+    # v2.1 "Employee.Role" — mandatory on an employee record and the thing RBAC keys on.
+    # Same catalogue as "RBAC Role"; role stacking (multi-select) is allowed.
+    "Person Role": [
+        "Admin", "Management", "BD Head", "BDRM", "Credit Head", "Deal Analyst",
+        "Syn Head", "Syn RM", "AM Head", "AM RM",
+    ],
     # The Deal ORIGINATION-FUNNEL vocabulary (verbatim Evam MIS terms) — a separate
     # dimension from the credit pipeline below; see rbac.DEAL_FUNNEL_STAGES.
     "Deal Funnel Stage": [
@@ -51,12 +77,25 @@ REF_VALUES: dict[str, list[str]] = {
         "Teaser Prepared", "Teaser Shared", "In Discussion", "NBO Received",
         "BO Received", "SPA / Documentation", "Closed", "Dropped",
     ],
+    # v2.1 SPLIT the single "Counterparty Type" in two. Both are seeded; the union stays
+    # for the counterparties table, whose rows predate the split.
+    "Lender Type": ["Bank", "NBFC", "DFI", "AIF / Fund", "Multilateral", "Other"],
+    "Investor Type": [
+        "Strategic", "Financial Investor", "Family Office", "Corporate", "Advisor", "Other",
+    ],
     "Counterparty Type": [
         "Bank", "NBFC", "DFI", "AIF/Fund", "Investor", "Strategic", "Advisor", "Other",
     ],
-    "Pending With": ["Client", "Lender", "RM", "Analyst", "Ops"],
-    "Tenor": ["<12m", "3-36m", "12-36m", "36-60m", ">60m"],
-    "Line of Lending": ["Referral", "Syndication", "Referral, Syndication"],
+    # v2.1 EXPANDED to the parties a real file actually waits on.
+    "Pending With": [
+        "Client", "Lender", "BDRM", "Deal Analyst", "Syn RM", "AM RM",
+        "Credit Committee", "Legal", "CFO",
+    ],
+    # v2.1 FIX: the old buckets overlapped (3-36m and 12-36m both covered 12-36 months),
+    # so the same tenor could be filed under either.
+    "Tenor": ["<12m", "12-24m", "24-36m", "36-60m", ">60m"],
+    # v2.1 FIX: "Referral, Syndication" was a combined value masquerading as a third one.
+    "Line of Lending": ["Referral", "Syndication"],
     "Mandate Status": [
         "To be sent by Evam", "Pending with Client", "In-principle approval from client",
         "Sent - pending signature", "Executed", "Not required",
@@ -64,7 +103,7 @@ REF_VALUES: dict[str, list[str]] = {
     "IM in Place": ["Work not started", "In prep", "In place"],
     "Interaction Type": [
         "In-Person Meeting", "Virtual Meeting / Video Call", "Phone Call",
-        "WhatsApp / Text message", "Email / Written Correspondence",
+        "WhatsApp / Text Message", "Email / Written Correspondence",
         "Site Visit / Due Diligence", "Management Presentation",
         "Term Sheet Negotiation", "Internal Review / Credit Committee",
     ],
@@ -87,12 +126,16 @@ REF_VALUES: dict[str, list[str]] = {
         "Fee will be paid by customer", "Fee to be collected from lender",
     ],
     "Mandate Status 3": ["Yes", "No", "Under discussion"],
-    # Generic + role pickers the ATLAS UI expects from /v1/ref (RM/Analyst can also be
-    # served live from /v1/people?role=…; both are supported).
     "Yes/No": ["Yes", "No"],
     "Terminal (Lending)": ["Disbursed", "Rejected", "On Hold"],
-    "RM": ["Chetan", "Shubh"],
-    "Analyst": ["Archana", "Prateek", "Bhavana", "Nirmala", "Grishma"],
+    # v2.1 "Vistaar Journey" — Evam's own name for the client relationship lifecycle.
+    # Reporting vocabulary; entities.lifecycle keeps its own (enforced) values.
+    "Vistaar Journey": ["Prospect", "Engaged", "Documented", "Under Review",
+                        "Committed", "Live", "Wound Down"],
+    # NO "RM" / "Analyst" NAME LISTS. They were seeded with the prototype's five people,
+    # so every deployment offered names its own people table had never heard of and the
+    # mismatch only surfaced at conversion ("Unknown rm 'Shubh' — not a person on
+    # record"). /v1/ref now merges these in from the people directory, by role.
     # Backing for the new financials / covenant fields.
     "Financial Section": ["P&L", "Balance Sheet", "Cash Flow", "Ratios"],
     "Scale": ["Absolute", "Thousand", "Lakh", "Million", "Crore"],

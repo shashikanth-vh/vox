@@ -149,6 +149,56 @@ matches by NAME, so keep lender names consistent with the master.
 
 ---
 
+## Reference lists — every dropdown in the UI
+
+**Table:** `ref_values` (`category`, `value`, `label`, `sort_order`, `is_active`).
+**API:** `GET /v1/ref` (all categories) · `GET /v1/ref/{category}` (one).
+Source of truth for the seed: `services/register/app/seed/refdata.py` (`REF_VALUES`),
+aligned with **ATLAS Forms & Validations v2.1**, "Reference lists".
+
+ATLAS calls `/v1/ref` once per signed-in session (`referenceService.hydrate()`, wired in
+`App.tsx`) and merges the answer into the store every `<SelectFld>` reads, so a
+vocabulary change is a **data** change — no browser rebuild. Fail-soft: an unreachable
+register keeps the bundled seed rather than leaving forms unfillable.
+
+| Category | Where it is used |
+| --- | --- |
+| `Sector`, `Lens` | Add lead, Push to Deals ▸ Client, Company profile |
+| `Priority`, `Temperature`, `Source`, `Lead Status` | Leads grid + drawer |
+| `Status of Proposal`, `Syndication Type`, `Mandate Status`, `Mandate Status 3`, `IM in Place`, `Tenor`, `Line of Lending` | Platform Deals (Syndication) |
+| `Lending Stage`, `Terminal (Lending)`, `Pending With` | Lending tracker + stage-change dialog |
+| `Asset Mon Status` | Asset Monetisation |
+| `Lender Type`, `Investor Type`, `Counterparty Type` | FI Master, AM investor tracking |
+| `Interaction Type` | Log interaction (every tab) |
+| `Person Role` / `RBAC Role`, `Assignment Role` | Employee record, assignment dialogs |
+| `Entity Lifecycle`, `Vistaar Journey`, `Register Status`, `Entity Type` | Company profile |
+| `Document Section`, `Document Status`, `Statement Type` | Data Register, Financials |
+| `Deal Funnel Stage`, `Product Type` | Deals |
+
+**Person NAMES are not reference data.** Per v2.1 — *"Employees table drives role-based
+lists (BDRM / Deal Analyst / Syn RM / AM RM / Heads). Do NOT hardcode names in the
+frontend."* — `GET /v1/ref` derives these categories **live from `people`** (active rows
+only), and they override anything of the same name in `ref_values`:
+
+| Category | Rows returned | `value` / `label` |
+| --- | --- | --- |
+| `BDRM` | `people.role` contains BDRM or BD Head | short handle / full name |
+| `Deal Analyst` | contains Deal Analyst | short handle / full name |
+| `Syn RM` | contains Syn RM or Syn Head | short handle / full name |
+| `AM RM` | contains AM RM or AM Head | short handle / full name |
+| `RM` (legacy key) | any of the RM roles above | short handle / full name |
+| `Analyst` (legacy key) | Deal Analyst or Credit Head | short handle / full name |
+
+`value` is the **short handle** because that is what `leads.rm`, `deals.an` and the
+trackers store — and what `POST /v1/leads/{id}/convert` validates against (it accepts the
+full name too).
+
+**Changing a vocabulary on a running deployment:** edit `REF_VALUES`, redeploy, and run
+`python -m app.seed.bootstrap`. Seeding RECONCILES — it adds new values, re-orders, and
+marks departed ones `is_active = false` (retired, never deleted, so existing rows stay
+readable). Categories not in `REF_VALUES` are left untouched, so anything an operator
+added by hand survives.
+
 ## Tables with no tab of their own (platform plumbing)
 
 `tenants`, `tenant_settings` (multi-tenancy + per-tenant config) ·

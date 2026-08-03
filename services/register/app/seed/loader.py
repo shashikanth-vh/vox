@@ -93,16 +93,35 @@ async def ensure_tenant(session: AsyncSession, code: str, name: str) -> uuid.UUI
 
 
 async def seed_ref_values(session: AsyncSession) -> int:
-    existing = set((await session.execute(select(RefValue.category, RefValue.value))).all())
-    added = 0
+    """RECONCILE ref_values with :data:`REF_VALUES` — add, re-order, retire, revive.
+
+    Adding-only was not enough: a deployment seeded before a vocabulary was corrected kept
+    serving the old values forever, so the dropdown fix never reached the browser (the
+    overlapping Tenor buckets survived three releases that way). Now a value that has left
+    a managed category is DEACTIVATED rather than deleted — ``/v1/ref`` stops offering it,
+    while rows that already hold it are untouched and still readable — and one that comes
+    back is revived. Categories NOT in REF_VALUES (anything an operator added by hand) are
+    left completely alone.
+    """
+    rows = (await session.execute(select(RefValue))).scalars().all()
+    by_key = {(r.category, r.value): r for r in rows}
+    changed = 0
     for category, values in REF_VALUES.items():
-        for i, value in enumerate(values):
-            if (category, value) in existing:
-                continue
-            session.add(RefValue(category=category, value=value, label=value, sort_order=i))
-            added += 1
+        wanted = {v: i for i, v in enumerate(values)}
+        for value, i in wanted.items():
+            row = by_key.get((category, value))
+            if row is None:
+                session.add(RefValue(category=category, value=value, label=value, sort_order=i))
+                changed += 1
+            elif row.sort_order != i or not row.is_active:
+                row.sort_order, row.is_active = i, True
+                changed += 1
+        for row in rows:
+            if row.category == category and row.value not in wanted and row.is_active:
+                row.is_active = False          # retired, not deleted
+                changed += 1
     await session.flush()
-    return added
+    return changed
 
 
 # --------------------------------------------------------------------------- #

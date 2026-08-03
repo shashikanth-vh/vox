@@ -6,6 +6,62 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Every dropdown now comes from the database, and the reference lists match ATLAS
+  Forms & Validations v2.1.** The `ref_values` table and `GET /v1/ref` existed, but
+  nothing called them — ATLAS read its dropdowns straight out of the bundled seed JSON,
+  so a vocabulary was only ever as correct as the last browser build. Fixed on both
+  sides:
+  * ATLAS calls `GET /v1/ref` once per signed-in session and merges the answer into the
+    store every `<SelectFld>` already reads — no dialog changed. Fail-soft: an
+    unreachable register keeps the seeded lists rather than leaving forms unfillable.
+  * `REF_VALUES` aligned with v2.1, including the fixes that sheet calls out — **Tenor**
+    (`3-36m`/`12-36m` overlapped; now `<12m, 12-24m, 24-36m, 36-60m, >60m`), **Line of
+    Lending** (dropped the combined "Referral, Syndication" third value), **Counterparty
+    Type** split into **Lender Type** / **Investor Type** (the union stays for the
+    counterparties table), **Pending With** expanded to the parties a file really waits
+    on (Credit Committee, Legal, CFO, the four assignment roles), **Source** → `BDRM`,
+    **Employee.Role** = the ten-role RBAC catalogue, plus a **Vistaar Journey** category.
+  * **Person names are no longer reference data.** v2.1 is explicit — *"Employees table
+    drives role-based lists… Do NOT hardcode names in the frontend."* The seeded `RM` /
+    `Analyst` name lists are gone; `/v1/ref` derives `BDRM`, `Deal Analyst`, `Syn RM`,
+    `AM RM` (and the legacy `RM`/`Analyst` keys) LIVE from `people`, active rows only,
+    `value` = the short handle the trackers store, `label` = the full name.
+  * **Seeding reconciles instead of only adding.** It was add-only, so a deployment that
+    had already stored a wrong value kept serving it forever next to the fix. Re-seeding
+    now adds, re-orders, retires departed values (`is_active = false` — never deleted, so
+    existing rows stay readable) and revives returning ones; categories an operator added
+    by hand are left alone. Run `python -m app.seed.bootstrap` after deploying.
+  * Two deliberate divergences from the sheet, both documented in `refdata.py`: **Lending
+    Stage** keeps PRISM's enforced credit pipeline (`Sanctioned → CP/CS Completed →
+    Ready for Disbursement → Disbursed`) rather than the sheet's "Documentation", and
+    **Entity Lifecycle** keeps the values already written to customer data.
+  Mapping and per-category usage: `docs/ATLAS_TAB_DB_API_MAP.md` ▸ "Reference lists".
+
+- **A conversion no longer hangs at "Applying": the RM roster the UI offers is now the
+  roster the register validates against, and a refusal fails fast.** An approved lead
+  conversion sat RUNNING for 17 minutes doing nothing visible. The worker was re-sending
+  the same rejected write every few seconds: `Unknown rm 'Shubh' — not a person on
+  record` (HTTP 422). Three separate faults, all fixed:
+  * **The person WAS on record.** The roster keeps two names — the short handle the
+    whole platform addresses people by (`people.name` = "Shubh", what every lead, deal
+    and tracker stores in `rm`/`analyst`) and the full name (`people.full_name` =
+    "Shubh Dave"). `POST /v1/leads/{id}/convert` checked `full_name` ONLY, so it
+    refused a name that came from its own directory. It now accepts either name, and
+    ignores case and surrounding space.
+  * **The dropdowns were prototype data.** "BDRM" and "Allot analyst" were filled from
+    the bundled seed JSON, so the UI offered names that existed only in the browser and
+    the mismatch only surfaced at conversion — after approval. ATLAS now reads the
+    register's own roster (`GET /v1/people`) on sign-in and drives both lists from it;
+    the hard-coded default BDRM is gone. Fail-soft: an unreachable register keeps the
+    seeded lists rather than emptying every select.
+  * **The retry policy treated a refusal as an outage.** Post-decision activities run
+    under an intentionally UNBOUNDED retry so an accepted decision is never dropped
+    while the register is down. But a 422/404/403/409 is a final answer — it reads the
+    same on the ten-thousandth attempt. Both retry policies now name those as
+    non-retryable, so the run FAILS with the message (and `GET /v1/workflows/{id}`
+    surfaces it) instead of looking hung. 5xx, timeouts and version conflicts keep
+    every retry they had.
+
 - **Push to Deals now keeps its promise: "one save — client + deal + product rows".**
   The dialog collects the CLIENT (segment, state, climate lens, industry, about) but
   wrote it only to the browser's local store; the register never saw a company, so a
