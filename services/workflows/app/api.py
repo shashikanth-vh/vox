@@ -117,8 +117,17 @@ def _f(name: str, label: str, kind: str = "text", *, required: bool = False,
 
 _NOTE = _f("note", "Note", "textarea", placeholder="Context for the approver (optional)")
 
+# Fields the SERVER fills from the verified caller. Never asked of the user: the identity
+# on a governance action is the token's, not a text box's.
+_IDENTITY_FIELDS = ("requested_by", "by")
+
 # run gate: None = don't care · "none" = no live run · "live" = a run is open ·
 #           "returned" = a run is open and parked back with the maker.
+#
+# Every action's `form` + `body` must satisfy the endpoint's own schema — required fields
+# covered, nothing extra. A test walks the OpenAPI and checks exactly that, because the
+# first version of this catalogue was written from the endpoint NAMES and got most of the
+# bodies wrong; the first thing a user saw was `amount_cr: Extra inputs are not permitted`.
 _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
     "Lending": (
         {
@@ -132,8 +141,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "prefill": {"deal_id": "deal_id"},
             "form": [_f("credit_note_reference", "Credit note reference", required=True,
                         placeholder="CN/<COMPANY>/2026-01"),
-                     _f("amount_cr", "Amount ₹ Cr", "number", required=True),
-                     _NOTE],
+                     _f("product_type", "Product", placeholder="Term Loan"),
+                     _f("rm", "Relationship manager")],
         },
         {
             "key": "deal-structuring.revise-credit-note",
@@ -141,9 +150,10 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/{workflow_id}/revise-credit-note",
             "roles": _CREDIT_MAKERS, "run": "returned",
             "run_reason": "Available when the committee has returned this run for revision.",
-            "form": [_f("credit_note_reference", "Revised credit note reference",
-                        required=True, placeholder="CN/<COMPANY>/2026-01-v2"),
-                     _f("summary", "What changed", "textarea", required=True)],
+            "form": [_f("reference", "Revised credit note reference", required=True,
+                        placeholder="CN/<COMPANY>/2026-01-v2"),
+                     _f("sha256", "Document digest (optional)",
+                        help_text="The SHA-256 of the revised note, if you have it.")],
         },
         {
             "key": "run.resubmit",
@@ -152,8 +162,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": _CREDIT_MAKERS, "run": "returned",
             "run_reason": "Available once this run has been returned to you.",
             "constant": {"action": "resubmit"},
-            "form": [_f("by", "Your name", required=True),
-                     _f("note", "What you changed", "textarea", required=True)],
+            "form": [_f("note", "What you changed", "textarea", required=True)],
         },
         {
             "key": "cpcs.prepare",
@@ -161,9 +170,12 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
             "stage_reason": "Available once the committee has sanctioned this facility.",
+            # The checklist is a LIST of conditions, each with its own evidence — a flat
+            # form cannot express it honestly, so it waits for its own screen rather than
+            # shipping a JSON box that looks like a feature.
+            "needs_screen": "the CP/CS checklist screen",
             "prefill": {"lending_id": "id"},
-            "form": [_f("checklist_version", "Version", "number", required=True, default=1,
-                        help_text="Raise the version when re-preparing after a return."),
+            "form": [_f("checklist_version", "Version", "number", default=1),
                      _NOTE],
         },
         {
@@ -172,8 +184,12 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/advaya-handover",
             "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed", "Ready for Disbursement"},
             "stage_reason": "Available once the CP/CS checklist has been approved.",
+            "needs_screen": "the handover package screen",
             "prefill": {"lending_id": "id"},
-            "form": [_NOTE],
+            "form": [_f("recipient", "Recipient", required=True),
+                     _f("delivery_method", "Delivery", "select", required=True,
+                        options=["SFTP", "Email", "Portal"]),
+                     _NOTE],
         },
         {
             "key": "handover.submit",
@@ -183,7 +199,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": {"Credit Head", "Management", "Admin"},
             "stages": {"CP/CS Completed", "Ready for Disbursement"},
             "stage_reason": "Available once the handover package has been approved.",
-            "form": [_f("submitted_by", "Your name", required=True), _NOTE],
+            "form": [],
         },
         {
             "key": "advaya.attest",
@@ -197,7 +213,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _f("reference", "Advaya reference / UTR", required=True,
                         help_text="The reference on the confirmation you received. "
                                   "Recorded as the evidence for this step."),
-                     _f("amount_cr", "Amount ₹ Cr", "number"),
+                     _f("amount_cr", "Amount \u20b9 Cr", "number"),
                      _f("disbursed_on", "Value date", "date"),
                      _NOTE],
         },
@@ -210,7 +226,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": _SYN_MAKERS, "run": "none",
             "run_reason": "A mandate run is already open on this line.",
             "prefill": {"syndication_id": "id", "deal_id": "deal_id"},
-            "form": [_f("amount_cr", "Ask ₹ Cr", "number", required=True), _NOTE],
+            "form": [_f("im_reference", "Information memorandum reference"),
+                     _f("im_sha256", "IM digest (optional)")],
         },
         {
             "key": "syndication.lender-update",
@@ -218,11 +235,13 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/{workflow_id}/lender-update",
             "roles": _SYN_MAKERS, "run": "live",
             "run_reason": "Start the mandate run first.",
-            "form": [_f("lender_name", "Lender", required=True),
-                     _f("status", "Status", "select", required=True,
+            # Addressed by the lender ROW id from the run's own state, which a person
+            # cannot type — it needs the lender list on screen to pick from.
+            "needs_screen": "the syndication chase screen",
+            "form": [_f("status", "Status", "select", required=True,
                         options=["Identified", "IM Circulated", "Queries Received",
                                  "IP Received", "Sanctioned", "Declined"]),
-                     _f("amount_cr", "Indicated ₹ Cr", "number"), _NOTE],
+                     _NOTE],
         },
         {
             "key": "syndication.allocate",
@@ -230,9 +249,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/{workflow_id}/allocate",
             "roles": _SYN_MAKERS, "run": "live",
             "run_reason": "Start the mandate run first.",
-            "form": [_f("allocations", "Allocations", "textarea", required=True,
-                        placeholder='[{"lender_name": "HDFC", "amount_cr": 25}]',
-                        help_text="One JSON array of {lender_name, amount_cr}.")],
+            "needs_screen": "the allocation screen",
+            "form": [],
         },
     ),
     "AssetMonetisation": (
@@ -243,8 +261,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": _AM_MAKERS, "run": "none",
             "run_reason": "A mandate run is already open on this asset.",
             "prefill": {"asset_mon_id": "id", "deal_id": "deal_id"},
-            "form": [_f("indicative_value_cr", "Indicative value ₹ Cr", "number",
-                        required=True), _NOTE],
+            "form": [_f("teaser_reference", "Teaser reference"),
+                     _f("teaser_sha256", "Teaser digest (optional)")],
         },
         {
             "key": "asset-monetisation.record-nda",
@@ -252,8 +270,9 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/{workflow_id}/record-nda",
             "roles": _AM_MAKERS, "run": "live",
             "run_reason": "Start the mandate run first.",
-            "form": [_f("buyer_name", "Counterparty", required=True),
-                     _f("signed_on", "Signed on", "date", required=True), _NOTE],
+            "needs_screen": "the buyer list screen",
+            "form": [_f("reference", "NDA reference", required=True),
+                     _f("data_room", "Data room")],
         },
         {
             "key": "asset-monetisation.record-offer",
@@ -261,13 +280,33 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/{workflow_id}/record-offer",
             "roles": _AM_MAKERS, "run": "live",
             "run_reason": "Start the mandate run first.",
-            "form": [_f("buyer_name", "Counterparty", required=True),
-                     _f("offer_type", "Offer", "select", required=True,
-                        options=["NBO", "BO"]),
-                     _f("amount_cr", "Offer ₹ Cr", "number", required=True), _NOTE],
+            "needs_screen": "the buyer list screen",
+            "form": [_f("kind", "Offer", "select", required=True, options=["NBO", "BO"]),
+                     _f("amount_cr", "Offer \u20b9 Cr", "number", required=True),
+                     _f("reference", "Offer reference")],
         },
     ),
 }
+
+
+# Which identity key each endpoint declares — `requested_by` on a run START, `by` on a
+# signal, neither on the two register routes. Filled from the verified caller.
+_IDENTITY_FOR: dict[str, tuple[str, ...]] = {
+    "deal-structuring.start": ("requested_by",),
+    "deal-structuring.revise-credit-note": ("by",),
+    "run.resubmit": ("by",),
+    "cpcs.prepare": ("requested_by",),
+    "handover.prepare": ("requested_by",),
+    "handover.submit": (),
+    "advaya.attest": (),
+    "syndication.start": ("requested_by",),
+    "syndication.lender-update": ("by",),
+    "syndication.allocate": ("by",),
+    "asset-monetisation.start": ("requested_by",),
+    "asset-monetisation.record-nda": ("by",),
+    "asset-monetisation.record-offer": ("by",),
+}
+
 
 # The deterministic workflow id a subject's run carries, by subject type. Same construction
 # the start routes use, so the lookup cannot drift from the thing it looks up.
@@ -295,6 +334,10 @@ def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
     stages = action.get("stages")
     if stages is not None and stage and stage not in stages:
         return False, action.get("stage_reason", f"Not available at stage '{stage}'.")
+    screen = action.get("needs_screen")
+    if screen:
+        return False, (f"This step needs {screen}, which is not built yet — drive it from "
+                       "the API collection for now.")
     want_run = action.get("run")
     if want_run == "none" and run_state != "none":
         return False, action.get("run_reason", "A run is already open on this subject.")
@@ -2858,6 +2901,11 @@ def create_app() -> FastAPI:
                 value = row.get(source)
                 if value:
                     body[field] = str(value)
+            # WHO is doing this comes from the verified token, never from a form field.
+            # Only fill the identity key this endpoint actually declares.
+            for key in _IDENTITY_FIELDS:
+                if key in _IDENTITY_FOR.get(spec["key"], ()):
+                    body[key] = who
             actions.append({
                 "key": spec["key"], "label": spec["label"], "method": spec["method"],
                 "url": url, "enabled": enabled,

@@ -6,6 +6,26 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The maker Actions catalogue was written from endpoint NAMES, not their schemas.**
+  "Send to credit committee" answered `requested_by: Field required; amount_cr: Extra
+  inputs are not permitted` — and most of the other actions would have failed the same
+  way. Rewritten against the generated OpenAPI, and pinned so it cannot drift again:
+  * Every action's form now matches its endpoint: `deal-structuring` takes
+    `credit_note_reference` / `product_type` / `rm` (no `amount_cr`), a credit-note
+    revision takes `reference` / `sha256`, syndication and AM starts take their reference
+    + digest, and so on.
+  * **Identity is server-filled.** `requested_by` / `by` come from the verified caller,
+    never from a form field — a text box asserting who you are is exactly what the
+    approval routes refuse.
+  * **Steps that need their own screen are offered, greyed, and say so.** The CP/CS
+    checklist (a list of conditions with evidence), the handover package's document set,
+    lender and buyer updates (addressed by a row id from the run's own state) and
+    allocation cannot be expressed by a flat form. They now read *"This step needs the
+    CP/CS checklist screen, which is not built yet — drive it from the API collection for
+    now"* rather than shipping a JSON box that looks like a feature.
+  * **A test walks the OpenAPI** and asserts every action sends nothing the endpoint
+    rejects and covers everything it requires — or is gated behind a named screen.
+
 - **Belt and braces on the phantom-row bug: a leftover local row can no longer be acted
   on.** The previous fix stops the optimistic insert being created, but a browser session
   that already held one kept using it — the drawer's "have I loaded this company's lines?"

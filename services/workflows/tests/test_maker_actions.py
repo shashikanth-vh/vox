@@ -15,7 +15,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.api import _evaluate_action, _MAKER_ACTIONS
+from app.api import _evaluate_action, _IDENTITY_FOR, _MAKER_ACTIONS
 from app.config import get_settings
 
 pytestmark = pytest.mark.asyncio
@@ -30,14 +30,20 @@ def _action(key: str, subject: str = "Lending") -> dict:
 # --------------------------------------------------------------------------------- #
 def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
     """The whole point of returning a disabled action: the reason teaches the process."""
-    prepare = _action("cpcs.prepare")
-    ok, reason = _evaluate_action(prepare, roles={"Credit Head"}, stage="Diligence",
+    submit = _action("handover.submit")
+    ok, reason = _evaluate_action(submit, roles={"Credit Head"}, stage="Diligence",
                                   run_state="none")
     assert not ok
-    assert reason == "Available once the committee has sanctioned this facility."
-    ok, _ = _evaluate_action(prepare, roles={"Credit Head"}, stage="Sanctioned",
+    assert reason == "Available once the handover package has been approved."
+    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="CP/CS Completed",
                              run_state="none")
     assert ok
+
+    # And the step whose own screen does not exist yet says exactly that, rather than
+    # pretending to be one stage away.
+    ok, reason = _evaluate_action(_action("cpcs.prepare"), roles={"Credit Head"},
+                                  stage="Sanctioned", run_state="none")
+    assert not ok and "CP/CS checklist screen" in reason
 
 
 def test_role_gate_names_who_does_the_step():
@@ -186,3 +192,93 @@ async def test_syndication_and_am_carry_their_own_catalogues(monkeypatch):
     assert "syndication.start" in keys and "syndication.lender-update" in keys
     assert not any(k.startswith("deal-structuring") for k in keys)
     get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------------- #
+# The catalogue must match the endpoints it points at
+# --------------------------------------------------------------------------------- #
+def _openapi() -> dict:
+    """The generated specs — the only honest description of what each endpoint accepts."""
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[3] / "docs" / "openapi"
+    return {"orchestrator": json.loads((root / "orchestrator.openapi.json").read_text()),
+            "register": json.loads((root / "register.openapi.json").read_text())}
+
+
+def _schema_for(spec: dict, specs: dict) -> tuple[set[str], set[str]] | None:
+    """(accepted field names, required field names) for an action's endpoint, or None
+    when the route takes no body."""
+    path = (spec["url"].replace("{workflow_id}", "{workflow_id}")
+            .replace("{subject_id}", "{lending_id}"))
+    for doc in specs.values():
+        op = (doc.get("paths", {}).get(path, {}) or {}).get(spec["method"].lower())
+        if op is None:
+            continue
+        ref = ((op.get("requestBody", {}).get("content", {})
+                .get("application/json", {}).get("schema", {}) or {}).get("$ref"))
+        if not ref:
+            return set(), set()
+        model = doc["components"]["schemas"][ref.split("/")[-1]]
+        return set(model.get("properties") or {}), set(model.get("required") or [])
+    raise AssertionError(f"{spec['key']}: no such route {spec['method']} {path}")
+
+
+def test_every_action_matches_its_endpoints_schema():
+    """The form + prefill + constants must BE a valid body for the endpoint.
+
+    The first version of this catalogue was written from the endpoint names rather than
+    their schemas, and got most of the bodies wrong — the first thing a user saw on
+    "Send to credit committee" was `requested_by: Field required; amount_cr: Extra inputs
+    are not permitted`. A catalogue that a client renders blind has to be checked against
+    the thing it describes, not against memory.
+    """
+    specs = _openapi()
+    for subject, actions in _MAKER_ACTIONS.items():
+        for spec in actions:
+            got = _schema_for(spec, specs)
+            assert got is not None, spec["key"]
+            accepted, required = got
+            if not accepted:
+                assert not spec["form"], f"{spec['key']}: body-less route with a form"
+                continue
+
+            sent = ({f["name"] for f in spec["form"]}
+                    | set(spec.get("prefill") or {})
+                    | set(spec.get("constant") or {})
+                    | set(_IDENTITY_FOR.get(spec["key"], ())))
+            extra = sent - accepted
+            assert not extra, f"{spec['key']} ({subject}) sends unknown field(s): {sorted(extra)}"
+
+            # Required fields must be covered by SOMETHING — a form field, a prefilled id,
+            # a constant, or the server-injected identity. An action that cannot satisfy
+            # them is allowed only if it is gated off pending its own screen.
+            missing = required - sent
+            if missing:
+                assert spec.get("needs_screen"), (
+                    f"{spec['key']} ({subject}) cannot satisfy required {sorted(missing)} "
+                    "and is not gated behind a screen")
+
+
+def test_identity_is_server_filled_and_never_asked_of_the_user():
+    """WHO did this comes from the verified token. A form field for it would be a text box
+    asserting an identity — exactly what the approval routes refuse."""
+    for actions in _MAKER_ACTIONS.values():
+        for spec in actions:
+            names = {f["name"] for f in spec["form"]}
+            assert not (names & {"requested_by", "by"}), spec["key"]
+            assert spec["key"] in _IDENTITY_FOR, f"{spec['key']} missing from _IDENTITY_FOR"
+
+
+def test_actions_needing_a_screen_are_offered_but_disabled():
+    """Honest about what is not built: listed, greyed, and the reason says where it will
+    live. Silently omitting them would make the flow look complete when it is not."""
+    from app.api import _evaluate_action as ev
+
+    gated = [s for acts in _MAKER_ACTIONS.values() for s in acts if s.get("needs_screen")]
+    assert gated, "expected some steps to be pending their own screen"
+    for spec in gated:
+        ok, reason = ev(spec, roles={"Admin"}, stage=next(iter(spec.get("stages") or {""})),
+                        run_state="returned" if spec.get("run") == "returned" else "live")
+        assert not ok and "not built yet" in reason, spec["key"]
