@@ -39,6 +39,9 @@ class LendingTracker(RegisterBase):
         Index("ix_lending_tenant_stage", "tenant_id", "stage"),
     )
 
+    # See Lead.__auto_number__ — assigned on create so a converted line is quotable.
+    __auto_number__ = ("tracker_no", "L", 3)
+
     tracker_no: Mapped[str | None] = mapped_column(String(40))  # e.g. "L001"
     entity_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("entities.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -73,6 +76,8 @@ class SyndicationTracker(RegisterBase):
         Index("ix_syn_tenant_entity", "tenant_id", "entity_id"),
         Index("ix_syn_tenant_status", "tenant_id", "status"),
     )
+
+    __auto_number__ = ("tracker_no", "S", 3)
 
     tracker_no: Mapped[str | None] = mapped_column(String(40))  # e.g. "S001"
     entity_id: Mapped[uuid.UUID] = mapped_column(
@@ -158,6 +163,8 @@ class AssetMonetisation(RegisterBase):
         Index("ix_am_tenant_entity", "tenant_id", "entity_id"),
         Index("ix_am_tenant_status", "tenant_id", "status"),
     )
+
+    __auto_number__ = ("tracker_no", "A", 3)
 
     tracker_no: Mapped[str | None] = mapped_column(String(40))  # e.g. "A001"
     entity_id: Mapped[uuid.UUID] = mapped_column(

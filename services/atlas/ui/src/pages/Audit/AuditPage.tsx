@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
 import { CodeText } from '../../components/common/Pills';
 import { auditService } from '../../services/auditService';
+import type { AuditRow } from '../../services/auditService';
+import { fields as detailFields, humanKey } from '../../services/auditDetail';
 import { tokens } from '../../theme';
-
-interface AuditRow { t: string; by: string; role?: string; act: string; code: string; detail: string; }
 
 // Same labelled two-column layout as the Activity log's detail dialog.
 const detailRow = (label: string, value: React.ReactNode) => (
@@ -25,7 +25,9 @@ export default function AuditPage() {
     { accessorKey: 't', header: 'When', size: 150 },
     // v12: a.by || a.role || '' — older entries carry `role` instead of `by`.
     { id: 'by', header: 'Who', size: 140, accessorFn: (r) => r.by || r.role || '' },
-    { accessorKey: 'act', header: 'Action', size: 160, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    // 'evidence.attach' is the stored verb; 'Evidence attach' is what a person reads.
+    { accessorKey: 'act', header: 'Action', size: 160,
+      Cell: ({ cell }) => <b>{humanKey(String(cell.getValue<string>() || '').replace(/\./g, ' '))}</b> },
     { accessorKey: 'code', header: 'Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     // v12 marks this column `wrap` — long detail strings run to multiple lines.
     { accessorKey: 'detail', header: 'Detail', size: 360,
@@ -46,9 +48,17 @@ export default function AuditPage() {
             <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 2, rowGap: 1.2, alignItems: 'baseline' }}>
               {detailRow('When', view.t)}
               {detailRow('Who', <b>{view.by || view.role || ''}</b>)}
-              {detailRow('Action', view.act)}
+              {detailRow('Action', humanKey(view.act.replace(/\./g, ' ')))}
               {detailRow('Code', view.code ? <CodeText code={view.code} /> : '—')}
-              {detailRow('Detail', view.detail || '—')}
+              {/* The grid shows the summary; here every recorded field is spelled out —
+                  identifiers included, because a trail you cannot drill into is not one. */}
+              {view.changes
+                ? detailFields(view.changes).map((f) => (
+                    <React.Fragment key={f.label}>{detailRow(f.label, f.value)}</React.Fragment>
+                  ))
+                : detailRow('Detail', view.detail || '—')}
+              {view.resourceId && detailRow('Record', <CodeText code={view.resourceId} />)}
+              {view.requestId && detailRow('Request', <CodeText code={view.requestId} />)}
             </Box>
           )}
         </DialogContent>

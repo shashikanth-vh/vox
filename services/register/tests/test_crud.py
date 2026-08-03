@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -190,3 +192,56 @@ async def test_entity_lifecycle_is_the_vistaar_journey(client: AsyncClient):
     from app.seed.refdata import REF_VALUES
     assert REF_VALUES["Entity Lifecycle"] == [
         "Prospect", "Onboarded", "Active", "Serviced", "Vistaar — Expansion", "Dormant"]
+
+
+async def test_tracker_lines_and_deals_get_a_quotable_number(client: AsyncClient):
+    """Every row a person TALKS about gets a number they can say.
+
+    Only the seed importers used to assign these, so a deal or a tracker line born from
+    the live path carried NULL: the Deals grid showed a blank Group Code and every audit
+    row for it recorded "label -> null". The lines continue the seed's own series, and a
+    deal takes its CLIENT's code — which is exactly what the grid labels Group Code.
+    """
+    ent = (await client.post("/v1/entities", json={
+        "code": f"NUM{uuid.uuid4().hex[:6].upper()}", "legal_name": "Numbering Co"})).json()
+
+    deal = (await client.post("/v1/deals", json={
+        "entity_id": ent["id"], "product_type": "Term Loan"})).json()
+    assert deal["deal_no"] == ent["code"], deal
+
+    # A second facility for the SAME company cannot collide on (tenant, deal_no).
+    deal2 = (await client.post("/v1/deals", json={
+        "entity_id": ent["id"], "product_type": "Working Capital"})).json()
+    assert deal2["deal_no"] == f"{ent['code']}-2", deal2
+
+    for path, prefix in (("/v1/lending", "L"), ("/v1/syndication", "S")):
+        r = await client.post(path, json={"entity_id": ent["id"], "deal_id": deal["id"]})
+        assert r.status_code == 201, r.text
+        no = r.json()["tracker_no"]
+        assert no and no.startswith(prefix) and no[len(prefix):].isdigit(), no
+
+    # A caller-supplied number always wins over the allocator.
+    mine = await client.post("/v1/lending", json={
+        "entity_id": ent["id"], "tracker_no": "L900"})
+    assert mine.status_code == 201 and mine.json()["tracker_no"] == "L900"
+
+
+async def test_conversion_numbers_the_rows_it_creates(client: AsyncClient):
+    """The path that actually matters: push-to-deals must not leave unnamed rows behind."""
+    ent = (await client.post("/v1/entities", json={
+        "code": f"CNV{uuid.uuid4().hex[:6].upper()}", "legal_name": "Convert Numbering"})).json()
+    assert (await client.post("/v1/people", json={
+        "name": "Asha", "full_name": "Asha Nair", "role": "BDRM"})).status_code == 201
+    lead = (await client.post("/v1/leads", json={
+        "company": "Convert Numbering", "entity_id": ent["id"], "status": "Active"})).json()
+    r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
+        "is_lending": True, "is_syndication": True, "product_type": "Term Loan",
+        "amount_cr": 10, "rm": "Asha"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    deal = (await client.get(f"/v1/deals/{body['deal_id']}")).json()
+    assert deal["deal_no"] == ent["code"], deal
+    lending = (await client.get(f"/v1/lending/{body['lending_id']}")).json()
+    assert lending["tracker_no"], lending
+    syn = (await client.get(f"/v1/syndication/{body['syndication_id']}")).json()
+    assert syn["tracker_no"], syn

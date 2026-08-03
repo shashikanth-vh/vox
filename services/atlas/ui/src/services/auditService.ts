@@ -2,7 +2,14 @@ import { db, nowStamp } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
 import { api, withFallback, asRows } from '../api/http';
 import { emitSave } from '../utils/saveIndicator';
+import { summary } from './auditDetail';
 import type { TableQuery } from './types';
+
+/** One row of the audit trail. `changes` is the register's raw JSON, kept for the dialog. */
+export interface AuditRow {
+  t: string; by: string; role?: string; act: string; code: string; detail: string;
+  changes?: Record<string, any>; resourceId?: string; requestId?: string;
+}
 
 export function writeAudit(by: string, act: string, code: string, detail: string) {
   db().audit.unshift({ t: nowStamp(), by, act, code, detail });
@@ -19,24 +26,27 @@ export function writeAudit(by: string, act: string, code: string, detail: string
 export const AUDIT_LIMIT = 200;
 
 /** An API audit entry read back as the row the trail renders. */
-export function toAuditRow(r: any): { t: string; by: string; role?: string; act: string; code: string; detail: string } {
+export function toAuditRow(r: any): AuditRow {
   // The trail renders `t` verbatim, and the local store writes "YYYY-MM-DD HH:MM".
   const t = String(r?.created_at || r?.at || r?.timestamp || '').replace('T', ' ').slice(0, 16);
-  // `detail` may arrive as a changes object rather than a sentence — render it readably
-  // rather than letting it stringify to [object Object] in the Detail column.
+  const act = r?.action || r?.event || '';
+  // `detail` may arrive as a structured `changes` object rather than a sentence. The
+  // grid gets the one-line summary; the raw object rides along so the row dialog can
+  // show every field, labelled, without a second fetch.
   const raw = r?.detail ?? r?.summary ?? r?.message ?? r?.changes;
-  const detail = raw == null ? ''
-    : typeof raw === 'string' ? raw
-      : Object.entries(raw).map(([k, v]) => `${k} → ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('; ');
+  const detail = raw == null ? '' : typeof raw === 'string' ? raw : summary(raw, act);
   return {
     t,
     by: r?.actor_name || r?.actor || r?.actor_email || r?.user || '',
     role: r?.role,
-    act: r?.action || r?.event || '',
+    act,
     // The Code column wants something human; resource_id is a UUID, so it is the last
     // resort rather than the first choice.
     code: r?.resource_no || r?.code || r?.resource_type || '',
     detail,
+    changes: raw && typeof raw === 'object' ? raw : undefined,
+    resourceId: r?.resource_id || undefined,
+    requestId: r?.request_id || undefined,
   };
 }
 

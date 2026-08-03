@@ -20,7 +20,18 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import Boolean, Integer, Numeric, and_, func, or_, select, tuple_
+from sqlalchemy import (
+    Boolean,
+    Integer,
+    Numeric,
+    and_,
+    cast,
+    func,
+    or_,
+    select,
+    text,
+    tuple_,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
@@ -54,6 +65,52 @@ def _json_safe(value: Any, cap: int = 300) -> Any:
         return value
     text = value if isinstance(value, str) else str(value)
     return text if len(text) <= cap else text[: cap - 1] + "…"
+
+
+async def _advisory_lock(session: AsyncSession, key: str) -> None:
+    """Transaction-scoped lock, released at commit — the same device the financial
+    version allocator uses."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k), 0)"), {"k": key})
+
+
+async def allocate_number(session: AsyncSession, model: type, tenant_id: uuid.UUID,
+                          field: str, prefix: str, width: int = 3) -> str:
+    """Hand out the next free ``{prefix}{NNN}`` for ``model.field`` in this tenant.
+
+    Serialized on a transaction-scoped advisory lock so two concurrent creates cannot
+    read the same maximum and then collide on the table's unique (tenant_id, <field>).
+    Continues the sequence the seed established rather than restarting at 1 — the
+    numbers a person quotes must never be reused for a different row.
+    """
+    await _advisory_lock(session, f"autonumber|{tenant_id}|{model.__tablename__}|{field}")
+    col = getattr(model, field)
+    pattern = f"^{prefix}[0-9]+$"
+    highest = (await session.execute(
+        select(func.max(cast(func.substring(col, f"^{prefix}([0-9]+)$"), Integer)))
+        .where(model.tenant_id == tenant_id, col.op("~")(pattern))
+    )).scalar()
+    return f"{prefix}{(highest or 0) + 1:0{width}d}"
+
+
+async def allocate_suffixed(session: AsyncSession, model: type, tenant_id: uuid.UUID,
+                            field: str, stem: str) -> str:
+    """``stem``, or ``stem-2`` / ``stem-3`` … when it is already taken.
+
+    For natural keys rather than sequences: a deal is quoted by its company's code, and
+    a company that comes back for a second facility must not collide with its first.
+    """
+    await _advisory_lock(session, f"autonumber|{tenant_id}|{model.__tablename__}|{field}")
+    col = getattr(model, field)
+    taken = set((await session.execute(
+        select(col).where(model.tenant_id == tenant_id,
+                          or_(col == stem, col.like(f"{stem}-%")))
+    )).scalars().all())
+    if stem not in taken:
+        return stem
+    n = 2
+    while f"{stem}-{n}" in taken:
+        n += 1
+    return f"{stem}-{n}"
 
 
 def _label_of(obj: Any) -> str | None:
@@ -134,6 +191,34 @@ class CRUDRepository(Generic[M]):
     async def create(
         self, session: AsyncSession, tenant_id: uuid.UUID, actor: str, data: dict
     ) -> M:
+        # A row people TALK about needs a number people can say. Declared on the model
+        # (``__auto_number__``), so it applies wherever the row is created — the generic
+        # POST route and a lead conversion alike — rather than at each call site, where
+        # it would be forgotten. Only the seed importers used to assign these, so every
+        # live-created deal and tracker line carried NULL: the Deals grid showed a blank
+        # Group Code and the audit trail recorded "label → null". A number the caller
+        # supplies always wins.
+        auto = getattr(self.model, "__auto_number__", None)
+        if auto:
+            field, prefix, width = auto
+            if not data.get(field):
+                data = {**data,
+                        field: await allocate_number(session, self.model, tenant_id,
+                                                     field, prefix, width)}
+        # The other shape: a number DERIVED from a related row (a deal is quoted by its
+        # client's code) rather than allocated from a sequence.
+        derived = getattr(self.model, "__auto_number_from__", None)
+        if derived:
+            field, fk, src_table, src_col = derived
+            if not data.get(field) and data.get(fk):
+                stem = (await session.execute(
+                    text(f"SELECT {src_col} FROM {src_table} "  # noqa: S608 - names are
+                         f"WHERE id = :id AND tenant_id = :t"),  # class constants
+                    {"id": str(data[fk]), "t": str(tenant_id)})).scalar()
+                if stem:
+                    data = {**data,
+                            field: await allocate_suffixed(session, self.model, tenant_id,
+                                                           field, str(stem))}
         obj = self.model(**data)
         obj.tenant_id = tenant_id
         obj.created_by = actor

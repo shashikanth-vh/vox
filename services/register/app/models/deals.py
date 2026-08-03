@@ -25,6 +25,11 @@ class Lead(RegisterBase):
         Index("ix_leads_tenant_status", "tenant_id", "status"),
     )
 
+    # (field, prefix, width) — the repository hands out the next free number on create.
+    # Declared on the MODEL rather than on the route so it applies wherever the row is
+    # created, not only through POST /v1/leads.
+    __auto_number__ = ("lead_no", "L-", 4)
+
     lead_no: Mapped[str | None] = mapped_column(String(40))  # e.g. "LD-002"
     entity_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("entities.id", ondelete="SET NULL"), index=True
@@ -57,6 +62,14 @@ class Deal(RegisterBase):
         UniqueConstraint("tenant_id", "deal_no", name="deals_tenant_deal_no"),
         Index("ix_deals_tenant_entity", "tenant_id", "entity_id"),
     )
+
+    # A deal is quoted by its CLIENT's code — that is what the seed does and what the
+    # Deals grid labels "Group Code". So the number is derived from the entity rather
+    # than being a sequence of its own: (field, fk column, source table, source column).
+    # A company that comes back for a second facility gets "<code>-2", never a clash.
+    # Live-created deals used to leave this NULL, which is why the grid showed a blank
+    # Group Code and the audit trail read "label → null".
+    __auto_number_from__ = ("deal_no", "entity_id", "entities", "code")
 
     deal_no: Mapped[str | None] = mapped_column(String(40))
     entity_id: Mapped[uuid.UUID] = mapped_column(
