@@ -6,6 +6,21 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **"Pending approval" that was really a dead run: conversions are now refused at
+  the door, and a FAILED run says WHY.** Pushing a UI-created lead to deals answered
+  `status: "pending approval"` — then the run FAILED 0.5 s later and never reached any
+  approver's queue, because a lead with no `entity_id` cannot become a deal (the
+  workflow raises non-retryably on its first step). Two fixes:
+  * `POST /v1/workflows/lead-conversions` PRE-FLIGHTS the lead: no company linked →
+    **422** naming the lead and the remedy ("link the lead to a client first, then push
+    it to deals"); already Converted → **409**; missing lead → **404**. The caller
+    learns at request time instead of hunting a dead workflow.
+  * `GET /v1/workflows/{id}` now returns a **`failure`** field for FAILED / TIMED_OUT /
+    TERMINATED runs, unwrapping the cause chain — a bare "FAILED" was a dead end for
+    the person who raised the request.
+  (Note for the UI: leads added through the Add-lead form carry no company; VOX
+  captures do. Link the company before pushing to deals.)
+
 - **The approver now gets the WHOLE triad everywhere — pending items offered only
   `approve_url`.** A checker queue that hands back one verb reads as "approve or
   ignore", which is not the governance the platform enforces. Fixed end to end:

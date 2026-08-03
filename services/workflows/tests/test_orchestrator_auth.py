@@ -133,3 +133,60 @@ async def test_conversion_rejects_null_string_lead_id(monkeypatch):
                     {"lead_id": "null", "requested_by": "rm@evamfinance.com"})
     assert r.status_code == 422, r.text
     get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# Pre-flight: a conversion that CANNOT succeed is refused at the door.
+# --------------------------------------------------------------------------- #
+class _LeadHttp:
+    """Serves GET /v1/leads/{id} with a fixed row (or 404 when row is None)."""
+
+    def __init__(self, row: dict | None) -> None:
+        self.row = row
+
+    async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if self.row is None:
+            return httpx.Response(404, json={"error": "missing"},
+                                  request=httpx.Request("GET", url))
+        return httpx.Response(200, json=self.row,
+                              request=httpx.Request("GET", url))
+
+
+async def _post_conv(app, lead_id="11111111-1111-1111-1111-111111111111"):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://orch"
+    ) as c:
+        return await c.post("/v1/workflows/lead-conversions",
+                            json={"lead_id": lead_id, "requested_by": "rm@evamfinance.com"},
+                            headers={"X-API-Key": "k", "X-Tenant": "EVAM"})
+
+
+async def test_conversion_refuses_a_lead_with_no_company(monkeypatch):
+    """A lead with no entity_id can never become a deal — the workflow enforced that
+    ~0.5s in, so the caller got "pending approval" and then a silently FAILED run that
+    never reached any approver's queue. Refuse at the door, and say how to fix it."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _LeadHttp({"id": "l1", "lead_no": "LD-139", "company": "mukesh",
+                                "entity_id": None, "status": "Active"})
+    r = await _post_conv(app)
+    assert r.status_code == 422, r.text
+    assert "not linked to a company" in r.text
+    assert "LD-139" in r.text                      # names the lead the user is looking at
+    get_settings.cache_clear()
+
+
+async def test_conversion_refuses_an_already_converted_lead(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _LeadHttp({"id": "l1", "lead_no": "LD-140", "company": "x",
+                                "entity_id": "e-1", "status": "Converted"})
+    r = await _post_conv(app)
+    assert r.status_code == 409 and "already" in r.text
+    get_settings.cache_clear()
+
+
+async def test_conversion_reports_a_missing_lead(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _LeadHttp(None)
+    r = await _post_conv(app)
+    assert r.status_code == 404
+    get_settings.cache_clear()

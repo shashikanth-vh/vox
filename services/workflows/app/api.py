@@ -718,6 +718,36 @@ def create_app() -> FastAPI:
             return _problem(403, "Forbidden",
                             "A verified, route-bound caller identity is required to start "
                             "a conversion.")
+        # PRE-FLIGHT: a lead with no company cannot become a deal (the deal's entity_id
+        # is mandatory), and the workflow enforces that a few hundred milliseconds in —
+        # which surfaced as "pending approval" followed by a silent FAILED run and an
+        # empty approver queue. Refuse it HERE, with the fix in the message, so the
+        # caller learns at request time instead of hunting a dead workflow.
+        try:
+            lead_resp = await request.app.state.http.get(
+                f"{settings.register_base_url.rstrip('/')}/v1/leads/{payload.lead_id}",
+                headers={"X-API-Key": settings.register_api_key,
+                         "X-Tenant": caller.tenant or settings.register_tenant})
+        except httpx.HTTPError as exc:
+            return _problem(503, "Service unavailable",
+                            f"The lead could not be read before starting the run: {exc}")
+        if lead_resp.status_code == 404:
+            return _problem(404, "Not found", f"Lead '{payload.lead_id}' does not exist.")
+        if lead_resp.status_code == 200:
+            lead_row = lead_resp.json()
+            if not lead_row.get("entity_id"):
+                return _problem(
+                    422, "Validation failed",
+                    f"Lead '{lead_row.get('lead_no') or payload.lead_id}' "
+                    f"({lead_row.get('company') or 'this lead'}) is not linked to a "
+                    "company, and a deal must belong to one. Link the lead to a client "
+                    "first (Masters → Clients, then set the lead's company), then push "
+                    "it to deals.")
+            if str(lead_row.get("status") or "").lower() == "converted":
+                return _problem(
+                    409, "Conflict",
+                    f"Lead '{lead_row.get('lead_no') or payload.lead_id}' is already "
+                    "Converted; it has left the lead register.")
         wf_id = f"leadconv-{_tenant_slug(caller.tenant)}-{payload.lead_id}"
         # Record the INITIATOR + tenant in the workflow memo so status/result can be scoped
         # to the initiator or an approver — not any same-tenant caller. The real lead_id is
@@ -2563,6 +2593,24 @@ def create_app() -> FastAPI:
                 pass
         elif desc.status == WorkflowExecutionStatus.COMPLETED:
             out["result"] = await handle.result()
+        elif desc.status in (WorkflowExecutionStatus.FAILED,
+                             WorkflowExecutionStatus.TIMED_OUT,
+                             WorkflowExecutionStatus.TERMINATED):
+            # WHY it failed, not just THAT it failed. A bare "FAILED" is a dead end for
+            # whoever raised the request: they see the run stop and have nowhere to look.
+            # Unwrap the cause chain the way the ?wait=true path does, so the message
+            # names the real refusal ("Lead … has no entity_id — link it to a company").
+            try:
+                await handle.result()
+            except Exception as exc:  # noqa: BLE001 - reporting, never re-raised
+                chain: list[str] = []
+                cur: BaseException | None = exc
+                while cur is not None and len(chain) < 4:
+                    msg = str(cur).strip() or cur.__class__.__name__
+                    if msg not in chain:
+                        chain.append(msg)
+                    cur = cur.__cause__
+                out["failure"] = " <- ".join(chain)
         return out
 
     @app.post("/v1/decisions/waiver", status_code=201, tags=["Decisions"],
