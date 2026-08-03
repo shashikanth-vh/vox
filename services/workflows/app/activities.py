@@ -242,16 +242,27 @@ async def create_lead(tp: VoxTouchpoint, entity_id: str,
                       idempotency_key: str) -> dict[str, Any]:
     """Open a lead for the company (new-company scenario, or existing company with no
     active lead). The assigned RM defaults to the acting RM who captured it."""
-    async with _client(tp.caller) as reg:
-        company = (tp.company_name or "").strip()
-        if not company:
-            # entity_id-only captures name no company, but the lead's `company` column
-            # is the grid's display text — take it from the entity itself rather than
-            # writing an "(unknown)" placeholder into every list the lead appears in.
-            entity = await reg.get("entities", entity_id,
-                                   request_id=activity.info().workflow_id)
+    company = (tp.company_name or "").strip()
+    if not company:
+        # entity_id-only captures name no company, but the lead's `company` column
+        # is the grid's display text — take it from the entity itself rather than
+        # writing an "(unknown)" placeholder into every list the lead appears in.
+        # The lookup runs on the SERVICE lane (caller's tenant, NO delegated
+        # identity): a scoped RM's visibility over the company usually BEGINS with
+        # this very lead, so reading as the human 403s — which killed real captures.
+        # Fail-soft either way: a display-name lookup must never fail the run.
+        from evam_register_client.errors import RegisterError
+        svc = CallerContext(tenant=tp.caller.tenant) if tp.caller else None
+        try:
+            async with _client(svc) as reg:
+                entity = await reg.get("entities", entity_id,
+                                       request_id=activity.info().workflow_id)
             company = ((entity.get("legal_name") or entity.get("display_name") or "")
                        .strip())
+        except RegisterError as exc:
+            activity.logger.warning("company backfill skipped for entity %s: %s",
+                                    entity_id, exc)
+    async with _client(tp.caller) as reg:
         return await reg.create("leads", {
             "entity_id": entity_id,
             "company": company or "(unknown)",

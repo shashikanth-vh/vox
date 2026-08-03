@@ -6,6 +6,15 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **VOX capture no longer dies on "Scoped access: this entity is not in your
+  scope" (regression fix).** The company-name backfill added for the "(unknown)"
+  lead read the entity AS THE CAPTURING RM — but a scoped RM's visibility over a
+  company usually *begins* with the very lead being created, so the read 403'd and
+  failed the whole run (folder 03 against an admin-created entity). The lookup now
+  runs on the SERVICE lane (caller's tenant, no delegated identity — it only
+  denormalises a display name) and is fail-soft: a refused or missing entity lands
+  the lead with "(unknown)" instead of killing the capture.
+
 - **The Syndication tab now runs on REAL register data — the last prototype-wired
   tab.** Its three views (Chase list / Matrix / Register-by-bank) read the bundled
   demo store and addressed writes by mock client codes (`POST

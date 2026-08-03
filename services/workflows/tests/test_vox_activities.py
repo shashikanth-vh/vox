@@ -78,6 +78,17 @@ async def test_create_lead_backfills_company_from_entity(mock_register):
     assert lead["company"] == "Sunrise Green Power LLP"
 
 
+async def test_create_lead_backfill_is_fail_soft(mock_register):
+    """The display-name lookup must NEVER fail the capture: an entity the service
+    lane cannot read (404/403) leaves company at the '(unknown)' placeholder and the
+    lead still lands — a real RM's capture died on exactly this before."""
+    tp = VoxTouchpoint(entity_id="e-gone", performed_by="Chetan")
+    env = ActivityEnvironment()
+    lead = await env.run(activities.create_lead, tp, "e-gone", "wf:test:lead")
+    assert lead["company"] == "(unknown)"
+    assert lead["status"] == "Active"
+
+
 async def test_create_lead_defaults_rm_to_acting_rm(mock_register):
     tp = VoxTouchpoint(company_name="New Co", performed_by="Chetan",
                        occurred_at="2026-07-25T10:00:00+05:30",
