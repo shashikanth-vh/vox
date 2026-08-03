@@ -109,11 +109,13 @@
       "fields": [
         {
           "key": "tenor",
-          "label": "Tenor"
+          "label": "Tenor",
+          "required": true
         },
         {
           "key": "pricing",
-          "label": "Pricing / ROI"
+          "label": "Pricing / ROI",
+          "required": true
         },
         {
           "key": "security",
@@ -134,7 +136,8 @@
             "Sanctioned",
             "Documented",
             "Disbursed"
-          ]
+          ],
+          "required": true
         }
       ]
     },
@@ -146,7 +149,8 @@
       "fields": [
         {
           "key": "lenders_approached",
-          "label": "Lenders approached"
+          "label": "Lenders approached",
+          "required": true
         },
         {
           "key": "tranche_split",
@@ -154,7 +158,8 @@
         },
         {
           "key": "arranger_role",
-          "label": "Arranger role"
+          "label": "Arranger role",
+          "required": true
         },
         {
           "key": "target_close",
@@ -175,7 +180,8 @@
       "fields": [
         {
           "key": "asset_type",
-          "label": "Asset type"
+          "label": "Asset type",
+          "required": true
         },
         {
           "key": "valuation",
@@ -183,7 +189,8 @@
         },
         {
           "key": "stake_offer",
-          "label": "Stake on offer"
+          "label": "Stake on offer",
+          "required": true
         },
         {
           "key": "buyer",
@@ -206,7 +213,8 @@
         {
           "key": "capacity_mw",
           "label": "Capacity (MW)",
-          "type": "number"
+          "type": "number",
+          "required": true
         },
         {
           "key": "ppa_tariff",
@@ -214,7 +222,8 @@
         },
         {
           "key": "offtaker",
-          "label": "Offtaker"
+          "label": "Offtaker",
+          "required": true
         },
         {
           "key": "cod",
@@ -238,12 +247,14 @@
       "fields": [
         {
           "key": "plant_type",
-          "label": "Plant type (STP/ETP/WTP)"
+          "label": "Plant type (STP/ETP/WTP)",
+          "required": true
         },
         {
           "key": "capacity_mld",
           "label": "Capacity (MLD)",
-          "type": "number"
+          "type": "number",
+          "required": true
         },
         {
           "key": "om_scope",
@@ -267,7 +278,8 @@
         {
           "key": "fleet_size",
           "label": "Fleet size",
-          "type": "number"
+          "type": "number",
+          "required": true
         },
         {
           "key": "charging",
@@ -287,12 +299,14 @@
       "fields": [
         {
           "key": "feedstock",
-          "label": "Feedstock"
+          "label": "Feedstock",
+          "required": true
         },
         {
           "key": "capacity_tpd",
           "label": "Capacity (TPD)",
-          "type": "number"
+          "type": "number",
+          "required": true
         },
         {
           "key": "offtake",
@@ -498,5 +512,77 @@
     "few_shot": true,
     "structured_output": true
   },
-  "_intelligence_note": "Feature flags for the Batch-1 intelligence upgrades — each independently switchable. In PRISM deployments the ENV VARS win (VOCX_STT_PRIMING, VOCX_EXTRACT_GLOSSARY, VOCX_EXTRACT_FEW_SHOT, VOCX_EXTRACT_STRUCTURED); this block is only the default for standalone/vendored use. Disabling a flag reverts that one feature to pre-Batch-1 behaviour."
+  "_intelligence_note": "Feature flags for the Batch-1 intelligence upgrades — each independently switchable. In PRISM deployments the ENV VARS win (VOCX_STT_PRIMING, VOCX_EXTRACT_GLOSSARY, VOCX_EXTRACT_FEW_SHOT, VOCX_EXTRACT_STRUCTURED); this block is only the default for standalone/vendored use. Disabling a flag reverts that one feature to pre-Batch-1 behaviour.",
+  "_completeness_note": "What a report must carry before it is filed, and what merely helps. The APPROVE screen reads this: a missing required field is named and blocks the default action; a missing optional one is named and can be waived. Declared here, not in the client, so the bar can be raised without shipping a new UI. 'path' is read from the extraction's report object unless it names another root; kind=list means non-empty.",
+  "completeness": [
+    {
+      "key": "title",
+      "label": "Client name",
+      "required": true
+    },
+    {
+      "key": "summary",
+      "label": "Summary",
+      "required": true
+    },
+    {
+      "key": "key_intel",
+      "label": "Key intel",
+      "required": true,
+      "kind": "list"
+    },
+    {
+      "key": "sector",
+      "label": "Sector",
+      "required": true
+    },
+    {
+      "key": "deal_temp",
+      "label": "Deal temperature",
+      "required": false
+    },
+    {
+      "key": "opportunity_score",
+      "label": "Opportunity score",
+      "required": false
+    },
+    {
+      "key": "next_steps",
+      "label": "Next steps",
+      "required": false,
+      "kind": "list"
+    },
+    {
+      "key": "attendees",
+      "label": "Attendees",
+      "required": false,
+      "kind": "list"
+    },
+    {
+      "key": "pipeline_stage",
+      "label": "Pipeline stage",
+      "required": false
+    },
+    {
+      "key": "location",
+      "label": "Location",
+      "required": false
+    },
+    {
+      "key": "ticket_size",
+      "label": "Ticket size",
+      "required": false
+    },
+    {
+      "key": "project_type",
+      "label": "Project type",
+      "required": false
+    },
+    {
+      "key": "nuances",
+      "label": "Nuances & soft signals",
+      "required": false,
+      "kind": "list"
+    }
+  ]
 }

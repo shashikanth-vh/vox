@@ -813,3 +813,45 @@ async def test_offline_capture_populates_next_meeting_end_to_end(stub_register):
     nm = r.json()["extraction"]["next_meeting"]
     assert nm["date"] == "2026-08-03"
     assert nm["time"] == "11:00"
+
+
+async def test_capabilities_serves_the_completeness_contract(stub_register):
+    """What a report MUST carry is the service's rule, not the client's.
+
+    The approve screen names the gaps before an interaction reaches a client's permanent
+    timeline. If that list lived in the UI bundle, raising the bar would mean shipping a
+    new front end, and the two would drift the moment either changed — the same reason
+    the report templates are served rather than compiled in.
+    """
+    app = create_app()
+    async with await _client(app) as c:
+        caps = (await c.get("/v1/capabilities")).json()
+
+    rows = caps["completeness"]
+    assert rows, "capabilities must carry the completeness contract"
+    by_key = {r["key"]: r for r in rows}
+    # A field report with no summary and no intel is not a report.
+    for key in ("title", "summary", "key_intel", "sector"):
+        assert by_key[key]["required"] is True, key
+    # And things nobody should be blocked on stay optional.
+    for key in ("opportunity_score", "attendees", "ticket_size"):
+        assert by_key[key]["required"] is False, key
+    assert by_key["key_intel"]["kind"] == "list"
+    assert all(r.get("label") for r in rows), "every rule needs a name a person can read"
+
+
+async def test_templates_mark_their_own_required_fields(stub_register):
+    """A sector template says which of its fields matter — the client only renders it."""
+    app = create_app()
+    async with await _client(app) as c:
+        caps = (await c.get("/v1/capabilities")).json()
+
+    tpl = {t["id"]: t for t in caps["report_templates"]}
+    solar = {f["key"]: f for f in tpl["solar"]["fields"]}
+    assert solar["capacity_mw"].get("required") is True
+    assert solar["offtaker"].get("required") is True
+    # Not everything: a template where every field is mandatory blocks every capture.
+    assert not solar["land_status"].get("required")
+    lending = {f["key"]: f for f in tpl["lending"]["fields"]}
+    assert lending["tenor"].get("required") is True
+    assert lending["sanction_stage"].get("required") is True

@@ -5,7 +5,7 @@ import StopIcon from '@mui/icons-material/Stop';
 import { useRecorder, MAX_SECONDS } from './useRecorder';
 import { vocxService, currentPosition, type VocxPreview } from '../../services/vocxService';
 import { currentRm } from './rm';
-import PreviewCard from './PreviewCard';
+import ReportCard from './ReportCard';
 import { tokens } from '../../theme';
 
 /** m:ss */
@@ -47,7 +47,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
 
   if (preview) {
     return (
-      <PreviewCard
+      <ReportCard
         preview={preview}
         onFiled={(msg) => { setPreview(null); setStatus(msg); onFiled(); }}
         onDiscarded={() => setPreview(null)}

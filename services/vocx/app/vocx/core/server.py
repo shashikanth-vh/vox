@@ -410,7 +410,12 @@ class VocxApp:
                 "google_configured": google_configured, "extraction": extraction,
                 "calendar_enabled": gcfg.get("calendar_enabled", True),
                 "drive_enabled": gcfg.get("drive_enabled", False),
-                "report_templates": self.config.get("report_templates", [])}
+                "report_templates": self.config.get("report_templates", []),
+                # What a report must carry before it may be filed, and what merely
+                # helps. Served rather than compiled into a client so the bar can be
+                # raised in config without shipping a new UI — the same rule the
+                # templates already follow.
+                "completeness": self.config.get("completeness", [])}
 
     def _store_for(self, data: dict[str, Any]) -> AtlasStore:
         """Resolve against the live register the browser posted (its S), if given;

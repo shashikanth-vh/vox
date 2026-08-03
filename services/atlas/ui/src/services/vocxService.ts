@@ -146,6 +146,27 @@ export const vocxService = {
     } catch (e) { return fail(vocxError(e, 'delete that report')); }
   },
 
+  /** Per-RM Google connection — the honest signal for the calendar banner. A mounted
+   *  client secret says the DEPLOYMENT can do calendars, not that THIS person has
+   *  connected theirs. */
+  async googleStatus(rm: string): Promise<Result<boolean>> {
+    try {
+      const r = await vocx.get<any>('/v1/auth/status', { rm });
+      return ok(!!r?.connected);
+    } catch (e) { return fail(vocxError(e, 'check your Google connection')); }
+  },
+
+  /** Ask the service to fill a template's fields from the transcript. */
+  async templateFill(transcript: string, fields: any[]): Promise<Result<Record<string, any>>> {
+    try {
+      const r = await vocx.post<any>('/v1/template_fill', { transcript, fields });
+      if (r?.error === 'no_api_key') {
+        return fail('Auto-fill needs the extraction model configured on this deployment.');
+      }
+      return ok((r?.values || {}) as Record<string, any>);
+    } catch (e) { return fail(vocxError(e, 'fill those fields')); }
+  },
+
   /** Company typeahead — the same scorer a commit resolves with, so what you pick is
    *  what gets linked. */
   async suggest(q: string, rm: string): Promise<Result<any>> {

@@ -3,7 +3,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Typography } from '@mui/mat
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { vocxService, type VocxPreview, type VocxReportRow } from '../../services/vocxService';
 import { currentRm } from './rm';
-import PreviewCard from './PreviewCard';
+import ReportCard from './ReportCard';
 import { tokens } from '../../theme';
 
 /**
@@ -74,8 +74,9 @@ export default function ReportsTab({ epoch }: { epoch: number }) {
           sx={{ textTransform: 'none', m: 1, color: 'rgba(232,238,242,.7)' }}>
           All reports
         </Button>
-        <PreviewCard
-          preview={open}
+        <ReportCard
+          preview={open.report || open}
+          initialStatus={open.status}
           onFiled={(msg) => { setOpen(null); setFlash(msg); void load(); }}
           onDiscarded={() => { setOpen(null); void load(); }}
         />
