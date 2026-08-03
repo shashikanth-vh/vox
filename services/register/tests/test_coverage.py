@@ -266,6 +266,28 @@ async def test_ref_serves_person_names_from_the_directory(client: AsyncClient):
     assert isinstance((await client.get("/v1/ref/Tenor")).json(), list)
 
 
+async def test_entity_search_by_name_backs_the_duplicate_check(client: AsyncClient):
+    """`GET /v1/entities?q=` is what ATLAS asks before onboarding a company.
+
+    The dialog used to consult the browser's own cache instead, which kept the
+    prototype's sample companies and never forgot a row the register had dropped — so it
+    refused a name citing a Group Code the database no longer held. The register is the
+    only thing that can answer this, so the contract is pinned: search finds the company
+    by name, and finds nothing for one that was never added.
+    """
+    r = await client.post("/v1/entities", json={
+        "code": "SRCH-1", "legal_name": "Findable Power Private Limited",
+        "display_name": "Findable Power"})
+    assert r.status_code == 201, r.text
+
+    hit = (await client.get("/v1/entities", params={"q": "Findable Power", "limit": 50})).json()
+    assert {row["code"] for row in hit["items"]} == {"SRCH-1"}
+
+    miss = (await client.get("/v1/entities", params={"q": "Nobody Ever Added This",
+                                                     "limit": 50})).json()
+    assert miss["items"] == []
+
+
 async def test_entity_list_pages_through_its_cursor(client: AsyncClient):
     """One page is NOT the list — `next_cursor` must walk every row.
 

@@ -11,6 +11,7 @@
 // collection's fixed values.
 
 import { api, errText, listAll } from '../api/http';
+import { normName } from '../utils/format';
 import { API_BASE_URL } from '../api/axiosClient';
 import type { ClientRow } from '../pages/Clients/client.types';
 
@@ -155,6 +156,27 @@ export const entitiesService = {
    */
   async list(max = ENTITY_MAX): Promise<ClientRow[]> {
     return (await listAll('/entities', { key: 'entities', max })).map(toClientRow);
+  },
+  /**
+   * The register row for a company NAME, or null — the authoritative duplicate check.
+   *
+   * `?q=` is the register's own search over legal_name / display_name / code / cin; the
+   * shortlist it returns is then matched on the normalised name, so "EcoSoch Solar Pvt
+   * Ltd" and "EcoSoch Solar Private Limited" are one company.
+   *
+   * This has to ask the REGISTER. Asking the browser's client cache said "Already on the
+   * register as DEF-312035" about a row that had been dropped when the database was
+   * recreated — the cache is never pruned, and it also ships pre-loaded with the
+   * prototype's sample companies, so on a fresh deployment it would refuse those names
+   * too, for companies the register had never held.
+   */
+  async findByName(name: string): Promise<ClientRow | null> {
+    const wanted = normName(name);
+    if (!wanted) return null;
+    const rows = await listAll('/entities', { key: 'entities', params: { q: name.trim() }, max: 200 });
+    const hit = rows.find((e: any) => normName(e?.legal_name) === wanted
+      || normName(e?.display_name) === wanted);
+    return hit ? toClientRow(hit) : null;
   },
   /** GET {{baseUrl}}/v1/entities/:id/dossier — the entity plus everything hanging off it. */
   async dossier(entityId: string): Promise<any> {

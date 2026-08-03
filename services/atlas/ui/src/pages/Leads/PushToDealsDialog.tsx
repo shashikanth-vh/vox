@@ -34,10 +34,18 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
 
   useEffect(() => {
     if (!lead) return;
-    const ex = conversionService.findExistingCode(lead.company);
-    setExistingCode(ex); setCode(ex ?? mintCode(lead.company)); setErr(''); setBusy(false);
+    // The register owns the answer, so it is awaited; the dialog opens on the minted code
+    // and corrects itself if the company turns out to be on the register already.
+    setExistingCode(null); setCode(mintCode(lead.company));
+    let alive = true;
+    void conversionService.findExistingCode(lead.company).then((ex) => {
+      if (!alive || !ex) return;
+      setExistingCode(ex); setCode(ex);
+    });
+    setErr(''); setBusy(false);
     setFlags({ lend: false, syn: true, am: false });
     setCl((p) => ({ ...p, sector: ref.getRefSync('Sector').includes(lead.sector) ? lead.sector : 'Other', lens: lead.lens || 'Mitigation', temp: lead.temp || 'Warm', source: lead.source || 'BDRM', sourceDetail: lead.sourceDetail || '' }));
+    return () => { alive = false; };   // a slow lookup must not land on the next lead
   }, [lead]);
 
   if (!lead) return null;

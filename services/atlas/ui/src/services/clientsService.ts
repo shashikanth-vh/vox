@@ -53,8 +53,23 @@ export const clientsService = {
   async create(input: { name: string; sector?: string; lens?: string; state?: string; toi?: string; about?: string }, by: string): Promise<{ ok: boolean; error?: string; code?: string }> {
     const name = (input.name || '').trim();
     if (!name) return { ok: false, error: 'Company name is required' };
-    const dup = Object.entries(db().clients).find(([, v]: any) => normName(v.name) === normName(name));
-    if (dup) return { ok: false, error: `Already on the register as ${dup[0]}` };
+    // The duplicate check asks the REGISTER, not the browser's cache. That cache holds
+    // the prototype's sample companies and is never pruned when a row leaves the
+    // register, so it refused real names on a fresh deployment and went on citing a
+    // company by a code the database no longer had.
+    if (USE_REAL_API) {
+      try {
+        const existing = await entitiesService.findByName(name);
+        if (existing) return { ok: false, error: `Already on the register as ${existing.code}` };
+      } catch (e) {
+        // A search that cannot run must not block onboarding: the register's own unique
+        // constraint is the real guard, and a 409 from it lands in the alert below.
+        console.warn('[register] duplicate-name search failed; letting the register decide:', e);
+      }
+    } else {
+      const dup = Object.entries(db().clients).find(([, v]: any) => normName(v.name) === normName(name));
+      if (dup) return { ok: false, error: `Already on the register as ${dup[0]}` };
+    }
     const code = mintCode(name);
     const client: any = {
       name, sector: input.sector || 'Other', lens: input.lens || 'Mitigation',

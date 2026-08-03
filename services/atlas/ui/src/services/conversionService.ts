@@ -2,7 +2,7 @@ import { db, today } from '../api/atlasStore';
 import { errText, USE_REAL_API } from '../api/http';
 import { orchestrator } from '../api/orchestratorClient';
 import { ORCHESTRATOR_URL } from '../api/axiosClient';
-import { runSuffix } from './entitiesService';
+import { runSuffix, entitiesService } from './entitiesService';
 import { employeesService } from './employeesService';
 import { getSession } from '../auth/session';
 import { writeAudit } from './auditService';
@@ -95,7 +95,24 @@ export function mintCode(name: string): string {
 }
 
 export const conversionService = {
-  findExistingCode(company: string): string | null {
+  /**
+   * The Group Code this company is already on the register under, or null.
+   *
+   * Register-backed in real-API mode for the same reason the Add-client duplicate check
+   * is: the local client cache keeps the prototype's samples and never forgets a row the
+   * register has dropped, so it would show a Group Code that no longer exists. A failed
+   * search returns null — the conversion settles the company canonically server-side
+   * anyway, so a missed match costs nothing.
+   */
+  async findExistingCode(company: string): Promise<string | null> {
+    if (USE_REAL_API) {
+      try {
+        return (await entitiesService.findByName(company))?.code ?? null;
+      } catch (e) {
+        console.warn('[register] existing-company search failed:', e);
+        return null;
+      }
+    }
     const hit = Object.entries(db().clients).find(([, v]: any) => normName(v.name) === normName(company));
     return hit ? hit[0] : null;
   },

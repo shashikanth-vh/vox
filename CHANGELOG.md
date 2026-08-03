@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **"Already on the register as DEF-312035" — for a company the register did not hold.**
+  Add-client checked for duplicates against the BROWSER's client cache instead of the
+  register. That cache is never pruned when a row leaves the register (recreating the
+  database left it citing a Group Code that no longer existed) and it ships pre-loaded
+  with the prototype's sample companies, so a fresh deployment would refuse those names
+  outright for companies it had never held. The check now asks the register —
+  `GET /v1/entities?q=<name>`, matched on the normalised name so "Pvt Ltd" and "Private
+  Limited" are one company. A search that cannot run no longer blocks onboarding: the
+  register's own unique constraint is the real guard and its 409 lands in the dialog.
+  Push-to-Deals resolves the existing Group Code the same way, so the code it shows is
+  one the register actually has.
+
 - **The Clients grid showed one company when the register held two.** `GET /v1/entities`
   was called with `limit=1` — a constant that should have been the page size and had been
   set to 1 — and the single page it returned was taken for the whole register. The row
