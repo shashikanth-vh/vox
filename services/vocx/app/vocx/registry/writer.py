@@ -20,9 +20,11 @@ minted-id→row id via the lead it just created.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -32,6 +34,21 @@ import httpx
 from app.vocx.core.atlas import AtlasStore
 
 log = logging.getLogger("vocx")
+
+# Canonical company-name matching — the same rules the VOX workflow uses, so the two
+# lead-creation paths (dev-ui/mobile commit here, orchestrator workflow there) resolve
+# a spoken name to the SAME entity row instead of each minting near-duplicates.
+_SUFFIXES = re.compile(
+    r"\b(private|pvt|limited|ltd|llp|india|co|company)\b\.?", re.IGNORECASE)
+
+
+def _canonical(name: str) -> str:
+    return re.sub(r"\s+", " ", _SUFFIXES.sub(" ", name)).strip().lower()
+
+
+def _entity_code(name: str) -> str:
+    slug = re.sub(r"[^A-Z0-9]", "", _canonical(name).upper())[:12] or "ENTITY"
+    return f"{slug}-{hashlib.sha256(name.encode()).hexdigest()[:4].upper()}"
 
 
 class _RegisterRefusedError(RuntimeError):
@@ -105,11 +122,50 @@ class RegisterWriter:
                 time.sleep(0.4 * (2 ** attempt))
         raise RuntimeError(f"Register write failed after retries: {path} ({last})")
 
+    def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        with httpx.Client(timeout=self.timeout_s) as client:
+            r = client.get(f"{self.base_url}{path}", params=params,
+                           headers=self._headers())
+        if r.status_code >= 400:
+            raise RuntimeError(f"Register {path} → {r.status_code}: {r.text[:400]}")
+        return r.json()
+
+    def _ensure_entity(self, company: str, record: dict[str, Any]) -> str | None:
+        """Resolve the company to a Register ENTITY (canonical-name match), creating it
+        when genuinely new — so a dev-ui/mobile-approved new lead is never an orphan
+        (no company drawer, no dossier, invisible to Masters). Fail-soft: if the
+        register refuses the lookup/create, the lead still lands (entity-less, as
+        before) rather than losing the capture."""
+        name = (company or "").strip()
+        if not name:
+            return None
+        try:
+            wanted = _canonical(name)
+            page = self._get("/v1/entities", {"q": name[:60], "limit": 50})
+            for row in page.get("items") or []:
+                for candidate in (row.get("legal_name"), row.get("display_name")):
+                    if candidate and _canonical(candidate) == wanted:
+                        return str(row["id"])
+            created = self._post("/v1/entities", {
+                "code": _entity_code(name),
+                "legal_name": name,
+                "display_name": name,
+                "sector": record.get("sector") or None,
+                "lens": record.get("lens") or None,
+                "register_status": "Pipeline",
+                "notes": f"Created by VOM capture {self.capture_id or ''}".strip(),
+            }, op="entity")
+            return str(created["id"])
+        except (RuntimeError, httpx.HTTPError, KeyError) as e:
+            log.warning("vocx: entity resolve/create failed for %r: %s", name, e)
+            return None
+
     # ---- ops ----------------------------------------------------------------
     def create_lead(self, record: dict[str, Any]) -> dict[str, Any]:
         body = {k: v for k, v in {
             "lead_no": record.get("id"),
             "company": record.get("company"),
+            "entity_id": self._ensure_entity(record.get("company", ""), record),
             "sector": record.get("sector") or None,
             "lens": record.get("lens") or None,
             "source": record.get("source") or None,

@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **A VOM/dev-ui-approved NEW lead now creates and links its ENTITY.** The direct
+  writer path (the `LD-V##` leads from the VocX dev-ui / mobile commit) posted the
+  lead with only the company *text* — no entity row, `entity_id` NULL — so the
+  company never appeared in Masters ▸ Clients, had no dossier/company drawer, and
+  the `entities` table stayed empty (user-reported: lead `LD-V01 Sunrise Green
+  Power` present, "no entry in entity"). `RegisterWriter.create_lead` now resolves
+  the company canonically (same suffix-stripping rules as the VOX workflow, so both
+  paths land on the SAME entity) and creates it when genuinely new
+  (`register_status: Pipeline`, idempotency-keyed on the capture), linking
+  `entity_id` on the lead. Fail-soft: a refused lookup/create still lands the lead
+  (entity-less, as before) rather than losing the capture. Repair for an existing
+  orphan lead: create the client in Masters, then `PATCH /v1/leads/{id}
+  {"entity_id": "<uuid>"}` — or delete the test lead and re-approve after rebuild.
+
 - **The intermittent VOX 502 ROOT CAUSE, from the register traceback: the literal
   string "null" as `entity_id`.** `asyncpg.DataError: invalid UUID 'null'` on the
   leads list — a failed folder-02 capture had stored the missing response id as the

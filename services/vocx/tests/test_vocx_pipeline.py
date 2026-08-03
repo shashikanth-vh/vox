@@ -62,6 +62,10 @@ def _register_stub(state: dict):
             body = json.loads(request.content)
             state.setdefault("leads", []).append(body)
             return httpx.Response(201, json={"id": str(uuid.uuid4()), **body})
+        if request.method == "POST" and path == "/v1/entities":
+            body = json.loads(request.content)
+            state.setdefault("entities", []).append(body)
+            return httpx.Response(201, json={"id": str(uuid.uuid4()), **body})
         return httpx.Response(404, json={"error": "unhandled " + path})
 
     return httpx.MockTransport(handler)
@@ -151,6 +155,12 @@ async def test_commit_new_lead_creates_a_register_lead(stub_register):
     assert len(leads) == 1
     assert leads[0]["company"] == "Windward Renewables"
     assert leads[0]["lead_no"].startswith("LD-V")
+    # A NEW company gets a real ENTITY row too (canonical-resolve → create), and the
+    # lead links it — an entity-less lead is invisible to Masters and has no dossier.
+    ents = stub_register["entities"]
+    assert len(ents) == 1 and ents[0]["legal_name"] == "Windward Renewables"
+    assert ents[0]["register_status"] == "Pipeline"
+    assert leads[0]["entity_id"], "the created entity must be linked on the lead"
     # The interaction landed on the freshly created lead (minted id translated to the row).
     inter = stub_register["interactions"][0]
     assert inter["subject_type"] == "Lead"
