@@ -551,6 +551,29 @@ def _problem(status: int, title: str, detail: str) -> ORJSONResponse:
         "type": title.lower().replace(" ", "_"), "title": title, "detail": detail}})
 
 
+def _upstream_detail(response: Any) -> str:
+    """The register's refusal, in words the person who pushed the button can act on.
+
+    A 422 answers `detail: "One or more fields are invalid."` and puts the useful part in
+    `errors[]` — which field, and why. Reading only `detail` turned a precise complaint
+    ("Extra inputs are not permitted: industry_type") into a shrug, and cost an afternoon
+    of guessing at a screen that just said the client could not be created.
+    """
+    if not (response.headers.get("content-type", "")).startswith("application/json"):
+        return (response.text or "").strip()[:500] or f"HTTP {response.status_code}"
+    try:
+        err = (response.json() or {}).get("error", {})
+    except ValueError:
+        return (response.text or "").strip()[:500] or f"HTTP {response.status_code}"
+    detail = str(err.get("detail") or err.get("title") or f"HTTP {response.status_code}")
+    fields = []
+    for item in err.get("errors") or []:
+        loc = ".".join(str(p) for p in (item.get("loc") or []) if p != "body")
+        msg = item.get("msg") or item.get("type") or ""
+        fields.append(f"{loc}: {msg}" if loc else str(msg))
+    return f"{detail} ({'; '.join(fields)})" if fields else detail
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level, json_logs=settings.log_json)
@@ -785,15 +808,22 @@ def create_app() -> FastAPI:
         try:
             found = await request.app.state.http.get(
                 f"{base}/v1/entities", params={"q": name[:60], "limit": 50}, headers=svc)
-            if found.status_code == 200:
-                wanted = _canonical(name)
-                for row in (found.json() or {}).get("items", []):
-                    for candidate in (row.get("legal_name"), row.get("display_name")):
-                        if candidate and _canonical(candidate) == wanted:
-                            entity_id = str(row["id"])
-                            break
-                    if entity_id:
+            # A search that did not RUN must never be read as "no such client" — that
+            # turns one refused read into a duplicate company on the register.
+            if found.status_code != 200:
+                return "", _problem(
+                    503, "Service unavailable",
+                    f"The client master could not be searched (HTTP {found.status_code}), "
+                    f"so '{name}' cannot be matched against existing clients. Retry once "
+                    "the register is reachable.")
+            wanted = _canonical(name)
+            for row in (found.json() or {}).get("items", []):
+                for candidate in (row.get("legal_name"), row.get("display_name")):
+                    if candidate and _canonical(candidate) == wanted:
+                        entity_id = str(row["id"])
                         break
+                if entity_id:
+                    break
         except (httpx.HTTPError, KeyError, AttributeError) as exc:
             return "", _problem(503, "Service unavailable",
                                 f"The client master could not be searched: {exc}")
@@ -802,7 +832,10 @@ def create_app() -> FastAPI:
             body = {k: v for k, v in {
                 "code": _entity_code(name), "legal_name": name, "display_name": name,
                 "sector": payload.sector, "lens": payload.lens, "state": payload.state,
-                "industry_type": payload.industry, "register_status": "Pipeline",
+                # `toi` (type of industry) is the register's field name. This said
+                # `industry_type`, which EntityCreate forbids, so EVERY genuinely-new
+                # company was refused 422 the moment it reached the create branch.
+                "toi": payload.industry, "register_status": "Pipeline",
                 "notes": payload.about or f"Created when lead "
                                           f"{lead_row.get('lead_no') or ''} was pushed "
                                           "to deals.",
@@ -815,12 +848,9 @@ def create_app() -> FastAPI:
                 return "", _problem(502, "Upstream unavailable",
                                     f"The client could not be created: {exc}")
             if created.status_code >= 300:
-                ct = created.headers.get("content-type", "")
-                detail = (created.json().get("error", {}).get("detail")
-                          if ct.startswith("application/json") else created.text)
                 return "", _problem(
                     created.status_code if created.status_code < 500 else 502,
-                    "Client could not be created", str(detail))
+                    "Client could not be created", _upstream_detail(created))
             entity_id = str(created.json()["id"])
         # 3. Link it to the lead so the conversion (and every later read) sees it.
         path = f"/v1/leads/{payload.lead_id}"

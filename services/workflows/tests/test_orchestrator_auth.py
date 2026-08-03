@@ -140,6 +140,16 @@ async def test_conversion_rejects_null_string_lead_id(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Pre-flight: a conversion that CANNOT succeed is refused at the door.
 # --------------------------------------------------------------------------- #
+# EntityCreate's field names, verbatim — services/register/app/schemas/resources.py.
+# A register-side test asserts this set is still exactly what EntityCreate accepts, so
+# the two cannot drift apart silently.
+_ENTITY_CREATE_FIELDS = {
+    "code", "legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
+    "sector", "sub_sector", "lens", "state", "location", "register_status", "lifecycle",
+    "promoter_group_code", "about", "toi", "notes", "tags",
+}
+
+
 class _LeadHttp:
     """A stand-in Register: serves GET /v1/leads/{id}, the entity search, and records
     the client-create / lead-link writes the conversion pre-flight makes."""
@@ -163,6 +173,17 @@ class _LeadHttp:
     async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
         body = kwargs.get("json") or {}
         self.created.append(body)
+        # The real EntityCreate FORBIDS extra fields, and this fake used to accept
+        # anything — which is how `industry_type` (the register calls it `toi`) shipped
+        # and refused every genuinely-new company with a 422 the moment it was pushed.
+        extra = sorted(set(body) - _ENTITY_CREATE_FIELDS)
+        if extra:
+            return httpx.Response(422, json={"error": {
+                "type": "validation_error", "title": "Validation failed",
+                "detail": "One or more fields are invalid.",
+                "errors": [{"type": "extra_forbidden", "loc": ["body", f],
+                            "msg": "Extra inputs are not permitted"} for f in extra]}},
+                request=httpx.Request("POST", url))
         return httpx.Response(201, json={"id": "ent-new", **body},
                               request=httpx.Request("POST", url))
 
@@ -179,6 +200,59 @@ async def _post_conv(app, lead_id="11111111-1111-1111-1111-111111111111"):
         return await c.post("/v1/workflows/lead-conversions",
                             json={"lead_id": lead_id, "requested_by": "rm@evamfinance.com"},
                             headers={"X-API-Key": "k", "X-Tenant": "EVAM"})
+
+
+async def test_created_client_uses_only_fields_the_register_accepts(monkeypatch):
+    """Every key of the client-create body must be a real EntityCreate field.
+
+    `industry_type` was not one — the register calls it `toi` — so the create branch
+    answered 422 "One or more fields are invalid." for every genuinely-new company, and
+    the dialog showed nothing more useful than that.
+    """
+    app = _app(monkeypatch)
+    http = _LeadHttp({"id": "l1", "lead_no": "LD-140", "company": "Brand New Co",
+                      "entity_id": None, "status": "Active"})
+    app.state.http = http
+    with contextlib.suppress(Exception):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://orch") as c:
+            await c.post("/v1/workflows/lead-conversions",
+                         json={"lead_id": "11111111-1111-1111-1111-111111111111",
+                               "requested_by": "rm@evamfinance.com",
+                               "company_name": "Brand New Co", "sector": "Other",
+                               "lens": "Mitigation", "state": "Karnataka",
+                               "industry": "EPC", "about": "good company"},
+                         headers={"X-API-Key": "k", "X-Tenant": "EVAM"})
+    assert http.created, "no client was created"
+    body = http.created[0]
+    assert set(body) <= _ENTITY_CREATE_FIELDS, sorted(set(body) - _ENTITY_CREATE_FIELDS)
+    assert body["toi"] == "EPC"                      # not industry_type
+    assert http.patched and http.patched[0]["entity_id"] == "ent-new"
+    get_settings.cache_clear()
+
+
+async def test_unsearchable_client_master_refuses_rather_than_duplicating(monkeypatch):
+    """A search that did NOT RUN must not read as "no such client".
+
+    Falling through to the create branch on a failed search puts a second copy of a
+    company on the register — the one thing the canonical match exists to prevent.
+    """
+    app = _app(monkeypatch)
+
+    class _Blind(_LeadHttp):
+        async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+            if "/v1/entities" in str(url):
+                return httpx.Response(503, json={"error": "down"},
+                                      request=httpx.Request("GET", url))
+            return await super().get(url, **kwargs)
+
+    http = _Blind({"id": "l1", "lead_no": "LD-141", "company": "Unsearchable Co",
+                   "entity_id": None, "status": "Active"})
+    app.state.http = http
+    r = await _post_conv(app)
+    assert r.status_code == 503, r.text
+    assert not http.created, "a failed search must not create a duplicate client"
+    get_settings.cache_clear()
 
 
 async def test_conversion_creates_the_client_for_an_unlinked_lead(monkeypatch):

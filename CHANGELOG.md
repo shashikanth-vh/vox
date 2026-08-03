@@ -6,6 +6,25 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Push to Deals: "Client could not be created — one or more fields are invalid."**
+  The conversion pre-flight builds the client from the dialog's fields when the lead has
+  no company linked. It sent **`industry_type`**; the register's field is **`toi`**, and
+  `EntityCreate` forbids extras — so every genuinely-new company was refused 422 the
+  moment it reached the create branch. Three fixes:
+  * The body uses `toi`. Verified against the real register: the exact body the
+    orchestrator sends now returns 201.
+  * **The error says which field.** A register 422 puts "One or more fields are invalid."
+    in `detail` and the useful part — the field and the reason — in `errors[]`. Only
+    `detail` was being read, so a precise complaint arrived as a shrug. Upstream refusals
+    now carry the field list through to the caller.
+  * **A search that did not RUN no longer reads as "no such client".** If the client
+    master cannot be searched the pre-flight returns 503 instead of falling through to
+    the create branch, which would have put a second copy of the company on the register
+    — the exact thing the canonical match exists to prevent.
+  The test fake for this path accepted any field, which is how the wrong name shipped; it
+  now rejects extras the way the real schema does, and a register-side test pins
+  `EntityCreate`'s field names against the list the orchestrator's tests carry.
+
 - **An RM could not see the lead she had just created.** The register scoped the list
   correctly and returned it; ATLAS then re-filtered that answer a SECOND time,
   client-side, keeping only rows whose `rm` field string-matched the signed-in user's

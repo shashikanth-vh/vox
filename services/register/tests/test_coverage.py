@@ -9,6 +9,8 @@ and the new reference vocabularies.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -264,6 +266,33 @@ async def test_ref_serves_person_names_from_the_directory(client: AsyncClient):
     assert {p["value"] for p in one} == set(bdrms)
     # A plain vocabulary still comes from ref_values (unseeded here, hence possibly empty).
     assert isinstance((await client.get("/v1/ref/Tenor")).json(), list)
+
+
+async def test_entity_create_field_names_are_pinned(client: AsyncClient):
+    """EntityCreate's accepted field names, pinned.
+
+    The orchestrator builds a client-create body when a lead is pushed to deals with no
+    company linked. It sent `industry_type`; the register calls that field `toi` and
+    FORBIDS extras, so every genuinely-new company was refused 422. The orchestrator's
+    test carries this same set (`_ENTITY_CREATE_FIELDS` in
+    services/workflows/tests/test_orchestrator_auth.py) — renaming a field here without
+    updating it there must fail this test, not a user's push.
+    """
+    from app.schemas.resources import EntityCreate
+
+    assert set(EntityCreate.model_fields) == {
+        "code", "legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
+        "sector", "sub_sector", "lens", "state", "location", "register_status",
+        "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
+    }
+    # And the body the orchestrator actually sends is accepted.
+    r = await client.post("/v1/entities", json={
+        "code": f"ORCH-{uuid.uuid4().hex[:6]}", "legal_name": "Pushed Co",
+        "display_name": "Pushed Co", "sector": "Other", "lens": "Mitigation",
+        "state": "Karnataka", "toi": "EPC", "register_status": "Pipeline",
+        "notes": "good company"})
+    assert r.status_code == 201, r.text
+    assert r.json()["toi"] == "EPC"
 
 
 async def test_entity_search_by_name_backs_the_duplicate_check(client: AsyncClient):
