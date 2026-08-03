@@ -12948,6 +12948,132 @@
         "title": "SyndicationLenderRead",
         "type": "object"
       },
+      "SyndicationLenderUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "chased_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chased Date"
+          },
+          "counterparty_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counterparty Id"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          },
+          "is_existing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Existing"
+          },
+          "lender_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lender Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "response_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Date"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "status_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status History"
+          }
+        },
+        "title": "SyndicationLenderUpdate",
+        "type": "object"
+      },
       "SyndicationRead": {
         "properties": {
           "amount_cr": {
@@ -67781,6 +67907,246 @@
           }
         },
         "summary": "Add a lender to a syndication",
+        "tags": [
+          "Syndication Lenders"
+        ]
+      }
+    },
+    "/v1/syndication/{syndication_id}/lenders/{lender_id}": {
+      "patch": {
+        "description": "The human lane for the chase board: advance a lender's engagement status\n(Identified \u2192 IM Circulated \u2192 \u2026 \u2192 Sanctioned/Declined), correct dates, note.\nParent-scoped exactly like adding a lender \u2014 the FLAT /v1/syndication-lenders\nupdate stays disabled (it could not enforce the parent tracker's line scope).\nThe repository appends status changes to status_history server-side.",
+        "operationId": "update_syndication_lender_v1_syndication__syndication_id__lenders__lender_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "syndication_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Syndication Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lender_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lender Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Actor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Actor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Email",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Gateway-Auth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Gateway-Auth"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Authz-Decision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Authz-Decision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Report-Ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Report-Ids"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Reports",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Reports"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Context"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyndicationLenderUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyndicationLenderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update a lender row (chase status, dates, note)",
         "tags": [
           "Syndication Lenders"
         ]

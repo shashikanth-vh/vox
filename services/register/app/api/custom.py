@@ -247,6 +247,32 @@ async def add_syndication_lender(
     return s.SyndicationLenderRead.model_validate(obj)
 
 
+@router.patch("/v1/syndication/{syndication_id}/lenders/{lender_id}",
+              response_model=s.SyndicationLenderRead, tags=["Syndication Lenders"],
+              summary="Update a lender row (chase status, dates, note)")
+async def update_syndication_lender(
+    syndication_id: uuid.UUID,
+    lender_id: uuid.UUID,
+    payload: s.SyndicationLenderUpdate,
+    ctx: RequestContext = Depends(get_context),
+) -> Any:
+    """The human lane for the chase board: advance a lender's engagement status
+    (Identified → IM Circulated → … → Sanctioned/Declined), correct dates, note.
+    Parent-scoped exactly like adding a lender — the FLAT /v1/syndication-lenders
+    update stays disabled (it could not enforce the parent tracker's line scope).
+    The repository appends status changes to status_history server-side."""
+    await _ensure_subject_scope(ctx, "add_lender_to_mandate", "Syndication",
+                                syndication_id)
+    row = await _synlender_repo.get(ctx.session, ctx.tenant_id, lender_id)
+    if str(row.syndication_id) != str(syndication_id):
+        raise NotFoundError(
+            f"lender '{lender_id}' is not on syndication '{syndication_id}'.")
+    obj = await _synlender_repo.update(
+        ctx.session, ctx.tenant_id, lender_id, ctx.actor,
+        payload.model_dump(exclude_unset=True))
+    return s.SyndicationLenderRead.model_validate(obj)
+
+
 # --------------------------------------------------------------------------- #
 # Interactions — the user-interaction timeline
 # --------------------------------------------------------------------------- #

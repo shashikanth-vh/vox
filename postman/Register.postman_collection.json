@@ -11099,6 +11099,67 @@
               }
             }
           }
+        },
+        {
+          "name": "PATCH /v1/syndication/{{{synId}}}/lenders/{{lender_id}}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/syndication/{{{synId}}}/lenders/{{lender_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "syndication",
+                "{{{synId}}}",
+                "lenders",
+                "{{lender_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chased_date\": \"2026-03-31\",\n  \"counterparty_id\": \"{{id}}\",\n  \"is_existing\": false,\n  \"lender_name\": \"sample lender_name\",\n  \"note\": \"sample note\",\n  \"response_date\": \"2026-03-31\",\n  \"since\": \"2026-03-31\",\n  \"status\": \"sample status\",\n  \"status_history\": [\n    {}\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     },

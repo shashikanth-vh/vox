@@ -1,10 +1,11 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, toParams, remote } from '../api/http';
+import { api, withFallback, remote, asRows, USE_REAL_API, LIST_MAX_LIMIT } from '../api/http';
+import { fillFromDeal, fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
 import type { TableQuery } from './types';
-import type { SynRow } from '../pages/Syndication/syndication.types';
+import type { SynRow, SynLender } from '../pages/Syndication/syndication.types';
 
 export const SYN_TERM = ['Dropped', 'Withdrawn', 'Rejected'];
 export const SYN_CLOSED = ['Sanctioned', 'Disbursed'];
@@ -15,10 +16,106 @@ export const ST2DOT: Record<string, number> = {
   'IP Received': 4, 'Sanctioned': 4, 'Declined': 5,
 };
 
+// ---------------------------------------------------------------------------
+// Real-API wiring. The three syndication views (chase / matrix / by-bank) all read
+// the local store synchronously and key rows by `code`, so the platform build
+// HYDRATES that store from the register (GET /v1/syndication embeds lenders[] —
+// one call) and stashes the REAL row ids (`apiId`) that the write paths address.
+// Mock mode never hydrates and behaves exactly as the prototype did.
+// ---------------------------------------------------------------------------
+
+/** One register lender row → the store's lender shape (`apiId` = its UUID). */
+function toLender(l: any): SynLender {
+  return {
+    apiId: l?.id,
+    name: l?.lender_name || '',
+    ex: !!l?.is_existing,
+    st: l?.status || '',
+    since: l?.since || '',
+    resp: l?.response_date || '',
+    chased: l?.chased_date || null,
+    note: l?.note || '',
+    h: l?.status_history || [],
+  };
+}
+
+/** One register syndication row → the store's SynRow (`apiId` = its UUID). */
+function toSynRow(r: any): SynRow {
+  return {
+    apiId: r?.id,
+    entityId: r?.entity_id,
+    dealId: r?.deal_id,
+    id: r?.tracker_no || r?.id || '',
+    // The "Group Code" column: the deal's human number (joined below), else the
+    // tracker's own number — never a UUID.
+    code: r?.tracker_no || '',
+    _name: '',
+    toi: r?.toi || '',
+    rm: r?.rm || '',
+    an: r?.analyst || '',
+    lc: r?.lc || '',
+    pri: r?.priority || '',
+    status: r?.status || '',
+    amt: Number(r?.amount_cr) || 0,
+    synType: r?.syndication_type || '',
+    mstat3: r?.mandate_status3 || '',
+    fac: r?.facility || '',
+    tenor: r?.tenor || '',
+    im: r?.im_status || '',
+    pot: r?.potential || '',
+    sancL: r?.sanctioned_lender || '',
+    ipL: r?.ip_lender || '',
+    exist: r?.existing || '',
+    price: r?.price || '',
+    pendingWith: r?.pending_with || '',
+    lenders: (r?.lenders || []).map(toLender),
+    h: r?.status_history || [],
+    createdAt: (r?.created_at || '').slice(0, 10),
+    remarks: r?.remarks || '',
+  };
+}
+
+let hydratedAt = 0;
+let inflight: Promise<void> | null = null;
+const HYDRATE_TTL_MS = 30_000;
+
+async function loadReal(): Promise<void> {
+  const data = await api.get<any>('/syndication', { limit: LIST_MAX_LIMIT });
+  const rows = asRows(data, 'syndication').map(toSynRow);
+  // Join the deal number + company through the deal, else the company via the entity.
+  await fillFromDeal(rows as any[]);
+  await fillCompanyFromEntity(rows as any[]);
+  rows.forEach((r) => {
+    if (!r.code) r.code = r.id;
+    // The views name companies via clientsService.get(code) — seed that cache so a
+    // register-born code resolves to the real company name, not to itself.
+    if (r.code && r._name && !db().clients[r.code]) db().clients[r.code] = { name: r._name };
+    // Column order: append lender names the default order doesn't know yet.
+    (r.lenders || []).forEach((l: any) => {
+      if (l.name && !db().lenderOrder.includes(l.name)) db().lenderOrder.push(l.name);
+    });
+  });
+  db().syn = rows;
+  hydratedAt = Date.now();
+}
+
 export const syndicationService = {
+  /** Replace the local store with the register's rows (real mode; briefly cached).
+   *  Fail-soft: on error the store keeps whatever it had, and the failure logs. */
+  async hydrate(force = false): Promise<void> {
+    if (!USE_REAL_API) return;
+    if (!force && Date.now() - hydratedAt < HYDRATE_TTL_MS) return;
+    if (!inflight) inflight = loadReal().finally(() => { inflight = null; });
+    try { await inflight; } catch (e) { console.warn('[api] syndication hydrate failed:', e); }
+  },
+
   async list(q: TableQuery) {
     return withFallback(
-      () => api.get<any>('/syndication', toParams(q)),
+      async () => {
+        await this.hydrate();
+        const rows = db().syn.map((r: SynRow) => ({ ...r, _name: r._name || clientsService.get(r.code).name }));
+        return applyQuery(rows, { ...q, searchFields: ['code', '_name', 'status'] });
+      },
       async () => {
         await delay();
         const rows = db().syn.map((r: SynRow) => ({ ...r, _name: clientsService.get(r.code).name }));
@@ -27,10 +124,11 @@ export const syndicationService = {
     );
   },
   byCode(code: string): SynRow[] { return db().syn.filter((r: SynRow) => r.code === code); },
-  find(id: string): SynRow | undefined { return db().syn.find((r: SynRow) => r.id === id); },
+  find(id: string): SynRow | undefined { return db().syn.find((r: SynRow) => r.id === id || r.apiId === id); },
   update(id: string, key: keyof SynRow, value: any, by: string) {
     const r = this.find(id); if (!r) return;
-    remote('patch', '/syndication/' + id, { [key]: value });
+    const wire = WIRE_FIELD[key as string];
+    if (r.apiId && wire) remote('patch', '/syndication/' + r.apiId, { [wire]: value });
     const old = (r as any)[key]; (r as any)[key] = value;
     if (key === 'status') (r.h = r.h || []).push({ status: value, t: today(), by });
     writeAudit(by, key === 'status' ? 'Platform Deals status' : 'Platform Deals updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
@@ -39,20 +137,34 @@ export const syndicationService = {
     const r = db().syn.find((x: SynRow) => x.code === code); if (!r) return;
     r.lenders = r.lenders || [];
     if (r.lenders.some((l: any) => l.name.toLowerCase() === name.toLowerCase())) return;
-    remote('post', '/syndication/' + code + '/lenders', { name });
-    r.lenders.push({ name, ex: false, st: 'Identified', since: today(), resp: today(), chased: null, note: '', h: [{ st: 'Identified', t: today(), by }] });
+    const local: SynLender = { name, ex: false, st: 'Identified', since: today(), resp: today(), chased: null, note: '', h: [{ st: 'Identified', t: today(), by }] };
+    r.lenders.push(local);
+    if (USE_REAL_API && r.apiId) {
+      // Capture the created row's UUID so the follow-up status/chase writes can
+      // address it without waiting for the next hydration.
+      api.post<any>('/syndication/' + r.apiId + '/lenders', { lender_name: name, status: 'Identified' })
+        .then((created: any) => { local.apiId = created?.id; })
+        .catch((e: unknown) => console.warn('[api] write failed: add lender', e));
+    }
     writeAudit(by, 'Lender added', code, name);
   },
   setLenderStatus(code: string, name: string, st: string, by: string) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
-    if (!e) return; remote('patch', '/syndication/' + code + '/lenders/' + encodeURIComponent(name), { st });
+    if (!e) return;
+    if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, { status: st, since: today() });
     const before = e.st; e.st = st; e.since = today(); e.resp = today();
     (e.h = e.h || []).push({ st, t: today(), by });
     writeAudit(by, 'Lender status', code, `${name}: ${before || '—'} → ${st}`);
   },
   logChase(code: string, name: string, note: string, by: string) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
-    if (!e) return; remote('post', '/syndication/' + code + '/lenders/' + encodeURIComponent(name) + '/chase', { note });
+    if (!e) return;
+    // An OUTBOUND interaction against the mandate: the register rolls chased_date
+    // onto the matching lender row itself, so this one call is the whole write.
+    if (r?.apiId) remote('post', '/syndication/' + r.apiId + '/interactions', {
+      interaction_type: 'Phone Call', direction: 'outbound', lender_name: name,
+      summary: (note || 'Chase').slice(0, 300), notes: note || null, performed_by: by,
+    });
     e.chased = today(); if (note) e.note = note;
     (e.h = e.h || []).push({ st: e.st || '(chase)', t: today(), by });
     writeAudit(by, 'Chased lender', code, name + (note ? ': ' + note.slice(0, 80) : ' (outbound)'));
@@ -60,15 +172,21 @@ export const syndicationService = {
   },
   logResp(code: string, name: string, note: string, by: string) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
-    if (!e) return; remote('post', '/syndication/' + code + '/lenders/' + encodeURIComponent(name) + '/response', { note });
+    if (!e) return;
+    // INBOUND — the register rolls response_date onto the lender row.
+    if (r?.apiId) remote('post', '/syndication/' + r.apiId + '/interactions', {
+      interaction_type: 'Phone Call', direction: 'inbound', lender_name: name,
+      summary: (note || 'Lender response').slice(0, 300), notes: note || null, performed_by: by,
+    });
     e.resp = today(); if (note) e.note = note;
     (e.h = e.h || []).push({ st: e.st || '(response)', t: today(), by });
     writeAudit(by, 'Lender response', code, name + (note ? ': ' + note.slice(0, 80) : ' (inbound)'));
     if (note) { db().interactions = db().interactions || []; db().interactions.push({ refId: code, refType: 'Platform Deals', occurredAt: today(), person: by, direction: 'inbound', lenderName: name, notes: note }); }
   },
   remove(id: string, by: string) {
-    remote('del', '/syndication/' + id);
-    const i = db().syn.findIndex((r: SynRow) => r.id === id);
+    const r = this.find(id);
+    remote('del', '/syndication/' + (r?.apiId || id));
+    const i = db().syn.findIndex((x: SynRow) => x === r || x.id === id);
     if (i > -1) { const [x] = db().syn.splice(i, 1); writeAudit(by, 'Platform Deals deleted', x.code, x.id); }
   },
 
@@ -91,7 +209,7 @@ export const syndicationService = {
     return Object.values(banks);
   },
   async registerList(q: TableQuery) {
-    await delay();
+    if (USE_REAL_API) await this.hydrate(); else await delay();
     return applyQuery(this.registerByBank(), { ...q, searchFields: ['name'] });
   },
 
@@ -115,11 +233,12 @@ export const syndicationService = {
   lenderOrder(): string[] { return db().lenderOrder; },
   matrix(): Record<string, Record<string, MatrixCell>> { return db().matrix; },
   cell(code: string, lender: string): MatrixCell | null { return (db().matrix[code] || {})[lender] || null; },
+  // Legacy standalone-matrix editor (pre-v12); the live MatrixView derives from the
+  // chase-list lenders instead. Local-only: no register route stores this grid.
   cycleCell(code: string, lender: string, by: string) {
     const m = (db().matrix[code] = db().matrix[code] || {});
     const cur = m[lender] ? m[lender].s : 0;
     const s = (cur + 1) % 6;
-    remote('patch', '/syndication/matrix/' + code + '/' + encodeURIComponent(lender), { s });
     if (s === 0) { delete m[lender]; }
     else {
       const o = m[lender] || { h: [] };
@@ -127,11 +246,21 @@ export const syndicationService = {
     }
     writeAudit(by, 'Matrix', code, `${lender} → ${MATRIX_LABELS[s]}`);
   },
+  // Column order is a per-browser display preference — nothing to persist server-side.
   reorderLenders(from: number, to: number) {
     const o = db().lenderOrder;
     const [x] = o.splice(from, 1); o.splice(to, 0, x);
-    remote('patch', '/syndication/matrix/lender-order', { order: o });
   },
+};
+
+// UI row key → register column, for PATCH /v1/syndication/{id}. Keys that have no
+// register column (mock-only leftovers) are simply not sent.
+const WIRE_FIELD: Record<string, string> = {
+  toi: 'toi', rm: 'rm', an: 'analyst', lc: 'lc', pri: 'priority', status: 'status',
+  amt: 'amount_cr', synType: 'syndication_type', mstat3: 'mandate_status3',
+  fac: 'facility', tenor: 'tenor', im: 'im_status', pot: 'potential',
+  sancL: 'sanctioned_lender', ipL: 'ip_lender', exist: 'existing', price: 'price',
+  pendingWith: 'pending_with', remarks: 'remarks',
 };
 
 export interface MatrixCell { s: number; since?: string; h?: { s: number; t: string; by: string }[]; }

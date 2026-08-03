@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { syndicationService } from '../../services/syndicationService';
 import { Box, Typography, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import GridOnIcon from '@mui/icons-material/GridOn';
@@ -22,7 +23,16 @@ export default function SyndicationPage() {
   const [addProd, setAddProd] = useState<string | null>(null);
   const [bank, setBank] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('chase');
+  const [, force] = useState(0);
   const refresh = () => qc.invalidateQueries();
+
+  // Platform build: the three views read the local store synchronously, so pull the
+  // register's rows (with their lenders) into it once on entry, then re-render.
+  useEffect(() => {
+    let alive = true;
+    syndicationService.hydrate().then(() => { if (alive) force((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
 
   const hint = mode === 'matrix' ? 'Matrix is read-only — it renders the Chase List state'
     : mode === 'reg' ? 'Click a bank for its full deal ledger'

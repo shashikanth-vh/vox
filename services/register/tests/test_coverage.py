@@ -142,6 +142,36 @@ async def test_syndication_embeds_lenders(client: AsyncClient):
     assert names == ["Axis Finance"]
 
 
+async def test_lender_row_patch_nested_only(client: AsyncClient):
+    """The chase board's human lane: PATCH the lender through its PARENT syndication
+    (scope-enforced); status changes append to status_history server-side; a lender
+    addressed under the WRONG parent is 404; the flat update route stays disabled."""
+    eid = await _entity(client, "SYNPCH")
+    sid = (await client.post("/v1/syndication",
+                             json={"entity_id": eid, "status": "IM in Prep"})).json()["id"]
+    ln = (await client.post(f"/v1/syndication/{sid}/lenders",
+                            json={"lender_name": "Kotak", "status": "Identified"})).json()
+
+    upd = await client.patch(f"/v1/syndication/{sid}/lenders/{ln['id']}",
+                             json={"status": "IM Circulated", "note": "sent v2 IM"})
+    assert upd.status_code == 200, upd.text
+    body = upd.json()
+    assert body["status"] == "IM Circulated" and body["note"] == "sent v2 IM"
+    hist = body["status_history"]
+    assert hist and hist[-1]["from"] == "Identified" and hist[-1]["to"] == "IM Circulated"
+
+    # Wrong parent → 404, never a cross-mandate edit.
+    other = (await client.post("/v1/syndication", json={"entity_id": eid})).json()["id"]
+    wrong = await client.patch(f"/v1/syndication/{other}/lenders/{ln['id']}",
+                               json={"status": "Declined"})
+    assert wrong.status_code == 404
+
+    # The flat route's update stays OFF (scope-bypass surface).
+    flat = await client.patch(f"/v1/syndication-lenders/{ln['id']}",
+                              json={"status": "Declined"})
+    assert flat.status_code == 405
+
+
 async def test_tenant_settings_get_put(client: AsyncClient):
     # defaults come back even with nothing stored
     r = await client.get("/v1/settings")

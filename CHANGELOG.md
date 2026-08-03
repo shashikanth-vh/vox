@@ -6,6 +6,28 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The Syndication tab now runs on REAL register data — the last prototype-wired
+  tab.** Its three views (Chase list / Matrix / Register-by-bank) read the bundled
+  demo store and addressed writes by mock client codes (`POST
+  /v1/syndication/MIRGREEN/lenders` → refused; the matrix showed demo companies
+  beside real tabs). Now:
+  * **Register**: new `PATCH /v1/syndication/{id}/lenders/{lender_id}` — the human
+    lane for the chase board (status ladder, dates, note). Parent-scoped exactly
+    like adding a lender; wrong parent → 404; `status_history` appended
+    server-side; the FLAT lender update stays disabled (scope-bypass surface).
+  * **UI**: on entering the tab the local store HYDRATES from `GET /v1/syndication`
+    (lenders come embedded — one call), with deal numbers + company names joined
+    via the name resolver, so all three views render real mandates. Writes now
+    address real UUIDs: add lender → nested POST; advance status → the new nested
+    PATCH; log chase / response → a nested INTERACTION with direction
+    outbound/inbound (the register rolls `chased_date`/`response_date` onto the
+    lender row itself); row edits → `PATCH /v1/syndication/{id}` with proper column
+    names. Lender column reorder is a per-browser display preference (no more
+    phantom calls to routes that never existed). Mock mode is unchanged.
+  Note on the 401 in the report: that request carried a stale/expired sign-in token
+  (Dex id-tokens live 24 h; the UI keeps the page but refuses writes) — sign in
+  again. The wrong-shaped URL it was sent to is what this entry fixes.
+
 - **A VOM/dev-ui-approved NEW lead now creates and links its ENTITY.** The direct
   writer path (the `LD-V##` leads from the VocX dev-ui / mobile commit) posted the
   lead with only the company *text* — no entity row, `entity_id` NULL — so the

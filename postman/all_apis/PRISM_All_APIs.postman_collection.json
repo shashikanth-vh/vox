@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (232 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (233 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Asset Monetisation",
@@ -9979,6 +9979,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"syndication_id\": \"{{id}}\",\n  \"counterparty_id\": \"{{id}}\",\n  \"lender_name\": \"sample\",\n  \"is_existing\": false,\n  \"status\": \"sample\",\n  \"since\": \"2026-01-31\",\n  \"response_date\": \"2026-01-31\",\n  \"chased_date\": \"2026-01-31\",\n  \"note\": \"sample\",\n  \"status_history\": [\n    {}\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "PATCH /v1/syndication/{syndication_id}/lenders/{lender_id} \u2014 Update a lender row (chase status, dates, note)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/syndication/{{syndication_id}}/lenders/{{lender_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "syndication",
+                    "{{syndication_id}}",
+                    "lenders",
+                    "{{lender_id}}"
+                  ]
+                },
+                "description": "The human lane for the chase board: advance a lender's engagement status\n(Identified \u2192 IM Circulated \u2192 \u2026 \u2192 Sanctioned/Declined), correct dates, note.\nParent-scoped exactly like adding a lender \u2014 the FLAT /v1/syndication-lenders\nupdate stays disabled (it could not enforce the parent tracker's line scope).\nThe repository appends status changes to status_history server-side.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"counterparty_id\": \"{{id}}\",\n  \"lender_name\": \"sample\",\n  \"is_existing\": false,\n  \"status\": \"sample\",\n  \"since\": \"2026-01-31\",\n  \"response_date\": \"2026-01-31\",\n  \"chased_date\": \"2026-01-31\",\n  \"note\": \"sample\",\n  \"status_history\": [\n    {}\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
