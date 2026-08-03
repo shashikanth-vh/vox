@@ -14,16 +14,34 @@ import { runSuffix } from './entitiesService';
 const PENDING_URL = '/v1/workflows/pending';
 
 export interface PendingWorkflow {
-  kind: string;            // 'deal-structuring', …
-  subjectId: string;       // the deal / lead the run is about
+  kind: string;            // 'deal-structuring', 'cpcs-checklist', …
+  subjectId: string;       // the deal / lead / lending line the item is about
+  // EMPTY for the register-sourced checker queues (CP/CS checklists, handover
+  // packages): their prepare-workflows complete immediately and the wait lives as a
+  // durable REGISTER row, so those items are keyed by subject, not by a run.
   workflowId: string;
-  status: string;          // RUNNING, …
+  status: string;          // RUNNING / Completed / Prepared …
   stage: string;           // 'Awaiting committee decision'
   requestedBy: string;
   startedAt: string;
   statusUrl?: string;
-  decisionUrl?: string;
+  // The plane hands back the whole triad — approve, return-for-revision, reject —
+  // per item. Nothing here constructs a workflow URL; the UI renders the buttons the
+  // plane actually offers.
+  decisionUrl?: string;    // named decision route (committee / syndication / AM)
+  approveUrl?: string;
+  returnUrl?: string;
+  rejectUrl?: string;
+  controlUrl?: string;     // run-control (return / resubmit / cancel) on a parked run
+  checklistVersion?: number;
 }
+
+/** A stable key for a queue item — register rows carry no workflow id. */
+export function pendingKey(w: PendingWorkflow): string {
+  return w.workflowId || `${w.kind}:${w.subjectId}`;
+}
+
+export type DecisionAction = 'approve' | 'return' | 'reject';
 
 /** Turn an orchestrator failure into a message the UI can render verbatim. */
 export function workflowError(e: any, step: string): string {
@@ -49,6 +67,11 @@ function toPending(r: any): PendingWorkflow {
     startedAt: r?.started_at || '',
     statusUrl: r?.status_url || undefined,
     decisionUrl: r?.decision_url || undefined,
+    approveUrl: r?.approve_url || undefined,
+    returnUrl: r?.return_url || undefined,
+    rejectUrl: r?.reject_url || undefined,
+    controlUrl: r?.control_url || undefined,
+    checklistVersion: r?.checklist_version ?? undefined,
   };
 }
 
@@ -92,11 +115,25 @@ export function sanctionRef(subjectId: string, suffix = runSuffix()): string {
 }
 
 export interface DecisionInput {
-  approved: boolean;
+  action: DecisionAction;
   by: string;
   note?: string;
   committeeReference?: string;
   sanctionLetterReference?: string;
+}
+
+/** Which verbs this item actually offers — the buttons the UI may render. */
+export function actionsFor(w: PendingWorkflow): DecisionAction[] {
+  const out: DecisionAction[] = [];
+  if (w.decisionUrl || w.approveUrl) out.push('approve');
+  if (w.returnUrl || w.controlUrl) out.push('return');
+  if (w.rejectUrl || w.decisionUrl) out.push('reject');
+  return out;
+}
+
+/** A note is REQUIRED to return or reject — a refusal must say why, permanently. */
+export function noteRequired(action: DecisionAction): boolean {
+  return action !== 'approve';
 }
 
 export const workflowService = {
@@ -108,27 +145,63 @@ export const workflowService = {
     if (!workflowService.enabled()) return [];
     const data = await orchestrator.get<any>(PENDING_URL);
     const rows: any[] = Array.isArray(data) ? data : (data?.pending ?? data?.items ?? []);
-    return rows.map(toPending).filter((w) => w.workflowId);
+    // Keep the register-sourced checker queues too: CP/CS checklists and handover
+    // packages carry NO workflow id (their wait is a durable register row), and
+    // dropping them hid the maker→checker items from the approver's own list.
+    return rows.map(toPending).filter((w) => w.workflowId || w.subjectId);
   },
 
   /**
-   * Record the human decision on a run. The body follows the endpoint the plane pointed
-   * at: a committee decision also carries the committee reference, and the sanction
-   * letter reference when it is an approval — an approved committee run mints one.
+   * Record the human decision — approve, RETURN for revision, or reject — on whichever
+   * lane this item lives on. The plane hands back the URLs; this picks the one for the
+   * action and speaks that endpoint's body shape:
+   *
+   * * named decision route (committee / syndication / AM): `{approved, by, note, …refs}`
+   * * conversion approve/reject: `{by, note}`
+   * * checker queues (CP/CS, handover): `{approved_by | returned_by | rejected_by, note}`
+   * * return on a PARKED run: run-control `{action:"return", by, note}` — the run goes
+   *   back to its requester, non-terminal, and the SLA clock restarts on resubmit.
    */
   async decide(w: PendingWorkflow, input: DecisionInput): Promise<{ ok: boolean; error?: string }> {
-    if (!w.decisionUrl) return { ok: false, error: 'This run does not expose a decision URL.' };
-    const body: Record<string, any> = { approved: input.approved, by: input.by };
-    if (input.note?.trim()) body.note = input.note.trim();
-    if (isCommitteeDecision(w)) {
-      body.committee_reference = input.committeeReference?.trim() || committeeRef();
-      if (input.approved) body.sanction_letter_reference = input.sanctionLetterReference?.trim() || sanctionRef(w.subjectId);
+    const { action } = input;
+    const note = input.note?.trim() || '';
+    if (noteRequired(action) && !note) {
+      return { ok: false, error: `A note is required to ${action} — say why, for the record.` };
     }
+    // Pick the URL + body for this action.
+    let url: string | undefined;
+    let body: Record<string, any>;
+    const checkerQueue = w.kind === 'cpcs-checklist' || w.kind === 'advaya-handover';
+    if (action === 'return') {
+      url = w.returnUrl || w.controlUrl;
+      body = checkerQueue
+        ? { returned_by: input.by, note }
+        : { action: 'return', by: input.by, note };
+    } else if (checkerQueue) {
+      url = action === 'approve' ? w.approveUrl : w.rejectUrl;
+      body = action === 'approve'
+        ? { approved_by: input.by, ...(note ? { note } : {}) }
+        : { rejected_by: input.by, note };
+    } else if (w.decisionUrl) {
+      url = w.decisionUrl;
+      body = { approved: action === 'approve', by: input.by, ...(note ? { note } : {}) };
+      if (isCommitteeDecision(w)) {
+        body.committee_reference = input.committeeReference?.trim() || committeeRef();
+        if (action === 'approve') {
+          body.sanction_letter_reference =
+            input.sanctionLetterReference?.trim() || sanctionRef(w.subjectId);
+        }
+      }
+    } else {
+      url = action === 'approve' ? w.approveUrl : w.rejectUrl;
+      body = { by: input.by, ...(note ? { note } : {}) };
+    }
+    if (!url) return { ok: false, error: `This item does not offer "${action}".` };
     try {
-      await orchestrator.post<any>(w.decisionUrl, body);
+      await orchestrator.post<any>(url, body);
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: workflowError(e, input.approved ? 'approve the run' : 'reject the run') };
+      return { ok: false, error: workflowError(e, `${action} this item`) };
     }
   },
 

@@ -11630,7 +11630,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (40 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (42 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "Decisions",
@@ -12073,6 +12073,58 @@
               }
             },
             {
+              "name": "POST /orchestrator/v1/workflows/advaya-handover/{lending_id}/return \u2014 CHECKER returns the prepared handover to its maker (amend and re-prepare)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/advaya-handover/{{lending_id}}/return",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "advaya-handover",
+                    "{{lending_id}}",
+                    "return"
+                  ]
+                },
+                "description": "NON-terminal: the line does NOT move (it stays at 'Ready for Disbursement');\nthe maker re-prepares the package \u2014 same row, fresh manifest + digest \u2014 and a\ndifferent checker approves the rebuilt one. Reasons mandatory and audited.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"returned_by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /orchestrator/v1/workflows/asset-monetisations \u2014 Start an asset-monetisation workflow (teaser \u2192 offers \u2192 closure)",
               "request": {
                 "method": "POST",
@@ -12264,6 +12316,58 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"rejected_by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/cpcs-checklists/{checklist_id}/return \u2014 CHECKER returns the CP/CS checklist to its maker (amend and resubmit)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/cpcs-checklists/{{checklist_id}}/return",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "cpcs-checklists",
+                    "{{checklist_id}}",
+                    "return"
+                  ]
+                },
+                "description": "The middle verb of the triad: NON-terminal. The row becomes 'Returned' with the\nreasons on record; the maker amends by preparing the NEXT checklist_version, which\nre-enters the checker queue. Same authority as approve/reject \u2014 through the SAME\ndoor, so a UI never needs the register's internal lane.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"returned_by\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

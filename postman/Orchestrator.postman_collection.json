@@ -487,6 +487,62 @@
           }
         },
         {
+          "name": "POST /v1/workflows/advaya-handover/{{{lendingId}}}/return",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/advaya-handover/{{{lendingId}}}/return",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "advaya-handover",
+                "{{{lendingId}}}",
+                "return"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\",\n  \"returned_by\": \"sample returned_by\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/workflows/asset-monetisations",
           "request": {
             "method": "POST",
@@ -698,6 +754,62 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"note\": \"sample note\",\n  \"rejected_by\": \"sample rejected_by\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/workflows/cpcs-checklists/{{{checklistId}}}/return",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/workflows/cpcs-checklists/{{{checklistId}}}/return",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workflows",
+                "cpcs-checklists",
+                "{{{checklistId}}}",
+                "return"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"sample note\",\n  \"returned_by\": \"sample returned_by\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

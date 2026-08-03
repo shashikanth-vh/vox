@@ -6,6 +6,29 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The approver now gets the WHOLE triad everywhere — pending items offered only
+  `approve_url`.** A checker queue that hands back one verb reads as "approve or
+  ignore", which is not the governance the platform enforces. Fixed end to end:
+  * **Orchestrator**: the missing `return` passthroughs exist —
+    `POST /v1/workflows/cpcs-checklists/{id}/return` and
+    `POST /v1/workflows/advaya-handover/{lending_id}/return` (checker authority,
+    reasons mandatory), so a client never needs the register's internal lane.
+  * **`GET /v1/workflows/pending`** returns `approve_url` + `return_url` +
+    `reject_url` on the checker queues, and every parked run additionally advertises
+    its return lane (`control_url`, `{action:"return"}`) — clients render the three
+    buttons without knowing any routing rule.
+  * **UI**: the Today queue was dropping most of the approver's work — it filtered to
+    items with a `decision_url` (hiding lead conversions) and to rows with a
+    `workflow_id` (hiding the ENTIRE CP/CS + handover checker queue, whose wait is a
+    register row). Both fixed; each row now renders Approve · **Return** · Reject,
+    the dialog is three-way with per-verb copy and a mandatory note on
+    return/reject, and `decide()` speaks each lane's body shape.
+  * **New `docs/STAGES_AND_APPROVALS.md`** — which stages the platform moves
+    (governed: Sanctioned, CP/CS Completed, Disbursed, deal closure) versus which the
+    user sets (operational: Data Awaited, Diligence, Note Circulated, …), why an
+    out-of-order hand edit is refused, and the complete maker → checker → return →
+    amend → approve loop as it runs FROM THE UI.
+
 - **The MANUAL Advaya attestation lane — finish the flow in PRISM on Advaya's
   behalf, production-grade.** Until the real API integration is live, Advaya
   confirms offline (letter / UTR / email); an authorised human now records that in

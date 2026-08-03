@@ -11,7 +11,8 @@ import AddProductDialog from '../Deals/AddProductDialog';
 import WorkflowDecisionDialog from './WorkflowDecisionDialog';
 import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
-import { workflowService, kindLabel, since, type PendingWorkflow } from '../../services/workflowService';
+import { workflowService, kindLabel, since, pendingKey, actionsFor,
+  type PendingWorkflow, type DecisionAction } from '../../services/workflowService';
 import { clientsService } from '../../services/clientsService';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import type { AttnRow, ContactRow, DueRow } from './compute';
@@ -85,7 +86,7 @@ export default function TodayPage() {
   // Workflow plane: runs parked on a human decision (GET /v1/workflows/pending). This is
   // Temporal's queue, separate from the local stage-change requests above — it is polled
   // because the plane releases runs on its own (a decision timeout, another approver).
-  const [wfDecide, setWfDecide] = useState<{ w: PendingWorkflow; approve: boolean } | null>(null);
+  const [wfDecide, setWfDecide] = useState<{ w: PendingWorkflow; action: DecisionAction } | null>(null);
   const { data: wfPending = [], refetch: refetchWf } = useQuery({
     queryKey: ['workflows', 'pending'],
     queryFn: () => workflowService.pending(),
@@ -97,7 +98,11 @@ export default function TodayPage() {
   // runs they raised, sitting with an approver — the same split as the requests above.
   const canDecideWf = can(user.roles, 'approveRequest');
   const myEmail = (getSession()?.email || '').toLowerCase();
-  const wfActionable = canDecideWf ? wfPending.filter((w) => w.decisionUrl) : [];
+  // Actionable = anything the plane offers a verb on. Filtering on decisionUrl alone
+  // hid every item decided by approve/reject (lead conversions) and the whole checker
+  // queue (CP/CS checklists, handover packages) — the approver saw a fraction of their
+  // work. The plane already scopes this list to the caller's approver roles.
+  const wfActionable = canDecideWf ? wfPending.filter((w) => actionsFor(w).length > 0) : [];
   const wfMine = wfPending.filter((w) => !wfActionable.includes(w) && w.requestedBy.toLowerCase() === myEmail);
   const wfDone = () => { refetchWf(); refresh(); };
 
@@ -157,18 +162,32 @@ export default function TodayPage() {
 
       {(wfActionable.length > 0 || wfMine.length > 0) && (
         <Section title="Workflow approvals" count={wfActionable.length + wfMine.length} defaultOpen>
-          {wfActionable.map((w) => (
-            <ChLine key={w.workflowId}>
-              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDE7F6', color: '#5B3FA8', whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
-              <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
-              {hint(`${w.status} · by ${w.requestedBy} · ${since(w.startedAt)}`)}
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" variant="contained" onClick={() => setWfDecide({ w, approve: true })} sx={{ minWidth: 0 }}>Approve</Button>
-              <Button size="small" color="error" onClick={() => setWfDecide({ w, approve: false })} sx={{ minWidth: 0 }}>Reject</Button>
-            </ChLine>
-          ))}
+          {wfActionable.map((w) => {
+            const verbs = actionsFor(w);
+            return (
+              <ChLine key={pendingKey(w)}>
+                <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDE7F6', color: '#5B3FA8', whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
+                <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
+                {hint(`${w.status} · by ${w.requestedBy} · ${since(w.startedAt)}`
+                  + (w.checklistVersion ? ` · v${w.checklistVersion}` : ''))}
+                <Box sx={{ flex: 1 }} />
+                {/* The WHOLE triad the platform enforces — approve, return for revision
+                    (non-terminal: back to the maker, then round again), reject. Only the
+                    verbs this item actually offers are rendered. */}
+                {verbs.includes('approve') && (
+                  <Button size="small" variant="contained" onClick={() => setWfDecide({ w, action: 'approve' })} sx={{ minWidth: 0 }}>Approve</Button>
+                )}
+                {verbs.includes('return') && (
+                  <Button size="small" color="warning" onClick={() => setWfDecide({ w, action: 'return' })} sx={{ minWidth: 0 }}>Return</Button>
+                )}
+                {verbs.includes('reject') && (
+                  <Button size="small" color="error" onClick={() => setWfDecide({ w, action: 'reject' })} sx={{ minWidth: 0 }}>Reject</Button>
+                )}
+              </ChLine>
+            );
+          })}
           {wfMine.map((w) => (
-            <ChLine key={w.workflowId}>
+            <ChLine key={pendingKey(w)}>
               <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDF1F3', color: tokens.muted, whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
               <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
               {hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
@@ -222,7 +241,7 @@ export default function TodayPage() {
         </Section>
       )}
 
-      <WorkflowDecisionDialog w={wfDecide?.w ?? null} approve={!!wfDecide?.approve} onClose={() => setWfDecide(null)} onDone={wfDone} />
+      <WorkflowDecisionDialog w={wfDecide?.w ?? null} action={wfDecide?.action ?? 'approve'} onClose={() => setWfDecide(null)} onDone={wfDone} />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
     </Box>

@@ -6,9 +6,32 @@ import { useAuth } from '../../auth/AuthContext';
 import { getSession } from '../../auth/session';
 import {
   workflowService, isCommitteeDecision, committeeRef, sanctionRef, kindLabel, since,
-  type PendingWorkflow,
+  noteRequired, type PendingWorkflow, type DecisionAction,
 } from '../../services/workflowService';
 import { tokens } from '../../theme';
+
+// Per-verb copy. Return is the middle verb of the triad: NON-terminal — it goes back
+// to the maker/requester for revision and comes round again, so it must never read like
+// a refusal.
+const TITLE: Record<DecisionAction, string> = {
+  approve: 'Approve', return: 'Return for revision', reject: 'Reject',
+};
+const CTA: Record<DecisionAction, string> = {
+  approve: 'Approve', return: 'Return to maker', reject: 'Reject',
+};
+const COLOR: Record<DecisionAction, 'primary' | 'warning' | 'error'> = {
+  approve: 'primary', return: 'warning', reject: 'error',
+};
+const PLACEHOLDER: Record<DecisionAction, string> = {
+  approve: 'What is being approved (optional)',
+  return: 'What must be corrected before this comes back (required)',
+  reject: 'Why this is refused, permanently (required)',
+};
+const EFFECT: Record<DecisionAction, string> = {
+  approve: 'This releases the item and advances the flow.',
+  return: 'The item goes BACK to its maker for revision — the loop continues and it returns to this queue once resubmitted.',
+  reject: 'This is TERMINAL for this attempt — a revival is a fresh version/cycle.',
+};
 
 // One read-only fact from the run, laid out like the drawer's label/value pairs.
 function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -26,8 +49,8 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
  * and — for a credit-committee decision — the committee and sanction-letter references.
  * References are pre-filled in the collection's shape and stay editable.
  */
-export default function WorkflowDecisionDialog({ w, approve, onClose, onDone }: {
-  w: PendingWorkflow | null; approve: boolean; onClose: () => void; onDone: () => void;
+export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
+  w: PendingWorkflow | null; action: DecisionAction; onClose: () => void; onDone: () => void;
 }) {
   const { user } = useAuth();
   const [note, setNote] = useState('');
@@ -38,6 +61,7 @@ export default function WorkflowDecisionDialog({ w, approve, onClose, onDone }: 
   const [live, setLive] = useState<any>(null);
 
   const committee = !!w && isCommitteeDecision(w);
+  const approve = action === 'approve';
 
   // Keyed on the run, not on the object: the list refetches on a timer, and a new object
   // identity for the same run must not wipe what is being typed into the note.
@@ -53,14 +77,14 @@ export default function WorkflowDecisionDialog({ w, approve, onClose, onDone }: 
     workflowService.status(w).then((s) => { if (alive) setLive(s); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wid, approve, committee]);
+  }, [wid, action, committee]);
 
   if (!w) return null;
 
   const submit = async () => {
     setBusy(true); setErr('');
     const res = await workflowService.decide(w, {
-      approved: approve,
+      action,
       by: getSession()?.email || user.full,
       note,
       committeeReference: cc,
@@ -76,7 +100,7 @@ export default function WorkflowDecisionDialog({ w, approve, onClose, onDone }: 
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontSize: 16 }}>{approve ? 'Approve' : 'Reject'} — {kindLabel(w.kind)}
+      <DialogTitle sx={{ fontSize: 16 }}>{TITLE[action]} — {kindLabel(w.kind)}
         <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>{stage || 'Awaiting a decision'} · raised {since(w.startedAt) || w.startedAt}</Typography>
         <IconButton onClick={onClose} disabled={busy} sx={{ position: 'absolute', right: 8, top: 8 }}><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
@@ -97,18 +121,19 @@ export default function WorkflowDecisionDialog({ w, approve, onClose, onDone }: 
         )}
         <Box sx={{ mt: 1.2 }}>
           <TextFld label="Note" value={note} onChange={setNote} multiline
-            placeholder={approve ? 'What the committee approved' : 'Why this is being rejected'} />
+            placeholder={PLACEHOLDER[action]}
+            required={noteRequired(action)} />
         </Box>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
-          Recorded on the workflow plane as <b>{getSession()?.email || user.full}</b>. This releases the run — it does not edit the Register directly.
+          Recorded on the workflow plane as <b>{getSession()?.email || user.full}</b>. {EFFECT[action]}
         </Typography>
         {err && <Alert severity="warning" sx={{ mt: 1.2, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
-        <Button onClick={submit} variant="contained" color={approve ? 'primary' : 'error'} disabled={busy}
+        <Button onClick={submit} variant="contained" color={COLOR[action]} disabled={busy}
           startIcon={busy ? <CircularProgress size={13} color="inherit" /> : undefined}>
-          {busy ? 'Recording…' : approve ? 'Approve run' : 'Reject run'}
+          {busy ? 'Recording…' : CTA[action]}
         </Button>
       </DialogActions>
     </Dialog>

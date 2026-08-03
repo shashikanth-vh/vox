@@ -229,9 +229,14 @@ async def test_pending_lists_every_parked_approval_across_subjects(monkeypatch):
     lead2 = next(p for p in body["pending"] if p["workflow_id"] == conv2)
     assert lead2["subject_id"] == "LEAD2"        # retry suffix stripped from the subject
     assert lead2["approve_url"] == f"/v1/workflows/{conv2}/approve"
+    assert lead2["reject_url"] == f"/v1/workflows/{conv2}/reject"
     deal = next(p for p in body["pending"] if p["kind"] == "deal-structuring")
     assert deal["decision_url"] == f"/v1/workflows/{parked}/committee-decision"
     assert deal["requested_by"] == "rm@evamfinance.com"
+    # Every parked run advertises its RETURN lane (run-control) too, so a client can
+    # render approve / return / reject without knowing any routing rules.
+    assert lead2["return_url"] == f"/v1/workflows/{conv2}/control"
+    assert deal["return_url"] == f"/v1/workflows/{parked}/control"
 
 
 async def test_pending_kind_filter_and_unknown_kind(monkeypatch):
@@ -279,10 +284,16 @@ async def test_pending_includes_the_register_checker_queues(monkeypatch):
     assert body["count"] == 2
     cp = next(p for p in body["pending"] if p["kind"] == "cpcs-checklist")
     assert cp["subject_id"] == "LEND9" and cp["checklist_version"] == 2
-    assert cp["approve_url"] == "/v1/workflows/cpcs-checklists/chk-1/approve"
     assert cp["status"] == "Completed" and cp["stage"] == "Awaiting checker approval"
+    # The WHOLE triad — a queue row that offered only 'approve' would read as
+    # "approve or ignore", which is not the governance the platform enforces.
+    assert cp["approve_url"] == "/v1/workflows/cpcs-checklists/chk-1/approve"
+    assert cp["return_url"] == "/v1/workflows/cpcs-checklists/chk-1/return"
+    assert cp["reject_url"] == "/v1/workflows/cpcs-checklists/chk-1/reject"
     ho = next(p for p in body["pending"] if p["kind"] == "advaya-handover")
     assert ho["approve_url"] == "/v1/workflows/advaya-handover/LEND9/approve"
+    assert ho["return_url"] == "/v1/workflows/advaya-handover/LEND9/return"
+    assert ho["reject_url"] == "/v1/workflows/advaya-handover/LEND9/reject"
     # The kind filter reaches the register-sourced kinds too.
     r = await _get_pending(app, {"kind": "cpcs-checklist"})
     assert r.json()["count"] == 1

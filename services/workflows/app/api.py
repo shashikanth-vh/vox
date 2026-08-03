@@ -469,6 +469,17 @@ class CheckerRejectIn(BaseModel):
     note: str = Field(min_length=1, max_length=2000)
 
 
+class CheckerReturnIn(BaseModel):
+    """The checker's RETURN-TO-MAKER (CP/CS checklist or handover package): amend and
+    come back — non-terminal, the loop continues. The decider is the AUTHENTICATED
+    caller; ``returned_by`` is only a dev fallback. Reasons are mandatory: a return
+    without them is useless to the maker."""
+
+    model_config = ConfigDict(extra="forbid")
+    returned_by: str = Field(max_length=200)
+    note: str = Field(min_length=1, max_length=2000)
+
+
 class AdvayaHandoverApproveIn(BaseModel):
     """CHECKER approves a prepared handover. The checker is the AUTHENTICATED caller (resolved from
     the verified identity), and must be a different person than the maker (enforced by the
@@ -1567,6 +1578,31 @@ def create_app() -> FastAPI:
             request, f"/v1/internal/handover-packages/{lending_id}/reject", rejected_by,
             checker, {"note": payload.note})
 
+    @app.post("/v1/workflows/advaya-handover/{lending_id}/return", tags=["Workflows"],
+              summary="CHECKER returns the prepared handover to its maker (amend and re-prepare)")
+    async def return_advaya_handover(lending_id: str, payload: CheckerReturnIn, request: Request,
+                                     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                     ) -> Any:
+        """NON-terminal: the line does NOT move (it stays at 'Ready for Disbursement');
+        the maker re-prepares the package — same row, fresh manifest + digest — and a
+        different checker approves the rebuilt one. Reasons mandatory and audited."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        returned_by, err = await _verified_email(request, payload.returned_by)
+        if err is not None:
+            return err
+        checker, verified = _caller_context(request, returned_by)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound checker identity is required to return.")
+        if not await _authorised_for("handover", request, returned_by, checker.tenant):
+            return _problem(403, "Forbidden",
+                            "Returning a handover requires Credit Head / Management / Admin "
+                            "authority.")
+        return await _register_post_as(
+            request, f"/v1/internal/handover-packages/{lending_id}/return", returned_by,
+            checker, {"note": payload.note})
+
     @app.post("/v1/workflows/cpcs-checklists", status_code=202, tags=["Workflows"],
               summary="MAKER prepares the CP/CS checklist")
     async def start_cpcs_checklist(payload: CpcsChecklistIn, request: Request,
@@ -1639,6 +1675,32 @@ def create_app() -> FastAPI:
                             "Admin authority.")
         return await _register_post_as(
             request, f"/v1/internal/cpcs-checklists/{checklist_id}/reject", rejected_by,
+            checker, {"note": payload.note})
+
+    @app.post("/v1/workflows/cpcs-checklists/{checklist_id}/return", tags=["Workflows"],
+              summary="CHECKER returns the CP/CS checklist to its maker (amend and resubmit)")
+    async def return_cpcs_checklist(checklist_id: str, payload: CheckerReturnIn, request: Request,
+                                    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                    ) -> Any:
+        """The middle verb of the triad: NON-terminal. The row becomes 'Returned' with the
+        reasons on record; the maker amends by preparing the NEXT checklist_version, which
+        re-enters the checker queue. Same authority as approve/reject — through the SAME
+        door, so a UI never needs the register's internal lane."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        returned_by, err = await _verified_email(request, payload.returned_by)
+        if err is not None:
+            return err
+        checker, verified = _caller_context(request, returned_by)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound checker identity is required to return.")
+        if not await _authorised_for("cpcs", request, returned_by, checker.tenant):
+            return _problem(403, "Forbidden",
+                            "Returning a CP/CS checklist requires Credit Head / Management / "
+                            "Admin authority.")
+        return await _register_post_as(
+            request, f"/v1/internal/cpcs-checklists/{checklist_id}/return", returned_by,
             checker, {"note": payload.note})
 
     @app.post("/v1/workflows/{workflow_id}/committee-decision", tags=["Workflows"],
@@ -2172,17 +2234,33 @@ def create_app() -> FastAPI:
 
     def _action_urls(decide: str | None, workflow_id: str, subject_id: str) -> dict[str, str]:
         """The ready-made URLs a client acts on — one construction site for the lookup
-        AND the pending list, so the two can never drift."""
-        urls = {"status_url": f"/v1/workflows/{workflow_id}"}
+        AND the pending list, so the two can never drift.
+
+        Every PARKED run advertises the full triad the platform enforces: approve (or a
+        named decision route), RETURN-for-revision, and reject. Return is always the
+        run-control lane (``/control {action:"return"}``) — that is how a waiting run
+        goes back to its requester without being decided — so a client that reads this
+        block can render all three buttons without knowing any of the routing rules.
+        """
+        urls = {"status_url": f"/v1/workflows/{workflow_id}",
+                "control_url": f"/v1/workflows/{workflow_id}/control"}
         if decide == "approve/reject":
             urls["approve_url"] = f"/v1/workflows/{workflow_id}/approve"
             urls["reject_url"] = f"/v1/workflows/{workflow_id}/reject"
         elif decide is not None and decide.startswith("subject:"):
-            urls["approve_url"] = ("/v1/workflows/"
-                                   + decide.removeprefix("subject:").format(
-                                       subject_id=subject_id))
+            base = ("/v1/workflows/"
+                    + decide.removeprefix("subject:").format(subject_id=subject_id))
+            urls["approve_url"] = base
+            # …/{subject}/approve → …/{subject}/return, …/reject
+            stem = base.rsplit("/", 1)[0]
+            urls["return_url"] = f"{stem}/return"
+            urls["reject_url"] = f"{stem}/reject"
         elif decide is not None:
             urls["decision_url"] = f"/v1/workflows/{workflow_id}/{decide}"
+        if "return_url" not in urls:
+            # The parked run's return lane: back to the requester, non-terminal, the
+            # SLA clock restarts when they resubmit.
+            urls["return_url"] = f"/v1/workflows/{workflow_id}/control"
         return urls
 
     # The approval-bearing kinds and their Temporal workflow TYPE names — the pending
@@ -2311,13 +2389,16 @@ def create_app() -> FastAPI:
                 continue
             for row in queue_resp.json():
                 lending_id = str(row.get("lending_id") or "")
+                # The checker gets the WHOLE triad, never approve alone: a queue that
+                # offers one verb reads as "approve or ignore", which is not the
+                # governance the platform actually enforces. One base path per kind,
+                # the three verbs hang off it.
                 if k == "cpcs-checklist":
-                    approve = (f"/v1/workflows/cpcs-checklists/"
-                               f"{row.get('id')}/approve")
+                    base = f"/v1/workflows/cpcs-checklists/{row.get('id')}"
                     extra = {"checklist_id": row.get("id"),
                              "checklist_version": row.get("checklist_version")}
                 else:
-                    approve = f"/v1/workflows/advaya-handover/{lending_id}/approve"
+                    base = f"/v1/workflows/advaya-handover/{lending_id}"
                     extra = {"package_id": row.get("id")}
                 pending.append({
                     "kind": k, "subject_id": lending_id, "workflow_id": None,
@@ -2325,7 +2406,9 @@ def create_app() -> FastAPI:
                     "stage": "Awaiting checker approval",
                     "requested_by": row.get("prepared_by"),
                     "started_at": row.get("created_at"),
-                    "approve_url": approve, **extra})
+                    "approve_url": f"{base}/approve",
+                    "return_url": f"{base}/return",
+                    "reject_url": f"{base}/reject", **extra})
         pending.sort(key=lambda r: r["started_at"] or "")
         return {"count": len(pending), "pending": pending}
 
