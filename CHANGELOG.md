@@ -6,6 +6,14 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **A greyed control now says who it belongs to.** Row-edit was HIDDEN when the signed-in
+  role could not perform it, so an AM RM looking at a lending line saw a control that did
+  nothing and no way to tell a permission apart from a bug. The pencil is now rendered
+  DISABLED with the reason on hover — *"This is done by Admin, Management, Credit Head,
+  Deal Analyst."* — across Leads, Deals, Lending, Asset Monetisation and Clients, matching
+  how the workflow Actions panel explains a step it cannot offer. The row still opens
+  read-only on click. `docs/E2E_UI_WALKTHROUGH.md` now carries the edit-rights table.
+
 - **The Data Register now actually stores documents.** The dialog wrote to browser
   memory and an audit line and made **no HTTP call of any kind** — the ticks, the progress
   bar and "Replace" all behaved normally while the register received nothing, anything

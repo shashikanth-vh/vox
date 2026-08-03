@@ -13,7 +13,7 @@ import PushToDealsDialog from './PushToDealsDialog';
 import LeadDrawer from './LeadDrawer';
 import { leadsService } from '../../services/leadsService';
 import { useAuth } from '../../auth/AuthContext';
-import { can, scopeFor } from '../../auth/rbac';
+import { can, scopeFor, whoCan } from '../../auth/rbac';
 import { tokens } from '../../theme';
 import type { Lead } from './lead.types';
 
@@ -52,7 +52,8 @@ export default function LeadsPage() {
         toolbarLeft={can(user.roles, 'addLead') && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add lead</Button>}
         // No View icon — clicking the row opens the lead.
         onRowClick={(l) => setEdit(l)}
-        onEdit={ro ? undefined : (l) => setEdit(l)}
+        onEdit={(l) => setEdit(l)}
+        editReason={ro ? whoCan('editLead') : ''}
         onDelete={can(user.roles, 'deleteRow') ? (l) => setDel(l) : undefined}
         // Push to deals — convert this lead into a deal (v11 doPush flow).
         extraActions={can(user.roles, 'pushToDeals') ? (l) => (

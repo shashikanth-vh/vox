@@ -11,7 +11,7 @@ import { assetMonService } from '../../services/assetMonService';
 import { referenceService } from '../../services/referenceService';
 import { fmt } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
-import { can, scopeFor } from '../../auth/rbac';
+import { can, scopeFor, whoCan } from '../../auth/rbac';
 import { tokens } from '../../theme';
 import type { AmRow } from './am.types';
 
@@ -70,7 +70,8 @@ export default function AssetMonPage() {
         columns={columns}
         csvName="atlas_asset_monetisation"
         // No View icon — a row click opens the drawer.
-        onEdit={ro ? undefined : (r) => setOpen(r.code)}
+        onEdit={(r) => setOpen(r.code)}
+        editReason={ro ? whoCan('editAM') : ''}
         onDelete={ro ? undefined : (r) => setDel(r)}
         onRowClick={(r) => setOpen(r.code)}
         // v12 greys out Dropped rows.

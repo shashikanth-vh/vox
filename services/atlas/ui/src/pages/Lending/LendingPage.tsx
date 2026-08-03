@@ -12,7 +12,7 @@ import { lendingService } from '../../services/lendingService';
 import { referenceService } from '../../services/referenceService';
 import { fmt } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
-import { can, scopeFor } from '../../auth/rbac';
+import { can, scopeFor, whoCan } from '../../auth/rbac';
 import { tokens } from '../../theme';
 import { LEND_GREEN } from '../../services/lendingService';
 import type { LendingRow } from './lending.types';
@@ -82,7 +82,8 @@ export default function LendingPage() {
         csvName="atlas_lending"
         // No View icon — clicking the row opens the company drawer.
         onRowClick={(r) => setOpen(r.code)}
-        onEdit={ro ? undefined : (r) => setOpen(r.code)}
+        onEdit={(r) => setOpen(r.code)}
+        editReason={ro ? whoCan('editLending') : ''}
         onDelete={ro ? undefined : (r) => setDel(r)}
         rowSx={(r) => stageRowSx(r.stage)}
       />

@@ -21,7 +21,26 @@ package assembly) are still Postman; Part 2 is the current register of those.
 
 ## Roles you will need
 
-Sign in as a different user for each column. Role names are the ten in `RBAC Role`.
+Sign in as a different user for each column. Role names are the ten in `RBAC Role`, and
+the profile chip (top right) shows the role the session is actually running as — check it
+first whenever a control is greyed.
+
+**A greyed pencil, dropdown or button is a ROLE, not a fault.** Hovering it says who does
+that step. The row still opens read-only on click. The edit rights that catch people out:
+
+| To edit | You need |
+| --- | --- |
+| A lead | Admin, Management, BD Head, BDRM |
+| A lending line (and its stage) | Admin, Management, Credit Head, Deal Analyst |
+| A syndication line | Admin, Management, Syn Head, Syn RM, Deal Analyst |
+| An asset-monetisation line | Admin, Management, AM Head, AM RM, Deal Analyst |
+| A client / deal profile | Admin, Management, BD Head, BDRM |
+| An FI record | Admin, Management, Syn Head |
+| An employee | Admin, Management |
+
+So an **AM RM** can edit asset-monetisation lines and nothing else — a lending row is
+visible to them (they may be in its company's scope) but not editable, which is correct.
+
 
 | Step | Role |
 | --- | --- |

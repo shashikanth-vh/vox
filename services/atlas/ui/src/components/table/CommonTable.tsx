@@ -263,6 +263,8 @@ export interface RowAction<T> {
   onView?: (row: T) => void;
   onEdit?: (row: T) => void;
   onDelete?: (row: T) => void;
+  /** Set when the row IS editable in principle but not by this user — the reason shown. */
+  editReason?: string;
 }
 
 interface CommonTableProps<T extends Record<string, any>> extends RowAction<T> {
@@ -295,6 +297,7 @@ export default function CommonTable<T extends Record<string, any>>(
     actionsEnabled = true,
     onView,
     onEdit,
+    editReason,
     onDelete,
     rowSx,
     extraActions,
@@ -839,10 +842,16 @@ export default function CommonTable<T extends Record<string, any>>(
               </Tooltip>
             )}
             {onEdit && (
-              <Tooltip title="Edit">
-                <IconButton onClick={() => onEdit(row.original)}>
-                  <EditIcon fontSize="small" />
-                </IconButton>
+              // `editReason` means "offered, but not by you" — rendered disabled with the
+              // reason rather than vanishing, so a user can tell a permission apart from a
+              // bug. A disabled MUI button swallows pointer events, hence the span.
+              <Tooltip title={editReason || 'Edit'}>
+                <span>
+                  <IconButton disabled={!!editReason}
+                    onClick={() => !editReason && onEdit(row.original)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </span>
               </Tooltip>
             )}
             <Tooltip title="Export row as CSV">

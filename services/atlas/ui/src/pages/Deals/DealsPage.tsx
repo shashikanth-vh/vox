@@ -9,7 +9,7 @@ import AddProductDialog from './AddProductDialog';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { dealsService } from '../../services/dealsService';
 import { useAuth } from '../../auth/AuthContext';
-import { scopeFor, can } from '../../auth/rbac';
+import { scopeFor, can, whoCan } from '../../auth/rbac';
 import type { DealRow } from './deal.types';
 
 export default function DealsPage() {
@@ -42,7 +42,8 @@ export default function DealsPage() {
         // No View icon — a row click opens the profile. Edit opens the same drawer;
         // Delete (Admin only) removes the deal row; the row-CSV icon is built in.
         onRowClick={(d) => setOpen(d.code)}
-        onEdit={can(user.roles, 'editDealProfile') ? (d) => setOpen(d.code) : undefined}
+        onEdit={(d) => setOpen(d.code)}
+        editReason={can(user.roles, 'editDealProfile') ? '' : whoCan('editDealProfile')}
         onDelete={can(user.roles, 'deleteRow') ? (d) => setDel(d) : undefined}
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refreshAll} onAddProduct={(c) => setAddProd(c)} />

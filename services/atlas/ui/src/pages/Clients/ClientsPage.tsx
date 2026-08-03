@@ -6,7 +6,7 @@ import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { canWrite, can } from '../../auth/rbac';
+import { canWrite, can, whoCan } from '../../auth/rbac';
 import { CodeText, LensPill, LifePill } from '../../components/common/Pills';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
@@ -63,7 +63,8 @@ export default function ClientsPage() {
         toolbarLeft={!ro && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add client</Button>}
         // Actions: edit · download row CSV (built into CommonTable) · delete.
         // v12 gates the delete on Admin; everyone else sees edit + download only.
-        onEdit={ro ? undefined : (r) => setOpen(r.code)}
+        onEdit={(r) => setOpen(r.code)}
+        editReason={ro ? whoCan('editDealProfile') : ''}
         onDelete={can(user.roles, 'deleteRow') ? (r) => setDel(r) : undefined}
         // v12: the whole row is clickable and opens the company drawer.
         onRowClick={(r) => setOpen(r.code)}

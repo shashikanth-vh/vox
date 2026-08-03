@@ -158,6 +158,19 @@ const OPS: Record<Op, Role[]> = {
   newsScan:           ALL,
 };
 
+/**
+ * Who may do this, in words — for a control that is offered but not available to you.
+ *
+ * A greyed control with no explanation is the same failure as a hidden one: the user
+ * cannot tell whether the platform is broken, their data is wrong, or they simply are not
+ * the right person. Naming the roles answers it in one line, and matches how the workflow
+ * Actions panel explains a step it cannot offer.
+ */
+export function whoCan(op: Op): string {
+  const roles = OPS[op] || [];
+  return roles.length ? `This is done by ${roles.join(', ')}.` : 'Not available to any role.';
+}
+
 export function can(role: RoleInput, op: Op): boolean {
   return asRoles(role).some((r) => OPS[op].includes(r));
 }
