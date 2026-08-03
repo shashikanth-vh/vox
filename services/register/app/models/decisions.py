@@ -41,7 +41,9 @@ class WorkflowDecision(RegisterBase):
     # Conditional approval: the committee's conditions and the sanction validity window.
     conditions: Mapped[str | None] = mapped_column(Text)
     valid_days: Mapped[int | None] = mapped_column(Integer)
-    decision: Mapped[str] = mapped_column(String(20), nullable=False)   # Approved / Rejected
+    # Approved / Rejected / the run-control outcomes — "ReturnedForInformation" is 22
+    # chars, which is exactly how the original String(20) broke folder 06's RETURN.
+    decision: Mapped[str] = mapped_column(String(40), nullable=False)
     decided_by: Mapped[str] = mapped_column(String(200), nullable=False)
     decided_by_id: Mapped[str | None] = mapped_column(String(64))
     roles: Mapped[list] = mapped_column(JSONB, nullable=False, default=list,
@@ -67,7 +69,7 @@ class WorkflowDecisionOutbox(RegisterBase):
     )
 
     workflow_id: Mapped[str] = mapped_column(String(200), nullable=False)
-    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    decision: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending",
                                         server_default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0,

@@ -1096,7 +1096,7 @@ def _base_0006_workflow_decisions() -> None:
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 workflow_id     varchar(200) NOT NULL,
                 lead_id         varchar(64),
-                decision        varchar(20)  NOT NULL,
+                decision        varchar(40)  NOT NULL,
                 decided_by      varchar(200) NOT NULL,
                 decided_by_id   varchar(64),
                 roles           jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -1210,7 +1210,7 @@ def _base_0008_decision_outbox() -> None:
             CREATE TABLE workflow_decision_outbox (
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 workflow_id     varchar(200) NOT NULL,
-                decision        varchar(20)  NOT NULL,
+                decision        varchar(40)  NOT NULL,
                 -- pending → not yet confirmed applied; applied → the run converted with this
                 -- outcome; dead → the run closed without applying it or retries were exhausted.
                 status          varchar(12)  NOT NULL DEFAULT 'pending',

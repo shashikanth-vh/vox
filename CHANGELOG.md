@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Folder 06's committee RETURN 500'd: `decision varchar(20)` vs
+  "ReturnedForInformation" (22 chars).** The register's traceback named it —
+  `StringDataRightTruncationError` inserting the control record. Approved /
+  Rejected / Cancelled / Resubmitted all fit under 20, so nothing failed until the
+  first real RETURN. `workflow_decisions.decision` (and the outbox's) are now
+  **varchar(40)** in the model and the baseline, and the control-record test
+  deliberately writes the longest outcome so this can never regress.
+  **Existing databases need a one-time widen** (no rebuild required — the running
+  register works the moment the column is wider):
+  `docker exec -it <postgres> psql -U register -d register -c
+  "ALTER TABLE workflow_decisions ALTER COLUMN decision TYPE varchar(40);
+   ALTER TABLE workflow_decision_outbox ALTER COLUMN decision TYPE varchar(40);"`
+  Then simply re-send the folder-06 control request — the run is still parked.
+
 - **FI Master wired to the real counterparty master + page-detail API maps.** The
   sub-tab's real-mode list returned unmapped wire rows and its writes went to routes
   that never existed (`POST /fi`, `PATCH /fi/{array-index}`). Now: entering the

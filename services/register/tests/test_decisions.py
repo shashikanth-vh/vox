@@ -457,16 +457,19 @@ async def test_control_records_are_kind_bound_and_create_no_delivery(wf_client):
     space is disjoint by kind (no control write can mint an approval and vice versa) and no
     conversion-delivery outbox row is created for them."""
     ref = f"{WF}:control:abc123"
+    # Deliberately the LONGEST control outcome (22 chars): "ReturnedForInformation"
+    # overflowed the original varchar(20) decision column and 500'd every folder-06
+    # committee RETURN — the column is 40 now and this write pins it.
     r = await wf_client.post(
         "/v1/internal/decisions",
-        json={"workflow_id": ref, "decision": "Cancelled", "kind": "control",
-              "note": "client withdrew"},
+        json={"workflow_id": ref, "decision": "ReturnedForInformation", "kind": "control",
+              "note": "committee wants the DSRA assumption quantified"},
         headers={"X-Internal-Context": _ctx()})
     assert r.status_code == 201, r.text
-    assert r.json()["decision"] == "Cancelled"
+    assert r.json()["decision"] == "ReturnedForInformation"
     # Readable back for the workflow's fail-closed verification…
     got = await wf_client.get(f"/v1/internal/decisions/{ref}")
-    assert got.status_code == 200 and got.json()["decision"] == "Cancelled"
+    assert got.status_code == 200 and got.json()["decision"] == "ReturnedForInformation"
     # …but nothing to deliver: the outbox is untouched.
     stats = (await wf_client.get("/v1/internal/decisions/deliveries/stats")).json()
     assert stats["pending"] == 0
