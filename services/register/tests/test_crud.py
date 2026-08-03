@@ -76,6 +76,16 @@ async def test_list_search_and_filter(client: AsyncClient):
     assert r.json()["count"] == 1
 
 
+async def test_list_refuses_malformed_uuid_filter(client: AsyncClient):
+    """The literal string "null" (an unset client variable) aimed at a UUID filter is
+    the CALLER's error: 422 with the offending filter named — never a 500 from the
+    driver's bind codec (which is how it used to surface, killing VOX runs)."""
+    for bad in ("null", "undefined", "not-a-uuid"):
+        r = await client.get("/v1/leads", params={"entity_id": bad})
+        assert r.status_code == 422, f"{bad!r}: {r.status_code} {r.text}"
+        assert "entity_id" in r.text
+
+
 async def test_keyset_pagination(client: AsyncClient):
     for i in range(25):
         await _create_entity(client, f"P{i:03d}")

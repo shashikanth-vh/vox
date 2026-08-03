@@ -6,6 +6,26 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The intermittent VOX 502 ROOT CAUSE, from the register traceback: the literal
+  string "null" as `entity_id`.** `asyncpg.DataError: invalid UUID 'null'` on the
+  leads list — a failed folder-02 capture had stored the missing response id as the
+  string `"null"` (what `pm.environment.set` writes for an undefined value), which is
+  TRUTHY, so it passed every `if (id)` check, entered the workflow as a real entity
+  id, and broke the register's UUID bind on every retry. "Random" because it only
+  bites runs where the folder-02 capture failed. Fixed at all three layers:
+  * **Register** — `_coerce_filter` no longer passes an un-castable filter value
+    through to the driver (an opaque 500): a malformed UUID/integer/number for a
+    typed filter column is refused as **422** naming the filter
+    (`Invalid value 'null' for filter 'entity_id' — a UUID is required.`).
+  * **Orchestrator** — `VoxTouchpointIn.entity_id`/`assigned_rm_id` and
+    `LeadConversionIn.lead_id`/`rm_id`/`analyst_id` must parse as UUIDs (empty →
+    None): `"null"`, `"undefined"`, `"{{entityId}}"` are refused **422 at the door**
+    ("was a client variable unset?") — a run that would fail can no longer start.
+  * **E2E collection** — `cap()` never stores a missing capture (it UNSETS the
+    variable and fails that request's test loudly, naming the missing field),
+    `guard()` also rejects the `"null"`/`"undefined"` strings, and folder 03's VOX
+    capture guards `entityId` in its pre-request script.
+
 - **Intermittent VOX 502 ("workflow_run_failed <- ServerError HTTP 500") hardened
   against.** The failure signature — the `?wait=true` call dying after ~16 s — is the
   old retry budget exactly: the register client did NOT retry 500s (only 429/502/503/

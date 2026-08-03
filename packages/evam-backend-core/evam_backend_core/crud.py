@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.orm.exc import StaleDataError
 
-from evam_backend_core.errors import NotFoundError, VersionConflictError
+from evam_backend_core.errors import NotFoundError, ValidationAppError, VersionConflictError
 from evam_backend_core.logging import request_id_ctx
 from evam_backend_core.pagination import decode_cursor, encode_cursor
 from evam_backend_core.db.base import AuditLog, RegisterBase
@@ -87,6 +87,10 @@ class CRUDRepository(Generic[M]):
 
         Filter values arrive as raw strings from the URL; comparing a string to a
         BOOLEAN / UUID / numeric column would fail or silently mismatch, so cast here.
+        A value that CANNOT be cast is the caller's error and refuses the request as
+        422 — passed through raw it reaches the driver's bind codec and blows up as an
+        opaque 500 (the literal string "null" from an unset client variable hitting
+        ``entity_id`` took down VOX runs exactly that way).
         """
         if not isinstance(value, str):
             return value
@@ -100,7 +104,13 @@ class CRUDRepository(Generic[M]):
                 return int(value)
             if isinstance(col_type, Numeric):
                 return float(value)
-        except (ValueError, AttributeError):
+        except ValueError:
+            kind = ("a UUID" if isinstance(col_type, PGUUID)
+                    else "an integer" if isinstance(col_type, Integer) else "a number")
+            raise ValidationAppError(
+                f"Invalid value {value!r} for filter '{name}' — {kind} is required."
+            ) from None
+        except AttributeError:
             return value
         return value
 

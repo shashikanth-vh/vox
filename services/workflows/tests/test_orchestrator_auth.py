@@ -50,7 +50,8 @@ async def test_require_auth_refuses_approval_without_oidc(monkeypatch):
 async def test_require_auth_refuses_conversion_request_without_oidc(monkeypatch):
     app = _app(monkeypatch, WORKFLOWS_REQUIRE_AUTH="true", WORKFLOWS_API_KEYS="k")
     r = await _post(app, "/v1/workflows/lead-conversions",
-                    {"lead_id": "l1", "requested_by": "attacker@example.com"})
+                    {"lead_id": "11111111-1111-1111-1111-111111111111",
+                     "requested_by": "attacker@example.com"})
     assert r.status_code == 401, r.text
     get_settings.cache_clear()
 
@@ -107,4 +108,28 @@ async def test_business_endpoints_reject_bad_api_key(monkeypatch):
         ):
             r = await c.post(path, json=body, headers={"X-API-Key": "wrong"})
             assert r.status_code == 401, f"{path}: {r.text}"
+    get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# Id fields refuse client-variable garbage at the door.
+# --------------------------------------------------------------------------- #
+async def test_vox_rejects_null_string_entity_id(monkeypatch):
+    """An unset Postman/JS variable arrives as the LITERAL string "null" — truthy, so
+    it used to sail into the workflow and die deep in a register query as a 500. The
+    door now refuses it as 422 with a message that names the problem."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    for bad in ("null", "undefined", "{{entityId}}"):
+        r = await _post(app, "/v1/workflows/vox-touchpoints",
+                        {"capture_id": "cap-1", "entity_id": bad})
+        assert r.status_code == 422, f"{bad!r}: {r.status_code} {r.text}"
+        assert "not a UUID" in r.text
+    get_settings.cache_clear()
+
+
+async def test_conversion_rejects_null_string_lead_id(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    r = await _post(app, "/v1/workflows/lead-conversions",
+                    {"lead_id": "null", "requested_by": "rm@evamfinance.com"})
+    assert r.status_code == 422, r.text
     get_settings.cache_clear()

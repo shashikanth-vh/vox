@@ -33,7 +33,7 @@ from evam_backend_core.oidc import (
 )
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import ORJSONResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 import httpx
 from temporalio.client import Client, WorkflowExecutionStatus, WorkflowHandle
 from temporalio.exceptions import TemporalError
@@ -90,6 +90,20 @@ _APPROVER_ROLES: dict[str, set[str]] = {
 }
 
 
+def _uuid_or_none(value: str | None) -> str | None:
+    """Reject a non-UUID value for an id field at the API door — an unset client
+    variable arrives as the LITERAL string "null"/"undefined", which is truthy, so it
+    sails past every `if entity_id:` check and dies deep in a register query instead.
+    Empty strings normalise to None (field genuinely not provided)."""
+    if value is None or value.strip() == "":
+        return None
+    try:
+        uuid.UUID(value.strip())
+    except ValueError:
+        raise ValueError(f"'{value}' is not a UUID — was a client variable unset?") from None
+    return value.strip()
+
+
 class VoxTouchpointIn(BaseModel):
     """The HTTP shape of a VOX capture — mirrors ``types.VoxTouchpoint``."""
 
@@ -123,6 +137,8 @@ class VoxTouchpointIn(BaseModel):
     lens: str | None = Field(default=None, max_length=20)
     state: str | None = Field(default=None, max_length=60)
 
+    _ids_are_uuids = field_validator("entity_id", "assigned_rm_id")(_uuid_or_none)
+
 
 class LeadConversionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -142,6 +158,16 @@ class LeadConversionIn(BaseModel):
     analyst_id: str | None = None
     note: str | None = None
     approval_timeout_hours: int = Field(default=24 * 7, ge=1, le=24 * 90)
+
+    _ids_are_uuids = field_validator("rm_id", "analyst_id")(_uuid_or_none)
+
+    @field_validator("lead_id")
+    @classmethod
+    def _lead_id_is_uuid(cls, value: str) -> str:
+        out = _uuid_or_none(value)
+        if out is None:
+            raise ValueError("lead_id is required and must be a UUID.")
+        return out
 
 
 class DecisionIn(BaseModel):

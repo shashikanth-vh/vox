@@ -80,7 +80,18 @@ def req(name, method, host, path, *, body=None, tests=None, headers=None, pre=No
 
 
 def cap(var, field="id"):
-    return [OK, f"pm.environment.set('{var}', pm.response.json().{field});",
+    # NEVER store a missing capture: pm.environment.set(var, undefined) writes the
+    # LITERAL string "null", which is truthy — it then sails through every downstream
+    # `if (id)` check and dies deep in a register query as an opaque 500 (the
+    # intermittent VOX workflow_run_failed was exactly this). A failed capture now
+    # UNSETS the variable (so guards catch it) and fails this request's test loudly.
+    return [OK,
+            f"let _v; try {{ _v = (pm.response.json() || {{}}).{field}; }} catch (e) {{}}",
+            f"if (_v) pm.environment.set('{var}', String(_v)); "
+            f"else pm.environment.unset('{var}');",
+            f"pm.test('captured {var}', () => pm.expect(_v, "
+            f"'{field} missing from the response — the create failed; downstream "
+            f"requests would have fired with a null id').to.exist);",
             f"console.log('{var} =', pm.environment.get('{var}'));"]
 
 
@@ -91,7 +102,8 @@ def refused(*c):
 
 def guard(var):
     return [f"const v = pm.environment.get('{var}');",
-            f"if (!v) throw new Error('{var} is not set — run the collection in order from 00.');",
+            f"if (!v || v === 'null' || v === 'undefined') "
+            f"throw new Error('{var} is not set — run the collection in order from 00.');",
             "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
             f"  throw new Error('{var} = ' + v + ' is the lead/deal id — stale value.');"]
 
@@ -430,6 +442,7 @@ F.append(("03 · VOX ▸ the field capture creates the lead + interaction", [
              "cold workflow plane. Collection Runner only."),
     req("POST /orchestrator/v1/workflows/vox-touchpoints?wait=true — RM's field capture",
         "POST", ORC, "/v1/workflows/vox-touchpoints?wait=true", headers=_RM,
+        pre=guard("entityId"),
         body={"capture_id": "e2e-{{runSuffix}}", "entity_id": "{{entityId}}",
               "interaction_type": "In-Person Meeting",
               "occurred_at": "2026-03-31T10:30:00Z",

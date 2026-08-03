@@ -1312,7 +1312,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('rmPersonId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('rmPersonId', String(_v)); else pm.environment.unset('rmPersonId');",
+                  "pm.test('captured rmPersonId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('rmPersonId =', pm.environment.get('rmPersonId'));"
                 ]
               }
@@ -1376,7 +1378,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('analystPersonId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('analystPersonId', String(_v)); else pm.environment.unset('analystPersonId');",
+                  "pm.test('captured analystPersonId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('analystPersonId =', pm.environment.get('analystPersonId'));"
                 ]
               }
@@ -1446,7 +1450,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('entityId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('entityId', String(_v)); else pm.environment.unset('entityId');",
+                  "pm.test('captured entityId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('entityId =', pm.environment.get('entityId'));"
                 ]
               }
@@ -1640,6 +1646,18 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('entityId');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('entityId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('entityId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -2645,7 +2663,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const v = pm.environment.get('lendingId');",
-                  "if (!v) throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
                   "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
                   "  throw new Error('lendingId = ' + v + ' is the lead/deal id \u2014 stale value.');"
                 ]
@@ -3284,7 +3302,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('checklistId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('checklistId', String(_v)); else pm.environment.unset('checklistId');",
+                  "pm.test('captured checklistId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('checklistId =', pm.environment.get('checklistId'));"
                 ]
               }
@@ -3463,7 +3483,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('checklistId2', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('checklistId2', String(_v)); else pm.environment.unset('checklistId2');",
+                  "pm.test('captured checklistId2', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('checklistId2 =', pm.environment.get('checklistId2'));"
                 ]
               }
@@ -3759,7 +3781,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('checklistId3', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('checklistId3', String(_v)); else pm.environment.unset('checklistId3');",
+                  "pm.test('captured checklistId3', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('checklistId3 =', pm.environment.get('checklistId3'));"
                 ]
               }
@@ -4956,7 +4980,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const v = pm.environment.get('syndicationId');",
-                  "if (!v) throw new Error('syndicationId is not set \u2014 run the collection in order from 00.');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('syndicationId is not set \u2014 run the collection in order from 00.');",
                   "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
                   "  throw new Error('syndicationId = ' + v + ' is the lead/deal id \u2014 stale value.');"
                 ]
@@ -4968,7 +4992,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('synRowId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('synRowId', String(_v)); else pm.environment.unset('synRowId');",
+                  "pm.test('captured synRowId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('synRowId =', pm.environment.get('synRowId'));"
                 ]
               }
@@ -5685,7 +5711,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const v = pm.environment.get('amId');",
-                  "if (!v) throw new Error('amId is not set \u2014 run the collection in order from 00.');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('amId is not set \u2014 run the collection in order from 00.');",
                   "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
                   "  throw new Error('amId = ' + v + ' is the lead/deal id \u2014 stale value.');"
                 ]
@@ -5697,7 +5723,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('buyerRowId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('buyerRowId', String(_v)); else pm.environment.unset('buyerRowId');",
+                  "pm.test('captured buyerRowId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('buyerRowId =', pm.environment.get('buyerRowId'));"
                 ]
               }
@@ -6469,7 +6497,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('financialId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('financialId', String(_v)); else pm.environment.unset('financialId');",
+                  "pm.test('captured financialId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('financialId =', pm.environment.get('financialId'));"
                 ]
               }
@@ -6533,7 +6563,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('documentId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('documentId', String(_v)); else pm.environment.unset('documentId');",
+                  "pm.test('captured documentId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('documentId =', pm.environment.get('documentId'));"
                 ]
               }
@@ -6594,7 +6626,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('insDocId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('insDocId', String(_v)); else pm.environment.unset('insDocId');",
+                  "pm.test('captured insDocId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('insDocId =', pm.environment.get('insDocId'));"
                 ]
               }
@@ -6890,7 +6924,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('insDocId2', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('insDocId2', String(_v)); else pm.environment.unset('insDocId2');",
+                  "pm.test('captured insDocId2', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('insDocId2 =', pm.environment.get('insDocId2'));"
                 ]
               }
@@ -7010,7 +7046,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('calEventId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('calEventId', String(_v)); else pm.environment.unset('calEventId');",
+                  "pm.test('captured calEventId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('calEventId =', pm.environment.get('calEventId'));"
                 ]
               }
@@ -7311,7 +7349,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "pm.environment.set('covenantId', pm.response.json().id);",
+                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
+                  "if (_v) pm.environment.set('covenantId', String(_v)); else pm.environment.unset('covenantId');",
+                  "pm.test('captured covenantId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('covenantId =', pm.environment.get('covenantId'));"
                 ]
               }
