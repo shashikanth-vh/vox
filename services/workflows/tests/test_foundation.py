@@ -177,3 +177,38 @@ def test_decision_awaiting_inputs_carry_the_approver_list():
                                          requested_by="rm@x")):
         assert inp.approver_notify == []                # default: notify the requester
         assert inp.schema_version == 2, type(inp).__name__
+
+
+# ---------------------------------------------------------------------------------------- #
+# Retry classification: transient vs deterministic
+# ---------------------------------------------------------------------------------------- #
+def test_both_retry_policies_refuse_to_retry_deterministic_refusals():
+    """A 422/404/403/409 from the Register is a FINAL answer — it reads the same on the
+    ten-thousandth attempt. Both policies must break out of the loop on one.
+
+    This bit for real: a lead conversion whose RM was not on the people register sat at
+    "Applying" for 17 minutes, re-sending ``Unknown rm 'Shubh'`` under the unbounded
+    DURABLE policy. Unbounded is for OUTAGES, not for refusals."""
+    from app.workflows import _DETERMINISTIC, _DURABLE, _RETRY
+
+    for name, policy in (("_RETRY", _RETRY), ("_DURABLE", _DURABLE)):
+        assert list(policy.non_retryable_error_types or []) == _DETERMINISTIC, name
+
+    # The exact class names the register client raises — a rename there must break this
+    # test, not silently restore the infinite retry.
+    from evam_register_client import errors as e
+    for cls in (e.ValidationError, e.BadRequestError, e.NotFoundError,
+                e.ForbiddenError, e.ConflictError):
+        assert cls.__name__ in _DETERMINISTIC
+
+    # ...and the ones that must KEEP retrying: a 5xx or a lost update is transient, and
+    # VersionConflictError is a re-read-and-retry, not a refusal.
+    for cls in (e.ServerError, e.RateLimitedError, e.VersionConflictError):
+        assert cls.__name__ not in _DETERMINISTIC
+
+
+def test_durable_policy_is_still_unbounded_for_outages():
+    """The point of DURABLE is that an accepted decision is never dropped because the
+    Register was down; classifying refusals must not have capped that."""
+    from app.workflows import _DURABLE
+    assert _DURABLE.maximum_attempts == 0

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
 import RoleGuard from './auth/RoleGuard';
@@ -18,6 +19,8 @@ import Activity from './pages/Activity/ActivityPage';
 import Masters from './pages/Masters/MastersPage';
 import ActivityHub from './pages/Masters/ActivityHubPage';
 import Tools from './pages/Tools/ToolsPage';
+import { employeesService } from './services/employeesService';
+import { referenceService } from './services/referenceService';
 
 const routes: [string, string, React.ReactNode][] = [
   ['today', '/today', <Today />],
@@ -40,6 +43,16 @@ const routes: [string, string, React.ReactNode][] = [
 
 export default function App() {
   const { authed } = useAuth();
+  // Every dropdown in the app comes from the Register, not from the bundled seed:
+  // /v1/ref for the vocabularies (and the role-driven name lists it derives from the
+  // people directory), then the people roster itself for the directory lookups. In that
+  // order — the roster only fills in name lists /v1/ref did not serve. Once per
+  // signed-in session, and fail-soft: an unreachable Register keeps the seeded lists
+  // rather than leaving the user with forms they cannot fill in.
+  useEffect(() => {
+    if (!authed) return;
+    void referenceService.hydrate().then(() => employeesService.hydrateRoster());
+  }, [authed]);
   if (!authed) return <Login />;
   return (
     <Routes>

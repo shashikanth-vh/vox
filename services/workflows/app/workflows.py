@@ -62,10 +62,21 @@ with workflow.unsafe.imports_passed_through():
         VoxTouchpoint,
     )
 
+# DETERMINISTIC refusals — the Register saying "this will never be accepted": a failed
+# validation (422), a missing row (404), a denied grant (403), a contradictory outcome
+# (409). Retrying them is pure waste and, on the DURABLE policy, retries FOREVER: a
+# conversion once sat at "Applying" for 17 minutes re-sending `Unknown rm 'Shubh' — not
+# a person on record` every few seconds, looking hung when it was actually refused.
+# Naming them here makes the run FAIL FAST with that message, which the status endpoint
+# now surfaces. Transient failures (5xx, timeouts, network) keep their retries.
+_DETERMINISTIC = ["ValidationError", "BadRequestError", "NotFoundError",
+                  "ForbiddenError", "ConflictError"]
+
 _RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=30),
+    non_retryable_error_types=_DETERMINISTIC,
     # 8 attempts ≈ a 90-second window (1+2+4+8+16+30+30), enough to ride out a DB
     # restart or connection-pool flush; 5 gave up after ~15s, which turned every brief
     # Register blip into a dead run. All _IO activities are idempotency-keyed, so the
@@ -84,6 +95,10 @@ _DURABLE = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(minutes=5),
+    # "Unbounded" means unbounded for OUTAGES, not for refusals. A 422/404/403/409 is the
+    # Register's final answer and will read the same on attempt 10,000, so it must break
+    # the loop rather than be reconciled against.
+    non_retryable_error_types=_DETERMINISTIC,
     maximum_attempts=0,   # unlimited — reconcile until the write lands
 )
 # No schedule_to_close cap: retries are GENUINELY unbounded (bounded only by the workflow's

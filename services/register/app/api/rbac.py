@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, Header, Query
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app import authz
 from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
@@ -485,15 +485,27 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         raise ConflictError(f"Lead is {lead.status}; only an open lead can be converted.")
 
     # rm / analyst, if named, must be known people in this tenant — not free-text.
+    #
+    # A person is on record under EITHER of their two names: the short handle the rest of
+    # the platform addresses them by ("Shubh" — what leads, deals and trackers store in
+    # `rm`/`analyst`) or the full name ("Shubh Dave"). Matching full_name alone refused a
+    # conversion whose RM was seeded from that very roster, because the lead carried the
+    # handle and the check read the other column. Case-insensitive: the operator typing
+    # "shubh" means the same person.
+    lowered = func.lower(func.trim(Person.full_name))
+    handle = func.lower(func.trim(Person.name))
     for label, name in (("rm", payload.rm), ("analyst", payload.analyst)):
-        if name:
+        wanted = (name or "").strip().lower()
+        if wanted:
             known = (await ctx.session.execute(
                 select(Person.id).where(Person.tenant_id == ctx.tenant_id,
-                                        Person.full_name == name,
+                                        or_(lowered == wanted, handle == wanted),
                                         Person.deleted_at.is_(None)).limit(1))
             ).scalar_one_or_none()
             if known is None:
-                raise ValidationAppError(f"Unknown {label} '{name}' — not a person on record.")
+                raise ValidationAppError(
+                    f"Unknown {label} '{name}' — not a person on record. Add them under "
+                    f"People (Employees) first, or pick a name from that list.")
 
     # The assignee IDs that will receive an auto-assignment must be real, active Access
     # users holding the right role — verified through Access when configured (a no-op in

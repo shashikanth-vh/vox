@@ -317,6 +317,39 @@ async def test_company_scoped_resources_and_unknown_filter(client: AsyncClient):
     assert "Unknown query parameter" in bad.text
 
 
+async def test_convert_accepts_the_short_handle_a_person_is_known_by(client: AsyncClient):
+    """A person is on record under EITHER name.
+
+    The roster stores both — the short handle the platform addresses people by ("Shubh")
+    and the full name ("Shubh Dave") — and every lead, deal and tracker carries the
+    handle. Validating the full name alone refused a conversion whose RM came from that
+    very roster: the run sat at "Applying" re-sending `Unknown rm 'Shubh'` until it was
+    killed. Both names, and either case, must be accepted; a name on NEITHER still 422s.
+    """
+    ent = (await client.post("/v1/entities", json={
+        "code": f"HD-{uuid.uuid4().hex[:6]}", "legal_name": "Handle Co"})).json()
+    assert (await client.post("/v1/people", json={
+        "name": "Shubh", "full_name": "Shubh Dave", "role": "BDRM"})).status_code == 201
+    assert (await client.post("/v1/people", json={
+        "name": "Bhavana", "full_name": "Bhavana Sridhar",
+        "role": "Deal Analyst"})).status_code == 201
+
+    async def convert(rm: str, analyst: str | None = None) -> int:
+        lead = (await client.post("/v1/leads", json={
+            "company": "Handle Co", "entity_id": ent["id"], "status": "Active"})).json()
+        body = {"is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": rm}
+        if analyst:
+            body["analyst"] = analyst
+        return (await client.post(f"/v1/leads/{lead['id']}/convert", json=body)).status_code
+
+    assert await convert("Shubh") == 200                       # short handle
+    assert await convert("Shubh Dave") == 200                  # full name
+    assert await convert("  shubh  ") == 200                   # case + surrounding space
+    assert await convert("Shubh", analyst="Bhavana") == 200    # analyst, same rule
+    assert await convert("Nobody At All") == 422               # genuinely not on record
+    assert await convert("Shubh", analyst="Ghost") == 422
+
+
 async def test_transactional_lead_convert(client: AsyncClient):
     """The atomic convert endpoint: deal + product lines + Converted lead in ONE
     transaction. Replaces the workflow's compensation — nothing partial survives."""

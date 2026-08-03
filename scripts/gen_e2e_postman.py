@@ -609,12 +609,15 @@ def _validate_person_refs(col: dict) -> list[str]:
             path = r["url"]["raw"].replace(REG, "")
             body = json.loads(r["body"]["raw"])
             if path == "/v1/people" and r["method"] == "POST":
-                if body.get("full_name"):
-                    on_record.add(body["full_name"])
+                # A person is on record under EITHER name — the short handle the platform
+                # addresses them by, or the full name. /convert accepts both.
+                for key in ("full_name", "name"):
+                    if body.get(key):
+                        on_record.add(body[key].strip().lower())
             elif path.endswith("/convert"):
                 for field in ("rm", "analyst"):
                     name = body.get(field)
-                    if name and name not in on_record:
+                    if name and name.strip().lower() not in on_record:
                         problems.append(
                             f"{item['name']}: {field}={name!r} is not created by an earlier "
                             f"POST /v1/people (would 422 'not a person on record'). "

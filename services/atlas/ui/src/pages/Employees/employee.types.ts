@@ -4,6 +4,8 @@ export interface Employee {
   inactive?: boolean; notes?: string;
   /** Access user id (`POST /access/v1/users` -> id). Present only for provisioned users. */
   accessId?: string;
+  /** Register `people.id` — set when the roster came from GET /v1/people. */
+  registerId?: string;
 }
 
 export interface BookRollup {
