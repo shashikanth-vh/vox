@@ -107,6 +107,12 @@ services:
       REGISTER_STORAGE_BACKEND: "s3"
       REGISTER_S3_ENDPOINT_URL: "http://minio:9000"
       REGISTER_S3_PUBLIC_ENDPOINT_URL: "http://localhost:9000"  # browser-reachable for presigned URLs
+      # Serve document bytes THROUGH the API rather than redirecting the browser to a
+      # presigned MinIO URL. Without this, "View" in the Data Register 302s to
+      # http://minio:9000/... — a docker-internal host the browser cannot resolve — and
+      # the download dies silently. It also keeps the one-door posture: everything the
+      # browser touches arrives on :8443, nothing internal.
+      REGISTER_S3_STREAM_THROUGH_API: "true"
       REGISTER_S3_BUCKET: "prism-documents"
       REGISTER_S3_ACCESS_KEY_ID: "prism"
       REGISTER_S3_SECRET_ACCESS_KEY: "prism-secret"

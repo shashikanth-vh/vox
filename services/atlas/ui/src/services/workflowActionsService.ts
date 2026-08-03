@@ -57,6 +57,33 @@ const NOTHING: SubjectActions = {
   scoped_to: { email: '', roles: [] }, actions: [],
 };
 
+/**
+ * Watch a just-started run long enough to catch an immediate refusal.
+ *
+ * Returns the failure text when the run has already died, or null — which covers both
+ * "still running" (the normal, healthy case: it is parked awaiting a decision) and
+ * "completed". Deliberately short: this is here to catch a step the register rejected on
+ * its first activity, not to wait out a real approval.
+ */
+async function settled(workflowId?: string): Promise<string | null> {
+  if (!workflowId) return null;
+  const DEAD = ['FAILED', 'TIMED_OUT', 'TERMINATED'];
+  for (const wait of [400, 900, 1800, 3000]) {
+    await new Promise((r) => setTimeout(r, wait));
+    try {
+      const run = await orchestrator.get<any>(`/v1/workflows/${workflowId}`);
+      if (DEAD.includes(String(run?.status))) {
+        return run?.failure
+          || `The run ended as ${run.status} — see the workflow log for ${workflowId}.`;
+      }
+      if (String(run?.status) === 'COMPLETED') return null;
+    } catch {
+      return null;                    // cannot watch it; do not invent a failure
+    }
+  }
+  return null;                        // still running: parked awaiting its decision
+}
+
 export const workflowActionsService = {
   async forSubject(subjectType: SubjectType, subjectId: string): Promise<SubjectActions> {
     if (!USE_REAL_API || !subjectId) return NOTHING;
@@ -93,6 +120,12 @@ export const workflowActionsService = {
       const data = action.method === 'PATCH'
         ? await orchestrator.patch<any>(action.url, body)
         : await orchestrator.post<any>(action.url, body);
+      // A 202 means the RUN STARTED, not that the step succeeded. A CP/CS checklist that
+      // the register refused failed inside its workflow seconds later, while the screen
+      // said "sent for checking" and nothing ever reached the approver's queue. So when a
+      // run id comes back, watch it briefly and report what actually happened.
+      const failure = await settled(data?.workflow_id);
+      if (failure) return { ok: false, error: failure };
       return { ok: true, data };
     } catch (e: any) {
       const status = e?.response?.status;

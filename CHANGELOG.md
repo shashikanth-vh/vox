@@ -6,6 +6,28 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **"Send for checking" reported success while the run died seconds later.** A CP/CS
+  checklist is filed as **Completed**, and the register refuses a Completed checklist that
+  leaves a required CP `Pending` — but that refusal happened inside the workflow, after the
+  202 had already been read as success. The screen said sent; nothing reached the
+  approver's queue. Fixed at both ends:
+  * **A started run is watched briefly and reported honestly.** Every action that returns a
+    `workflow_id` is now polled for a few seconds; a run that has already FAILED surfaces
+    its failure text instead of a success message. A run still Running is the healthy case
+    (parked awaiting its decision) and reports success as before.
+  * **The checklist dialog blocks on the rules the register enforces** — a required CP left
+    Pending, a waiver with no reason, a CS deferral with no reason or no date, a non-CP
+    deferred as a CS — each named, before anything is sent. A **Satisfy by** date field
+    appears when a condition is deferred.
+
+- **"View" on a document did nothing.** With documents in object storage the register
+  **redirects** to a presigned URL, and in compose that URL is `http://minio:9000/...` — a
+  docker-internal host the browser cannot resolve, so the download died following the
+  redirect. Compose now sets `REGISTER_S3_STREAM_THROUGH_API=true`, which serves the bytes
+  through the API: the file downloads, and the browser still only ever talks to `:8443`.
+  The UI also reports a failed download instead of leaving a button that appears to do
+  nothing, and recognises a storage-reference response for what it is.
+
 - **The two bespoke screens were rebuilding the request body themselves, and dropped the
   identity.** "Prepare CP/CS checklist" answered `requested_by: Field required` on its
   first real use. The generic action dialog gets `requested_by` from the catalogue — the

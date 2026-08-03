@@ -28,12 +28,14 @@ export interface CpcsItem {
   status: 'Pending' | 'Completed' | 'Waived' | 'Deferred as CS';
   evidence_ref: string;
   reason: string;
+  /** Required when a CP is deferred as a CS — the date it must be satisfied by. */
+  expiry_date: string;
 }
 
 const STATUSES: CpcsItem['status'][] = ['Pending', 'Completed', 'Waived', 'Deferred as CS'];
 
 /** A sensible opening checklist — the conditions almost every sanction carries. */
-const STARTER: Omit<CpcsItem, 'status' | 'evidence_ref' | 'reason'>[] = [
+const STARTER: Omit<CpcsItem, 'status' | 'evidence_ref' | 'reason' | 'expiry_date'>[] = [
   { key: 'security-creation', label: 'Security created and charge filed', condition_type: 'CP', required: true },
   { key: 'insurance', label: 'Insurance assigned to the lender', condition_type: 'CP', required: true },
   { key: 'end-use', label: 'End-use certificate', condition_type: 'CS', required: true },
@@ -41,7 +43,7 @@ const STARTER: Omit<CpcsItem, 'status' | 'evidence_ref' | 'reason'>[] = [
 
 const blank = (n: number): CpcsItem => ({
   key: `condition-${n}`, label: '', condition_type: 'CP', required: true,
-  status: 'Pending', evidence_ref: '', reason: '',
+  status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
 });
 
 /**
@@ -68,7 +70,8 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
 
   useEffect(() => {
     if (!open) return;
-    setItems(STARTER.map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '' })));
+    setItems(STARTER.map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '',
+                                   expiry_date: '' })));
     setVersion(1); setNote(''); setErr(''); setBusy(false);
   }, [open]);
 
@@ -82,11 +85,35 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     if (!named.length) { setErr('A checklist needs at least one condition.'); return; }
     const unlabelled = named.findIndex((r) => !r.label.trim());
     if (unlabelled >= 0) { setErr(`Condition ${unlabelled + 1} needs a description.`); return; }
-    // A waiver has to be justified — the register asks the same question later, and it is
-    // cheaper to answer it here than to have the checker return the whole checklist.
+    // Everything below mirrors a rule the register enforces. Checking it here is not
+    // belt-and-braces: this checklist is FILED as Completed, so a breach fails inside the
+    // workflow seconds after the dialog closes — the run dies, nothing reaches the
+    // checker's queue, and the screen has already said "sent".
     const unexplained = named.findIndex((r) => r.status === 'Waived' && !r.reason.trim());
     if (unexplained >= 0) {
       setErr(`Condition ${unexplained + 1} is waived — say why.`); return;
+    }
+    const deferredNotCp = named.findIndex(
+      (r) => r.status === 'Deferred as CS' && r.condition_type !== 'CP');
+    if (deferredNotCp >= 0) {
+      setErr(`Condition ${deferredNotCp + 1} is already a CS — only a CP can be deferred as one.`);
+      return;
+    }
+    const noExpiry = named.findIndex(
+      (r) => r.status === 'Deferred as CS' && (!r.reason.trim() || !r.expiry_date));
+    if (noExpiry >= 0) {
+      setErr(`Condition ${noExpiry + 1} is deferred as a CS — it needs a reason and a date to be satisfied by.`);
+      return;
+    }
+    // THE one that bit: a checklist is filed as Completed, and a Completed checklist may
+    // not leave a required CP outstanding.
+    const outstanding = named.filter(
+      (r) => r.required && r.condition_type === 'CP' && r.status === 'Pending');
+    if (outstanding.length) {
+      setErr('These required CPs are still Pending, so the checklist cannot be sent: '
+        + outstanding.map((r) => r.label || r.key).join(', ')
+        + '. Mark each Completed, Waived (with a reason) or Deferred as CS.');
+      return;
     }
     if (!action) return;
     setBusy(true);
@@ -101,6 +128,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           status: r.status,
           ...(r.evidence_ref.trim() ? { evidence_ref: r.evidence_ref.trim() } : {}),
           ...(r.reason.trim() ? { reason: r.reason.trim() } : {}),
+          ...(r.expiry_date ? { expiry_date: r.expiry_date } : {}),
         })),
     };
     // The action's own body wins: it holds the ids and the verified identity, and a form
@@ -127,7 +155,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           Conditions precedent (CP) must be satisfied before disbursement; conditions
           subsequent (CS) may follow it. A different checker approves this — you cannot
           approve your own checklist. Raise the <b>version</b> when re-preparing after a
-          checker returned the previous one.
+          checker returned the previous one. Every <b>required CP</b> must be Completed,
+          Waived or Deferred as CS before this can be sent — a required CP left Pending is
+          refused.
         </Typography>
         {err && <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
           onClose={() => setErr('')}>{err}</Alert>}
@@ -163,10 +193,17 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
                 onChange={(e) => set(i, { evidence_ref: e.target.value })}
                 placeholder="Document or filing reference" sx={{ flex: '1 1 240px' }} />
               <TextField size="small"
-                label={r.status === 'Waived' ? 'Why waived (required)' : 'Reason / note'}
-                required={r.status === 'Waived'} value={r.reason}
+                label={r.status === 'Waived' ? 'Why waived (required)'
+                  : r.status === 'Deferred as CS' ? 'Why deferred (required)' : 'Reason / note'}
+                required={r.status === 'Waived' || r.status === 'Deferred as CS'}
+                value={r.reason}
                 onChange={(e) => set(i, { reason: e.target.value })}
                 sx={{ flex: '2 1 300px' }} />
+              {r.status === 'Deferred as CS' && (
+                <TextField size="small" type="date" label="Satisfy by (required)" required
+                  value={r.expiry_date} onChange={(e) => set(i, { expiry_date: e.target.value })}
+                  InputLabelProps={{ shrink: true }} sx={{ width: 190 }} />
+              )}
             </Box>
           </Box>
         ))}

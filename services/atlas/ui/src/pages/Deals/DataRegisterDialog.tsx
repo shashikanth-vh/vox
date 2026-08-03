@@ -102,7 +102,9 @@ export default function DataRegisterDialog({ code, open, onClose }: { code: stri
                     </Box>
                     <Box sx={{ display: 'flex', gap: 0.75 }}>
                       {e && (e.inline || e.id) && <Button size="small" variant="outlined"
-                        onClick={() => void documentsService.download(e)}>View</Button>}
+                        onClick={() => void documentsService.download(e).then((r) => {
+                          if (!r.ok) setErr(r.error || 'The file could not be fetched.');
+                        })}>View</Button>}
                       {e?.id && e.status !== 'Verified' && !ro && (
                         <Button size="small" variant="outlined" disabled={busy === e.id}
                           onClick={() => void verify(e)}>Verify</Button>

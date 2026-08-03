@@ -159,22 +159,45 @@ export const documentsService = {
     return { ok: true };
   },
 
-  /** The stored bytes, as a download. */
-  async download(entry: DocEntry): Promise<void> {
+  /**
+   * The stored bytes, as a download.
+   *
+   * Reported rather than thrown: a download that quietly does nothing is indistinguishable
+   * from a broken button. The commonest cause is a register configured to REDIRECT to
+   * object storage — the browser is sent to an internal host it cannot resolve — which is
+   * why the compose file streams bytes through the API instead.
+   */
+  async download(entry: DocEntry): Promise<{ ok: boolean; error?: string }> {
     if (entry.data) {                       // mock mode
       const a = document.createElement('a');
       a.href = entry.data; a.download = entry.name;
       document.body.appendChild(a); a.click(); a.remove();
-      return;
+      return { ok: true };
     }
-    if (!entry.id) return;
-    const { default: axiosClient } = await import('../api/axiosClient');
-    const res = await axiosClient.get(`/documents/${entry.id}/content`, { responseType: 'blob' });
-    const url = URL.createObjectURL(res.data as Blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = entry.name;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    if (!entry.id) return { ok: false, error: 'This document has no bytes on the register.' };
+    try {
+      const { default: axiosClient } = await import('../api/axiosClient');
+      const res = await axiosClient.get(`/documents/${entry.id}/content`, { responseType: 'blob' });
+      const blob = res.data as Blob;
+      // A JSON body here is the register answering with a storage REFERENCE rather than
+      // bytes — it means object storage is configured to redirect, and the browser cannot
+      // follow it.
+      if (blob.type.includes('application/json') && blob.size < 2048) {
+        return { ok: false, error: 'The register returned a storage reference instead of the '
+          + 'file. Set REGISTER_S3_STREAM_THROUGH_API=true so documents are served through '
+          + 'the API.' };
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = entry.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      return { ok: true };
+    } catch (e: any) {
+      console.warn('[register] document download failed:', e?.response ?? e);
+      return { ok: false, error: errText(e?.response?.data)
+        || `The file could not be fetched (HTTP ${e?.response?.status ?? 'no response'}).` };
+    }
   },
 
   async remove(code: string, section: string, slotKey: string, entry: DocEntry,

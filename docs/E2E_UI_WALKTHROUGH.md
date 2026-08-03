@@ -180,9 +180,12 @@ Two of those open a screen of their own rather than a generic form, because a fl
 cannot express them honestly:
 
 * **Prepare CP/CS checklist** — a repeating list of conditions, each with type (CP / CS),
-  status, evidence reference and a reason. A waived condition must say why before it will
-  send. The **Version** field starts at 1; raise it when re-preparing after a checker
-  returned the previous one, since the register keys a checklist on (lending, version).
+  status, evidence reference and a reason. The checklist is filed as **Completed**, so
+  every **required CP** must be Completed, Waived (with a reason) or Deferred as CS (with a
+  reason *and* a date) — a required CP left `Pending` is refused, and the dialog blocks on
+  it rather than letting the run die after the screen has closed. The **Version** field
+  starts at 1; raise it when re-preparing after a checker returned the previous one, since
+  the register keys a checklist on (lending, version).
 * **Prepare the Advaya handover package** — tick the executed documents from the company's
   Data Register, add any reference not yet uploaded, name the recipient and the delivery
   method.
@@ -220,6 +223,12 @@ than swallowed. A status chip on each row reads `On File`, `Verified` or `Reject
 
 A company with no register record yet says so, and uploads stay session-only until it has
 one.
+
+> **View needs `REGISTER_S3_STREAM_THROUGH_API=true`** when documents live in object
+> storage (the compose file sets it). Without it the register 302s the browser to a
+> presigned `http://minio:9000/...` URL — a docker-internal host it cannot resolve — and
+> the download dies silently. Streaming through the API also keeps the one-door posture:
+> everything the browser touches arrives on `:8443`.
 
 ---
 
