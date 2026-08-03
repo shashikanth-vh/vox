@@ -10,8 +10,9 @@ import { listAll, USE_REAL_API } from '../api/http';
  */
 
 type DealRef = { code: string; entityId: string | null };
+type EntityRef = { name: string; code: string };
 
-let entityNames = new Map<string, string>();
+let entities = new Map<string, EntityRef>();
 let dealRefs = new Map<string, DealRef>();
 let loadedAt = 0;
 let inflight: Promise<void> | null = null;
@@ -22,9 +23,14 @@ async function load(): Promise<void> {
     listAll('/entities', { key: 'entities' }),
     listAll('/deals', { key: 'deals' }),
   ]);
-  const e = new Map<string, string>();
+  const e = new Map<string, EntityRef>();
   ents.forEach((r: any) => {
-    if (r?.id) e.set(String(r.id), r.display_name || r.legal_name || '');
+    if (!r?.id) return;
+    // The CODE as well as the name: a deal row's "Group Code" is the company's code, and
+    // the company drawer is addressed by it. Without it a converted deal rendered a blank
+    // Group Code and clicking the row opened nothing at all, because the drawer was being
+    // asked to open '' — the deal was on the register and unreachable from the grid.
+    e.set(String(r.id), { name: r.display_name || r.legal_name || '', code: r.code || '' });
   });
   const d = new Map<string, DealRef>();
   deals.forEach((r: any) => {
@@ -33,7 +39,7 @@ async function load(): Promise<void> {
       entityId: r.entity_id ? String(r.entity_id) : null,
     });
   });
-  entityNames = e;
+  entities = e;
   dealRefs = d;
   loadedAt = Date.now();
 }
@@ -45,12 +51,21 @@ async function ensure(): Promise<void> {
   try { await inflight; } catch (e) { console.warn('[api] name lookup failed:', e); }
 }
 
-/** Deals grid: fill the COMPANY column from the row's entity_id. Mutates in place. */
-export async function fillCompanyFromEntity<T extends { _name?: string; entityId?: string }>(rows: T[]): Promise<T[]> {
-  if (rows.some((r) => !r._name && r.entityId)) {
+/**
+ * Deals grid: fill COMPANY and GROUP CODE from the row's entity_id. Mutates in place.
+ *
+ * The code matters as much as the name — it is what the row click passes to the company
+ * drawer. A deal carries `deal_no` only when one was assigned, so on a converted deal
+ * both were blank and the row was a dead end.
+ */
+export async function fillCompanyFromEntity<T extends { _name?: string; code?: string; entityId?: string }>(rows: T[]): Promise<T[]> {
+  if (rows.some((r) => r.entityId && (!r._name || !r.code))) {
     await ensure();
     rows.forEach((r) => {
-      if (!r._name && r.entityId) r._name = entityNames.get(String(r.entityId)) || '';
+      const ref = r.entityId ? entities.get(String(r.entityId)) : undefined;
+      if (!ref) return;
+      if (!r._name) r._name = ref.name;
+      if (!r.code) r.code = ref.code;
     });
   }
   return rows;
@@ -63,8 +78,10 @@ export async function fillFromDeal<T extends { _name?: string; code?: string; de
     rows.forEach((r) => {
       const ref = r.dealId ? dealRefs.get(String(r.dealId)) : undefined;
       if (!ref) return;
-      if (!r.code) r.code = ref.code;
-      if (!r._name && ref.entityId) r._name = entityNames.get(ref.entityId) || '';
+      const ent = ref.entityId ? entities.get(ref.entityId) : undefined;
+      // Prefer the company's group code; a deal number is not what the drawer opens on.
+      if (!r.code) r.code = ent?.code || ref.code;
+      if (!r._name) r._name = ent?.name || '';
     });
   }
   return rows;

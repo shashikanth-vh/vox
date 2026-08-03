@@ -1,7 +1,7 @@
 import { Drawer, Box, Typography, Button, IconButton, Divider, TextField, Stack } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FieldGrid, TextFld, SelectFld, DrawerSection, FieldShell } from '../../components/common/Field';
 import { CodeText, LensPill, TempPill, ProductFlags } from '../../components/common/Pills';
 import { referenceService } from '../../services/referenceService';
@@ -17,6 +17,8 @@ import DataRegisterDialog from './DataRegisterDialog';
 import StageChangeDialog from './StageChangeDialog';
 import type { StageLine } from '../../services/stageRequestService';
 import { useAuth } from '../../auth/AuthContext';
+import { USE_REAL_API } from '../../api/http';
+import { db } from '../../api/atlasStore';
 import ActionsPanel from '../../components/workflow/ActionsPanel';
 import { can } from '../../auth/rbac';
 import { tokens } from '../../theme';
@@ -60,6 +62,20 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   const [stageReq, setStageReq] = useState<{ line: StageLine; refId: string; current: string } | null>(null);
   const [noteText, setNoteText] = useState('');
   const bump = () => { force((n) => n + 1); onChanged(); };
+  // The drawer reads the company and its product lines out of the shared store, which is
+  // filled by whichever grid the user happened to visit. Opened from Deals that store can
+  // be cold, so the drawer would render the group code where the company name belongs and
+  // show no product lines at all. Warm what is missing, once, on open.
+  useEffect(() => {
+    if (!code || !USE_REAL_API) return;
+    const page = { pageIndex: 0, pageSize: 200, globalFilter: '', sorting: [], columnFilters: [] };
+    const jobs: Promise<any>[] = [];
+    if (!db().clients[code]) jobs.push(clientsService.list(page as any));
+    if (!lendingService.byCode(code).length) jobs.push(lendingService.list(page as any));
+    if (!assetMonService.byCode(code).length) jobs.push(assetMonService.list(page as any));
+    if (!syndicationService.byCode(code).length) jobs.push(syndicationService.hydrate());
+    if (jobs.length) Promise.allSettled(jobs).then(() => force((n) => n + 1));
+  }, [code]);
   if (!code) return null;
 
   const c = clientsService.get(code);

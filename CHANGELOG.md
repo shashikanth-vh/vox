@@ -6,6 +6,18 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **A converted deal could not be opened from the Deals grid.** Its GROUP CODE column was
+  blank, and the row click passes that code to the company drawer — so clicking the row
+  asked the drawer to open `''` and nothing happened. The deal was on the register,
+  visible, and unreachable. Two causes, both fixed:
+  * The row's code was read from `deal_no`, which a converted deal does not carry. The
+    Deals grid's "Group Code" is the COMPANY's code, so the resolver now returns the
+    entity's `code` alongside its name and fills both — as it already did for the tracker
+    grids, which took the code from the deal rather than the company for the same reason.
+  * Opened from Deals, the drawer rendered the group code where the company name belongs
+    and showed no product lines: it reads them from the shared store, which is only warm
+    for grids the user has already visited. It now fetches what is missing, once, on open.
+
 - **A greyed control now says who it belongs to.** Row-edit was HIDDEN when the signed-in
   role could not perform it, so an AM RM looking at a lending line saw a control that did
   nothing and no way to tell a permission apart from a bug. The pencil is now rendered
