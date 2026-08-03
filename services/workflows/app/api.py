@@ -2315,16 +2315,33 @@ def create_app() -> FastAPI:
         slug = _tenant_slug(tenant)
         caller_roles: set[str] | None = None
         if _auth_enforced():
-            caller_roles = set()
-            if settings.access_url and _who:
-                with contextlib.suppress(httpx.HTTPError):
-                    role_resp = await request.app.state.http.get(
-                        f"{settings.access_url.rstrip('/')}/v1/resolve",
-                        params={"email": _who},
-                        headers={"X-API-Key": settings.access_api_key,
-                                 "X-Tenant": tenant})
-                    if role_resp.status_code == 200:
-                        caller_roles = set(role_resp.json().get("roles", []))
+            # Role scoping decides what this approver may SEE. If we cannot establish
+            # it, the queue must NOT quietly come back empty: an empty list reads as
+            # "nothing needs you", and an approver who believes that stops looking.
+            # Say so instead — the UI can then show an error, not a clean desk.
+            if not settings.access_url:
+                return _problem(503, "Service unavailable",
+                                "Approver roles cannot be resolved (WORKFLOWS_ACCESS_URL "
+                                "is not configured), so this queue cannot be scoped. It "
+                                "is NOT necessarily empty — fix the configuration and "
+                                "retry.")
+            try:
+                role_resp = await request.app.state.http.get(
+                    f"{settings.access_url.rstrip('/')}/v1/resolve",
+                    params={"email": _who},
+                    headers={"X-API-Key": settings.access_api_key,
+                             "X-Tenant": tenant})
+            except httpx.HTTPError as exc:
+                return _problem(503, "Service unavailable",
+                                "The access service could not be reached to resolve your "
+                                f"approver roles ({exc}); this queue is unscoped, not "
+                                "empty. Retry shortly.")
+            if role_resp.status_code != 200:
+                return _problem(503, "Service unavailable",
+                                "The access service could not resolve your approver roles "
+                                f"(HTTP {role_resp.status_code}); this queue is unscoped, "
+                                "not empty.")
+            caller_roles = set(role_resp.json().get("roles", []))
         client: Client = request.app.state.temporal
         pending: list[dict[str, Any]] = []
         for k, wtype in _PENDING_TYPES.items():
@@ -2410,7 +2427,26 @@ def create_app() -> FastAPI:
                     "return_url": f"{base}/return",
                     "reject_url": f"{base}/reject", **extra})
         pending.sort(key=lambda r: r["started_at"] or "")
-        return {"count": len(pending), "pending": pending}
+        # Always say WHAT the list was scoped to. An empty queue then distinguishes
+        # "nothing is waiting" from "you hold no approver role" — the second one is a
+        # provisioning problem the approver can act on, and it used to be invisible.
+        out: dict[str, Any] = {"count": len(pending), "pending": pending}
+        if caller_roles is not None:
+            # The role prefix comes from the Temporal map for parked runs and from the
+            # queue map for the register-sourced checker kinds.
+            prefixes = {k: _LOOKUP_KINDS[k][0] for k in _PENDING_TYPES}
+            prefixes.update({k: role for k, (_p, role) in _PENDING_REGISTER_QUEUES.items()})
+            approver_kinds = sorted(
+                k for k, prefix in prefixes.items()
+                if caller_roles & _APPROVER_ROLES.get(prefix, set()))
+            out["scoped_to"] = {"email": _who, "roles": sorted(caller_roles),
+                                "approver_for": approver_kinds}
+            if not approver_kinds:
+                out["note"] = (
+                    f"{_who or 'This identity'} holds no approver role in this tenant "
+                    f"(roles: {sorted(caller_roles) or 'none'}), so nothing can appear "
+                    "here. An Admin grants approval authority in Access.")
+        return out
 
     @app.get("/v1/workflows", tags=["Workflows"],
              summary="Find a subject's runs (newest attempt first) — clients never build ids")

@@ -83,12 +83,26 @@ class _FakeTemporal:
 class _FakeHttp:
     """Serves the register checker queues by URL fragment — and HONOURS the ?status=
     filter like the real register does, so a wrong status in the query surfaces as an
-    empty queue here too (that exact mock drift once hid a Prepared-vs-Completed bug)."""
+    empty queue here too (that exact mock drift once hid a Prepared-vs-Completed bug).
 
-    def __init__(self, queues: dict[str, list] | None = None) -> None:
+    ``roles`` (when given) also answers Access's /v1/resolve, so the production
+    identity posture — where the pending list is scoped to the caller's approver
+    roles — can be exercised. ``resolve_status`` forces a failure instead."""
+
+    def __init__(self, queues: dict[str, list] | None = None,
+                 roles: list[str] | None = None,
+                 resolve_status: int | None = None) -> None:
         self.queues = queues or {}
+        self.roles = roles
+        self.resolve_status = resolve_status
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if "/v1/resolve" in str(url):
+            if self.resolve_status is not None:
+                return httpx.Response(self.resolve_status, json={"error": "nope"},
+                                      request=httpx.Request("GET", url))
+            return httpx.Response(200, json={"roles": self.roles or []},
+                                  request=httpx.Request("GET", url))
         parsed = httpx.URL(url)
         want = parsed.params.get("status")
         for frag, rows in self.queues.items():
@@ -98,6 +112,18 @@ class _FakeHttp:
                                       request=httpx.Request("GET", url))
         return httpx.Response(404, json={"error": "nope"},
                               request=httpx.Request("GET", url))
+
+
+class _FakeVerifier:
+    """A stand-in OIDC verifier so the PRODUCTION identity posture can be exercised
+    without a real IdP: every token resolves to this e-mail."""
+
+    def __init__(self, email: str) -> None:
+        self.email = email
+
+    async def verify(self, _token):  # noqa: ANN001
+        from types import SimpleNamespace
+        return SimpleNamespace(email=self.email)
 
 
 def _app(monkeypatch, temporal, http=None):  # noqa: ANN001
@@ -297,3 +323,84 @@ async def test_pending_includes_the_register_checker_queues(monkeypatch):
     # The kind filter reaches the register-sourced kinds too.
     r = await _get_pending(app, {"kind": "cpcs-checklist"})
     assert r.json()["count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# The production posture: the queue is role-scoped — and says so.
+# --------------------------------------------------------------------------- #
+def _prod_app(monkeypatch, temporal, http):  # noqa: ANN001
+    """The orchestrator under the PRODUCTION identity posture (signed context on),
+    with a stand-in OIDC verifier so the caller has a real verified e-mail."""
+    monkeypatch.setenv("WORKFLOWS_INTERNAL_SIGNING_SECRET", "s" * 32)
+    monkeypatch.setenv("WORKFLOWS_ACCESS_URL", "http://access:8000")
+    monkeypatch.setenv("WORKFLOWS_REGISTER_TENANT", "EVAM")
+    get_settings.cache_clear()
+    from app.api import create_app
+
+    app = create_app()
+    app.state.oidc = _FakeVerifier("head@evamfinance.com")
+    app.state.temporal = temporal
+    app.state.http = http
+    return app
+
+
+async def _get_pending_as(app, params=None):  # noqa: ANN001
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://orch"
+    ) as c:
+        return await c.get("/v1/workflows/pending", params=params or {},
+                           headers={"X-Tenant": "EVAM",
+                                    "Authorization": "Bearer any"})
+
+
+async def test_pending_says_why_it_is_empty_for_a_non_approver(monkeypatch):
+    """An approver-less identity gets an empty list WITH the reason. Silence here is
+    the dangerous failure: an empty queue reads as 'nothing needs you', and someone
+    who believes that stops looking for work that is genuinely waiting."""
+    slug = _slug()
+    conv = f"leadconv-{slug}-LEAD1"
+    temporal = _FakeTemporal(
+        known={conv: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending")},
+        types={"LeadConversionWorkflow": [conv]})
+    app = _prod_app(monkeypatch, temporal, _FakeHttp({}, roles=["BDRM"]))
+    r = await _get_pending_as(app)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 0
+    assert body["scoped_to"]["roles"] == ["BDRM"]
+    assert body["scoped_to"]["approver_for"] == []
+    assert "no approver role" in body["note"]
+    get_settings.cache_clear()
+
+
+async def test_pending_is_scoped_and_reports_the_scope(monkeypatch):
+    """A real approver sees their work AND what the list was scoped to — so an empty
+    queue is always distinguishable from a mis-scoped one."""
+    slug = _slug()
+    conv = f"leadconv-{slug}-LEAD1"
+    temporal = _FakeTemporal(
+        known={conv: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending")},
+        types={"LeadConversionWorkflow": [conv]})
+    app = _prod_app(monkeypatch, temporal, _FakeHttp({}, roles=["BD Head"]))
+    r = await _get_pending_as(app)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 1
+    assert "lead-conversion" in body["scoped_to"]["approver_for"]
+    assert "note" not in body
+    get_settings.cache_clear()
+
+
+async def test_pending_refuses_rather_than_faking_an_empty_queue(monkeypatch):
+    """If the roles cannot be resolved at all, the queue is UNSCOPED, not empty —
+    answer 503 so the UI shows an error instead of a clean desk."""
+    slug = _slug()
+    conv = f"leadconv-{slug}-LEAD1"
+    temporal = _FakeTemporal(
+        known={conv: _Desc(WorkflowExecutionStatus.RUNNING, stage="Pending")},
+        types={"LeadConversionWorkflow": [conv]})
+    app = _prod_app(monkeypatch, temporal, _FakeHttp({}, resolve_status=500))
+    r = await _get_pending_as(app)
+    assert r.status_code == 503, r.text
+    assert "not empty" in r.text
+    get_settings.cache_clear()
