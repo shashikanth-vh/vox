@@ -1,4 +1,4 @@
-import { api, asRows, LIST_MAX_LIMIT, USE_REAL_API } from '../api/http';
+import { listAll, USE_REAL_API } from '../api/http';
 
 /**
  * The register keeps grids NORMALISED: a deal row carries entity_id (no company name),
@@ -19,15 +19,15 @@ const TTL_MS = 60_000;
 
 async function load(): Promise<void> {
   const [ents, deals] = await Promise.all([
-    api.get<any>('/entities', { limit: LIST_MAX_LIMIT }),
-    api.get<any>('/deals', { limit: LIST_MAX_LIMIT }),
+    listAll('/entities', { key: 'entities' }),
+    listAll('/deals', { key: 'deals' }),
   ]);
   const e = new Map<string, string>();
-  asRows(ents, 'entities').forEach((r: any) => {
+  ents.forEach((r: any) => {
     if (r?.id) e.set(String(r.id), r.display_name || r.legal_name || '');
   });
   const d = new Map<string, DealRef>();
-  asRows(deals, 'deals').forEach((r: any) => {
+  deals.forEach((r: any) => {
     if (r?.id) d.set(String(r.id), {
       code: r.deal_no || r.code || '',
       entityId: r.entity_id ? String(r.entity_id) : null,

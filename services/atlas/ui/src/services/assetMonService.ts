@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, LIST_MAX_LIMIT } from '../api/http';
+import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -82,8 +82,8 @@ export const assetMonService = {
   async summary() {
     return withFallback(
       async () => {
-        const data = await api.get<any>(AM_PATH, { limit: LIST_MAX_LIMIT });
-        return computeAmSummary(asRows(data, 'asset_monetisation').map(toAmRow));
+        const rows = await listAll(AM_PATH, { key: 'asset_monetisation' });
+        return computeAmSummary(rows.map(toAmRow));
       },
       async () => { await delay(); return computeAmSummary(db().am as AmRow[]); },
     );

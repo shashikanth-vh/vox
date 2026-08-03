@@ -266,6 +266,35 @@ async def test_ref_serves_person_names_from_the_directory(client: AsyncClient):
     assert isinstance((await client.get("/v1/ref/Tenor")).json(), list)
 
 
+async def test_entity_list_pages_through_its_cursor(client: AsyncClient):
+    """One page is NOT the list — `next_cursor` must walk every row.
+
+    ATLAS reads the whole register for its Clients grid. It once asked for `limit=1`,
+    took that page for the answer, and rendered one company out of two: the count was
+    right in the database, right in the audit trail, and wrong on screen. The contract
+    the UI now depends on is pinned here — a tiny page still reaches every row, and the
+    walk terminates.
+    """
+    codes = {f"PG-{i}" for i in range(5)}
+    for code in sorted(codes):
+        r = await client.post("/v1/entities",
+                              json={"code": code, "legal_name": f"Paged {code}"})
+        assert r.status_code == 201, r.text
+
+    seen: list[str] = []
+    cursor, hops = None, 0
+    while True:
+        params = {"limit": 1, **({"cursor": cursor} if cursor else {})}
+        body = (await client.get("/v1/entities", params=params)).json()
+        seen.extend(row["code"] for row in body["items"])
+        cursor, hops = body.get("next_cursor"), hops + 1
+        assert hops <= 20, "the cursor walk did not terminate"
+        if not cursor:
+            break
+    assert codes <= set(seen), f"the walk missed {sorted(codes - set(seen))}"
+    assert len(seen) == len(set(seen)), "the walk returned a row twice"
+
+
 async def test_ref_seeding_reconciles_instead_of_only_adding(client: AsyncClient):
     """Re-seeding must RETIRE values that left a vocabulary, not just add new ones.
 

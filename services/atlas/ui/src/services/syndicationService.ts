@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, asRows, USE_REAL_API, LIST_MAX_LIMIT } from '../api/http';
+import { api, withFallback, remote, asRows, USE_REAL_API, listAll } from '../api/http';
 import { fillFromDeal, fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -80,8 +80,7 @@ let inflight: Promise<void> | null = null;
 const HYDRATE_TTL_MS = 30_000;
 
 async function loadReal(): Promise<void> {
-  const data = await api.get<any>('/syndication', { limit: LIST_MAX_LIMIT });
-  const rows = asRows(data, 'syndication').map(toSynRow);
+  const rows = (await listAll('/syndication', { key: 'syndication' })).map(toSynRow);
   // Join the deal number + company through the deal, else the company via the entity.
   await fillFromDeal(rows as any[]);
   await fillCompanyFromEntity(rows as any[]);

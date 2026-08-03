@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, asRows, USE_REAL_API, LIST_MAX_LIMIT } from '../api/http';
+import { api, withFallback, remote, asRows, USE_REAL_API, listAll } from '../api/http';
 import { syndicationService } from './syndicationService';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
@@ -41,8 +41,8 @@ export const fiService = {
     if (!USE_REAL_API) return;
     const jobs: Promise<any>[] = [syndicationService.hydrate()];
     if (Date.now() - hydratedAt >= HYDRATE_TTL_MS) {
-      jobs.push(api.get<any>('/counterparties', { limit: LIST_MAX_LIMIT }).then((data) => {
-        db().lenders = asRows(data, 'counterparties').map(toFi);
+      jobs.push(listAll('/counterparties', { key: 'counterparties' }).then((rows: any[]) => {
+        db().lenders = rows.map(toFi);
         hydratedAt = Date.now();
       }));
     }

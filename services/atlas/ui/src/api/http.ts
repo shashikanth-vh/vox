@@ -80,6 +80,36 @@ export const gwApi = {
   get: <T>(url: string, params?: Record<string, any>) => gwClient.get<T>(url, { params }).then((r) => r.data),
 };
 
+/**
+ * Read EVERY row of a keyset-paged list endpoint, following `next_cursor`.
+ *
+ * One request returns one page. Treating that page as the whole list is how a register
+ * holding two companies rendered a one-row grid, and the register's `limit` is capped
+ * server-side (`max_page_size`), so asking for a bigger number is a 422 rather than a
+ * bigger page. Every list read that wants "all of it" goes through here.
+ *
+ * `key` names the envelope field for services that answer `{<key>: [...]}`; `params`
+ * carries anything else the endpoint accepts (filters that are known-good — the register
+ * fails CLOSED on an unrecognised query param and rejects the whole list).
+ */
+export async function listAll(
+  url: string, opts: { key?: string; params?: Record<string, any>; max?: number } = {},
+): Promise<any[]> {
+  const { key, params, max = 5000 } = opts;
+  const rows: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const limit = Math.min(LIST_MAX_LIMIT, max - rows.length);
+    if (limit < 1) break;
+    const page: any = await api.get<any>(url, { ...params, limit, ...(cursor ? { cursor } : {}) });
+    rows.push(...asRows(page, key));
+    cursor = nextCursorOf(page) ?? undefined;
+  } while (cursor && rows.length < max);
+  // Never silently short: a truncated list that LOOKS complete is the bug this exists for.
+  if (cursor) console.warn('[api] %s stopped at the %s-row ceiling — later rows are not listed.', url, max);
+  return rows;
+}
+
 export const api = {
   get: <T>(url: string, params?: Record<string, any>) => axiosClient.get<T>(url, { params }).then((r) => r.data),
   post: <T>(url: string, data?: any) => axiosClient.post<T>(url, data).then((r) => r.data),

@@ -10,7 +10,7 @@
 // input for — entity_type, register_status, state, location, cin — is sent with the
 // collection's fixed values.
 
-import { api, errText } from '../api/http';
+import { api, errText, listAll } from '../api/http';
 import { API_BASE_URL } from '../api/axiosClient';
 import type { ClientRow } from '../pages/Clients/client.types';
 
@@ -87,10 +87,18 @@ export function buildEntityPayload(seed: EntitySeed, suffix = runSuffix()): Enti
 /**
  * GET /v1/entities filters FAIL-CLOSED: the collection asserts `?bogus_filter=x`
  * comes back 400/422, so an unknown query param fails the whole list. Only `limit`
- * (proven on /v1/lending, /v1/syndication, /v1/audit) is sent — paging, sorting and
- * search stay client-side through applyQuery, exactly as the mock path does.
+ * and `cursor` (both proven on /v1/lending, /v1/syndication, /v1/audit) are sent —
+ * sorting and search stay client-side through applyQuery, exactly as the mock path does.
+ *
+ * ENTITY_PAGE is the register's own ceiling (`max_page_size`); asking for more is a 422.
+ * It was once set to 1, which is how a register holding two companies rendered a Clients
+ * grid with one row in it — so the list now FOLLOWS THE CURSOR rather than trusting a
+ * single page to be the whole register.
  */
-export const ENTITY_LIMIT = 1;
+export const ENTITY_PAGE = 200;
+
+/** Hard stop, so a large register cannot turn one grid render into endless requests. */
+export const ENTITY_MAX = 5000;
 
 /** List payloads differ by service; accept a bare array or the usual envelopes. */
 function asRows(data: any): any[] {
@@ -138,14 +146,15 @@ export const entitiesService = {
   buildEntityPayload,
   toClientRow,
   /**
-   * GET {{baseUrl}}/v1/entities — the whole register (up to ENTITY_LIMIT), mapped to
-   * client rows. Not paged server-side: see ENTITY_LIMIT on why only `limit` is sent.
+   * GET {{baseUrl}}/v1/entities — the WHOLE register, mapped to client rows.
+   *
+   * The endpoint is keyset-paged, so one request returns one page and `next_cursor`
+   * points at the rest. Following that cursor is the difference between "the whole
+   * register" and "however many rows happened to fit in the first page" — the grid
+   * shows every company or it says so; it never quietly drops the tail.
    */
-  async list(limit = ENTITY_LIMIT): Promise<ClientRow[]> {
-    const rows = asRows(await api.get<any>('/entities', { limit }));
-    // No silent truncation — a full page means there are probably more behind it.
-    if (rows.length >= limit) console.warn('[register] /entities returned the %s-row cap — later entities are not listed.', limit);
-    return rows.map(toClientRow);
+  async list(max = ENTITY_MAX): Promise<ClientRow[]> {
+    return (await listAll('/entities', { key: 'entities', max })).map(toClientRow);
   },
   /** GET {{baseUrl}}/v1/entities/:id/dossier — the entity plus everything hanging off it. */
   async dossier(entityId: string): Promise<any> {

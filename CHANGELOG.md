@@ -6,6 +6,24 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The Clients grid showed one company when the register held two.** `GET /v1/entities`
+  was called with `limit=1` — a constant that should have been the page size and had been
+  set to 1 — and the single page it returned was taken for the whole register. The row
+  was in the database and in the audit trail, and simply never reached the screen.
+  Fixed as a class, not a constant:
+  * A shared `listAll()` in `api/http.ts` FOLLOWS `next_cursor` until the endpoint is
+    exhausted, pages at the register's own `max_page_size` (200), stops at a 5,000-row
+    ceiling and `console.warn`s if that ceiling truncated anything — a short list never
+    passes for a complete one.
+  * Every "read all of it" call now goes through it: entities, people, counterparties,
+    deals, syndication and asset-monetisation. Four of those asked for exactly 200 rows
+    and would have silently dropped the 201st.
+  * `GET /v1/people?limit=500` was a **422** — the register caps `limit` at 200, so
+    asking for more fails the request rather than returning more. That call is the one
+    the RM/Analyst dropdowns depend on, so it now pages properly.
+  * A register-side test walks `/v1/entities` with `limit=1` and asserts the cursor
+    reaches every row without repeats or running away.
+
 - **Every dropdown now comes from the database, and the reference lists match ATLAS
   Forms & Validations v2.1.** The `ref_values` table and `GET /v1/ref` existed, but
   nothing called them — ATLAS read its dropdowns straight out of the bundled seed JSON,

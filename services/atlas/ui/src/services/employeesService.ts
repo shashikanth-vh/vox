@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { withFallback, remote, api, asRows, USE_REAL_API } from '../api/http';
+import { withFallback, remote, listAll, USE_REAL_API } from '../api/http';
 import { accessService, toAccessUser, fromAccessUser } from './accessService';
 import { servedByRegister } from './referenceService';
 import { writeAudit } from './auditService';
@@ -47,7 +47,7 @@ async function hydrateRoster(): Promise<void> {
   if (!USE_REAL_API) return;
   let rows: any[];
   try {
-    rows = asRows(await api.get<any>('/people', { limit: 500 }));
+    rows = await listAll('/people', { key: 'people' });
   } catch (e) {
     console.warn('[api] people roster unavailable — keeping the seeded name lists:', e);
     return;
