@@ -75,12 +75,20 @@ export const workflowActionsService = {
    * in that order, so a form field can never overwrite the subject id it was issued with.
    */
   async run(action: WorkflowAction, values: Record<string, any>): Promise<{ ok: boolean; error?: string; data?: any }> {
+    // `action.body` LAST, always: it carries the subject ids and the identity the plane
+    // filled from the verified caller, and no form value may overwrite either.
     const body: Record<string, any> = { ...values, ...action.body };
     for (const f of action.form) {
       const v = values[f.name];
       if (v === '' || v === undefined || v === null) { delete body[f.name]; continue; }
       body[f.name] = f.type === 'number' ? Number(v) : v;
     }
+    // A bespoke screen (the CP/CS checklist, the handover package) passes a payload the
+    // catalogue's flat `form` cannot describe; those keys pass through untouched.
+    Object.entries(values).forEach(([k, v]) => {
+      if (!action.form.some((f) => f.name === k) && v !== undefined) body[k] = v;
+    });
+    Object.assign(body, action.body);
     try {
       const data = action.method === 'PATCH'
         ? await orchestrator.patch<any>(action.url, body)

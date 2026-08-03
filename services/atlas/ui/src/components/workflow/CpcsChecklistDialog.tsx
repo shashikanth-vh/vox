@@ -5,8 +5,7 @@ import {
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
-import { orchestrator } from '../../api/orchestratorClient';
-import { errText } from '../../api/http';
+import { workflowActionsService, type WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
 
 /**
@@ -45,13 +44,19 @@ const blank = (n: number): CpcsItem => ({
   status: 'Pending', evidence_ref: '', reason: '',
 });
 
-export default function CpcsChecklistDialog({ open, lendingId, dealId, onClose, onDone }: {
-  open: boolean;
-  lendingId: string;
-  dealId?: string;
+/**
+ * Takes the ACTION rather than loose ids. Its `body` already carries `lending_id`,
+ * `deal_id` and — critically — the `requested_by` the plane filled from the verified
+ * caller. Building the body here from scratch is how this screen first shipped, and it
+ * answered `requested_by: Field required` on the very first use: a bespoke screen that
+ * re-derives what the catalogue already provides will always drift from it.
+ */
+export default function CpcsChecklistDialog({ action, onClose, onDone }: {
+  action: WorkflowAction | null;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
+  const open = !!action;
   const [items, setItems] = useState<CpcsItem[]>([]);
   // The maker owns the version: v1 first time, raised when re-preparing after a checker
   // returned the previous one. The register keys the checklist on (lending, version), so
@@ -83,11 +88,9 @@ export default function CpcsChecklistDialog({ open, lendingId, dealId, onClose, 
     if (unexplained >= 0) {
       setErr(`Condition ${unexplained + 1} is waived — say why.`); return;
     }
+    if (!action) return;
     setBusy(true);
-    try {
-      await orchestrator.post('/v1/workflows/cpcs-checklists', {
-        lending_id: lendingId,
-        ...(dealId ? { deal_id: dealId } : {}),
+    const values: Record<string, any> = {
         checklist_version: version,
         ...(note.trim() ? { note: note.trim() } : {}),
         items: named.map((r) => ({
@@ -99,18 +102,17 @@ export default function CpcsChecklistDialog({ open, lendingId, dealId, onClose, 
           ...(r.evidence_ref.trim() ? { evidence_ref: r.evidence_ref.trim() } : {}),
           ...(r.reason.trim() ? { reason: r.reason.trim() } : {}),
         })),
-      });
-      onDone(`CP/CS checklist v${version} sent for checking.`);
-      onClose();
-    } catch (e: any) {
-      setErr(errText(e?.response?.data)
-        || `The workflow plane refused the checklist (HTTP ${e?.response?.status ?? '?'}).`);
-    } finally {
-      setBusy(false);
-    }
+    };
+    // The action's own body wins: it holds the ids and the verified identity, and a form
+    // value must never be able to overwrite either.
+    const r = await workflowActionsService.run({ ...action, form: [] }, values);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'The workflow plane refused the checklist.'); return; }
+    onDone(`CP/CS checklist v${version} sent for checking.`);
+    onClose();
   };
 
-  if (!open) return null;
+  if (!action) return null;
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>

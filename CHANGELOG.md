@@ -6,6 +6,21 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The two bespoke screens were rebuilding the request body themselves, and dropped the
+  identity.** "Prepare CP/CS checklist" answered `requested_by: Field required` on its
+  first real use. The generic action dialog gets `requested_by` from the catalogue — the
+  plane fills it from the verified caller — but the CP/CS and handover screens POSTed
+  directly and re-derived the body from their own props, so they inherited nothing.
+  * Both now take the **action** rather than loose ids, and send through the same path as
+    every other action: the screen contributes the part a flat form cannot express (the
+    condition list, the document set) and the catalogue contributes the ids and the
+    identity.
+  * `action.body` is applied **last** in the merge, so a form value can never overwrite
+    the subject id or the caller identity — checked directly: a payload carrying
+    `requested_by: attacker@example.com` still sends the verified caller's address.
+  A bespoke screen that re-derives what the catalogue already provides will always drift
+  from it; the fix is structural rather than another field added by hand.
+
 - **The CP/CS checklist and the Advaya handover package now have their own screens.**
   These were the two steps a server-described form could not carry — a checklist is a LIST
   of conditions each with evidence, and a handover package names a SET of executed

@@ -5,9 +5,8 @@ import {
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
-import { orchestrator } from '../../api/orchestratorClient';
-import { errText } from '../../api/http';
 import { documentsService } from '../../services/documentsService';
+import { workflowActionsService, type WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
 
 /**
@@ -21,15 +20,19 @@ import { tokens } from '../../theme';
  * Handing a facility to Advaya is a money-movement authorisation, so a different checker
  * approves the package on Today before it can be submitted.
  */
-export default function HandoverPackageDialog({ open, lendingId, code, entityId, onClose, onDone }: {
-  open: boolean;
-  lendingId: string;
+/**
+ * Takes the ACTION, so the ids and the plane-filled `requested_by` come from the
+ * catalogue rather than being rebuilt here — see the note on CpcsChecklistDialog.
+ */
+export default function HandoverPackageDialog({ action, code, entityId, onClose, onDone }: {
+  action: WorkflowAction | null;
   /** The company, for reading its documents as the pick list. */
   code: string;
   entityId?: string;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
+  const open = !!action;
   const [onFile, setOnFile] = useState<{ ref: string; label: string }[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [extra, setExtra] = useState<string[]>([]);
@@ -63,26 +66,21 @@ export default function HandoverPackageDialog({ open, lendingId, code, entityId,
     if (!recipient.trim()) { setErr('Name the recipient at Advaya.'); return; }
     const documents = refs();
     if (!documents.length) { setErr('A handover package must name at least one executed document.'); return; }
+    if (!action) return;
     setBusy(true);
-    try {
-      await orchestrator.post('/v1/workflows/advaya-handover', {
-        lending_id: lendingId,
-        recipient: recipient.trim(),
-        delivery_method: delivery,
-        executed_document_refs: documents,
-        ...(note.trim() ? { note: note.trim() } : {}),
-      });
-      onDone('Handover package prepared and sent for checking.');
-      onClose();
-    } catch (e: any) {
-      setErr(errText(e?.response?.data)
-        || `The workflow plane refused the package (HTTP ${e?.response?.status ?? '?'}).`);
-    } finally {
-      setBusy(false);
-    }
+    const r = await workflowActionsService.run({ ...action, form: [] }, {
+      recipient: recipient.trim(),
+      delivery_method: delivery,
+      executed_document_refs: documents,
+      ...(note.trim() ? { note: note.trim() } : {}),
+    });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'The workflow plane refused the package.'); return; }
+    onDone('Handover package prepared and sent for checking.');
+    onClose();
   };
 
-  if (!open) return null;
+  if (!action) return null;
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="md" fullWidth>

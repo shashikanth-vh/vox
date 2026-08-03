@@ -66,11 +66,10 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
           form the plane sent. The panel does not know what either screen contains. */}
       <ActionFormDialog action={open && !open.screen ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
-      <CpcsChecklistDialog open={open?.screen === 'cpcs-checklist'}
-        lendingId={subjectId} dealId={String(open?.body?.deal_id || '') || undefined}
+      <CpcsChecklistDialog action={open?.screen === 'cpcs-checklist' ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
-      <HandoverPackageDialog open={open?.screen === 'handover-package'}
-        lendingId={subjectId} code={code || ''} entityId={entityId}
+      <HandoverPackageDialog action={open?.screen === 'handover-package' ? open : null}
+        code={code || ''} entityId={entityId}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
     </>
   );
