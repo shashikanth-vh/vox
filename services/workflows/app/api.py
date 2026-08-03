@@ -158,6 +158,17 @@ class LeadConversionIn(BaseModel):
     analyst_id: str | None = None
     note: str | None = None
     approval_timeout_hours: int = Field(default=24 * 7, ge=1, le=24 * 90)
+    # THE CLIENT, when the lead has not been linked to one yet. The Push-to-Deals dialog
+    # collects these ("One save: client + deal + product rows"), and a deal cannot exist
+    # without a company — so the conversion resolves the company by canonical name and
+    # CREATES it when it is genuinely new, exactly as a VOX capture does. Omitted fields
+    # simply are not set on a newly created client; an already-linked lead ignores them.
+    company_name: str | None = Field(default=None, max_length=300)
+    sector: str | None = Field(default=None, max_length=60)
+    lens: str | None = Field(default=None, max_length=20)
+    state: str | None = Field(default=None, max_length=60)
+    industry: str | None = Field(default=None, max_length=200)
+    about: str | None = None
 
     _ids_are_uuids = field_validator("rm_id", "analyst_id")(_uuid_or_none)
 
@@ -469,6 +480,11 @@ class CheckerRejectIn(BaseModel):
     note: str = Field(min_length=1, max_length=2000)
 
 
+# The Push-to-Deals CLIENT fields: consumed by the conversion pre-flight (link-or-create
+# the company) and deliberately NOT carried into workflow history.
+_CLIENT_ONLY_FIELDS = {"company_name", "sector", "lens", "state", "industry", "about"}
+
+
 class CheckerReturnIn(BaseModel):
     """The checker's RETURN-TO-MAKER (CP/CS checklist or handover package): amend and
     come back — non-terminal, the loop continues. The decider is the AUTHENTICATED
@@ -699,6 +715,128 @@ def create_app() -> FastAPI:
             "workflow_id": wf_id, "status": "started",
             "status_url": f"/v1/workflows/{wf_id}"})
 
+    def _delegated_headers(request: Request, who: str, caller: CallerContext,
+                           method: str, path: str) -> dict[str, str]:
+        """Headers that write to the Register AS the verified human — a server-minted,
+        route-bound context in production, forwarded identity headers in dev."""
+        tenant = caller.tenant or (request.headers.get("X-Tenant") or settings.register_tenant)
+        headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+        if settings.internal_signing_secret:
+            from evam_backend_core.internal_token import mint_internal_context
+            headers["X-Internal-Context"] = mint_internal_context(
+                signing_key=settings.internal_signing_secret,
+                algorithm=settings.internal_signing_algorithm,
+                ttl_seconds=max(settings.internal_token_ttl_seconds, 120),
+                tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
+                roles=list(caller.roles), effective_views=caller.effective_views,
+                effective_operations=caller.effective_operations, decision="FULL",
+                method=method, path=path)
+        else:
+            headers["X-User-Email"] = who
+            if caller.user_id:
+                headers["X-User-Id"] = caller.user_id
+            if caller.roles:
+                headers["X-User-Roles"] = ",".join(caller.roles)
+        return headers
+
+    async def _read_lead(request: Request, caller: CallerContext,
+                         lead_id: str) -> tuple[dict, ORJSONResponse | None]:
+        """The lead row, or a problem response naming what went wrong."""
+        try:
+            resp = await request.app.state.http.get(
+                f"{settings.register_base_url.rstrip('/')}/v1/leads/{lead_id}",
+                headers={"X-API-Key": settings.register_api_key,
+                         "X-Tenant": caller.tenant or settings.register_tenant})
+        except httpx.HTTPError as exc:
+            return {}, _problem(503, "Service unavailable",
+                                f"The lead could not be read before starting the run: {exc}")
+        if resp.status_code == 404:
+            return {}, _problem(404, "Not found", f"Lead '{lead_id}' does not exist.")
+        if resp.status_code >= 300:
+            return {}, _problem(502, "Upstream error",
+                                f"The Register refused to read the lead (HTTP "
+                                f"{resp.status_code}).")
+        return resp.json(), None
+
+    async def _settle_lead_company(request: Request, caller: CallerContext, who: str,
+                                   lead_row: dict, payload: LeadConversionIn
+                                   ) -> tuple[str, ORJSONResponse | None]:
+        """Give an unlinked lead its company, the same way a VOX capture does: match the
+        name CANONICALLY against the client master ('Pvt Ltd' == 'Private Limited'), and
+        create the client when it is genuinely new — then link it to the lead. Both writes
+        run AS THE HUMAN, so creating a client still needs their authority.
+
+        Without a company name anywhere, nothing can be resolved — that is the one case
+        the caller must fix, and the message says how."""
+        from app.activities import _canonical, _entity_code
+
+        name = ((payload.company_name or lead_row.get("company") or "").strip())
+        if not name or name == "(unknown)":
+            return "", _problem(
+                422, "Validation failed",
+                f"Lead '{lead_row.get('lead_no') or payload.lead_id}' has no company "
+                "name, and a deal must belong to one. Set the lead's company (or send "
+                "company_name with the conversion) and push it again.")
+        tenant = caller.tenant or settings.register_tenant
+        base = settings.register_base_url.rstrip('/')
+        svc = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+        # 1. Existing client? Canonical comparison, exactly the VOX matching rules.
+        entity_id = ""
+        try:
+            found = await request.app.state.http.get(
+                f"{base}/v1/entities", params={"q": name[:60], "limit": 50}, headers=svc)
+            if found.status_code == 200:
+                wanted = _canonical(name)
+                for row in (found.json() or {}).get("items", []):
+                    for candidate in (row.get("legal_name"), row.get("display_name")):
+                        if candidate and _canonical(candidate) == wanted:
+                            entity_id = str(row["id"])
+                            break
+                    if entity_id:
+                        break
+        except (httpx.HTTPError, KeyError, AttributeError) as exc:
+            return "", _problem(503, "Service unavailable",
+                                f"The client master could not be searched: {exc}")
+        # 2. Genuinely new → create it, as the human (create_client authority applies).
+        if not entity_id:
+            body = {k: v for k, v in {
+                "code": _entity_code(name), "legal_name": name, "display_name": name,
+                "sector": payload.sector, "lens": payload.lens, "state": payload.state,
+                "industry_type": payload.industry, "register_status": "Pipeline",
+                "notes": payload.about or f"Created when lead "
+                                          f"{lead_row.get('lead_no') or ''} was pushed "
+                                          "to deals.",
+            }.items() if v}
+            try:
+                created = await request.app.state.http.post(
+                    f"{base}/v1/entities", json=body,
+                    headers=_delegated_headers(request, who, caller, "POST", "/v1/entities"))
+            except httpx.HTTPError as exc:
+                return "", _problem(502, "Upstream unavailable",
+                                    f"The client could not be created: {exc}")
+            if created.status_code >= 300:
+                ct = created.headers.get("content-type", "")
+                detail = (created.json().get("error", {}).get("detail")
+                          if ct.startswith("application/json") else created.text)
+                return "", _problem(
+                    created.status_code if created.status_code < 500 else 502,
+                    "Client could not be created", str(detail))
+            entity_id = str(created.json()["id"])
+        # 3. Link it to the lead so the conversion (and every later read) sees it.
+        path = f"/v1/leads/{payload.lead_id}"
+        try:
+            linked = await request.app.state.http.patch(
+                f"{base}{path}", json={"entity_id": entity_id},
+                headers=_delegated_headers(request, who, caller, "PATCH", path))
+        except httpx.HTTPError as exc:
+            return "", _problem(502, "Upstream unavailable",
+                                f"The lead could not be linked to its client: {exc}")
+        if linked.status_code >= 300:
+            return "", _problem(502, "Upstream error",
+                                f"The lead could not be linked to its client (HTTP "
+                                f"{linked.status_code}).")
+        return entity_id, None
+
     @app.post("/v1/workflows/lead-conversions", status_code=202, tags=["Workflows"],
               summary="Request a lead→deal conversion (waits for approve/reject)")
     async def start_conversion(payload: LeadConversionIn, request: Request,
@@ -718,36 +856,26 @@ def create_app() -> FastAPI:
             return _problem(403, "Forbidden",
                             "A verified, route-bound caller identity is required to start "
                             "a conversion.")
-        # PRE-FLIGHT: a lead with no company cannot become a deal (the deal's entity_id
-        # is mandatory), and the workflow enforces that a few hundred milliseconds in —
-        # which surfaced as "pending approval" followed by a silent FAILED run and an
-        # empty approver queue. Refuse it HERE, with the fix in the message, so the
-        # caller learns at request time instead of hunting a dead workflow.
-        try:
-            lead_resp = await request.app.state.http.get(
-                f"{settings.register_base_url.rstrip('/')}/v1/leads/{payload.lead_id}",
-                headers={"X-API-Key": settings.register_api_key,
-                         "X-Tenant": caller.tenant or settings.register_tenant})
-        except httpx.HTTPError as exc:
-            return _problem(503, "Service unavailable",
-                            f"The lead could not be read before starting the run: {exc}")
-        if lead_resp.status_code == 404:
-            return _problem(404, "Not found", f"Lead '{payload.lead_id}' does not exist.")
-        if lead_resp.status_code == 200:
-            lead_row = lead_resp.json()
-            if not lead_row.get("entity_id"):
-                return _problem(
-                    422, "Validation failed",
-                    f"Lead '{lead_row.get('lead_no') or payload.lead_id}' "
-                    f"({lead_row.get('company') or 'this lead'}) is not linked to a "
-                    "company, and a deal must belong to one. Link the lead to a client "
-                    "first (Masters → Clients, then set the lead's company), then push "
-                    "it to deals.")
-            if str(lead_row.get("status") or "").lower() == "converted":
-                return _problem(
-                    409, "Conflict",
-                    f"Lead '{lead_row.get('lead_no') or payload.lead_id}' is already "
-                    "Converted; it has left the lead register.")
+        # PRE-FLIGHT: a deal MUST belong to a company, and the workflow enforces that a
+        # few hundred milliseconds in — which surfaced as "pending approval" followed by
+        # a silently FAILED run that reached no approver's queue. Settle the company
+        # HERE: link the existing client, or create it (the Push-to-Deals dialog's
+        # promise — "one save: client + deal + product rows"), or refuse with the remedy.
+        lead_row, err = await _read_lead(request, caller, payload.lead_id)
+        if err is not None:
+            return err
+        if str(lead_row.get("status") or "").lower() == "converted":
+            return _problem(
+                409, "Conflict",
+                f"Lead '{lead_row.get('lead_no') or payload.lead_id}' is already "
+                "Converted; it has left the lead register.")
+        if not lead_row.get("entity_id"):
+            entity_id, err = await _settle_lead_company(
+                request, caller, requested_by, lead_row, payload)
+            if err is not None:
+                return err
+            log.info("conversion_company_linked",
+                     extra={"lead": payload.lead_id, "entity": entity_id})
         wf_id = f"leadconv-{_tenant_slug(caller.tenant)}-{payload.lead_id}"
         # Record the INITIATOR + tenant in the workflow memo so status/result can be scoped
         # to the initiator or an approver — not any same-tenant caller. The real lead_id is
@@ -759,7 +887,10 @@ def create_app() -> FastAPI:
                                  caller=caller,
                                  emit_search_attributes=settings.search_attributes_enabled,
                                  approver_notify=settings.approver_notify_list(),
-                                 **payload.model_dump()),
+                                 # The client fields are settled by the pre-flight above
+                                 # (link-or-create); the workflow reads the company from
+                                 # the lead itself, so they never travel into history.
+                                 **payload.model_dump(exclude=_CLIENT_ONLY_FIELDS)),
                              wf_id, restart_if_closed=True, memo=memo)
         wf_id = handle.id  # may be the #n retry id if a prior attempt had closed
         return ORJSONResponse(status_code=202, content={

@@ -141,6 +141,17 @@ export const conversionService = {
           analyst,
           analyst_id: accessIdOf(analyst),
           note: `Converted from lead ${lead.id} (${lead.company}).`,
+          // THE CLIENT this dialog collects — the "one save: client + deal + product
+          // rows" promise. A deal must belong to a company, and a lead added through
+          // the Add-lead form carries none, so the plane links the matching client or
+          // CREATES it from these fields. (They were previously written only to the
+          // local store, which is why such a conversion died on the workflow plane.)
+          company_name: lead.company,
+          sector: p.client.sector || undefined,
+          lens: p.client.lens || undefined,
+          state: p.client.state || undefined,
+          industry: p.client.toi || undefined,
+          about: p.client.about || undefined,
         });
       } catch (e: any) {
         // The qualification already went through, so say so — a retry re-qualifies.

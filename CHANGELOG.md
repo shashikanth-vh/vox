@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Push to Deals now keeps its promise: "one save — client + deal + product rows".**
+  The dialog collects the CLIENT (segment, state, climate lens, industry, about) but
+  wrote it only to the browser's local store; the register never saw a company, so a
+  UI-added lead had no `entity_id` and its conversion died 0.5 s in (a deal must belong
+  to a company). Now the conversion PRE-FLIGHT settles the company the same way a VOX
+  capture does — canonical name match against the client master ("Pvt Ltd" ==
+  "Private Limited") → link it, or CREATE it from the dialog's fields
+  (`register_status: Pipeline`) → then link the lead — and only then starts the run.
+  Both writes go through the register AS THE HUMAN, so creating a client still needs
+  their authority. The UI sends those fields (`company_name`, `sector`, `lens`,
+  `state`, `industry`, `about`); they are consumed by the pre-flight and never travel
+  into workflow history. A lead with NO company name anywhere is still refused — with
+  the remedy in the message.
+
 - **"Pending approval" that was really a dead run: conversions are now refused at
   the door, and a FAILED run says WHY.** Pushing a UI-created lead to deals answered
   `status: "pending approval"` — then the run FAILED 0.5 s later and never reached any

@@ -7,6 +7,8 @@ the (Temporal-connecting) lifespan.
 
 from __future__ import annotations
 
+import contextlib
+
 import httpx
 import pytest
 
@@ -139,17 +141,35 @@ async def test_conversion_rejects_null_string_lead_id(monkeypatch):
 # Pre-flight: a conversion that CANNOT succeed is refused at the door.
 # --------------------------------------------------------------------------- #
 class _LeadHttp:
-    """Serves GET /v1/leads/{id} with a fixed row (or 404 when row is None)."""
+    """A stand-in Register: serves GET /v1/leads/{id}, the entity search, and records
+    the client-create / lead-link writes the conversion pre-flight makes."""
 
-    def __init__(self, row: dict | None) -> None:
+    def __init__(self, row: dict | None, entities: list | None = None) -> None:
         self.row = row
+        self.entities = entities or []
+        self.created: list[dict] = []
+        self.patched: list[dict] = []
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if "/v1/entities" in str(url):
+            return httpx.Response(200, json={"items": self.entities},
+                                  request=httpx.Request("GET", url))
         if self.row is None:
             return httpx.Response(404, json={"error": "missing"},
                                   request=httpx.Request("GET", url))
         return httpx.Response(200, json=self.row,
                               request=httpx.Request("GET", url))
+
+    async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        body = kwargs.get("json") or {}
+        self.created.append(body)
+        return httpx.Response(201, json={"id": "ent-new", **body},
+                              request=httpx.Request("POST", url))
+
+    async def patch(self, url, **kwargs):  # noqa: ANN001, ANN003
+        self.patched.append(kwargs.get("json") or {})
+        return httpx.Response(200, json={"id": "l1", **(kwargs.get("json") or {})},
+                              request=httpx.Request("PATCH", url))
 
 
 async def _post_conv(app, lead_id="11111111-1111-1111-1111-111111111111"):
@@ -161,17 +181,51 @@ async def _post_conv(app, lead_id="11111111-1111-1111-1111-111111111111"):
                             headers={"X-API-Key": "k", "X-Tenant": "EVAM"})
 
 
-async def test_conversion_refuses_a_lead_with_no_company(monkeypatch):
-    """A lead with no entity_id can never become a deal — the workflow enforced that
-    ~0.5s in, so the caller got "pending approval" and then a silently FAILED run that
-    never reached any approver's queue. Refuse at the door, and say how to fix it."""
+async def test_conversion_creates_the_client_for_an_unlinked_lead(monkeypatch):
+    """The Push-to-Deals promise — "one save: client + deal + product rows". A lead with
+    no entity_id used to start a run that FAILED 0.5s later (a deal must belong to a
+    company) and reached no approver. Now the client is created from the lead's company
+    and linked, so the conversion proceeds."""
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
-    app.state.http = _LeadHttp({"id": "l1", "lead_no": "LD-139", "company": "mukesh",
+    http = _LeadHttp({"id": "l1", "lead_no": "LD-139", "company": "Solar Mukesh",
+                      "entity_id": None, "status": "Active"})
+    app.state.http = http
+    # Temporal is absent here, so the START raises after the pre-flight — which is exactly
+    # what these assertions cover: the company is settled BEFORE any run is attempted.
+    with contextlib.suppress(Exception):
+        await _post_conv(app)
+    assert http.created and http.created[0]["legal_name"] == "Solar Mukesh"
+    assert http.created[0]["register_status"] == "Pipeline"
+    assert http.patched and http.patched[0]["entity_id"] == "ent-new"
+    get_settings.cache_clear()
+
+
+async def test_conversion_links_an_existing_client_canonically(monkeypatch):
+    """A near-name match reuses the EXISTING client instead of minting a near-duplicate:
+    'Solar Mukesh Pvt Ltd' is the same company as 'Solar Mukesh Private Limited'."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    http = _LeadHttp({"id": "l1", "lead_no": "LD-139",
+                      "company": "Solar Mukesh Pvt Ltd", "entity_id": None,
+                      "status": "Active"},
+                     entities=[{"id": "ent-existing",
+                                "legal_name": "Solar Mukesh Private Limited"}])
+    app.state.http = http
+    with contextlib.suppress(Exception):
+        await _post_conv(app)
+    assert not http.created                       # nothing new was minted
+    assert http.patched[0]["entity_id"] == "ent-existing"
+    get_settings.cache_clear()
+
+
+async def test_conversion_refuses_a_lead_with_no_company_name(monkeypatch):
+    """The one case that cannot be settled: no company NAME anywhere. Refused at the
+    door with the remedy, never as a dead workflow."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _LeadHttp({"id": "l1", "lead_no": "LD-139", "company": "",
                                 "entity_id": None, "status": "Active"})
     r = await _post_conv(app)
     assert r.status_code == 422, r.text
-    assert "not linked to a company" in r.text
-    assert "LD-139" in r.text                      # names the lead the user is looking at
+    assert "no company name" in r.text and "LD-139" in r.text
     get_settings.cache_clear()
 
 

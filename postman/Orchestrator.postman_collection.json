@@ -1025,7 +1025,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amount_cr\": 1.0,\n  \"analyst\": \"sample analyst\",\n  \"analyst_id\": \"{{id}}\",\n  \"approval_timeout_hours\": 1,\n  \"is_asset_mon\": false,\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"lead_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"product_type\": \"sample product_type\",\n  \"requested_by\": \"sample requested_by\",\n  \"rm\": \"sample rm\",\n  \"rm_id\": \"{{id}}\"\n}",
+              "raw": "{\n  \"about\": \"sample about\",\n  \"amount_cr\": 1.0,\n  \"analyst\": \"sample analyst\",\n  \"analyst_id\": \"{{id}}\",\n  \"approval_timeout_hours\": 1,\n  \"company_name\": \"sample company_name\",\n  \"industry\": \"sample industry\",\n  \"is_asset_mon\": false,\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"lead_id\": \"{{id}}\",\n  \"lens\": \"sample lens\",\n  \"note\": \"sample note\",\n  \"product_type\": \"sample product_type\",\n  \"requested_by\": \"sample requested_by\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

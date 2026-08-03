@@ -1058,6 +1058,17 @@
       "LeadConversionIn": {
         "additionalProperties": false,
         "properties": {
+          "about": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "About"
+          },
           "amount_cr": {
             "anyOf": [
               {
@@ -1099,6 +1110,30 @@
             "title": "Approval Timeout Hours",
             "type": "integer"
           },
+          "company_name": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry"
+          },
           "is_asset_mon": {
             "default": false,
             "title": "Is Asset Mon",
@@ -1117,6 +1152,18 @@
           "lead_id": {
             "title": "Lead Id",
             "type": "string"
+          },
+          "lens": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lens"
           },
           "note": {
             "anyOf": [
@@ -1168,6 +1215,30 @@
               }
             ],
             "title": "Rm Id"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
           }
         },
         "required": [
