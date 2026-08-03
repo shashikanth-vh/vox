@@ -300,3 +300,53 @@ def test_screen_backed_actions_are_offered_and_name_their_screen():
         ok, reason = ev(spec, roles={"Credit Head"},
                         stage=next(iter(spec["stages"])), run_state="none")
         assert ok, (key, reason)
+
+
+async def test_cpcs_version_is_served_not_guessed(monkeypatch):
+    """The screen opens on the NEXT version.
+
+    A checklist is keyed on (lending, version). A client that always defaults to 1 makes
+    the user fill in the whole form and THEN get `A CP/CS checklist v1 already exists`.
+    The plane knows the answer, so it answers.
+    """
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+
+    class _WithChecklists(_Http):
+        async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+            if "cpcs-checklists" in str(url):
+                return httpx.Response(200, json={"items": [{"checklist_version": 1},
+                                                           {"checklist_version": 2}]},
+                                      request=httpx.Request("GET", url))
+            return await super().get(url, **kwargs)
+
+    app.state.http = _WithChecklists({"id": "22222222-2222-2222-2222-222222222222",
+                                      "deal_id": "33333333-3333-3333-3333-333333333333",
+                                      "stage": "Sanctioned"})
+    r = await _get(app, {"subject_type": "Lending",
+                         "subject_id": "22222222-2222-2222-2222-222222222222"})
+    assert r.status_code == 200, r.text
+    prepare = next(a for a in r.json()["actions"] if a["key"] == "cpcs.prepare")
+    version = next(f for f in prepare["form"] if f["name"] == "checklist_version")
+    assert version["default"] == 3, "v1 and v2 exist, so the next one is 3"
+    get_settings.cache_clear()
+
+
+async def test_cpcs_version_starts_at_one_on_a_fresh_line(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+
+    class _NoChecklists(_Http):
+        async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+            if "cpcs-checklists" in str(url):
+                return httpx.Response(200, json={"items": []},
+                                      request=httpx.Request("GET", url))
+            return await super().get(url, **kwargs)
+
+    app.state.http = _NoChecklists({"id": "22222222-2222-2222-2222-222222222222",
+                                    "deal_id": "33333333-3333-3333-3333-333333333333",
+                                    "stage": "Sanctioned"})
+    r = await _get(app, {"subject_type": "Lending",
+                         "subject_id": "22222222-2222-2222-2222-222222222222"})
+    prepare = next(a for a in r.json()["actions"] if a["key"] == "cpcs.prepare")
+    version = next(f for f in prepare["form"] if f["name"] == "checklist_version")
+    assert version["default"] == 1
+    get_settings.cache_clear()

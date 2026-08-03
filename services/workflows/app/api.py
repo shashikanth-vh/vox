@@ -2956,6 +2956,19 @@ def create_app() -> FastAPI:
                                 "stage": business,
                                 "status_url": f"/v1/workflows/{workflow_id}"}
 
+        # The NEXT CP/CS version, so the screen opens on it. A checklist is keyed on
+        # (lending, version), so a client that always defaults to 1 hands the user a 409
+        # after they have filled the whole form in — the plane knows the answer, so it
+        # gives it rather than letting them guess.
+        next_version = 1
+        if subject_type == "Lending":
+            existing, _ = await _register_get_as(
+                request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
+                who, caller)
+            rows = existing.get("items") if isinstance(existing, dict) else existing
+            versions = [int(r.get("checklist_version") or 0) for r in (rows or [])]
+            next_version = (max(versions) + 1) if versions else 1
+
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
             enabled, reason = _evaluate_action(spec, roles=roles, stage=stage,
@@ -2971,6 +2984,10 @@ def create_app() -> FastAPI:
             for key in _IDENTITY_FIELDS:
                 if key in _IDENTITY_FOR.get(spec["key"], ()):
                     body[key] = who
+            form = spec["form"]
+            if spec["key"] == "cpcs.prepare":
+                form = [{**f, "default": next_version} if f["name"] == "checklist_version"
+                        else f for f in form]
             actions.append({
                 "key": spec["key"], "label": spec["label"], "method": spec["method"],
                 "url": url, "enabled": enabled,
@@ -2978,7 +2995,7 @@ def create_app() -> FastAPI:
                 # client builds its dialog from `form`.
                 **({"screen": spec["screen"]} if spec.get("screen") else {}),
                 **({"reason": reason} if not enabled else {}),
-                "body": body, "form": spec["form"],
+                "body": body, "form": form,
             })
         return {
             "subject": {"type": subject_type, "id": subject_id, "stage": stage},

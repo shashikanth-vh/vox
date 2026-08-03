@@ -72,8 +72,13 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     if (!open) return;
     setItems(STARTER.map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '',
                                    expiry_date: '' })));
-    setVersion(1); setNote(''); setErr(''); setBusy(false);
-  }, [open]);
+    // The plane knows which version comes next — a checklist is keyed on (lending,
+    // version), so opening on 1 every time hands the user a 409 after they have filled
+    // the whole form in.
+    const served = action?.form.find((f) => f.name === 'checklist_version')?.default;
+    setVersion(Number(served) > 0 ? Number(served) : 1);
+    setNote(''); setErr(''); setBusy(false);
+  }, [open, action]);
 
   const set = (i: number, patch: Partial<CpcsItem>) =>
     setItems((rows) => rows.map((r, n) => (n === i ? { ...r, ...patch } : r)));

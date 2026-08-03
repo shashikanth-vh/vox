@@ -6,6 +6,15 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The CP/CS screen opens on the NEXT version, instead of always 1.** A checklist is
+  keyed on (lending, version), so a client that defaults to 1 lets the user fill in the
+  whole form and only then answers `A CP/CS checklist v1 already exists — open a new
+  version` (409). The plane knows the answer: `GET /v1/workflows/actions` now reads the
+  line's existing checklists and serves the next version as the field's default. Fresh
+  line → 1; after a return on v2 → 3.
+  This is the same principle as the rest of the catalogue — anything the server can
+  determine, it determines, rather than letting a client guess and be corrected.
+
 - **Approving the CP/CS checklist left the line on `Sanctioned` with nothing explaining
   why.** Reaching `CP/CS Completed` needs TWO governance evidences —
   **`cp_cs_completion`** and **`executed_agreement`** — and approving the checklist filed
