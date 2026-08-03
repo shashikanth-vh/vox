@@ -48,7 +48,8 @@ export const lendingService = {
         // cursor and `q` are only sent once the user pages or searches, so the first
         // load is exactly the request the collection makes.
         const data = await api.get<any>('/lending', toCursorParams(q));
-        const rows = asRows(data, 'lending').map(toLendingRow).filter((r) => inScope(scope ?? null, r));
+        // No inScope here: the register already scoped this list (see auth/rbac.ts).
+        const rows = asRows(data, 'lending').map(toLendingRow);
         // The wire row carries deal_id only — join the deal number + company in.
         await fillFromDeal(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };

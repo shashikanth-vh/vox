@@ -133,6 +133,33 @@ async def test_conversion_is_idempotent(client: AsyncClient):
     assert deals["total"] == 1
 
 
+async def test_bdrm_lists_the_lead_they_created_whoever_it_names(client: AsyncClient):
+    """Own book: an RM sees a lead they created even when its `rm` field names someone
+    else — the row is theirs because they created it, not because of a string match.
+
+    ATLAS relied on the opposite: it re-filtered the register's answer client-side on
+    `rm == <sign-in display name>`, so a BDRM's own new lead disappeared from her Leads
+    tab whenever the field held a different spelling of her name. The register's scope
+    is the wider, correct one, and this pins it.
+    """
+    rm = _as("priya@evamfinance.com", "BDRM", uuid.uuid4())
+    eid = (await client.post("/v1/entities", json={
+        "code": f"OWNB-{uuid.uuid4().hex[:6]}", "legal_name": "Own Book Co"},
+        headers=rm)).json()["id"]
+    mine = await client.post("/v1/leads", json={
+        "company": "Own Book Co", "entity_id": eid, "rm": "Somebody Else"}, headers=rm)
+    assert mine.status_code == 201, mine.text
+
+    listed = await client.get("/v1/leads", headers=rm)
+    assert listed.status_code == 200, listed.text
+    assert mine.json()["id"] in {row["id"] for row in listed.json()["items"]}
+
+    # ...and it is genuinely scoped: another BDRM's book does not contain it.
+    other = _as("nikhil@evamfinance.com", "BDRM", uuid.uuid4())
+    theirs = await client.get("/v1/leads", headers=other)
+    assert mine.json()["id"] not in {row["id"] for row in theirs.json()["items"]}
+
+
 async def test_scoped_convert_needs_exact_assignment(client: AsyncClient):
     # Lead created by a machine caller (created_by != the BDRM) and NOT assigned to them.
     eid = (await client.post("/v1/entities",

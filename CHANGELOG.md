@@ -6,6 +6,20 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **An RM could not see the lead she had just created.** The register scoped the list
+  correctly and returned it; ATLAS then re-filtered that answer a SECOND time,
+  client-side, keeping only rows whose `rm` field string-matched the signed-in user's
+  display name. Any other spelling — the person's full name, a different RM named on the
+  row, a lead created on someone else's behalf — and the row was dropped after the
+  register had granted it. An Admin saw it because Admins skip the filter entirely.
+  The client-side pass is now MOCK-MODE ONLY, on Leads, Deals, Lending and Asset
+  Monetisation alike. The register's rule is both authoritative and much wider: a row is
+  yours through an assignment, through any line of the same company, **because you
+  created it**, because it belongs to someone who reports to you, or because you are the
+  vertical Head of an unassigned line. A register-side test pins it — a BDRM lists a lead
+  they created even when its `rm` names someone else, and another BDRM still does not
+  see it.
+
 - **"Already on the register as DEF-312035" — for a company the register did not hold.**
   Add-client checked for duplicates against the BROWSER's client cache instead of the
   register. That cache is never pruned when a row leaves the register (recreating the

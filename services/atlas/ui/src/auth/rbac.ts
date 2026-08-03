@@ -180,7 +180,18 @@ export function scopeFor(role: RoleInput, view: string, userName: string): RowSc
   return { fields: SCOPE_FIELDS[view] || ['rm'], names: [userName] };
 }
 
-// Does a single row fall inside a scope? (fields OR-matched against names.)
+/**
+ * Does a single row fall inside a scope? (fields OR-matched against names.)
+ *
+ * MOCK MODE ONLY — see the services, which apply this to the bundled store and never to
+ * an API response. On the platform the register is the authority on scope, and its rule
+ * is far wider than this one: a row is yours through an assignment, through any line of
+ * the same company, because YOU CREATED IT, because it belongs to someone who reports to
+ * you, or because you are the vertical Head of an unassigned line. Re-applying this
+ * name-equality test on top of that answer silently threw rows away — an RM's own new
+ * lead vanished from her Leads tab because the `rm` field held a different spelling of
+ * her name than her sign-in display name.
+ */
 export function inScope(scope: RowScope | null, row: any): boolean {
   if (!scope) return true;
   return scope.fields.some((f) => scope.names.includes((row?.[f] ?? '').toString()));

@@ -45,7 +45,8 @@ export const dealsService = {
         // carries the previous page's cursor, so one page comes back and applyQuery must
         // NOT re-slice it. Search goes up as `q`; the total comes from with_total.
         const data = await api.get<any>('/deals', toCursorParams(q));
-        const rows = asRows(data, 'deals').map(toDealRow).filter((d) => inScope(scope ?? null, d));
+        // No inScope here: the register already scoped this list (see auth/rbac.ts).
+        const rows = asRows(data, 'deals').map(toDealRow);
         // The wire row carries entity_id, not a company name — join it in for the grid.
         await fillCompanyFromEntity(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };

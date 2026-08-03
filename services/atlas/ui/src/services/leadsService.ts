@@ -173,7 +173,8 @@ export const leadsService = {
         // Wire rows are snake_case, so they are mapped to Lead before the grid sees
         // them — otherwise every accessorKey (id, temp, last, next) reads undefined
         // and the ID column shows a raw UUID instead of lead_no.
-        const rows = asRows(data, 'leads').map(toLeadRow).filter((l) => inScope(scope ?? null, l));
+        // No inScope here: the register already scoped this list (see auth/rbac.ts).
+        const rows = asRows(data, 'leads').map(toLeadRow);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {

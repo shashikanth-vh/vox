@@ -64,7 +64,8 @@ export const assetMonService = {
         // Server-paged like the other registers: `limit` is the table's page size and
         // Next carries the previous page's cursor, so applyQuery must NOT re-slice it.
         const data = await api.get<any>(AM_PATH, toCursorParams(q));
-        const rows = asRows(data, 'asset_monetisation').map(toAmRow).filter((r) => inScope(scope ?? null, r));
+        // No inScope here: the register already scoped this list (see auth/rbac.ts).
+        const rows = asRows(data, 'asset_monetisation').map(toAmRow);
         // The wire row carries deal_id only — join the deal number + company in.
         await fillFromDeal(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
