@@ -173,7 +173,9 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # The checklist is a LIST of conditions, each with its own evidence — a flat
             # form cannot express it honestly, so it waits for its own screen rather than
             # shipping a JSON box that looks like a feature.
-            "needs_screen": "the CP/CS checklist screen",
+            # A checklist is a LIST of conditions with evidence — the client renders its
+            # own screen for this rather than the generic form.
+            "screen": "cpcs-checklist",
             "prefill": {"lending_id": "id"},
             "form": [_f("checklist_version", "Version", "number", default=1),
                      _NOTE],
@@ -184,7 +186,9 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST", "url": "/v1/workflows/advaya-handover",
             "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed", "Ready for Disbursement"},
             "stage_reason": "Available once the CP/CS checklist has been approved.",
-            "needs_screen": "the handover package screen",
+            # The package names a SET of executed documents, picked against what is
+            # actually on the company's file.
+            "screen": "handover-package",
             "prefill": {"lending_id": "id"},
             "form": [_f("recipient", "Recipient", required=True),
                      _f("delivery_method", "Delivery", "select", required=True,
@@ -334,9 +338,9 @@ def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
     stages = action.get("stages")
     if stages is not None and stage and stage not in stages:
         return False, action.get("stage_reason", f"Not available at stage '{stage}'.")
-    screen = action.get("needs_screen")
-    if screen:
-        return False, (f"This step needs {screen}, which is not built yet — drive it from "
+    waiting = action.get("needs_screen")
+    if waiting:
+        return False, (f"This step needs {waiting}, which is not built yet — drive it from "
                        "the API collection for now.")
     want_run = action.get("run")
     if want_run == "none" and run_state != "none":
@@ -2909,6 +2913,9 @@ def create_app() -> FastAPI:
             actions.append({
                 "key": spec["key"], "label": spec["label"], "method": spec["method"],
                 "url": url, "enabled": enabled,
+                # Named screen for the steps a flat form cannot express; absent means the
+                # client builds its dialog from `form`.
+                **({"screen": spec["screen"]} if spec.get("screen") else {}),
                 **({"reason": reason} if not enabled else {}),
                 "body": body, "form": spec["form"],
             })

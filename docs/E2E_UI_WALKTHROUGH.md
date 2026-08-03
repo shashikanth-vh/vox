@@ -176,6 +176,19 @@ On a **Lending** line: `Send to credit committee` · `File a revised credit note
 `Prepare CP/CS checklist` · `Prepare the Advaya handover package` ·
 `Submit the handover to Advaya` · `Record an Advaya confirmation`.
 
+Two of those open a screen of their own rather than a generic form, because a flat form
+cannot express them honestly:
+
+* **Prepare CP/CS checklist** — a repeating list of conditions, each with type (CP / CS),
+  status, evidence reference and a reason. A waived condition must say why before it will
+  send. The **Version** field starts at 1; raise it when re-preparing after a checker
+  returned the previous one, since the register keys a checklist on (lending, version).
+* **Prepare the Advaya handover package** — tick the executed documents from the company's
+  Data Register, add any reference not yet uploaded, name the recipient and the delivery
+  method.
+
+Both go to a *different* checker on Today. You cannot approve your own.
+
 On **Platform Deals**: `Start the mandate run` · `Record a lender response` ·
 `Allocate the sanctioned amounts`.
 

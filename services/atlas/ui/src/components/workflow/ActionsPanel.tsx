@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Stack, Tooltip, Typography, Alert } from '@mui/material';
 import ActionFormDialog from './ActionFormDialog';
+import CpcsChecklistDialog from './CpcsChecklistDialog';
+import HandoverPackageDialog from './HandoverPackageDialog';
 import { workflowActionsService, type SubjectActions, type SubjectType, type WorkflowAction }
   from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -15,9 +17,12 @@ import { tokens } from '../../theme';
  * dropdown, which offered four stages the register would always refuse and explained
  * none of them.
  */
-export default function ActionsPanel({ subjectType, subjectId }: {
+export default function ActionsPanel({ subjectType, subjectId, code, entityId }: {
   subjectType: SubjectType;
   subjectId: string;
+  /** The company — the handover package picks its documents from that file. */
+  code?: string;
+  entityId?: string;
 }) {
   const [data, setData] = useState<SubjectActions | null>(null);
   const [open, setOpen] = useState<WorkflowAction | null>(null);
@@ -57,8 +62,16 @@ export default function ActionsPanel({ subjectType, subjectId }: {
           </Tooltip>
         ))}
       </Stack>
-      <ActionFormDialog action={open} onClose={() => setOpen(null)}
-        onDone={(m) => { setDone(m); load(); }} />
+      {/* A step with its own screen opens that screen; everything else is built from the
+          form the plane sent. The panel does not know what either screen contains. */}
+      <ActionFormDialog action={open && !open.screen ? open : null}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <CpcsChecklistDialog open={open?.screen === 'cpcs-checklist'}
+        lendingId={subjectId} dealId={String(open?.body?.deal_id || '') || undefined}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <HandoverPackageDialog open={open?.screen === 'handover-package'}
+        lendingId={subjectId} code={code || ''} entityId={entityId}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
     </>
   );
 }

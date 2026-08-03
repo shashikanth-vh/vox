@@ -39,11 +39,11 @@ def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
                              run_state="none")
     assert ok
 
-    # And the step whose own screen does not exist yet says exactly that, rather than
+    # And a step whose own screen does not exist yet says exactly that, rather than
     # pretending to be one stage away.
-    ok, reason = _evaluate_action(_action("cpcs.prepare"), roles={"Credit Head"},
-                                  stage="Sanctioned", run_state="none")
-    assert not ok and "CP/CS checklist screen" in reason
+    pending = _action("syndication.allocate", "Syndication")
+    ok, reason = _evaluate_action(pending, roles={"Syn Head"}, stage="", run_state="live")
+    assert not ok and "not built yet" in reason
 
 
 def test_role_gate_names_who_does_the_step():
@@ -256,9 +256,12 @@ def test_every_action_matches_its_endpoints_schema():
             # them is allowed only if it is gated off pending its own screen.
             missing = required - sent
             if missing:
-                assert spec.get("needs_screen"), (
+                # A dedicated screen collects what a flat form cannot (a checklist's
+                # items, a package's document set); anything with neither a screen nor a
+                # field for a required key would fail on first use.
+                assert spec.get("screen") or spec.get("needs_screen"), (
                     f"{spec['key']} ({subject}) cannot satisfy required {sorted(missing)} "
-                    "and is not gated behind a screen")
+                    "and has no screen to collect it")
 
 
 def test_identity_is_server_filled_and_never_asked_of_the_user():
@@ -282,3 +285,18 @@ def test_actions_needing_a_screen_are_offered_but_disabled():
         ok, reason = ev(spec, roles={"Admin"}, stage=next(iter(spec.get("stages") or {""})),
                         run_state="returned" if spec.get("run") == "returned" else "live")
         assert not ok and "not built yet" in reason, spec["key"]
+
+
+def test_screen_backed_actions_are_offered_and_name_their_screen():
+    """The CP/CS checklist and the handover package have their own screens now, so they
+    must be OFFERED (not gated) and must tell the client which screen to open."""
+    from app.api import _evaluate_action as ev
+
+    for key, screen in (("cpcs.prepare", "cpcs-checklist"),
+                        ("handover.prepare", "handover-package")):
+        spec = _action(key)
+        assert spec.get("screen") == screen
+        assert not spec.get("needs_screen"), f"{key} still gated behind a missing screen"
+        ok, reason = ev(spec, roles={"Credit Head"},
+                        stage=next(iter(spec["stages"])), run_state="none")
+        assert ok, (key, reason)

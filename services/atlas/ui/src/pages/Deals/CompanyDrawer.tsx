@@ -192,7 +192,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
             </FieldGrid>
             {/* What the workflow plane says this user may do next on this
                 line — served, not guessed. */}
-            <ActionsPanel subjectType="Lending" subjectId={r.id} />
+            <ActionsPanel subjectType="Lending" subjectId={r.id} code={code} entityId={(c as any)?.entityId} />
             <Box sx={{ mt: 1 }}><TextFld label="Remarks" value={r.remarks} disabled={roLend} onChange={(v) => updL(r.id, 'remarks', v)} multiline /></Box>
           </DrawerSection>
         ))}

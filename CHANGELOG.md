@@ -6,6 +6,25 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The CP/CS checklist and the Advaya handover package now have their own screens.**
+  These were the two steps a server-described form could not carry — a checklist is a LIST
+  of conditions each with evidence, and a handover package names a SET of executed
+  documents — so they were listed, greyed, and honest about waiting. They are now built,
+  and the catalogue names the screen for the client to open (`screen: "cpcs-checklist"` /
+  `"handover-package"`) instead of refusing.
+  * **CP/CS checklist**: repeating conditions with type (CP/CS), required/optional,
+    status, evidence reference and reason; opens with the conditions almost every sanction
+    carries; a waived condition must say why before it will send; the **Version** field
+    starts at 1 and is raised when re-preparing after a return, because the register keys
+    a checklist on (lending, version).
+  * **Handover package**: picks the executed documents from the company's Data Register —
+    which only became possible once documents actually reached the register — plus any
+    reference not yet uploaded, the recipient and the delivery method.
+  Both go to a DIFFERENT checker on Today; neither dialog offers to approve what it just
+  filed. Still waiting for their own screens, and still saying so: lender and buyer
+  updates (addressed by a row id from the run's internal state) and syndication
+  allocation.
+
 - **The maker Actions catalogue was written from endpoint NAMES, not their schemas.**
   "Send to credit committee" answered `requested_by: Field required; amount_cr: Extra
   inputs are not permitted` — and most of the other actions would have failed the same
