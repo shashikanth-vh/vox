@@ -6,6 +6,24 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Approving the CP/CS checklist left the line on `Sanctioned` with nothing explaining
+  why.** Reaching `CP/CS Completed` needs TWO governance evidences —
+  **`cp_cs_completion`** and **`executed_agreement`** — and approving the checklist filed
+  neither. The approval succeeded, the stage did not move, and nothing on screen said what
+  was outstanding.
+  * **`cp_cs_completion` is now minted by the approval itself.** It is DERIVED from the
+    approved checklist — the register verifies the citation and refuses one not backed by
+    an approved, four-eyes checklist — so there is nothing for a human to type. Approving
+    is the act; the evidence is its record. If the mint fails the response says the
+    checklist IS approved and the evidence is not, so nobody re-approves hoping for a
+    different outcome.
+  * **New action: "Record the executed agreement"** on a Sanctioned line — the one part
+    only a human can attest. Its **SHA-256 digest is mandatory**, because the register
+    treats an executed agreement as governance evidence and governance evidence must be
+    tamper-evident (verified against a live register: without a digest it answers 422).
+  With both on file the stage moves to `CP/CS Completed`, and the register's refusal
+  already names whichever is missing.
+
 - **"Send for checking" reported success while the run died seconds later.** A CP/CS
   checklist is filed as **Completed**, and the register refuses a Completed checklist that
   leaves a required CP `Pending` — but that refusal happened inside the workflow, after the

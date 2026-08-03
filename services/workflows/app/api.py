@@ -17,6 +17,8 @@ Run it:  python -m app.api   (same image as the worker; a second container/deplo
 from __future__ import annotations
 
 import contextlib
+
+import orjson
 import hashlib
 import hmac
 import re
@@ -181,6 +183,27 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _NOTE],
         },
         {
+            "key": "evidence.executed-agreement",
+            "label": "Record the executed agreement",
+            "method": "POST", "url": "/v1/evidence",
+            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
+            "stage_reason": "Filed once the facility is sanctioned and the agreement signed.",
+            # 'CP/CS Completed' needs TWO evidences: cp_cs_completion, which the checklist
+            # approval mints by itself, and this one — the signed facility agreement, which
+            # only a human can attest. Without it an approved checklist leaves the line on
+            # 'Sanctioned' with nothing on screen explaining why.
+            "constant": {"subject_type": "Lending", "evidence_kind": "executed_agreement"},
+            "prefill": {"subject_id": "id"},
+            # The digest is MANDATORY: the register treats an executed agreement as
+            # governance evidence, and governance evidence must be tamper-evident.
+            "form": [_f("reference", "Agreement reference", required=True,
+                        placeholder="Facility agreement / execution reference"),
+                     _f("sha256", "Document digest (SHA-256)", required=True,
+                        help_text="The signed agreement's SHA-256 — this is what makes the "
+                                  "evidence tamper-evident, so the register requires it."),
+                     _NOTE],
+        },
+        {
             "key": "handover.prepare",
             "label": "Prepare the Advaya handover package",
             "method": "POST", "url": "/v1/workflows/advaya-handover",
@@ -300,6 +323,7 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "deal-structuring.revise-credit-note": ("by",),
     "run.resubmit": ("by",),
     "cpcs.prepare": ("requested_by",),
+    "evidence.executed-agreement": (),
     "handover.prepare": ("requested_by",),
     "handover.submit": (),
     "advaya.attest": (),
@@ -2171,8 +2195,45 @@ def create_app() -> FastAPI:
             return _problem(403, "Forbidden",
                             "Approving a CP/CS checklist requires Credit Head / Management / Admin "
                             "authority.")
-        return await _register_post_as(
+        approved = await _register_post_as(
             request, f"/v1/internal/cpcs-checklists/{checklist_id}/approve", approved_by, checker, {})
+        if approved.status_code >= 300:
+            return approved
+
+        # MINT cp_cs_completion from the approval itself.
+        #
+        # The evidence is DERIVED from the approved checklist — the register verifies the
+        # citation and refuses one that is not backed by an approved, four-eyes checklist —
+        # so there is nothing for a human to type, and asking them to file it separately is
+        # how an approved checklist sat there with the line still 'Sanctioned' and no sign
+        # of what was missing. Approving is the act; the evidence is its record.
+        row = orjson.loads(approved.body)
+        lending_id = str(row.get("lending_id") or "")
+        if lending_id:
+            ev = await _register_post_as(
+                request, "/v1/evidence", approved_by, checker,
+                {"subject_type": "Lending", "subject_id": lending_id,
+                 "evidence_kind": "cp_cs_completion",
+                 "reference": f"CPCS/{row.get('checklist_version') or 1}/{checklist_id}",
+                 "decision_ref": checklist_id,
+                 "note": "Minted on approval of the CP/CS checklist."})
+            if ev.status_code >= 300:
+                # The checklist IS approved; only the evidence failed. Say both, so nobody
+                # re-approves looking for a different outcome.
+                detail = orjson.loads(ev.body).get("error", {}).get("detail", "")
+                log.error("cpcs_evidence_not_minted",
+                          extra={"checklist": checklist_id, "lending": lending_id,
+                                 "detail": detail})
+                row["cp_cs_completion"] = None
+                row["warning"] = (
+                    "The checklist is approved, but the cp_cs_completion evidence could not "
+                    f"be filed ({detail}). The line cannot reach 'CP/CS Completed' until it "
+                    "is.")
+                return ORJSONResponse(status_code=200, content=row)
+            row["cp_cs_completion"] = orjson.loads(ev.body).get("id")
+            row["next"] = ("Record the executed agreement, then the line may move to "
+                           "'CP/CS Completed'.")
+        return ORJSONResponse(status_code=200, content=row)
 
 
     @app.post("/v1/workflows/cpcs-checklists/{checklist_id}/reject", tags=["Workflows"],
