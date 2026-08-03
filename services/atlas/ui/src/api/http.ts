@@ -122,6 +122,16 @@ export const api = {
 // from Pydantic entries so a 422 names the offending FIELD rather than saying "invalid".
 export function errText(data: any): string {
   const d = data?.error?.detail ?? data?.detail ?? data?.error?.title ?? data?.message;
+  // A register 422 puts a summary in `detail` and the ACTIONABLE part — which field, and
+  // why — in `errors[]`. Reading only the summary turns "obj_id is not a valid UUID" into
+  // "One or more fields are invalid", which is what a user then reports, and it costs an
+  // afternoon to work back from.
+  const fields: string[] = (data?.error?.errors || []).map((x: any) => {
+    const loc = Array.isArray(x?.loc) ? x.loc.filter((p: any) => p !== 'body').join('.') : '';
+    const msg = x?.msg || x?.type || '';
+    return loc ? `${loc}: ${msg}` : String(msg);
+  }).filter(Boolean);
+  if (fields.length && typeof d === 'string') return `${d} (${fields.join('; ')})`;
   if (Array.isArray(d)) {
     return d.map((x: any) => {
       const loc = Array.isArray(x?.loc) ? x.loc.filter((p: any) => p !== 'body').join('.') : '';

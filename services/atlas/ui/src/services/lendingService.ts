@@ -38,6 +38,31 @@ export function toLendingRow(r: any): LendingRow {
   };
 }
 
+/**
+ * Read-through cache: the company drawer reads a company's lending lines out of the
+ * shared store (`byCode`), so the store has to hold the REGISTER's rows.
+ *
+ * It did not. The rows there came from the Push-to-Deals dialog's optimistic insert,
+ * which mints a local id like `L1754…` — so the drawer's stage dropdown PATCHed
+ * `/v1/lending/L1754…`, a path the register could only answer 422 to. The grid worked
+ * (real rows, real UUIDs) while the drawer failed on the same control.
+ */
+function hydrate(rows: LendingRow[]): void {
+  const store = db().lending as LendingRow[];
+  rows.forEach((row) => {
+    const i = store.findIndex((r) => r.id === row.id);
+    if (i >= 0) store[i] = { ...store[i], ...row };
+    else store.unshift(row);
+  });
+  // Drop the optimistic locals now that the real rows for that company have arrived: a
+  // local row and its register twin would otherwise both render.
+  const codes = new Set(rows.map((r) => r.code).filter(Boolean));
+  for (let i = store.length - 1; i >= 0; i--) {
+    const r = store[i];
+    if (r && codes.has(r.code) && !rows.some((x) => x.id === r.id)) store.splice(i, 1);
+  }
+}
+
 export const lendingService = {
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<LendingRow>>(
@@ -52,6 +77,7 @@ export const lendingService = {
         const rows = asRows(data, 'lending').map(toLendingRow);
         // The wire row carries deal_id only — join the deal number + company in.
         await fillFromDeal(rows);
+        hydrate(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {

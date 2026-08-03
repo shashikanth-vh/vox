@@ -57,6 +57,22 @@ export function computeAmSummary(rows: AmRow[]) {
   };
 }
 
+/** Read-through cache — the company drawer reads AM lines from the store, by code, so
+ *  they must be the REGISTER's rows and not a local optimistic copy. */
+function hydrateAm(rows: AmRow[]): void {
+  const store = db().am as AmRow[];
+  rows.forEach((row) => {
+    const i = store.findIndex((r) => r.id === row.id);
+    if (i >= 0) store[i] = { ...store[i], ...row };
+    else store.unshift(row);
+  });
+  const codes = new Set(rows.map((r) => r.code).filter(Boolean));
+  for (let i = store.length - 1; i >= 0; i--) {
+    const r = store[i];
+    if (r && codes.has(r.code) && !rows.some((x) => x.id === r.id)) store.splice(i, 1);
+  }
+}
+
 export const assetMonService = {
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<AmRow>>(
@@ -68,6 +84,7 @@ export const assetMonService = {
         const rows = asRows(data, 'asset_monetisation').map(toAmRow);
         // The wire row carries deal_id only — join the deal number + company in.
         await fillFromDeal(rows);
+        hydrateAm(rows);
         return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {

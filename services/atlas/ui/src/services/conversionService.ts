@@ -176,6 +176,17 @@ export const conversionService = {
       }
     }
     const code = p.code, now = today();
+    // On the platform the REGISTER created the client, the deal and the product lines
+    // inside the conversion; the grids read them back with their real ids. Writing a
+    // second, local copy here minted rows whose id was `L`+timestamp — and the company
+    // drawer reads its product lines out of this store, so its controls addressed a row
+    // the register had never heard of and every write came back 422. The lead's own
+    // status is still marked locally so the grid updates without waiting for a refetch.
+    if (USE_REAL_API) {
+      lead.status = 'Converted'; lead.conv = code; (lead as any).convertedAt = now;
+      writeAudit(by, 'Lead converted', lead.id, '→ ' + code);
+      return { ok: true, code };
+    }
     // client
     if (!p.existing) {
       db().clients[code] = { name: lead.company, ...p.client, notes: 'Onboarded ' + now };

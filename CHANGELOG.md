@@ -6,6 +6,27 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Changing a lending stage from the company drawer answered "One or more fields are
+  invalid", while the same control in the grid worked.** The drawer reads a company's
+  product lines out of the shared store, and the rows there had been minted by the
+  Push-to-Deals dialog's optimistic local insert — `id: 'L' + Date.now()`. So the drawer
+  PATCHed `/v1/lending/L1754…`, a path the register can only answer 422 to, and the
+  message was about the path parameter, not the stage. Three fixes:
+  * **The conversion no longer invents local rows on the platform.** The register creates
+    the client, deal and product lines inside the conversion and the grids read them back
+    with their real ids; a second local copy could only ever disagree. (Mock mode keeps
+    the prototype's behaviour.)
+  * **The lending and asset-monetisation lists are read-through caches**, as syndication
+    and clients already were: fetched rows land in the store, and an optimistic local row
+    for the same company is dropped once its register twin arrives. So `byCode` — what
+    the drawer renders and addresses — is the register's row.
+  * **`errText` now carries the field-level detail.** A register 422 puts a summary in
+    `detail` and the actionable part in `errors[]`; only the summary was read, which is
+    how "obj_id is not a valid UUID" reached the user as "One or more fields are invalid".
+  Confirmed against a live register that the transition itself was never the problem:
+  `PATCH /v1/lending/{id} {"stage":"Diligence"}` → **200**, and the governed jump to
+  `Sanctioned` → 422 naming the allowed next stages.
+
 - **Every document upload was refused: `422 missing body.file`, for a file that was
   definitely attached.** Both axios clients set `Content-Type: application/json` as a
   DEFAULT header — right for every JSON call, and wrong for exactly one thing. With the
