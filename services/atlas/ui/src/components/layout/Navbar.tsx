@@ -12,6 +12,7 @@ import { useSearch } from '../../context/SearchContext';
 import { referenceService } from '../../services/referenceService';
 import { onSave } from '../../utils/saveIndicator';
 import { tokens } from '../../theme';
+import { VocxNavButton } from "../vocx/VocxLauncher";
 
 const MOBILE = '@media (max-width:760px)';
 
@@ -75,6 +76,12 @@ export default function Navbar() {
       </Box>
 
       <Stack direction="row" alignItems="center" sx={{ gap: '9px', ml: 'auto', [MOBILE]: { gap: '6px' } }}>
+        {/* VocX beside the search box, where a pointer looks for a toolbar. On a phone
+            the floating draggable button (mounted at the layout root) takes over, so this
+            one steps aside rather than being duplicated. */}
+        <Box sx={{ display: 'inline-flex', [MOBILE]: { display: 'none' } }}>
+          <VocxNavButton />
+        </Box>
         <Typography sx={{ fontSize: 12.5, color: '#C8D6E2', whiteSpace: 'nowrap', [MOBILE]: { display: 'none' } }}>
           {roleLabel(user.role, user.name)}
         </Typography>

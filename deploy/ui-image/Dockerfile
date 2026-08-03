@@ -25,6 +25,9 @@ ARG VITE_API_BASE_URL="/v1"
 # explicitly; a leading-slash URL resolves against the page's own origin.
 ARG VITE_ACCESS_URL="/access"
 ARG VITE_ORCHESTRATOR_URL="/orchestrator"
+# VocX (field-intel capture) rides the same edge; the gateway injects VocX's own
+# front-door key, so the browser never holds it.
+ARG VITE_VOCX_URL="/vocx"
 ARG VITE_DEX_URL=""
 ARG VITE_TENANT="EVAM"
 # The app ships a full MOCK data store for standalone demos and only calls the real
@@ -40,6 +43,7 @@ ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
     VITE_MOCK_FALLBACK=$VITE_MOCK_FALLBACK \
     VITE_ACCESS_URL=$VITE_ACCESS_URL \
     VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \
+    VITE_VOCX_URL=$VITE_VOCX_URL \
     VITE_DEX_URL=$VITE_DEX_URL \
     VITE_TENANT=$VITE_TENANT \
     VITE_USE_REAL_API=$VITE_USE_REAL_API

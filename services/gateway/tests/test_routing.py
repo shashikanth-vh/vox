@@ -114,3 +114,27 @@ async def test_tokenless_bearer_is_dropped_not_a_502(gw):
     # dev posture has no OIDC verifier, so it must simply not break the request.
     r = await gw.get("/v1/ref", headers={"Authorization": "Bearer not-a-real-token"})
     assert r.status_code == 200, r.text
+
+
+def test_a_speech_capture_gets_the_long_upstream_window():
+    """Transcription is synchronous, so the capture path needs minutes — and nothing else
+    does.
+
+    A three-minute recording is decoded on CPU while the request is held open. Under the
+    ordinary 60s budget the gateway abandons it and the user loses a recording they have
+    already made, reported as an upstream failure they cannot act on. The long window is
+    scoped to the capture prefixes on purpose: a hung register call must still fail fast.
+    """
+    from app.config import Settings
+    from app.main import _timeout_for
+
+    s = Settings(upstream_timeout_s=60.0, slow_upstream_timeout_s=300.0)
+    assert _timeout_for(s, "/vocx/v1/capture_audio") == 300.0
+    assert _timeout_for(s, "/vocx/v1/capture") == 300.0
+    # Everything else keeps the short one — including the rest of VocX.
+    assert _timeout_for(s, "/v1/leads") == 60.0
+    assert _timeout_for(s, "/vocx/v1/reports") == 60.0
+    assert _timeout_for(s, "/orchestrator/v1/workflows/pending") == 60.0
+    # Never SHORTER than the default, however the two are configured.
+    lopsided = Settings(upstream_timeout_s=120.0, slow_upstream_timeout_s=30.0)
+    assert _timeout_for(lopsided, "/vocx/v1/capture_audio") == 120.0

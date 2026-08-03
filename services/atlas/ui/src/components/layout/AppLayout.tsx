@@ -4,6 +4,9 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Navbar from "./Navbar";
 import BottomNav from "./BottomNav";
 import Copilot from "../copilot/Copilot";
+import { VocxProvider, useVocx } from "../vocx/VocxProvider";
+import { VocxFab } from "../vocx/VocxLauncher";
+import VocxPanel from "../vocx/VocxPanel";
 import { NAV } from "./navConfig";
 import { useAuth } from "../../auth/AuthContext";
 import { canSee } from "../../auth/rbac";
@@ -161,6 +164,7 @@ export default function AppLayout() {
   };
 
   return (
+   <VocxProvider>
     <Box
       sx={{
         height: "100dvh",
@@ -323,6 +327,19 @@ export default function AppLayout() {
       <BottomNav />
       {/* v17 AUGMENT 12 — floating ATLAS Copilot (chat over the live Register). */}
       <Copilot />
+      {/* VocX: the phone's draggable capture button and the floating panel. Mounted at
+          the layout root, not inside a page, so an in-progress capture survives
+          navigation — an RM can start a note on Lending, go and check something on
+          Deals, and come back to it. */}
+      <VocxFab />
+      <VocxPanelMount />
     </Box>
+   </VocxProvider>
   );
+}
+
+/** Reads the shared open state so the panel need not be threaded through the layout. */
+function VocxPanelMount() {
+  const { open, setOpen } = useVocx();
+  return <VocxPanel open={open} onClose={() => setOpen(false)} />;
 }

@@ -57,6 +57,21 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 
 
+# Paths whose upstream legitimately takes minutes rather than seconds. A speech capture
+# is transcribed SYNCHRONOUSLY on CPU, and a three-minute clip can decode for longer than
+# that — so the shared 60s upstream timeout would abandon a recording the user has already
+# made, and report it as an upstream failure they cannot act on. The long window is scoped
+# to these prefixes on purpose: a hung register call must never get minutes to hang.
+_SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/template_fill")
+
+
+def _timeout_for(settings, full_path: str) -> float:  # noqa: ANN001
+    """The upstream timeout for this path — the default, or the long one for a capture."""
+    if any(full_path.startswith(p) for p in _SLOW_PATHS):
+        return max(settings.upstream_timeout_s, settings.slow_upstream_timeout_s)
+    return settings.upstream_timeout_s
+
+
 def _is_tenant_admin_route(method: str, path: str) -> bool:
     """A tenant-administration route. The Register gates ALL of these — reads (GET/list)
     AND writes — on the admin credential, so the gateway injects it for a verified Admin on
@@ -322,6 +337,7 @@ def create_app() -> FastAPI:
             resp = await request.app.state.client.request(
                 method, upstream, content=body,
                 params=request.query_params,
+                timeout=_timeout_for(settings, full_path),
                 headers=_forward_headers(request, user, decision,
                                          method=method, path=downstream_path,
                                          api_key=api_key, admin_key=admin_key),
