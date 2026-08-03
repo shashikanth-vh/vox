@@ -105,7 +105,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         {!mobile && <DragIndicatorIcon sx={{ fontSize: 18, color: 'rgba(232,238,242,.45)' }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: '.5px', lineHeight: 1.1 }}>
-            VOM
+            VOCX
           </Typography>
           <Typography sx={{ fontSize: 9.5, color: 'rgba(232,238,242,.55)', letterSpacing: '1px' }}>
             EVAM · FIELD INTEL
