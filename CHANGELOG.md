@@ -6,6 +6,24 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **Lending stage changes from the UI were cosmetic.** The Stage dropdown PATCHed
+  `/v1/lending/{id}/stage` — **a route the register does not have** — fire-and-forget, then
+  moved the row on screen regardless. Every stage change made in the browser advanced the
+  grid and left the database untouched, with the 404 going no further than a console
+  warning. It now PATCHes `/v1/lending/{id}`, is **awaited**, and updates the row only
+  once the register has accepted it; a refusal appears in a warning strip. The governed
+  stages (`Sanctioned`, `CP/CS Completed`, `Ready for Disbursement`, `Disbursed`) are
+  refused by design — they are written by the workflows that carry their approval — and
+  the page now says so instead of pretending the move worked.
+
+- **`docs/E2E_UI_WALKTHROUGH.md`** — how far a deal can be driven from the browser alone,
+  with verbatim labels and the API behind each click, and an explicit register of the
+  steps that have **no UI at all** (committee run, CP/CS preparation, handover submission,
+  Advaya attestation, the syndication and AM workflow planes, documents, financials,
+  covenants, EWS, deal closure, notifications, evidence). Also lists four more UI writes
+  aimed at non-existent routes. Ends with the recommended mixed run: Postman to raise,
+  browser to decide, covering every approval gate with a return round-trip.
+
 - **Push to Deals: "Client could not be created — one or more fields are invalid."**
   The conversion pre-flight builds the client from the dialog's fields when the lead has
   no company linked. It sent **`industry_type`**; the register's field is **`toi`**, and

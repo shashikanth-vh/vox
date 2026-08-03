@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
+import { api, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -63,13 +63,41 @@ export const lendingService = {
   },
   byCode(code: string): LendingRow[] { return db().lending.filter((r: LendingRow) => r.code === code); },
   find(id: string): LendingRow | undefined { return db().lending.find((r: LendingRow) => r.id === id); },
-  updateStage(id: string, stage: string, by: string) {
-    const r = this.find(id); if (!r) return;
-    remote('patch', '/lending/' + id + '/stage', { stage });
-    const old = r.stage; r.stage = stage; r.updated = today();
-    (r.h = r.h || []).push({ stage, t: today(), by });
-    if (LEND_GREEN.includes(stage) && !r.sanc) r.sanc = today();
-    writeAudit(by, 'Lending stage', r.code, `${old} → ${stage}`);
+  /**
+   * Move a lending line to another stage.
+   *
+   * AWAITED, and the local row is only updated once the register has accepted it. This
+   * used to PATCH `/v1/lending/{id}/stage` — a route that does not exist — fire-and-
+   * forget, then move the row on screen regardless. Every stage change a user made from
+   * the UI was therefore cosmetic: the grid advanced, the database did not, and the
+   * failure went no further than a console warning.
+   *
+   * The GOVERNED stages (Sanctioned, CP/CS Completed, Ready for Disbursement, Disbursed)
+   * are refused by the register on a direct PATCH by design — they are reached through
+   * committee approval, an approved CP/CS checklist and the Advaya attestation lane. The
+   * refusal now reaches the caller instead of being swallowed, so the screen and the
+   * register cannot disagree.
+   */
+  async updateStage(id: string, stage: string, by: string): Promise<{ ok: boolean; error?: string }> {
+    const r = this.find(id);
+    const from = r?.stage;
+    if (USE_REAL_API) {
+      try {
+        await api.patch('/lending/' + id, { stage });
+      } catch (e: any) {
+        const msg = errText(e?.response?.data)
+          || `The register refused the stage change (HTTP ${e?.response?.status ?? '?'}).`;
+        console.warn('[register] lending stage change refused:', e?.response?.data ?? e);
+        return { ok: false, error: msg };
+      }
+    }
+    if (r) {
+      r.stage = stage; r.updated = today();
+      (r.h = r.h || []).push({ stage, t: today(), by });
+      if (LEND_GREEN.includes(stage) && !r.sanc) r.sanc = today();
+      writeAudit(by, 'Lending stage', r.code, `${from} → ${stage}`);
+    }
+    return { ok: true };
   },
   update(id: string, key: keyof LendingRow, value: any, by: string) {
     const r = this.find(id); if (!r) return;

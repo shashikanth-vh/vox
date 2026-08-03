@@ -157,7 +157,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
             <FieldGrid>
               {/* Amount is mandatory past Data Awaited and LOCKS on Sanctioned (Admin/Mgmt only after). */}
               <TextFld label="Amount (₹ Cr)" required type="number" value={r.amt} disabled={roLend || (LEND_GREEN.includes(r.stage) && !adminOverride)} onChange={(v) => updL(r.id, 'amt', v)} />
-              <SelectFld label="Stage" required value={r.stage} disabled={roLend} onChange={(v) => { lendingService.updateStage(r.id, v, user.full); bump(); }} options={ref.getRefSync('Lending Stage')} />
+              <SelectFld label="Stage" required value={r.stage} disabled={roLend} onChange={(v) => { void lendingService.updateStage(r.id, v, user.full).then((res) => { if (!res.ok) alert(res.error); bump(); }); }} options={ref.getRefSync('Lending Stage')} />
               <SelectFld label="Deal Analyst" value={r.an} disabled={roLend} onChange={(v) => updL(r.id, 'an', v)} options={ref.getRefSync('Analyst')} blank />
               {/* BDRM is read-only here — edited on Company Ownership (Forms spec). */}
               <SelectFld label="RM" value={r.rm} disabled onChange={(v) => updL(r.id, 'rm', v)} options={ref.getRefSync('RM')} blank />

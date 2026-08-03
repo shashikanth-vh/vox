@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { MenuItem, TextField } from '@mui/material';
+import { Alert, MenuItem, TextField } from '@mui/material';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
@@ -34,6 +34,17 @@ export default function LendingPage() {
   const [addProd, setAddProd] = useState<string | null>(null);
   const [del, setDel] = useState<LendingRow | null>(null);
   const refresh = () => qc.invalidateQueries();
+  const [stageErr, setStageErr] = useState('');
+  // The register REFUSES a governed stage on a direct change (Sanctioned, CP/CS
+  // Completed, Ready for Disbursement, Disbursed are reached through approvals). That
+  // refusal has to be visible: the row must not advance on screen while the register
+  // holds the line.
+  const stageTo = async (id: string, stage: string) => {
+    setStageErr('');
+    const r = await lendingService.updateStage(id, stage, user.full);
+    if (!r.ok) setStageErr(r.error || 'The register refused that stage change.');
+    refresh();
+  };
 
   const columns = useMemo<MRT_ColumnDef<LendingRow>[]>(() => [
     { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
@@ -47,7 +58,7 @@ export default function LendingPage() {
       Cell: ({ row }) => (
         <TextField select size="small" value={row.original.stage} disabled={ro} variant="outlined"
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => { lendingService.updateStage(row.original.id, e.target.value, user.full); refresh(); }}
+          onChange={(e) => { void stageTo(row.original.id, e.target.value); }}
           sx={{ minWidth: 130, '& .MuiOutlinedInput-input': { fontSize: 12, py: '5px' } }}>
           {referenceService.getRefSync('Lending Stage').map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
         </TextField>
@@ -59,7 +70,11 @@ export default function LendingPage() {
 
   return (
     <>
-      <PageHint>Stage edits stamp the date automatically; sanction date lives in the company profile.</PageHint>
+      <PageHint>Stage edits stamp the date automatically; sanction date lives in the company profile.
+        Sanctioned, CP/CS Completed, Ready for Disbursement and Disbursed are reached through
+        their approvals — the register refuses them here.</PageHint>
+      {stageErr && <Alert severity="warning" sx={{ mb: 1, fontSize: 12.5, py: 0.2 }}
+        onClose={() => setStageErr('')}>{stageErr}</Alert>}
       <CommonTable<LendingRow>
         queryKey={['lending']}
         fetcher={(q) => lendingService.list(q, scopeFor(user.roles, 'lend', user.name))}
