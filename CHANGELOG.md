@@ -6,6 +6,17 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The E2E collection is now THE one finalized end-to-end run: entry GATES +
+  runbook.** Folders 06/07/08 open with a GATE request that reads the lending line
+  and fails fast with "complete folder N first — current stage: X" when a
+  predecessor wasn't finished — the mis-ordered-run 422s ("may not move
+  'Note Circulated' → 'CP/CS Completed'") now stop at request one with
+  instructions instead of deep inside a folder (142 → 145 requests). New
+  **`docs/E2E_RUNBOOK.md`**: how to run the whole journey in Collection Runner,
+  the full human-gate matrix (who approves/returns/rejects at every stage across
+  lending, syndication, asset monetisation, documents, waivers, closure), the
+  resume matrix for every failure symptom, and the state each folder leaves behind.
+
 - **Folder 06's committee RETURN 500'd: `decision varchar(20)` vs
   "ReturnedForInformation" (22 chars).** The register's traceback named it —
   `StringDataRightTruncationError` inserting the control record. Approved /

@@ -108,6 +108,24 @@ def guard(var):
             f"  throw new Error('{var} = ' + v + ' is the lead/deal id — stale value.');"]
 
 
+def stage_gate(allowed, hint):
+    """A folder-entry GATE: read the lending line and FAIL FAST with an instructive
+    message when its stage is not one this folder can start from. Without this, a
+    skipped/unfinished predecessor surfaces as a cryptic 422 deep inside the folder
+    ('may not move X → Y') instead of 'finish folder N first'."""
+    import json as _json
+    allowed_js = _json.dumps(allowed)
+    label = " / ".join(allowed)
+    return req(f"GATE · lending stage must be {label}", "GET", REG,
+               "/v1/lending/{{lendingId}}", pre=guard("lendingId"),
+               tests=[OK, "const st = pm.response.json().stage;",
+                      f"pm.test('entry state ok (stage: ' + st + ')', () => "
+                      f"pm.expect({allowed_js}, {_json.dumps(hint)} "
+                      f"+ ' — the lending line is currently at: ' + st).to.include(st));"],
+               desc="Entry-state gate: verifies the previous folder completed. A failure "
+                    "here means resume the NAMED folder — nothing in this one has run.")
+
+
 def stage(name, path, field, value, *, extra=None, tests=None, headers=None,
           pre=None, desc=None):
     b = {field: value}
@@ -565,6 +583,9 @@ F.append(("05 · Convert → deal (REQUEST + APPROVE, human-in-the-loop)", [
 ]))
 
 F.append(("06 · LENDING ▸ committee APPROVES (conditional) via Temporal", [
+    stage_gate(["Data Awaited", "Diligence", "Note Circulated"],
+               "Folder 06 starts from the freshly-converted line (folder 05). "
+               "Already 'Sanctioned'? Folder 06 is done — continue with folder 07"),
     stage("PATCH lending — → Sanctioned by hand is REFUSED", "/v1/lending/{{lendingId}}",
           "stage", "Sanctioned", pre=guard("lendingId"), tests=refused(400, 403, 422),
           desc="The milestone cannot be typed. The workflow below is the ONLY route."),
@@ -636,6 +657,9 @@ F.append(("06 · LENDING ▸ committee APPROVES (conditional) via Temporal", [
 ]))
 
 F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPROVED", [
+    stage_gate(["Sanctioned"],
+               "Complete folder 06 first (committee return → revise → resubmit → "
+               "approve → poll until Sanctioned)"),
     req("POST /v1/evidence — executed_agreement", "POST", REG, "/v1/evidence",
         body={"subject_type": "Lending", "subject_id": "{{lendingId}}",
               "evidence_kind": "executed_agreement",
@@ -736,6 +760,9 @@ F.append(("07 · LENDING ▸ CP/CS — maker → checker RETURNS → v2 → APPR
 ]))
 
 F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's boundary)", [
+    stage_gate(["CP/CS Completed"],
+               "Complete folder 07 first (CP/CS maker → checker approve → evidence → "
+               "stage to CP/CS Completed)"),
     stage("PATCH lending — → Ready for Disbursement", "/v1/lending/{{lendingId}}", "stage",
           "Ready for Disbursement",
           extra={"proposed_disbursement_amount": 45.0,

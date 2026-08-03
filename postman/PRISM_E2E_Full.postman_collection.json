@@ -2605,6 +2605,71 @@
       "name": "06 \u00b7 LENDING \u25b8 committee APPROVES (conditional) via Temporal",
       "item": [
         {
+          "name": "GATE \u00b7 lending stage must be Data Awaited / Diligence / Note Circulated",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Entry-state gate: verifies the previous folder completed. A failure here means resume the NAMED folder \u2014 nothing in this one has run."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('lendingId');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('lendingId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const st = pm.response.json().stage;",
+                  "pm.test('entry state ok (stage: ' + st + ')', () => pm.expect([\"Data Awaited\", \"Diligence\", \"Note Circulated\"], \"Folder 06 starts from the freshly-converted line (folder 05). Already 'Sanctioned'? Folder 06 is done \\u2014 continue with folder 07\" + ' \u2014 the lending line is currently at: ' + st).to.include(st));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "PATCH lending \u2014 \u2192 Sanctioned by hand is REFUSED",
           "request": {
             "method": "PATCH",
@@ -3189,6 +3254,71 @@
     {
       "name": "07 \u00b7 LENDING \u25b8 CP/CS \u2014 maker \u2192 checker RETURNS \u2192 v2 \u2192 APPROVED",
       "item": [
+        {
+          "name": "GATE \u00b7 lending stage must be Sanctioned",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Entry-state gate: verifies the previous folder completed. A failure here means resume the NAMED folder \u2014 nothing in this one has run."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('lendingId');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('lendingId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const st = pm.response.json().stage;",
+                  "pm.test('entry state ok (stage: ' + st + ')', () => pm.expect([\"Sanctioned\"], \"Complete folder 06 first (committee return \\u2192 revise \\u2192 resubmit \\u2192 approve \\u2192 poll until Sanctioned)\" + ' \u2014 the lending line is currently at: ' + st).to.include(st));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "POST /v1/evidence \u2014 executed_agreement",
           "request": {
@@ -3858,6 +3988,71 @@
     {
       "name": "08 \u00b7 LENDING \u25b8 handover \u2192 SUBMITTED \u2192 Advaya ACCEPTS (PRISM's boundary)",
       "item": [
+        {
+          "name": "GATE \u00b7 lending stage must be CP/CS Completed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{lendingId}}"
+              ]
+            },
+            "description": "Entry-state gate: verifies the previous folder completed. A failure here means resume the NAMED folder \u2014 nothing in this one has run."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const v = pm.environment.get('lendingId');",
+                  "if (!v || v === 'null' || v === 'undefined') throw new Error('lendingId is not set \u2014 run the collection in order from 00.');",
+                  "if (v === pm.environment.get('leadId') || v === pm.environment.get('dealId'))",
+                  "  throw new Error('lendingId = ' + v + ' is the lead/deal id \u2014 stale value.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const st = pm.response.json().stage;",
+                  "pm.test('entry state ok (stage: ' + st + ')', () => pm.expect([\"CP/CS Completed\"], \"Complete folder 07 first (CP/CS maker \\u2192 checker approve \\u2192 evidence \\u2192 stage to CP/CS Completed)\" + ' \u2014 the lending line is currently at: ' + st).to.include(st));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "PATCH lending \u2014 \u2192 Ready for Disbursement",
           "request": {
