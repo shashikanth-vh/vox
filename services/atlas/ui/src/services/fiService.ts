@@ -1,16 +1,63 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, toCursorParams, remote } from '../api/http';
+import { api, withFallback, remote, asRows, USE_REAL_API, LIST_MAX_LIMIT } from '../api/http';
+import { syndicationService } from './syndicationService';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
 import type { FiRow, FiDeal, FiLedgerRow } from '../pages/FIMaster/fi.types';
 
 interface FiEng { pursued: number; sanc: number; ip: number; decl: number; live: number; cos: FiDeal[] }
 
+/** One register counterparty → the store's lender-master shape (`apiId` = its UUID). */
+function toFi(r: any) {
+  return {
+    apiId: r?.id,
+    name: r?.name || '',
+    type: r?.counterparty_type || '',
+    preferredSectors: r?.sectors || '',
+    notes: r?.notes || '',
+    inactive: r?.is_active === false,
+  };
+}
+
+/** UI patch keys → register columns (PATCH /v1/counterparties/{id}). */
+function toFiPatch(patch: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  if ('name' in patch) out.name = patch.name;
+  if ('type' in patch) out.counterparty_type = patch.type;
+  if ('preferredSectors' in patch) out.sectors = patch.preferredSectors;
+  if ('notes' in patch) out.notes = patch.notes;
+  if ('inactive' in patch) out.is_active = !patch.inactive;
+  return out;
+}
+
+let hydratedAt = 0;
+const HYDRATE_TTL_MS = 30_000;
+
 export const fiService = {
+  /** Real mode: replace the lender master from GET /v1/counterparties (cached briefly).
+   *  The engagement rollup additionally needs the syndication book — hydrated too. */
+  async hydrate(): Promise<void> {
+    if (!USE_REAL_API) return;
+    const jobs: Promise<any>[] = [syndicationService.hydrate()];
+    if (Date.now() - hydratedAt >= HYDRATE_TTL_MS) {
+      jobs.push(api.get<any>('/counterparties', { limit: LIST_MAX_LIMIT }).then((data) => {
+        db().lenders = asRows(data, 'counterparties').map(toFi);
+        hydratedAt = Date.now();
+      }));
+    }
+    try { await Promise.all(jobs); } catch (e) { console.warn('[api] fi hydrate failed:', e); }
+  },
+
   async list(q: TableQuery) {
     return withFallback(
-      () => api.get<any>('/counterparties', toCursorParams(q)),
+      async () => {
+        // The grid's engagement columns (# pursued / live / IP / sanctioned /
+        // declined) derive from the SYNDICATION book, so the rollup runs over the
+        // hydrated stores — one shape in both modes.
+        await this.hydrate();
+        return applyQuery(fiService.rollup(), { ...q, searchFields: ['name', 'type', 'preferredSectors', 'sectors'] });
+      },
       async () => {
         await delay();
         const rows = fiService.rollup();
@@ -60,13 +107,21 @@ export const fiService = {
     if (!name) return { ok: false, error: 'Bank / FI name is required' };
     if (db().lenders.some((l: any) => (l.name || '').toLowerCase() === name.toLowerCase())) return { ok: false, error: `${name} is already on the register` };
     const fi: any = { name, type: input.type || '', preferredSectors: input.preferredSectors || '', notes: input.notes || '', inactive: false };
-    remote('post', '/fi', fi);
     db().lenders.push(fi);
+    if (USE_REAL_API) {
+      // Capture the created row's UUID so a follow-up edit can address it.
+      api.post<any>('/counterparties', {
+        name, counterparty_type: input.type || null,
+        sectors: input.preferredSectors || null, notes: input.notes || null,
+      }).then((created: any) => { fi.apiId = created?.id; })
+        .catch((e: unknown) => console.warn('[api] write failed: add counterparty', e));
+    }
     writeAudit(by, 'FI updated', name, 'FI added');
     return { ok: true };
   },
   update(index: number, patch: Partial<FiRow>, by: string) {
-    remote('patch', '/fi/' + index, patch);
-    Object.assign(db().lenders[index], patch); writeAudit(by, 'FI updated', db().lenders[index].name, Object.keys(patch).join(','));
+    const f = db().lenders[index]; if (!f) return;
+    if (f.apiId) remote('patch', '/counterparties/' + f.apiId, toFiPatch(patch));
+    Object.assign(f, patch); writeAudit(by, 'FI updated', f.name, Object.keys(patch).join(','));
   },
 };

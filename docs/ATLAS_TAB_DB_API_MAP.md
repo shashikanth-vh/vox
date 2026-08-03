@@ -110,6 +110,45 @@ triggering: `UI_INTEGRATION_GUIDE.md`.
 
 ---
 
+## Page detail — 🔗 Platform Deals (Syndication): every UI action → API call
+
+The three views (Chase list · Matrix · Register-by-bank) all render from ONE
+hydration call made on entering the tab; every write addresses register UUIDs.
+
+| UI action | API call | Notes |
+|---|---|---|
+| Open the tab (all three views) | `GET /v1/syndication?limit=200` | `syndication_tracker` rows with `lenders[]` (from `syndication_lenders`) EMBEDDED — one call; deal number + company joined via `GET /v1/deals` + `GET /v1/entities` (cached 60 s) |
+| Add a lender chip / first dot click | `POST /v1/syndication/{syndication_id}/lenders` `{lender_name, status:"Identified"}` | nested route, parent line-scope enforced |
+| Advance a lender's status (dot click / chase-list dropdown) | `PATCH /v1/syndication/{syndication_id}/lenders/{lender_id}` `{status, since}` | the human chase lane; `status_history` appended server-side; flat `/v1/syndication-lenders` update is deliberately disabled |
+| Log a CHASE (outbound) | `POST /v1/syndication/{syndication_id}/interactions` `{direction:"outbound", lender_name, summary, notes, performed_by}` | the register rolls `chased_date` onto the matching lender row itself |
+| Log a lender RESPONSE (inbound) | same, `direction:"inbound"` | rolls `response_date` |
+| Edit a mandate field (register view) | `PATCH /v1/syndication/{id}` | UI keys map to columns: `amt→amount_cr`, `an→analyst`, `pri→priority`, `im→im_status`, `synType→syndication_type`, `mstat3→mandate_status3`, `fac→facility`, `pot→potential`, `sancL→sanctioned_lender`, `ipL→ip_lender`, `exist→existing`, `pendingWith→pending_with` (rest same-named) |
+| Delete a mandate row | `DELETE /v1/syndication/{id}` | soft delete |
+| Reorder matrix lender columns | *(no call)* | per-browser display preference |
+| Governed mandate decisions (IM circulate, allocation, sanction) | `POST /orchestrator/v1/workflows/syndications` → `circulate-im` / `lender-update` / `allocate` / `syndication-decision` | the WORKFLOW lane (E2E-09) — distinct from the chase board above |
+
+Tables: `syndication_tracker` (mandate) · `syndication_lenders` (one row per lender
+per mandate; `status`, `since`, `chased_date`, `response_date`, `status_history`) ·
+`interactions` (chase/response provenance) · joins: `deals`, `entities`.
+
+## Page detail — 🗂️ Masters ▸ FI Master: every UI action → API call
+
+| UI action | API call | Notes |
+|---|---|---|
+| Open the sub-tab | `GET /v1/counterparties?limit=200` **+** the syndication hydration above | the grid's static columns come from `counterparties`; the engagement columns (# pursued / LIVE / IP / SANCTIONED / DECLINED and the dot strip) are DERIVED client-side from the syndication book's lender rows — there is no stored rollup |
+| Add bank / FI | `POST /v1/counterparties` `{name, counterparty_type, sectors, notes}` | unique per tenant on `name` |
+| Edit (card view inline) | `PATCH /v1/counterparties/{id}` | UI keys map: `type→counterparty_type`, `preferredSectors→sectors`, `inactive→is_active` (inverted); `name`/`notes` same-named |
+| Bank row click → deal ledger | *(no extra call)* | the ledger is the hydrated syndication book filtered to that lender name |
+
+Table: `counterparties` (`name`, `short_name`, `counterparty_type`, `is_active`,
+`sectors`, `ticket_min_cr`, `ticket_max_cr`, `notes`). "No records to display" on a
+fresh system is genuine — nothing seeds this master; create rows via Add bank / FI
+or `PRISM_All_APIs → Register → Counterparties`. Linking a syndication lender row to
+a master record (`syndication_lenders.counterparty_id`) is optional — the rollup
+matches by NAME, so keep lender names consistent with the master.
+
+---
+
 ## Tables with no tab of their own (platform plumbing)
 
 `tenants`, `tenant_settings` (multi-tenancy + per-tenant config) ·

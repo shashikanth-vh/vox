@@ -6,6 +6,19 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **FI Master wired to the real counterparty master + page-detail API maps.** The
+  sub-tab's real-mode list returned unmapped wire rows and its writes went to routes
+  that never existed (`POST /fi`, `PATCH /fi/{array-index}`). Now: entering the
+  sub-tab hydrates the lender master from `GET /v1/counterparties` and the
+  syndication book (the engagement columns are DERIVED from lender rows — no stored
+  rollup); Add bank/FI → `POST /v1/counterparties`; inline edits →
+  `PATCH /v1/counterparties/{id}` with proper column names
+  (`type→counterparty_type`, `preferredSectors→sectors`, `inactive→is_active`
+  inverted). An empty FI Master on a fresh system is genuine — nothing seeds it.
+  `docs/ATLAS_TAB_DB_API_MAP.md` gains **per-action → API call tables** for the
+  Platform Deals views and FI Master (every click mapped to its endpoint and the
+  UI-key→column translations).
+
 - **VOX capture no longer dies on "Scoped access: this entity is not in your
   scope" (regression fix).** The company-name backfill added for the "(unknown)"
   lead read the entity AS THE CAPTURING RM — but a scoped RM's visibility over a

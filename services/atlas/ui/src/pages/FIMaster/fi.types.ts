@@ -8,6 +8,7 @@ export interface FiLedgerRow {
 }
 
 export interface FiRow {
+  apiId?: string;  // the register counterparty UUID on platform builds (writes address it)
   name: string; type?: string; notes?: string; inactive?: boolean;
   preferredSectors?: string; sectors?: string; engagements: number; _i: number;
   // v12 engagement rollup: every mandate this lender was put on, by outcome.
