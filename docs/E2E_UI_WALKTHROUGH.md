@@ -14,8 +14,8 @@ half of the governance chain now has a home too — the **Actions** panel on eac
 in the company drawer (§10) — served by `GET /v1/workflows/actions`, which answers what
 *this* user may do to *this* line right now and why the rest is not yet available. The two
 steps whose shape a generic form cannot carry (the CP/CS checklist grid and handover
-package assembly) are still Postman, as is document upload; Part 2 is the current register
-of those.
+package assembly) are still Postman; Part 2 is the current register of those.
+**Documents now reach the register** (§11) — upload, download and the maker-checker verify.
 
 ---
 
@@ -169,6 +169,28 @@ came to offer four stages the register would always refuse.
 
 ---
 
+### 11. Documents — company drawer ▸ **📁 Data Register**
+
+Titled **📁 Data Register — {company}**. Each checklist row carries **Upload** (or
+**Replace** once something is on file), and once uploaded: **View**, **Verify** and
+**Remove**.
+
+Files go to the register — `POST /v1/entities/{id}/documents/upload`, multipart, keyed by
+the checklist's section and slot — so they survive a refresh, are downloadable again
+(`GET /v1/documents/{id}/content`) and count toward the completeness the register itself
+reports. Previously this dialog wrote to browser memory only: the ticks and the progress
+bar worked while nothing was ever stored.
+
+**Verify** is the second pair of eyes (`POST /v1/documents/{id}/validate`). The register
+**refuses a verification by whoever uploaded the file** — *"A document must be verified by
+a DIFFERENT checker than its uploader (maker–checker)"* — and that refusal is shown rather
+than swallowed. A status chip on each row reads `On File`, `Verified` or `Rejected`.
+
+A company with no register record yet says so, and uploads stay session-only until it has
+one.
+
+---
+
 ---
 
 ## Part 2 — where the UI stops
@@ -203,10 +225,10 @@ workflow's `lender-update`.
 
 ### Documents, financials, governance
 
-* **Documents never reach the register.** The `📁 Data Register` dialog's **Upload** /
-  **Replace** controls write to the browser's local store and an audit line only — there
-  is no `POST /v1/documents` call at all. Document validation (maker ≠ checker), replace
-  with a `Superseded` chain, and expiry are likewise absent. Use folder `08`.
+* **Documents** now upload, download and verify from the UI (§11). Still missing:
+  document **expiry** is not surfaced anywhere, and **Replace** uploads a new file into
+  the slot rather than going through the register's replace route, so no `Superseded`
+  chain is built — use folder `08` when the supersede trail matters.
 * **Financials** (`POST /v1/financials`) — no UI.
 * **Calendar events** — a follow-up can be created (as an interaction's next action) but
   never completed or cancelled.

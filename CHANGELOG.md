@@ -6,6 +6,27 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The Data Register now actually stores documents.** The dialog wrote to browser
+  memory and an audit line and made **no HTTP call of any kind** — the ticks, the progress
+  bar and "Replace" all behaved normally while the register received nothing, anything
+  over 400 KB was not even kept locally, and every file vanished on refresh. It now drives
+  the register's own document plane:
+  * **Upload** → `POST /v1/entities/{id}/documents/upload` (multipart, so the BYTES are
+    stored), keyed by the checklist's section and slot — the same coordinates
+    `/v1/entities/{id}/data-register` reports completeness against.
+  * **View** → `GET /v1/documents/{id}/content`, byte for byte.
+  * **Verify** → `POST /v1/documents/{id}/validate`, the second pair of eyes. The register
+    refuses a verification by whoever uploaded the file, and that refusal is SHOWN, not
+    swallowed: four-eyes is the control, and a user who hits it should be told what it is.
+    A status chip reads `On File` / `Verified` / `Rejected`.
+  * A company with no register record says so, and uploads stay session-only until it has
+    one; mock mode keeps the prototype's behaviour exactly.
+  Verified against a live register (upload 201 → list → content → self-verify 422 →
+  checker verify 200) and pinned by a register-side test that drives the same four calls.
+  Still outstanding: document **expiry** is not surfaced, and **Replace** uploads into the
+  slot rather than going through the register's replace route, so no `Superseded` chain is
+  built.
+
 - **The maker's half of the governance chain is now in the UI.** The approver's half has
   always been server-described — `/v1/workflows/pending` hands back the verbs and Today
   renders whatever it is given — but nothing described what the MAKER could do, so

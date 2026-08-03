@@ -8,6 +8,7 @@ rollup, ad-hoc documents, and the inline size ceiling.
 from __future__ import annotations
 
 import base64
+import uuid
 
 import pytest
 from httpx import AsyncClient
@@ -190,3 +191,56 @@ async def test_documents_filter_by_subject(client: AsyncClient):
     assert r.status_code == 200
     assert r.json()["total"] == 1
     assert r.json()["items"][0]["slot_key"] == "coi"
+
+
+async def test_data_register_upload_flow_the_ui_drives(client: AsyncClient):
+    """The exact calls the ATLAS Data Register makes, in order.
+
+    That dialog wrote to browser memory and an audit line and made no HTTP call at all —
+    the ticks, the progress bar and "Replace" all worked while the register never received
+    a file, and anything over 400 KB was not even kept locally. Now it drives these four,
+    so they are pinned: multipart upload against the COMPANY under a checklist
+    section/slot, read back, download the bytes, and the maker-checker gate on verify.
+    """
+    maker = {"X-User-Email": "maker@evamfinance.com", "X-User-Roles": "Deal Analyst"}
+    checker = {"X-User-Email": "checker@evamfinance.com", "X-User-Roles": "Credit Head"}
+
+    # Onboarded BY the maker, so the company is in their own book — the real shape: the
+    # person who brought the client in is the one filing its documents.
+    eid = (await client.post("/v1/entities",
+                             json={"code": f"UIDOC-{uuid.uuid4().hex[:6]}",
+                                   "legal_name": "UI Docs Co"},
+                             headers={**maker, "X-User-Roles": "Admin"})).json()["id"]
+
+    up = await client.post(
+        f"/v1/entities/{eid}/documents/upload",
+        files={"file": ("coi.pdf", b"%PDF-1.4 incorporation", "application/pdf")},
+        data={"section": "kyc", "slot_key": "coi",
+              "title": "Certificate of Incorporation", "is_required": "true"},
+        headers=maker)
+    assert up.status_code == 201, up.text
+    doc = up.json()
+    assert (doc["section"], doc["slot_key"], doc["status"]) == ("kyc", "coi", "On File")
+    assert doc["size_bytes"] and doc["checksum"], "the bytes must actually be stored"
+
+    # The dialog indexes the list by section + slot to tick the checklist.
+    listed = await client.get(f"/v1/entities/{eid}/documents", params={"limit": 50})
+    assert listed.status_code == 200
+    rows = listed.json()
+    rows = rows if isinstance(rows, list) else rows["items"]
+    assert {(r["section"], r["slot_key"]) for r in rows} == {("kyc", "coi")}
+
+    # "View" downloads what was stored, byte for byte.
+    content = await client.get(f"/v1/documents/{doc['id']}/content")
+    assert content.status_code == 200
+    assert content.content == b"%PDF-1.4 incorporation"
+
+    # FOUR EYES: the uploader may not verify their own document, and the refusal says why.
+    mine = await client.post(f"/v1/documents/{doc['id']}/validate", json={}, headers=maker)
+    assert mine.status_code == 422, mine.text
+    assert "different checker" in mine.text.lower()
+
+    theirs = await client.post(f"/v1/documents/{doc['id']}/validate", json={},
+                               headers=checker)
+    assert theirs.status_code == 200, theirs.text
+    assert theirs.json()["status"] == "Verified"
