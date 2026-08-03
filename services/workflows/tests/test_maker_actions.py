@@ -350,3 +350,26 @@ async def test_cpcs_version_starts_at_one_on_a_fresh_line(monkeypatch):
     version = next(f for f in prepare["form"] if f["name"] == "checklist_version")
     assert version["default"] == 1
     get_settings.cache_clear()
+
+
+def test_every_screen_the_catalogue_names_is_one_the_client_implements():
+    """The plane names a screen; the client renders it. A name with no implementation
+    behind it silently falls through to the generic form — which for the executed
+    agreement meant asking a credit manager to type a SHA-256 by hand, a question with
+    no answer inside the product. Keep the two lists in step."""
+    implemented = {"cpcs-checklist", "handover-package", "executed-agreement"}
+    named = {spec["screen"] for actions in _MAKER_ACTIONS.values()
+             for spec in actions if spec.get("screen")}
+    assert named <= implemented, f"no client screen for {sorted(named - implemented)}"
+
+
+def test_the_executed_agreement_still_offers_a_flat_form_as_the_fallback():
+    """The screen is an improvement on the form, not a replacement for it: a client that
+    does not implement the screen must still be able to file the evidence, and the
+    register's requirements are unchanged either way."""
+    spec = next(s for s in _MAKER_ACTIONS["Lending"]
+                if s["key"] == "evidence.executed-agreement")
+    assert spec["screen"] == "executed-agreement"
+    names = {f["name"] for f in spec["form"]}
+    assert {"reference", "sha256"} <= names
+    assert all(f.get("required") for f in spec["form"] if f["name"] in {"reference", "sha256"})

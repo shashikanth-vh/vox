@@ -195,7 +195,12 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "constant": {"subject_type": "Lending", "evidence_kind": "executed_agreement"},
             "prefill": {"subject_id": "id"},
             # The digest is MANDATORY: the register treats an executed agreement as
-            # governance evidence, and governance evidence must be tamper-evident.
+            # governance evidence, and governance evidence must be tamper-evident. But a
+            # flat form can only ASK for a SHA-256, and typing one is not something a
+            # credit manager can do — so this gets its own screen, which reads the digest
+            # off the document already on the register or hashes the signed file in the
+            # browser. The form below stays as the fallback for a client with no screen.
+            "screen": "executed-agreement",
             "form": [_f("reference", "Agreement reference", required=True,
                         placeholder="Facility agreement / execution reference"),
                      _f("sha256", "Document digest (SHA-256)", required=True,

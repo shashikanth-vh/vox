@@ -3,6 +3,7 @@ import { Button, Stack, Tooltip, Typography, Alert } from '@mui/material';
 import ActionFormDialog from './ActionFormDialog';
 import CpcsChecklistDialog from './CpcsChecklistDialog';
 import HandoverPackageDialog from './HandoverPackageDialog';
+import ExecutedAgreementDialog from './ExecutedAgreementDialog';
 import { workflowActionsService, type SubjectActions, type SubjectType, type WorkflowAction }
   from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -69,6 +70,9 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
       <CpcsChecklistDialog action={open?.screen === 'cpcs-checklist' ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <HandoverPackageDialog action={open?.screen === 'handover-package' ? open : null}
+        code={code || ''} entityId={entityId}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <ExecutedAgreementDialog action={open?.screen === 'executed-agreement' ? open : null}
         code={code || ''} entityId={entityId}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
     </>

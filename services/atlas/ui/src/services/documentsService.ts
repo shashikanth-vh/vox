@@ -22,6 +22,13 @@ export interface DocEntry {
   name: string; size: number; type: string; when: string; by: string; label: string;
   status?: string;
   verifiedBy?: string | null;
+  /**
+   * SHA-256 the register computed over the stored bytes at upload. Governance evidence
+   * has to be tamper-evident, and asking a person to produce a digest by hand is asking
+   * them to open a terminal — so where the file is already on the register, its digest
+   * comes from here.
+   */
+  checksum?: string;
   /** Mock mode only: a data: URI kept in the session. */
   data?: string; inline?: boolean;
 }
@@ -71,6 +78,7 @@ function toEntry(r: any): DocEntry {
     label: r.title || '',
     status: r.status,
     verifiedBy: r.verified_by ?? null,
+    checksum: r.checksum || undefined,
   };
 }
 

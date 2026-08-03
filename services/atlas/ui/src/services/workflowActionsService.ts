@@ -37,7 +37,7 @@ export interface WorkflowAction {
   /** Present only when `enabled` is false — why not, in words for the user. */
   reason?: string;
   /** Named screen for a step a flat form cannot express; otherwise build from `form`. */
-  screen?: 'cpcs-checklist' | 'handover-package';
+  screen?: 'cpcs-checklist' | 'handover-package' | 'executed-agreement';
   /** Ids and constants the plane pre-filled; merged under the form's own values. */
   body: Record<string, any>;
   form: ActionField[];
