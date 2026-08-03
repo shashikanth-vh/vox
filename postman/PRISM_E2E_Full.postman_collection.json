@@ -4462,21 +4462,25 @@
           ]
         },
         {
-          "name": "MACHINE LANE \u00b7 Advaya REJECTS attempt 1",
+          "name": "MANUAL ATTESTATION \u00b7 ops records Advaya's REJECTION (letter cited)",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{svcAdvayaKey}}"
-              },
               {
                 "key": "X-Tenant",
                 "value": "{{tenant}}"
               },
               {
                 "key": "X-Actor",
-                "value": "advaya-simulated"
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
               },
               {
                 "key": "Content-Type",
@@ -4484,20 +4488,21 @@
               }
             ],
             "url": {
-              "raw": "{{registerDirectUrl}}/v1/internal/advaya-handoffs",
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/advaya-events",
               "host": [
-                "{{registerDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "internal",
-                "advaya-handoffs"
+                "lending",
+                "{{lendingId}}",
+                "advaya-events"
               ]
             },
-            "description": "MACHINE LANE (svc_advaya key): Advaya's validation answer, simulated. A rejection reopens PRISM's prepare \u2192 approve \u2192 submit loop; nothing downstream may happen off a rejected package.",
+            "description": "PRODUCTION REALITY before the API integration: Advaya confirmed OFFLINE (letter/email), and an AUTHORISED human relays it on their OWN identity, citing the artefact (reference is mandatory). Same machinery as the machine lane \u2014 the digest comes from PRISM's own submitted package \u2014 with provenance 'manual-attestation'. A rejection reopens prepare \u2192 approve \u2192 submit.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"handoff_key\": \"advaya-handoff:{{lendingId}}:r1\",\n  \"lending_id\": \"{{lendingId}}\",\n  \"payload_sha256\": \"{{pkgSha}}\",\n  \"status\": \"Rejected\",\n  \"note\": \"Simulated: KYC document illegible \\u2014 correct and resubmit.\"\n}",
+              "raw": "{\n  \"event\": \"rejected\",\n  \"reference\": \"ADV-LTR/{{runSuffix}}/1\",\n  \"note\": \"Advaya letter: KYC document illegible \\u2014 correct and resubmit.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4511,7 +4516,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('recorded AS the human, source-marked', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.source).to.eql('manual-attestation');",
+                  "  pm.expect(b.recorded_by).to.eql(pm.environment.get('checkerEmail')); });"
                 ]
               }
             }
@@ -4728,21 +4737,25 @@
           ]
         },
         {
-          "name": "MACHINE LANE \u00b7 Advaya ACCEPTS attempt 2",
+          "name": "MANUAL ATTESTATION \u00b7 ops records Advaya's ACCEPTANCE (ack cited)",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{svcAdvayaKey}}"
-              },
               {
                 "key": "X-Tenant",
                 "value": "{{tenant}}"
               },
               {
                 "key": "X-Actor",
-                "value": "advaya-simulated"
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
               },
               {
                 "key": "Content-Type",
@@ -4750,20 +4763,21 @@
               }
             ],
             "url": {
-              "raw": "{{registerDirectUrl}}/v1/internal/advaya-handoffs",
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/advaya-events",
               "host": [
-                "{{registerDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "internal",
-                "advaya-handoffs"
+                "lending",
+                "{{lendingId}}",
+                "advaya-events"
               ]
             },
-            "description": "Advaya validates and ACCEPTS \u2014 THIS is where PRISM's workflow stops. The acknowledgement becomes the package's one-time advaya_reference and the package freezes (database trigger).",
+            "description": "Advaya validates and ACCEPTS (confirmed offline; attested here) \u2014 THIS is where PRISM's workflow stops. The cited reference becomes the package's one-time advaya_reference and the package freezes (database trigger).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"handoff_key\": \"advaya-handoff:{{lendingId}}:r2\",\n  \"lending_id\": \"{{lendingId}}\",\n  \"payload_sha256\": \"{{pkgSha}}\",\n  \"status\": \"Accepted\",\n  \"acknowledgement_id\": \"ADV-ACK/{{runSuffix}}\"\n}",
+              "raw": "{\n  \"event\": \"accepted\",\n  \"reference\": \"ADV-ACK/{{runSuffix}}\",\n  \"note\": \"Advaya acceptance received by email; ack id cited.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4777,7 +4791,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "pm.test('accepted, human-attributed', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.handoff.status).to.eql('Accepted');",
+                  "  pm.expect(b.source).to.eql('manual-attestation'); });"
                 ]
               }
             }
@@ -4893,24 +4911,28 @@
       ]
     },
     {
-      "name": "08b \u00b7 ADVAYA SIMULATION \u25b8 the downstream system's events (NOT PRISM operations)",
+      "name": "08b \u00b7 ADVAYA EVENTS \u25b8 ops attests the downstream facts (manual, pre-integration)",
       "item": [
         {
-          "name": "MACHINE LANE \u00b7 Advaya disburses tranche T1 (30 Cr) \u2192 stage flips",
+          "name": "MANUAL ATTESTATION \u00b7 UTR for tranche T1 (30 Cr) \u2192 stage flips",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{svcAdvayaKey}}"
-              },
               {
                 "key": "X-Tenant",
                 "value": "{{tenant}}"
               },
               {
                 "key": "X-Actor",
-                "value": "advaya-simulated"
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
               },
               {
                 "key": "Content-Type",
@@ -4918,22 +4940,21 @@
               }
             ],
             "url": {
-              "raw": "{{registerDirectUrl}}/v1/internal/lending/{{lendingId}}/tranches",
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/advaya-events",
               "host": [
-                "{{registerDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "internal",
                 "lending",
                 "{{lendingId}}",
-                "tranches"
+                "advaya-events"
               ]
             },
-            "description": "SIMULATED DOWNSTREAM EVENT: in production this is Advaya's callback after money actually moved. The FIRST tranche \u2014 not any PRISM approval \u2014 is what advances the line to 'Disbursed' and writes the actuals. Idempotent per ref; append-only; ceiling-bounded. Repayments, collections, penalties and operational loan closure remain wholly in Advaya and are not modelled here \u2014 PRISM would consume those as read-only status events.",
+            "description": "PRODUCTION REALITY pre-integration: Advaya's disbursement advice arrives offline; an authorised human attests it citing the UTR. The FIRST tranche \u2014 not any PRISM approval \u2014 is what advances the line to 'Disbursed' and writes the actuals. Idempotent per reference; append-only; ceiling-bounded. (When the real integration goes live, Advaya's own callback drives the SAME machinery on the machine lane.)",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tranche_ref\": \"T1-{{runSuffix}}\",\n  \"amount\": 30.0,\n  \"disbursed_on\": \"2026-04-30\",\n  \"advaya_reference\": \"ADV/{{runSuffix}}/1\"\n}",
+              "raw": "{\n  \"event\": \"disbursed\",\n  \"reference\": \"UTR-T1-{{runSuffix}}\",\n  \"amount_cr\": 30.0,\n  \"disbursed_on\": \"2026-04-30\",\n  \"note\": \"Advaya disbursement advice; UTR cited.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4954,7 +4975,7 @@
           ]
         },
         {
-          "name": "GET /v1/lending/{id} \u2014 Disbursed BY ADVAYA'S EVENT",
+          "name": "GET /v1/lending/{id} \u2014 Disbursed BY THE ATTESTED EVENT",
           "request": {
             "method": "GET",
             "header": [
@@ -4999,31 +5020,35 @@
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
                   "const l = pm.response.json();",
-                  "pm.test('Disbursed via advaya-disbursement', () => {",
+                  "pm.test('Disbursed, source manual-attestation', () => {",
                   "  pm.expect(l.stage).to.eql('Disbursed');",
                   "  const h = l.stage_history || [];",
-                  "  pm.expect(h[h.length-1].source).to.eql('advaya-disbursement'); });"
+                  "  pm.expect(h[h.length-1].source).to.eql('manual-attestation'); });"
                 ]
               }
             }
           ]
         },
         {
-          "name": "MACHINE LANE \u00b7 Advaya disburses tranche T2 (15 Cr)",
+          "name": "MANUAL ATTESTATION \u00b7 UTR for tranche T2 (15 Cr)",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{svcAdvayaKey}}"
-              },
               {
                 "key": "X-Tenant",
                 "value": "{{tenant}}"
               },
               {
                 "key": "X-Actor",
-                "value": "advaya-simulated"
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{checkerToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{checkerEmail}}"
               },
               {
                 "key": "Content-Type",
@@ -5031,21 +5056,20 @@
               }
             ],
             "url": {
-              "raw": "{{registerDirectUrl}}/v1/internal/lending/{{lendingId}}/tranches",
+              "raw": "{{baseUrl}}/v1/lending/{{lendingId}}/advaya-events",
               "host": [
-                "{{registerDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "internal",
                 "lending",
                 "{{lendingId}}",
-                "tranches"
+                "advaya-events"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tranche_ref\": \"T2-{{runSuffix}}\",\n  \"amount\": 15.0,\n  \"disbursed_on\": \"2026-05-15\",\n  \"advaya_reference\": \"ADV/{{runSuffix}}/2\"\n}",
+              "raw": "{\n  \"event\": \"disbursed\",\n  \"reference\": \"UTR-T2-{{runSuffix}}\",\n  \"amount_cr\": 15.0,\n  \"disbursed_on\": \"2026-05-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

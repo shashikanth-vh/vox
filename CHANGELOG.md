@@ -6,6 +6,31 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The MANUAL Advaya attestation lane — finish the flow in PRISM on Advaya's
+  behalf, production-grade.** Until the real API integration is live, Advaya
+  confirms offline (letter / UTR / email); an authorised human now records that in
+  PRISM on their OWN identity via `POST /v1/lending/{id}/advaya-events`
+  `{event: accepted|rejected|disbursed, reference, note?, amount_cr?, disbursed_on?}`:
+  * **Human lane** — OIDC-verified caller through the gateway; a service key is
+    refused (machines keep the `/v1/internal/…` lane). The write is attributed to
+    the person.
+  * **Authority-gated + scoped** — the handover-approval authority (Credit Head /
+    Management / Admin), company-scope enforced.
+  * **Artefact-cited** — `reference` (Advaya's letter no. / UTR / ack id) is
+    MANDATORY, becomes the package's `advaya_reference` / the tranche ref, and keys
+    idempotency (re-sending the same reference replays, never duplicates).
+  * **Same machinery** — the attestation drives the exact machine-lane code
+    (`apply_handoff` / `apply_tranche`, now shared): digest taken from PRISM's own
+    submitted package (a human never types a hash), same single-winner settlement,
+    ceilings, actuals and the stage move to Disbursed. Rows, stage_history and
+    audit entries carry `source: manual-attestation`. When the real integration
+    goes live, disable this one route — nothing else changes.
+  E2E folders 08/08b now demonstrate THIS lane (the checker attests rejection →
+  acceptance → two UTR-cited tranches); the machine lane remains in All-APIs (316
+  requests) for the future integration. New register tests cover the full manual
+  boundary, the guards (authority, mandatory reference/amount, pre-acceptance
+  refusal, contradictory attestation) and the service-key refusal.
+
 - **Every Postman request now goes through the ONE door — `https://<host>:8443` —
   nothing internal.** Two lanes still defaulted to direct service ports: the Dex
   sign-in (`dexUrl` → `:5556`) and the MACHINE lane (`registerDirectUrl` → `:8000`

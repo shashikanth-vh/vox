@@ -62,6 +62,16 @@ def _serialize(row: AdvayaHandoff) -> dict[str, Any]:
              summary="Record an Advaya handoff outcome (single-winner)")
 async def record_handoff(payload: HandoffIn, ctx: RequestContext = Depends(get_context)):
     _require_service()
+    return await apply_handoff(ctx, payload)
+
+
+async def apply_handoff(ctx: RequestContext, payload: HandoffIn,
+                        source: str | None = None) -> dict[str, Any]:
+    """The ONE settlement path for a handoff outcome — shared by the machine lane
+    (Advaya's own callback / the workflow) and the MANUAL attestation lane (an
+    authorised human relaying Advaya's offline confirmation). ``source`` marks the
+    provenance in the audit trail and the package snapshot; the state machinery is
+    identical either way, so downstream logic never cares which lane fed it."""
     values = {
         "tenant_id": ctx.tenant_id, "handoff_key": payload.handoff_key,
         "lending_id": payload.lending_id, "payload_sha256": payload.payload_sha256,
@@ -99,14 +109,16 @@ async def record_handoff(payload: HandoffIn, ctx: RequestContext = Depends(get_c
         if isinstance(pkg.snapshot, dict):
             pkg.snapshot = {**pkg.snapshot, "advaya_outcome": payload.status,
                             "advaya_acknowledgement_id": payload.acknowledgement_id,
-                            "advaya_note": payload.note}
+                            "advaya_note": payload.note,
+                            **({"advaya_source": source} if source else {})}
         ctx.session.add(AuditLog(
             tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handoff",
             resource_type="advaya_handoffs", resource_id=str(won),
             request_id=request_id_ctx.get(),
             changes={"handoff_key": payload.handoff_key, "lending_id": payload.lending_id,
                      "status": payload.status, "acknowledgement_id": payload.acknowledgement_id,
-                     "package_id": str(pkg.id), "package_status": pkg.status}))
+                     "package_id": str(pkg.id), "package_status": pkg.status,
+                     **({"source": source} if source else {})}))
         row = (await ctx.session.execute(
             select(AdvayaHandoff).where(AdvayaHandoff.id == won))).scalar_one()
         return _serialize(row)

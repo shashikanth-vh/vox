@@ -821,16 +821,20 @@ F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's 
         REG, "/v1/internal/handover-packages/{{lendingId}}/submit", headers=_CHECKER,
         tests=[OK, "pm.test('Submitted', () => "
                    "pm.expect(pm.response.json().status).to.eql('Submitted'));"]),
-    req("MACHINE LANE · Advaya REJECTS attempt 1", "POST", MREG,
-        "/v1/internal/advaya-handoffs", headers=_SVC_ADVAYA,
-        body={"handoff_key": "advaya-handoff:{{lendingId}}:r1",
-              "lending_id": "{{lendingId}}", "payload_sha256": "{{pkgSha}}",
-              "status": "Rejected",
-              "note": "Simulated: KYC document illegible — correct and resubmit."},
-        tests=[OK],
-        desc="MACHINE LANE (svc_advaya key): Advaya's validation answer, simulated. A "
-             "rejection reopens PRISM's prepare → approve → submit loop; nothing "
-             "downstream may happen off a rejected package."),
+    req("MANUAL ATTESTATION · ops records Advaya's REJECTION (letter cited)", "POST", REG,
+        "/v1/lending/{{lendingId}}/advaya-events", headers=_CHECKER,
+        body={"event": "rejected", "reference": "ADV-LTR/{{runSuffix}}/1",
+              "note": "Advaya letter: KYC document illegible — correct and resubmit."},
+        tests=[OK, "pm.test('recorded AS the human, source-marked', () => {",
+               "  const b = pm.response.json();",
+               "  pm.expect(b.source).to.eql('manual-attestation');",
+               "  pm.expect(b.recorded_by).to.eql(pm.environment.get('checkerEmail')); });"],
+        desc="PRODUCTION REALITY before the API integration: Advaya confirmed OFFLINE "
+             "(letter/email), and an AUTHORISED human relays it on their OWN identity, "
+             "citing the artefact (reference is mandatory). Same machinery as the "
+             "machine lane — the digest comes from PRISM's own submitted package — with "
+             "provenance 'manual-attestation'. A rejection reopens prepare → approve → "
+             "submit."),
     req("GET /v1/lending/{id}/handover-package — Rejected, loop reopened", "GET", REG,
         "/v1/lending/{{lendingId}}/handover-package",
         tests=[OK, "pm.test('package Rejected', () => "
@@ -853,15 +857,17 @@ F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's 
     req("POST …/submit — resubmitted to Advaya", "POST",
         REG, "/v1/internal/handover-packages/{{lendingId}}/submit", headers=_CHECKER,
         tests=[OK]),
-    req("MACHINE LANE · Advaya ACCEPTS attempt 2", "POST", MREG,
-        "/v1/internal/advaya-handoffs", headers=_SVC_ADVAYA,
-        body={"handoff_key": "advaya-handoff:{{lendingId}}:r2",
-              "lending_id": "{{lendingId}}", "payload_sha256": "{{pkgSha}}",
-              "status": "Accepted", "acknowledgement_id": "ADV-ACK/{{runSuffix}}"},
-        tests=[OK],
-        desc="Advaya validates and ACCEPTS — THIS is where PRISM's workflow stops. The "
-             "acknowledgement becomes the package's one-time advaya_reference and the "
-             "package freezes (database trigger)."),
+    req("MANUAL ATTESTATION · ops records Advaya's ACCEPTANCE (ack cited)", "POST", REG,
+        "/v1/lending/{{lendingId}}/advaya-events", headers=_CHECKER,
+        body={"event": "accepted", "reference": "ADV-ACK/{{runSuffix}}",
+              "note": "Advaya acceptance received by email; ack id cited."},
+        tests=[OK, "pm.test('accepted, human-attributed', () => {",
+               "  const b = pm.response.json();",
+               "  pm.expect(b.handoff.status).to.eql('Accepted');",
+               "  pm.expect(b.source).to.eql('manual-attestation'); });"],
+        desc="Advaya validates and ACCEPTS (confirmed offline; attested here) — THIS is "
+             "where PRISM's workflow stops. The cited reference becomes the package's "
+             "one-time advaya_reference and the package freezes (database trigger)."),
     req("GET handover-package — ACCEPTED, acknowledgement stored, package frozen", "GET",
         REG, "/v1/lending/{{lendingId}}/handover-package",
         tests=[OK, "const p = pm.response.json();",
@@ -878,29 +884,30 @@ F.append(("08 · LENDING ▸ handover → SUBMITTED → Advaya ACCEPTS (PRISM's 
              "operational loan closure. PRISM only consumes Advaya's events."),
 ]))
 
-F.append(("08b · ADVAYA SIMULATION ▸ the downstream system's events (NOT PRISM operations)", [
-    req("MACHINE LANE · Advaya disburses tranche T1 (30 Cr) → stage flips", "POST", MREG,
-        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,
-        body={"tranche_ref": "T1-{{runSuffix}}", "amount": 30.0,
-              "disbursed_on": "2026-04-30", "advaya_reference": "ADV/{{runSuffix}}/1"},
+F.append(("08b · ADVAYA EVENTS ▸ ops attests the downstream facts (manual, pre-integration)", [
+    req("MANUAL ATTESTATION · UTR for tranche T1 (30 Cr) → stage flips", "POST", REG,
+        "/v1/lending/{{lendingId}}/advaya-events", headers=_CHECKER,
+        body={"event": "disbursed", "reference": "UTR-T1-{{runSuffix}}",
+              "amount_cr": 30.0, "disbursed_on": "2026-04-30",
+              "note": "Advaya disbursement advice; UTR cited."},
         tests=[OK],
-        desc="SIMULATED DOWNSTREAM EVENT: in production this is Advaya's callback after "
-             "money actually moved. The FIRST tranche — not any PRISM approval — is what "
-             "advances the line to 'Disbursed' and writes the actuals. Idempotent per "
-             "ref; append-only; ceiling-bounded. Repayments, collections, penalties and "
-             "operational loan closure remain wholly in Advaya and are not modelled "
-             "here — PRISM would consume those as read-only status events."),
-    req("GET /v1/lending/{id} — Disbursed BY ADVAYA'S EVENT", "GET", REG,
+        desc="PRODUCTION REALITY pre-integration: Advaya's disbursement advice arrives "
+             "offline; an authorised human attests it citing the UTR. The FIRST tranche "
+             "— not any PRISM approval — is what advances the line to 'Disbursed' and "
+             "writes the actuals. Idempotent per reference; append-only; "
+             "ceiling-bounded. (When the real integration goes live, Advaya's own "
+             "callback drives the SAME machinery on the machine lane.)"),
+    req("GET /v1/lending/{id} — Disbursed BY THE ATTESTED EVENT", "GET", REG,
         "/v1/lending/{{lendingId}}",
         tests=[OK, "const l = pm.response.json();",
-               "pm.test('Disbursed via advaya-disbursement', () => {",
+               "pm.test('Disbursed, source manual-attestation', () => {",
                "  pm.expect(l.stage).to.eql('Disbursed');",
                "  const h = l.stage_history || [];",
-               "  pm.expect(h[h.length-1].source).to.eql('advaya-disbursement'); });"]),
-    req("MACHINE LANE · Advaya disburses tranche T2 (15 Cr)", "POST", MREG,
-        "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,
-        body={"tranche_ref": "T2-{{runSuffix}}", "amount": 15.0,
-              "disbursed_on": "2026-05-15", "advaya_reference": "ADV/{{runSuffix}}/2"},
+               "  pm.expect(h[h.length-1].source).to.eql('manual-attestation'); });"]),
+    req("MANUAL ATTESTATION · UTR for tranche T2 (15 Cr)", "POST", REG,
+        "/v1/lending/{{lendingId}}/advaya-events", headers=_CHECKER,
+        body={"event": "disbursed", "reference": "UTR-T2-{{runSuffix}}",
+              "amount_cr": 15.0, "disbursed_on": "2026-05-15"},
         tests=[OK]),
     req("MACHINE LANE · GET tranches — read-only reconciliation view", "GET", MREG,
         "/v1/internal/lending/{{lendingId}}/tranches", headers=_SVC_ADVAYA,

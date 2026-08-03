@@ -106,6 +106,15 @@ def _ceiling(line: LendingTracker) -> float | None:
 async def record_tranche(lending_id: str, payload: TrancheIn,
                          ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     _require_service(ctx)
+    return await apply_tranche(ctx, lending_id, payload)
+
+
+async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn,
+                        source: str | None = None) -> dict[str, Any]:
+    """The ONE tranche-recording path — shared by the machine lane (Advaya's
+    callbacks) and the MANUAL attestation lane (an authorised human relaying
+    Advaya's offline disbursement confirmation). Identical guards, ceilings,
+    actuals and stage move; ``source`` marks the provenance."""
     line = await _line(ctx, lending_id)
     # Tranches are ADVAYA's disbursement evidence. They are recorded only after Advaya
     # ACCEPTED the handover (PRISM's workflow boundary), and it is the FIRST tranche —
@@ -167,7 +176,7 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
     if line.stage != "Disbursed":
         history = list(line.stage_history or [])
         history.append({"from": line.stage, "to": "Disbursed",
-                        "source": "advaya-disbursement",
+                        "source": source or "advaya-disbursement",
                         "tranche_ref": payload.tranche_ref, "by": ctx.actor})
         line.stage = "Disbursed"
         line.stage_history = history
@@ -178,7 +187,8 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "tranche_ref": payload.tranche_ref,
                  "amount": payload.amount, "cumulative": already + payload.amount,
-                 "stage": line.stage}))
+                 "stage": line.stage,
+                 **({"source": source} if source else {})}))
     row = (await ctx.session.execute(select(DisbursementTranche).where(
         DisbursementTranche.id == won))).scalar_one()
     return _serialize(row)

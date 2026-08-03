@@ -35,7 +35,8 @@ instead of a cryptic 422 mid-folder.
 | 05 | Lead → Deal conversion | BD Head/Management (`adminToken`) | `…/{{convWorkflowId}}/approve` → deal + product lines created | `…/control {action:"return"}` → RM revises, `resubmit` | `…/reject` (note mandatory) |
 | 06 | Credit Committee on the credit note | Checker (Credit authority) | `…/committee-decision {approved:true}` → evidence filed, stage → **Sanctioned** | `…/control return` → maker `revise-credit-note` (v2) → `…/control resubmit` | `…/committee-decision {approved:false}` |
 | 07 | CP/CS checklist (maker ≠ checker) | Maker prepares; Checker decides | `…/cpcs-checklists/{id}/approve` → evidence → stage → **CP/CS Completed** | `…/{id}/return` → maker amends v2 | `…/{id}/reject` (v3 demo; revival = fresh version) |
-| 08 | Advaya handover package | Maker prepares; Checker decides | `…/approve` → `submit` → Advaya accepts | `…/return` → re-prepare | `…/reject` (folder opens with this, then re-prepare → approve) |
+| 08 | Advaya handover package | Maker prepares; Checker decides | `…/approve` → `submit` → outcome attested | `…/return` → re-prepare | `…/reject` (folder opens with this, then re-prepare → approve) |
+| 08/08b | **Advaya's offline confirmations** (pre-integration reality) | Authorised human (Credit Head/Mgmt/Admin) **on Advaya's behalf** | `POST /v1/lending/{id}/advaya-events` `{event: accepted\|disbursed, reference}` — the cited letter/UTR is mandatory; provenance `manual-attestation` | — | `{event: rejected, reference}` reopens prepare → approve → submit |
 | 09 | Syndication mandate sanction | Syn Head | `…/syndication-decision` | `…/control return/resubmit` | negative decision |
 | 10 | AM mandate closure | AM Head | `…/am-decision` | `…/control return/resubmit` | negative decision |
 | 11 | Document validation | Uploader ≠ validator | `…/documents/{id}/validate` | replace flow (expiry → new version) | refuse validation |

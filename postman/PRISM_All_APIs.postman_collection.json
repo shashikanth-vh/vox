@@ -20,8 +20,62 @@
   ],
   "item": [
     {
-      "name": "Register  (233 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (234 requests \u00b7 {{baseUrl}}/)",
       "item": [
+        {
+          "name": "Advaya",
+          "item": [
+            {
+              "name": "POST /v1/lending/{lending_id}/advaya-events \u2014 Record Advaya's OFFLINE confirmation (manual attestation, human lane)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/advaya-events",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "advaya-events"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"event\": \"REPLACE-to-match-^(accepted|rejected|\",\n  \"reference\": \"sample\",\n  \"note\": \"sample\",\n  \"amount_cr\": 1.0,\n  \"disbursed_on\": \"2026-01-31\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
         {
           "name": "Asset Monetisation",
           "item": [

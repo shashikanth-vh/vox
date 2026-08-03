@@ -6,6 +6,66 @@
   },
   "item": [
     {
+      "name": "Advaya",
+      "item": [
+        {
+          "name": "POST /v1/lending/{{{lendingId}}}/advaya-events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/advaya-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "advaya-events"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_cr\": 1.0,\n  \"disbursed_on\": \"2026-03-31\",\n  \"event\": \"sample event\",\n  \"note\": \"sample note\",\n  \"reference\": \"sample reference\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Asset Monetisation",
       "item": [
         {
