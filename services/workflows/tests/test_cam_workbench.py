@@ -182,6 +182,26 @@ async def test_a_typed_brief_drafts_without_any_prompt_document(monkeypatch):
     assert "pdf-1" in r2.json()["error"]["detail"]
 
 
+async def test_an_ask_answers_without_touching_the_working_draft(monkeypatch):
+    """update_draft=false: the reply joins the transcript but the analyst's draft stays
+    theirs — the ASK lane for mining answers while hand-filling the working CAM."""
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1"], "prompt_doc_id": "prompt-1"})
+    rid = gen.json()["report_id"]
+    before = stub.reports[rid]["draft_md"]
+
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
+                    json={"instruction": "What was FY25 revenue?", "update_draft": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["updated_draft"] is False
+    assert stub.reports[rid]["draft_md"] == before          # draft untouched
+    # …but the exchange IS on the durable transcript.
+    assert [t["role"] for t in stub.turns][-2:] == ["user", "assistant"]
+
+
 async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypatch):
     app = _app(monkeypatch)
     app.state.http = _RegisterStub()

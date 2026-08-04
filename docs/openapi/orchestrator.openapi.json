@@ -1549,10 +1549,15 @@
         "additionalProperties": false,
         "properties": {
           "instruction": {
-            "maxLength": 20000,
+            "maxLength": 100000,
             "minLength": 1,
             "title": "Instruction",
             "type": "string"
+          },
+          "update_draft": {
+            "default": true,
+            "title": "Update Draft",
+            "type": "boolean"
           }
         },
         "required": [

@@ -116,11 +116,17 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, 'draft the CAM')); }
   },
 
-  /** Rework the open draft with a further instruction. */
-  async refine(lendingId: string, instruction: string): Promise<{ draft_md: string }> {
+  /**
+   * Continue the conversation. updateDraft=true reworks the draft (the reply replaces
+   * it); false is an ASK — the reply comes back for the analyst to mine, the working
+   * draft stays theirs. Both land on the transcript.
+   */
+  async refine(lendingId: string, instruction: string,
+               updateDraft = true): Promise<{ draft_md: string; updated_draft?: boolean }> {
     try {
-      return await orchestrator.post<any>(`/v1/cam/${lendingId}/refine`, { instruction });
-    } catch (e) { throw new Error(msg(e, 'rework the draft')); }
+      return await orchestrator.post<any>(`/v1/cam/${lendingId}/refine`,
+        { instruction, update_draft: updateDraft });
+    } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
   /** File the draft to the Data Register and submit it to the committee. */

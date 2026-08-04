@@ -138,11 +138,19 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     setBusy('');
   };
 
-  const generate = () => run('generate', async () => {
+  // Summary-first: the engine digests every selected document (facts, figures, gaps)
+  // as draft v1 — the analyst then applies the master prompt, asks, and hand-fills.
+  const SUMMARY_BRIEF =
+    'Summarise each of the supplied documents for a credit analyst: key facts, all '
+    + 'figures with periods and units, parties, and NAME every gap (what a CAM would '
+    + 'need that these documents do not contain). Do not draft the CAM yet.';
+
+  const generate = (promptOverride?: string) => run('generate', async () => {
     const out = await camService.generate(subjectId, {
       source_doc_ids: [...sel],
-      ...(promptDoc === TYPED ? { prompt_text: typedBrief.trim() }
-        : { prompt_doc_id: promptDoc }),
+      ...(promptOverride ? { prompt_text: promptOverride }
+        : promptDoc === TYPED ? { prompt_text: typedBrief.trim() }
+          : { prompt_doc_id: promptDoc }),
       ...(action?.body?.deal_id ? { deal_id: action.body.deal_id } : {}),
     });
     const skipped = (out.skipped || []).length;
@@ -150,10 +158,28 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       + (skipped ? ` ${skipped} document(s) skipped — see the transcript.` : '');
   });
 
+  // The ASK lane's latest answer — shown beside the draft, never written into it.
+  const [answer, setAnswer] = useState('');
+
   const refine = () => run('refine', async () => {
     await camService.refine(subjectId, instruction.trim());
     setInstruction('');
     return 'Draft reworked.';
+  });
+
+  const ask = () => run('ask', async () => {
+    const out = await camService.refine(subjectId, instruction.trim(), false);
+    setAnswer(out.draft_md || '');
+    setInstruction('');
+    return 'Answer below — your draft is untouched; copy in what is useful.';
+  });
+
+  const loadExample = () => run('example', async () => {
+    if (!working || !defaults.example) throw new Error('No example template on record.');
+    const tpl = await camService.docText(defaults.example.id);
+    if (!tpl.text?.trim()) throw new Error(tpl.reason || 'The example has no readable text.');
+    await camService.saveDraft(working.id, tpl.text);
+    return 'The example CAM is now your working draft — edit it and fill in the facts.';
   });
 
   const saveEdit = () => run('save', async () => {
@@ -261,6 +287,13 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   ? <>returned by the committee{working.decision_note ? <> — “{working.decision_note}”</> : null}; rework it below</>
                   : 'draft in progress'} · engine {working.engine || '—'}
               </Typography>
+              {!editing && defaults.example && (
+                <Button size="small" disabled={!!busy} onClick={() => void loadExample()}
+                  title="Overwrites the current draft with the example CAM's text — then edit and fill it in"
+                  sx={{ textTransform: 'none', fontSize: 12 }}>
+                  {busy === 'example' ? 'Loading…' : 'Start from the example'}
+                </Button>
+              )}
               {!editing && !!working.draft_md && (
                 <Button size="small" disabled={!!busy}
                   onClick={() => { setDraftText(working.draft_md || ''); setEditing(true); }}
@@ -288,15 +321,47 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               }}>{working.draft_md || 'No draft text yet — generate below.'}</Box>
             )}
             <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'flex-start' }}>
-              <TextField fullWidth size="small" multiline minRows={1}
-                label="Rework instruction — what should change?"
+              <TextField fullWidth size="small" multiline minRows={2}
+                label="Instruction / question — paste anything (doc extracts, figures, prompts)"
                 value={instruction} onChange={(e) => setInstruction(e.target.value)} />
-              <Button variant="outlined" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                disabled={!instruction.trim() || !!busy} onClick={() => void refine()}
-                sx={{ whiteSpace: 'nowrap', mt: 0.3 }}>
-                {busy === 'refine' ? 'Reworking…' : 'Rework'}
-              </Button>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
+                  disabled={!instruction.trim() || !!busy} onClick={() => void refine()}
+                  sx={{ whiteSpace: 'nowrap' }}>
+                  {busy === 'refine' ? 'Reworking…' : 'Rework draft'}
+                </Button>
+                <Button variant="outlined" size="small"
+                  disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
+                  title="The answer comes back below — your draft stays untouched"
+                  sx={{ whiteSpace: 'nowrap' }}>
+                  {busy === 'ask' ? 'Asking…' : 'Ask only'}
+                </Button>
+              </Box>
             </Box>
+            {defaults.prompt && (
+              <Button size="small" disabled={!!busy} sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.4 }}
+                title="Loads the EVAM master prompt into the box — then Rework draft applies it to everything the engine has seen"
+                onClick={() => void camService.docText(defaults.prompt!.id)
+                  .then((t) => setInstruction(t.text || ''))
+                  .catch((e: any) => setErr(e?.message || String(e)))}>
+                Insert the master prompt into the box
+              </Button>
+            )}
+            {answer && (
+              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
+                    Engine answer — copy what is useful into your draft
+                  </Typography>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => void navigator.clipboard?.writeText(answer)}>Copy</Button>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => setAnswer('')}>Close</Button>
+                </Box>
+                <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
+                  fontFamily: 'inherit', maxHeight: 220, overflow: 'auto', m: 0 }}>{answer}</Box>
+              </Box>
+            )}
             <Divider sx={{ my: 1.4 }} />
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField size="small" sx={{ flex: 1 }} label="Filed title"
@@ -406,12 +471,19 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   )}
                 </Box>
               )}
-              <Button variant="contained" size="small"
-                startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                disabled={!sel.size || !promptDoc || (promptDoc === TYPED && !typedBrief.trim()) || !!busy}
-                onClick={() => void generate()}>
-                {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button variant="contained" size="small"
+                  startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
+                  disabled={!sel.size || !promptDoc || (promptDoc === TYPED && !typedBrief.trim()) || !!busy}
+                  onClick={() => void generate()}>
+                  {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
+                </Button>
+                <Button variant="outlined" size="small" disabled={!sel.size || !!busy}
+                  title="The engine digests the documents first — facts, figures, gaps — then you apply the master prompt, ask questions, and fill the CAM"
+                  onClick={() => void generate(SUMMARY_BRIEF)}>
+                  Summarise the documents first
+                </Button>
+              </Box>
             </Box>
           );
         })()}

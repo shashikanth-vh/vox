@@ -176,7 +176,11 @@ class GenerateIn(BaseModel):
 
 class RefineIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    instruction: str = Field(min_length=1, max_length=20_000)
+    instruction: str = Field(min_length=1, max_length=100_000)
+    # True (default): the engine's reply REPLACES the working draft — a rework.
+    # False: an ASK — the reply comes back (and joins the transcript) but the analyst's
+    # working draft stays untouched; they copy what is useful into it themselves.
+    update_draft: bool = True
 
 
 class FinaliseIn(BaseModel):
@@ -458,13 +462,16 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         try:
             await _record_turn(request, caller, who, report["id"], "user",
                                payload.instruction)
-            draft = await engine.generate(request.app.state.http, _SYSTEM, turns)
+            reply = await engine.generate(request.app.state.http, _SYSTEM, turns)
+            # An ASK records the exchange (the transcript stays the audit answer to
+            # "where did this figure come from?") but leaves draft_md alone.
             await _record_turn(request, caller, who, report["id"], "assistant",
-                               draft, draft=draft)
+                               reply, draft=reply if payload.update_draft else None)
         except RuntimeError as exc:
             return problem(502, "Drafting failed", str(exc))
         return {"report_id": report["id"], "report_version": report["report_version"],
-                "engine": engine.name, "draft_md": draft}
+                "engine": engine.name, "draft_md": reply,
+                "updated_draft": payload.update_draft}
 
     @app.post("/v1/cam/{lending_id}/finalise", tags=["CAM"],
               summary="File the draft to the Data Register and submit it to committee")

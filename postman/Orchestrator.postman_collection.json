@@ -212,7 +212,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"instruction\": \"sample instruction\"\n}",
+              "raw": "{\n  \"instruction\": \"sample instruction\",\n  \"update_draft\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
