@@ -154,13 +154,23 @@ class _LeadHttp:
     """A stand-in Register: serves GET /v1/leads/{id}, the entity search, and records
     the client-create / lead-link writes the conversion pre-flight makes."""
 
-    def __init__(self, row: dict | None, entities: list | None = None) -> None:
+    def __init__(self, row: dict | None, entities: list | None = None,
+                 people: dict | None = None) -> None:
         self.row = row
         self.entities = entities or []
+        # name (lowercased) → the roster rows it denotes, as /v1/people/resolve answers.
+        self.people = people or {}
         self.created: list[dict] = []
         self.patched: list[dict] = []
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if "/v1/people/resolve" in str(url):
+            wanted = ((kwargs.get("params") or {}).get("name") or "").strip().lower()
+            rows = self.people.get(wanted, [])
+            return httpx.Response(200, json={
+                "query": wanted,
+                "resolved": rows[0] if len(rows) == 1 else None,
+                "candidates": rows}, request=httpx.Request("GET", url))
         if "/v1/entities" in str(url):
             return httpx.Response(200, json={"items": self.entities},
                                   request=httpx.Request("GET", url))
@@ -317,4 +327,71 @@ async def test_conversion_reports_a_missing_lead(monkeypatch):
     app.state.http = _LeadHttp(None)
     r = await _post_conv(app)
     assert r.status_code == 404
+    get_settings.cache_clear()
+
+
+async def _guarded_post(app):
+    """POST a conversion and return the response, or None when the request got as far as
+    the Temporal start (there is no Temporal here — reaching it IS the pass condition for
+    a pre-flight guard that must not fire)."""
+    try:
+        return await _post_conv(app)
+    except Exception:                                    # noqa: BLE001 — no Temporal here
+        return None
+
+
+def _passed_the_guard(resp) -> bool:                     # noqa: ANN001
+    return resp is None or resp.status_code != 422
+
+
+async def test_a_conversion_naming_an_unknown_rm_is_refused_before_anyone_approves(
+        monkeypatch):
+    """The register validates rm/analyst on the CONVERT call — which is on the far side
+    of a human approval.
+
+    So a lead whose RM was never added under People was accepted, parked, shown to an
+    approver, approved, and only THEN failed: the approver was handed
+    "Unknown rm 'e2e.rm'" about somebody else's data, with the run dead behind it. The
+    same rule, asked of the same roster, before the run starts.
+    """
+    app = _app(monkeypatch)
+    app.state.http = _LeadHttp(
+        {"id": "l1", "lead_no": "LD-9", "company": "Known Co", "entity_id": "ent-1",
+         "status": "Active", "rm": "e2e.rm"},
+        people={"priya": [{"name": "Priya", "full_name": "Priya Nair",
+                           "email": "priya@evamfinance.com"}]})
+    r = await _post_conv(app)
+    assert r.status_code == 422, r.text
+    detail = r.json()["error"]["detail"]
+    assert "e2e.rm" in detail and "People" in detail, detail
+    get_settings.cache_clear()
+
+
+async def test_a_conversion_naming_a_person_on_record_still_starts(monkeypatch):
+    """The guard must not become the new way conversions fail: a name the roster DOES
+    know passes straight through it."""
+    app = _app(monkeypatch)
+    app.state.http = _LeadHttp(
+        {"id": "l1", "lead_no": "LD-9", "company": "Known Co", "entity_id": "ent-1",
+         "status": "Active", "rm": "Priya"},
+        people={"priya": [{"name": "Priya", "full_name": "Priya Nair",
+                           "email": "priya@evamfinance.com"}]})
+    assert _passed_the_guard(await _guarded_post(app))
+    get_settings.cache_clear()
+
+
+async def test_a_roster_that_cannot_be_read_does_not_refuse_the_conversion(monkeypatch):
+    """A lookup that did not RUN is not a refusal. The register being unreachable must
+    not block a conversion the roster would have allowed — the convert call checks
+    again anyway, where a failure is recoverable."""
+    class _Down(_LeadHttp):
+        async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+            if "/v1/people/resolve" in str(url):
+                raise httpx.ConnectError("register down")
+            return await super().get(url, **kwargs)
+
+    app = _app(monkeypatch)
+    app.state.http = _Down({"id": "l1", "lead_no": "LD-9", "company": "Known Co",
+                            "entity_id": "ent-1", "status": "Active", "rm": "Priya"})
+    assert _passed_the_guard(await _guarded_post(app))
     get_settings.cache_clear()

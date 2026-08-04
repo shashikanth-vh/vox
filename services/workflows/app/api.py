@@ -1204,6 +1204,58 @@ def create_app() -> FastAPI:
                                 f"{resp.status_code}).")
         return resp.json(), None
 
+    async def _settle_people(request: Request, caller: CallerContext, lead_row: dict,
+                             payload: LeadConversionIn) -> ORJSONResponse | None:
+        """Refuse a conversion whose RM or analyst is not a person on the roster — HERE,
+        not after somebody has approved it.
+
+        The register validates these names on the convert call, which happens on the far
+        side of a human approval. So a lead naming an RM who was never added under People
+        was accepted, parked, shown to an approver, approved — and only then failed, with
+        the approver holding an error about somebody else's data. The rule is the
+        register's own (GET /v1/people/resolve accepts the handle, the full name, the
+        e-mail or its local part), asked before the run starts.
+
+        A lookup that cannot RUN is not a refusal: the register being unreachable must
+        not block a conversion the roster would have allowed, and the convert call will
+        check again anyway.
+        """
+        base = settings.register_base_url.rstrip("/")
+        svc = {"X-API-Key": settings.register_api_key,
+               "X-Tenant": caller.tenant or settings.register_tenant}
+        for label, name in (("RM", (payload.rm or lead_row.get("rm") or "").strip()),
+                            ("analyst", (payload.analyst or "").strip())):
+            if not name:
+                continue
+            try:
+                got = await request.app.state.http.get(
+                    f"{base}/v1/people/resolve", params={"name": name}, headers=svc)
+                if got.status_code != 200:
+                    continue                       # cannot check ≠ refuse
+                body = got.json() or {}
+            except (httpx.HTTPError, ValueError, AttributeError):
+                continue
+            if body.get("resolved"):
+                continue
+            candidates = body.get("candidates") or []
+            if candidates:
+                who = ", ".join(
+                    f"{c.get('full_name') or c.get('name')}"
+                    + (f" <{c['email']}>" if c.get("email") else "")
+                    for c in candidates)
+                return _problem(
+                    422, "Validation failed",
+                    f"The {label} on this lead, '{name}', matches {len(candidates)} "
+                    f"people on record ({who}). Set it to the full name or the e-mail "
+                    f"address and push it again.")
+            return _problem(
+                422, "Validation failed",
+                f"The {label} on this lead is '{name}', who is not a person on record. "
+                f"Add them under People (Employees) — the e-mail matters, it is what "
+                f"binds the entry to their sign-in — or set the lead's {label} to "
+                f"someone from that list, then push it again. Nothing was converted.")
+        return None
+
     async def _settle_lead_company(request: Request, caller: CallerContext, who: str,
                                    lead_row: dict, payload: LeadConversionIn
                                    ) -> tuple[str, ORJSONResponse | None]:
@@ -1322,6 +1374,8 @@ def create_app() -> FastAPI:
                 409, "Conflict",
                 f"Lead '{lead_row.get('lead_no') or payload.lead_id}' is already "
                 "Converted; it has left the lead register.")
+        if (err := await _settle_people(request, caller, lead_row, payload)) is not None:
+            return err
         if not lead_row.get("entity_id"):
             entity_id, err = await _settle_lead_company(
                 request, caller, requested_by, lead_row, payload)

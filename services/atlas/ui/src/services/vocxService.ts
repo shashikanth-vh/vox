@@ -130,6 +130,22 @@ export const vocxService = {
     } catch (e) { return fail(vocxError(e, 'open that report')); }
   },
 
+  /**
+   * The printable report, as HTML.
+   *
+   * NOT a link. `window.open` on the print URL is a plain browser navigation: it carries
+   * no bearer token, so the edge answered it with "Authentication required (Bearer
+   * token)" and the user got a JSON error where a report should have been. Every VocX
+   * route needs the signed-in identity, so the document is FETCHED like everything else
+   * and handed to a window the click already opened.
+   */
+  async printable(rm: string, captureId: string): Promise<Result<string>> {
+    try {
+      const r = await vocx.get<any>('/v1/reports/print', { rm, id: captureId });
+      return ok(typeof r === 'string' ? r : String(r ?? ''));
+    } catch (e) { return fail(vocxError(e, 'open the print view')); }
+  },
+
   /** Keep an edited draft without filing it. */
   async saveDraft(rm: string, captureId: string, report: VocxPreview,
                   status = 'ready'): Promise<Result<true>> {

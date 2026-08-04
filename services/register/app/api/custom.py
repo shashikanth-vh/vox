@@ -443,6 +443,33 @@ async def list_ref(ctx: RequestContext = Depends(get_context)) -> dict[str, list
     return out
 
 
+@router.get("/v1/people/resolve", tags=["People"],
+            summary="Who does this name denote? (handle / full name / e-mail / local part)")
+async def resolve_person_name(
+    name: str = Query(min_length=1, max_length=200),
+    ctx: RequestContext = Depends(get_context),
+) -> dict:
+    """The roster's own answer to "who is this?", so other services stop guessing.
+
+    The rule (app.core.people) accepts every string that honestly denotes a person and
+    refuses one that denotes two. It was reachable only by converting a lead — which
+    meant a lead naming an RM who is not on record sailed through a request, parked for
+    approval, and failed AFTER an approver had approved it. Anything that is about to
+    write a person's name can now ask first.
+
+    Always 200: "nobody" and "more than one" are answers, not errors, and the caller
+    decides what to do about them.
+    """
+    from app.core.people import find_people
+
+    found = await find_people(ctx.session, ctx.tenant_id, name)
+    rows = [{"name": p.name, "full_name": p.full_name, "email": p.email,
+             "role": p.role, "inactive": bool(p.inactive)} for p in found]
+    return {"query": name,
+            "resolved": rows[0] if len(rows) == 1 else None,
+            "candidates": rows}
+
+
 @router.get("/v1/ref/{category}", tags=["Reference"], summary="One reference vocabulary")
 async def list_ref_category(
     category: str, ctx: RequestContext = Depends(get_context)

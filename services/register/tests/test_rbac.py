@@ -512,3 +512,36 @@ async def test_one_person_one_mailbox(client: AsyncClient):
     moved = await client.patch(f"/v1/people/{ok.json()['id']}",
                                json={"email": "devi@evamfinance.com"})
     assert moved.status_code == 422, moved.text
+
+
+async def test_the_roster_answers_who_a_name_denotes(client: AsyncClient):
+    """Other services must be able to ASK, rather than each keeping their own idea of it.
+
+    The rule was reachable only by converting a lead, which happens on the far side of a
+    human approval — so a lead naming an RM who was never added under People was
+    accepted, parked, shown to an approver, approved, and only then failed.
+    """
+    assert (await client.post("/v1/people", json={
+        "name": "Kavya", "full_name": "Kavya Rao", "role": "BDRM",
+        "email": "kavya.rao@evamfinance.com"})).status_code == 201
+
+    async def resolve(name: str) -> dict:
+        r = await client.get("/v1/people/resolve", params={"name": name})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    for spelling in ("Kavya", "kavya rao", "kavya.rao@evamfinance.com", "kavya.rao"):
+        got = await resolve(spelling)
+        assert got["resolved"], (spelling, got)
+        assert got["resolved"]["full_name"] == "Kavya Rao"
+
+    # "Nobody" and "more than one" are ANSWERS, not errors — the caller decides.
+    absent = await resolve("e2e.rm")
+    assert absent["resolved"] is None and absent["candidates"] == []
+
+    assert (await client.post("/v1/people", json={
+        "name": "Kavya", "full_name": "Kavya Sharma", "role": "BDRM",
+        "email": "kavya.sharma@evamfinance.com"})).status_code == 201
+    both = await resolve("Kavya")
+    assert both["resolved"] is None
+    assert {c["full_name"] for c in both["candidates"]} == {"Kavya Rao", "Kavya Sharma"}

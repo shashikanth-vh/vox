@@ -13,7 +13,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import {
   vocxService, captureIdOf, type VocxCapabilities, type VocxPreview,
 } from '../../services/vocxService';
-import { VOCX_URL } from '../../api/vocxClient';
 import { currentRm } from './rm';
 import { check, rulesFor, type Completeness } from './completeness';
 import ApproveDialog from './ApproveDialog';
@@ -203,6 +202,28 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
     onDiscarded();
   };
 
+  /**
+   * The print view, opened the only way it can be: fetched, then written into a window
+   * this click already opened.
+   *
+   * Linking straight at the print URL was a plain navigation with no bearer token, so
+   * the edge answered "Authentication required" and the user got JSON where a report
+   * should have been. The blank tab is opened SYNCHRONOUSLY inside the click — a
+   * `window.open` after an await is a pop-up, and browsers block it.
+   */
+  const openPrintView = async () => {
+    const w = window.open('', '_blank', 'noopener');
+    if (!w) { setErr('Allow pop-ups for this site to open the print view.'); return; }
+    w.document.write('<!doctype html><title>Preparing…</title>'
+      + '<body style="font:14px system-ui;padding:24px">Preparing the report…</body>');
+    setErr('');
+    const r = await vocxService.printable(rm, captureId);
+    if (!r.ok) { w.close(); setErr(r.error); return; }
+    w.document.open();
+    w.document.write(r.data);
+    w.document.close();
+  };
+
   const jumpTo = (key: string) => {
     setAskApprove(false);
     const el = focusRef.current[key];
@@ -267,9 +288,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         <Button disabled={!!busy || committed} onClick={saveDraft} sx={pill}>Save changes</Button>
         <Tooltip title="Opens the print view — use your browser's Save as PDF">
           <Button startIcon={<DownloadIcon sx={{ fontSize: 17 }} />}
-            onClick={() => window.open(
-              `${VOCX_URL}/v1/reports/print?rm=${encodeURIComponent(rm)}&id=${encodeURIComponent(captureId)}`,
-              '_blank', 'noopener')}
+            disabled={!!busy || !captureId} onClick={openPrintView}
             sx={pill}>Download PDF</Button>
         </Tooltip>
         <Box sx={{ flex: 1 }} />

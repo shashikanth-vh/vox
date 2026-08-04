@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (234 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (235 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -9359,6 +9359,49 @@
                     }
                   ]
                 }
+              }
+            },
+            {
+              "name": "GET /v1/people/resolve \u2014 Who does this name denote? (handle / full name / e-mail / local part)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/people/resolve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "people",
+                    "resolve"
+                  ],
+                  "query": [
+                    {
+                      "key": "name",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
+                },
+                "description": "The roster's own answer to \"who is this?\", so other services stop guessing.\n\nThe rule (app.core.people) accepts every string that honestly denotes a person and\nrefuses one that denotes two. It was reachable only by converting a lead \u2014 which\nmeant a lead naming an RM who is not on record sailed through a request, parked for\napproval, and failed AFTER an approver had approved it. Anything that is about to\nwrite a person's name can now ask first.\n\nAlways 200: \"nobody\" and \"more than one\" are answers, not errors, and the caller\ndecides what to do about them."
               }
             },
             {
