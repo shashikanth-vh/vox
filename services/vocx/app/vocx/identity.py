@@ -13,10 +13,13 @@ register interaction and the register's own scoping governs it. So the rule here
 supervisor override, deliberately; if one is ever needed it should be an audited
 break-glass like the register's, not an ambient Admin privilege.
 
-The RM handle is resolved from the VERIFIED e-mail the gateway forwards, against the
-register's own people roster, so it matches the handle the rest of the platform addresses
-that person by. The result is cached briefly: identity changes rarely, and a lookup per
-capture would put the register in the path of every keystroke of a typeahead.
+The key a capture is filed under is derived from the VERIFIED e-mail the gateway forwards
+— and from nothing else. An earlier build resolved it against the register's people
+roster, which made the location of someone's unfiled work depend on a remote read: it
+resolved on one restart and not the next, and a person's own report list came back empty
+with the drafts still on disk. The roster handle survives only as a READ alias for
+captures written before the change, and only when it is a case-variant of the e-mail's
+local part (see aliases_for for why that limit is a boundary and not a nicety).
 """
 
 from __future__ import annotations
@@ -63,8 +66,9 @@ def _lookup(email: str, settings: Any) -> str:
     return ""
 
 
-def rm_for(email: str, settings: Any) -> str:
-    """The RM handle captures are filed under for this verified e-mail."""
+def _handle(email: str, settings: Any) -> str:
+    """The roster handle for this e-mail, TTL-cached. '' when the register holds none or
+    cannot be reached."""
     email = (email or "").strip()
     if not email:
         return ""
@@ -73,10 +77,50 @@ def rm_for(email: str, settings: Any) -> str:
         hit = _cache.get(email)
         if hit and (now - hit[1]) < _TTL_S:
             return hit[0]
-    handle = _lookup(email, settings) or local_part(email)
+    handle = _lookup(email, settings)
     with _lock:
         _cache[email] = (handle, now)
     return handle
+
+
+def rm_for(email: str, settings: Any = None) -> str:
+    """The key this person's captures are filed under — derived from the e-mail alone.
+
+    This deliberately does NOT consult the register. Keying private drafts on a
+    roster-resolved handle makes the location of someone's unsaved work depend on a remote
+    read: resolve today, fail tomorrow, and the same person's captures are filed under two
+    names. Their report list then comes back empty with the drafts still sitting on disk —
+    the worst failure this module can have, because it is silent and it is about work
+    nobody else can recover for them.
+
+    The local part is also what every ATLAS client already computes, so server and browser
+    agree without a round trip.
+    """
+    return local_part(email)
+
+
+def aliases_for(email: str, settings: Any) -> list[str]:
+    """Every key this person's captures may be read from, the write key first.
+
+    An earlier build filed captures under the roster handle ("Priya"), and the store keeps
+    a case-preserving directory per key — so after the switch to the local part ("priya")
+    those drafts are still on disk under a name nothing lists any more. The old key is
+    therefore read as well.
+
+    Only a CASE-VARIANT of the write key is accepted, and that limit is the point. A
+    roster handle unrelated to the e-mail could coincide with a different person's write
+    key, and reading it would hand one person another's unfiled captures — the one thing
+    this module exists to prevent. A case-variant of your own local part cannot be someone
+    else's. Handles that differ by more than case are left unread; those drafts are
+    reachable by their own owner only after they are committed.
+    """
+    primary = rm_for(email)
+    if not primary:
+        return []
+    handle = (_handle(email, settings) or "").strip()
+    if handle and handle != primary and handle.lower() == primary.lower():
+        return [primary, handle]
+    return [primary]
 
 
 def reset_cache() -> None:                              # test hook

@@ -41,9 +41,8 @@ export function VocxProvider({ children }: { children: React.ReactNode }) {
   // not asked to use.
   useEffect(() => {
     let alive = true;
-    const rm = currentRm();
-    if (!rm || !vocxService.enabled()) { setPending(0); return; }
-    void vocxService.reports(rm).then((r) => {
+    if (!vocxService.enabled()) { setPending(0); return; }
+    void vocxService.reports(currentRm()).then((r) => {
       if (!alive || !r.ok) return;
       setPending(r.data.filter((x) => String(x.status || '').toLowerCase() !== 'committed').length);
     });

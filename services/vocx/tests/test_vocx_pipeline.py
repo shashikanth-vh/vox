@@ -564,8 +564,10 @@ async def test_committed_interaction_lands_in_structured_columns(stub_register):
             "rm": "Priya", "extraction": ext, "chosen_code": "ECOSOCH"})
     assert r.status_code == 200 and r.json()["committed"], r.text
     inter = stub_register["interactions"][-1]
-    # Provenance + actor: the capturing RM, not the service key; source is VOX.
-    assert inter["performed_by"] == "Priya"
+    # Provenance + actor: the capturing RM, not the service key; source is VOX. The actor
+    # is the caller's own key (identity.rm_for), never the `rm` they typed in the body —
+    # a forged one there would file the capture under someone else's name.
+    assert inter["performed_by"] == "priya"
     assert inter["source"] == "VOX"
     assert inter["source_ref"] == cid
     # Capture facts in their own columns.
@@ -579,7 +581,7 @@ async def test_committed_interaction_lands_in_structured_columns(stub_register):
     assert inter["meta"]["capture_id"] == cid
     # Notes is the lean narrative: no KEY INTEL / NEXT STEPS dumps.
     assert "KEY INTEL" not in inter["notes"]
-    assert "captured by Priya via VocX" in inter["notes"]
+    assert "captured by priya via VocX" in inter["notes"]
 
 
 async def test_suggest_typeahead_matches_and_new_company(stub_register):
@@ -951,3 +953,86 @@ def test_recording_ownership_is_read_from_the_reference():
     assert not owns_audio_ref("", "Priya")
     # A ref shaped to look like someone else's does not become theirs.
     assert not owns_audio_ref("/data/audio/20260804_143000_Priyanka.wav", "Priya")
+
+
+async def test_reports_are_read_across_a_persons_storage_keys(stub_register, monkeypatch,
+                                                              tmp_path):
+    """A person's own past captures must not disappear because a lookup changed answers.
+
+    An earlier build keyed captures on the roster HANDLE, resolved from the verified
+    e-mail by a register read. A read that succeeds today and fails tomorrow files the
+    same person's work under two names, and their report list comes back empty with the
+    drafts still sitting on disk. So the write key is now derived from the e-mail alone,
+    and the LIST is read across the old key too.
+
+    Ownership is untouched: both keys come from the same verified e-mail, and neither is
+    another person's.
+    """
+    from app.vocx import identity
+
+    monkeypatch.setenv("VOCX_TOKENS_DIR", str(tmp_path / "vox"))
+    get_settings.cache_clear()
+    identity.reset_cache()
+    app = create_app()
+
+    # A draft filed by the older build, under the roster handle "Priya"…
+    legacy = {"on": True}
+    monkeypatch.setattr(identity, "rm_for",
+                        lambda email, settings=None:
+                        "Priya" if legacy["on"] else identity.local_part(email))
+    async with await _client(app, "priya@evamfinance.com") as c:
+        first = await c.post("/v1/capture", json={
+            "rm": "ignored", "offline": True,
+            "transcript": "Met the EcoSoch Solar team about the term loan."})
+        assert first.status_code == 200, first.text
+        cid_handle = first.json()["extraction"]["_meta"]["capture_id"]
+
+    # …and one filed by this build, under the e-mail's local part.
+    legacy["on"] = False
+    async with await _client(app, "priya@evamfinance.com") as c:
+        second = await c.post("/v1/capture", json={
+            "rm": "ignored", "offline": True,
+            "transcript": "Second note about the same facility."})
+        assert second.status_code == 200, second.text
+        cid_local = second.json()["extraction"]["_meta"]["capture_id"]
+
+        listed = await c.get("/v1/reports")
+        assert listed.status_code == 200, listed.text
+        ids = {r["capture_id"] for r in listed.json()["reports"]}
+    assert {cid_handle, cid_local} <= ids, (
+        "both keys belong to the same person; neither may vanish from their own list")
+
+    # A listed draft must also OPEN and DELETE — a row you can see but cannot touch is
+    # worse than one that never appeared.
+    async with await _client(app, "priya@evamfinance.com") as c:
+        got = await c.get("/v1/reports/get", params={"id": cid_handle})
+        assert got.status_code == 200, got.text
+        assert (got.json().get("report") or {}).get("capture_id") == cid_handle
+
+        gone = await c.post("/v1/reports/delete", json={"capture_id": cid_handle})
+        assert gone.status_code == 200, gone.text
+        after = await c.get("/v1/reports")
+        assert cid_handle not in {r["capture_id"] for r in after.json()["reports"]}, (
+            "a delete that misses the older key lets the draft reappear on refresh")
+
+    # And the key a capture is written to never depends on the register being reachable.
+    identity.reset_cache()
+    monkeypatch.setattr(identity, "_lookup", lambda *a, **k: "")
+    assert identity.rm_for("priya@evamfinance.com") == "priya"
+
+
+def test_a_persons_keys_are_their_own_and_nobody_elses(monkeypatch):
+    """The alias list widens what YOU can see, never whose captures you can reach."""
+    from app.vocx import identity
+
+    identity.reset_cache()
+    keys = identity.aliases_for("priya@evamfinance.com", None)
+    assert keys, "a verified e-mail always yields at least one key"
+    assert all("priya" in k.lower() for k in keys)
+    assert not identity.aliases_for("", None)
+
+    # A roster handle unrelated to the e-mail is NOT read: it could be another person's
+    # write key, and then a list would show one person another's unfiled captures.
+    identity.reset_cache()
+    monkeypatch.setattr(identity, "_lookup", lambda *a, **k: "Arun")
+    assert identity.aliases_for("priya@evamfinance.com", None) == ["priya"]

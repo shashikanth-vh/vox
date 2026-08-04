@@ -94,6 +94,15 @@ export function useDraggable(opts: {
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (!enabled || e.button !== 0) return;
+    // A press that starts on a CONTROL is that control's, not the drag's. The handle
+    // calls setPointerCapture, which retargets every following pointer event — including
+    // the pointerup that would have completed the click — to the handle. So the close and
+    // roll-up buttons in the panel's header simply stopped working: the panel could not
+    // be shut. Interactive descendants opt out of the drag entirely.
+    if ((e.target as HTMLElement)?.closest?.(
+      'button, a, input, textarea, select, [role="button"], [role="tab"]')) {
+      return;
+    }
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture?.(e.pointerId);
     originRef.current = { px: e.clientX, py: e.clientY, x: pos.x, y: pos.y };

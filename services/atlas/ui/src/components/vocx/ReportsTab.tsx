@@ -45,8 +45,11 @@ export default function ReportsTab({ epoch }: { epoch: number }) {
   const [opening, setOpening] = useState('');
   const [flash, setFlash] = useState('');
 
+  // No `if (!rm) return` guard. Whose reports these are is decided by VocX from the
+  // verified identity the edge forwards, not by this value — so skipping the call when
+  // the session happens to carry no short name showed an empty list for captures that
+  // were on the server all along. `rm` rides along for older builds and is ignored.
   const load = useCallback(async () => {
-    if (!rm) { setLoading(false); return; }
     setLoading(true);
     const r = await vocxService.reports(rm);
     setLoading(false);

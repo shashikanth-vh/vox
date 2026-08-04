@@ -79,16 +79,74 @@ class PrismVocxApp(VocxApp):
         return result
 
 
+def _merged_reports(app: Any, keys: list[str]) -> Response:
+    """One report list across a person's storage keys, newest first, de-duplicated."""
+    import json as _json
+
+    seen: set[str] = set()
+    rows: list[dict] = []
+    for key in keys:
+        status, ctype, payload = app.handle("GET", "/v1/reports", {"rm": [key]}, b"")
+        if status != 200:
+            continue
+        try:
+            got = _json.loads(payload).get("reports") or []
+        except (ValueError, UnicodeDecodeError):
+            continue
+        for row in got:
+            cid = str(row.get("capture_id") or "")
+            if cid and cid not in seen:
+                seen.add(cid)
+                rows.append(row)
+    rows.sort(key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+    return Response(content=_json.dumps({"ok": True, "reports": rows}).encode("utf-8"),
+                    status_code=200, media_type="application/json")
+
+
+def _first_hit(app: Any, method: str, path: str, query: dict[str, Any], body: bytes,
+               keys: list[str]) -> Response:
+    """Open a document under whichever of a person's keys actually holds it.
+
+    Without this a draft written by the older build would LIST (see _merged_reports) and
+    then 404 on open — a row in your own list you cannot touch, which is worse than not
+    showing it at all.
+    """
+    last: tuple[int, str, bytes] = (404, "application/json", b'{"ok": false}')
+    for key in keys:
+        last = app.handle(method, path, {**query, "rm": [key]}, body)
+        if last[0] == 200:                              # a miss is a 404, never an empty 200
+            break
+    status, ctype, payload = last
+    return Response(content=payload, status_code=status, media_type=ctype)
+
+
+def _delete_everywhere(app: Any, query: dict[str, Any], body: bytes,
+                       keys: list[str]) -> Response:
+    """Delete under every key this person's captures may sit under — otherwise a draft
+    deleted from the list reappears on the next refresh, filed under the older key."""
+    last = None
+    for key in keys:
+        last = app.handle("POST", "/v1/reports/delete", {**query, "rm": [key]},
+                          _rebind_body(body, key))
+    status, ctype, payload = last
+    return Response(content=payload, status_code=status, media_type=ctype)
+
+
 def _rebind_body(body: bytes, rm: str) -> bytes:
-    """Replace a JSON body's `rm` with the verified caller's. Non-JSON bodies (the raw
-    audio a capture posts) pass through untouched."""
+    """Set a JSON body's `rm` to the verified caller's. Non-JSON bodies (the raw audio a
+    capture posts) pass through untouched.
+
+    SET, not replace-if-present: these routes act on your own captures, so a body that
+    omits `rm` is not a request to act on nobody — it is a client that (rightly) stopped
+    sending an identity the server decides.
+    """
     import json as _json
 
     try:
         data = _json.loads(body)
     except (ValueError, UnicodeDecodeError):
         return body
-    if not isinstance(data, dict) or "rm" not in data:
+    if not isinstance(data, dict):
         return body
     data["rm"] = rm
     return _json.dumps(data).encode("utf-8")
@@ -186,6 +244,22 @@ def build_vocx_router(settings: Any) -> APIRouter:
                 if not who:
                     return _unauthenticated()
                 query["rm"] = [who]
+                # Captures filed by an earlier build sit under a second key (see
+                # identity.aliases_for). Every route that reads or removes one spans both,
+                # or a person's own past work is either invisible or — worse — listed and
+                # then unopenable.
+                if route_path in ("/v1/reports", "/v1/reports/get", "/v1/reports/print",
+                                  "/v1/reports/delete"):
+                    keys = await run_in_threadpool(identity.aliases_for, email, settings)
+                    if len(keys) > 1:
+                        app = _app()
+                        if route_path == "/v1/reports":
+                            return await run_in_threadpool(_merged_reports, app, keys)
+                        if route_path == "/v1/reports/delete":
+                            return await run_in_threadpool(
+                                _delete_everywhere, app, query, body, keys)
+                        return await run_in_threadpool(
+                            _first_hit, app, request.method, route_path, query, body, keys)
                 # The audio ref is opaque but not unguessable, and its payload is the raw
                 # meeting recording — so it is checked on its own terms, not by trusting
                 # that the caller asked with the right rm.
