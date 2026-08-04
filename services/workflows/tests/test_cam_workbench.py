@@ -1,0 +1,158 @@
+"""The CAM workbench: generate → refine → finalise over a stubbed register, stub engine.
+
+The engine seam is the point under test as much as the flow: the workbench must run the
+whole lifecycle with NO vendor account (StubEngine), record every turn durably on the
+register, refuse to draft without a readable prompt doc, and never silently drop a
+document it could not read.
+"""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.config import get_settings
+
+pytestmark = pytest.mark.asyncio
+
+LENDING = "11111111-2222-3333-4444-555555555555"
+
+
+def _app(monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_API_KEYS", "k")
+    monkeypatch.setenv("WORKFLOWS_ANTHROPIC_API_KEY", "")   # → StubEngine
+    get_settings.cache_clear()
+    from app.api import create_app
+
+    app = create_app()
+    # Stand in for what lifespan would set — no Temporal, no OIDC verifier.
+    app.state.oidc = None
+    app.state.temporal = None
+    app.state.http = None
+    return app
+
+
+class _RegisterStub:
+    """The register as the workbench sees it: documents with content, cam-report rows."""
+
+    def __init__(self) -> None:
+        self.docs: dict[str, tuple[str, str]] = {   # id -> (content_type, body)
+            "prompt-1": ("text/markdown", "# CAM prompts\nAssess the borrower."),
+            "fin-1": ("text/csv", "year,revenue\n2025,120"),
+            "pdf-1": ("application/pdf", "%PDF-1.4 binary"),
+        }
+        self.reports: dict[str, dict] = {}
+        self.turns: list[dict] = []
+        self._n = 0
+
+    async def get(self, url, **kw):  # noqa: ANN001, ANN003
+        u = str(url)
+        if "/v1/documents/" in u and u.endswith("/content"):
+            doc_id = u.split("/v1/documents/")[1].split("/")[0]
+            if doc_id not in self.docs:
+                return httpx.Response(404, request=httpx.Request("GET", u))
+            ctype, body = self.docs[doc_id]
+            return httpx.Response(200, content=body.encode(),
+                                  headers={"content-type": ctype},
+                                  request=httpx.Request("GET", u))
+        if u.endswith("/v1/internal/cam-reports"):
+            rows = [r for r in self.reports.values()
+                    if r["lending_id"] == (kw.get("params") or {}).get("lending_id")]
+            return httpx.Response(200, json=rows, request=httpx.Request("GET", u))
+        if "/v1/internal/cam-reports/" in u:
+            rid = u.rsplit("/", 1)[1]
+            row = dict(self.reports.get(rid) or {})
+            row["turns"] = [t for t in self.turns if t["report_id"] == rid]
+            return httpx.Response(200 if row else 404, json=row,
+                                  request=httpx.Request("GET", u))
+        return httpx.Response(404, request=httpx.Request("GET", u))
+
+    async def post(self, url, **kw):  # noqa: ANN001, ANN003
+        u = str(url)
+        body = kw.get("json") or {}
+        if u.endswith("/v1/internal/cam-reports"):
+            self._n += 1
+            rid = f"cam-{self._n}"
+            self.reports[rid] = {"id": rid, "lending_id": body["lending_id"],
+                                 "report_version": self._n, "status": "Draft",
+                                 "engine": body.get("engine"), "draft_md": ""}
+            return httpx.Response(201, json=self.reports[rid],
+                                  request=httpx.Request("POST", u))
+        if "/turns" in u:
+            rid = u.split("/cam-reports/")[1].split("/")[0]
+            self.turns.append({"report_id": rid, **body})
+            if body.get("draft_md") is not None:
+                self.reports[rid]["draft_md"] = body["draft_md"]
+            return httpx.Response(201, json={"ok": True},
+                                  request=httpx.Request("POST", u))
+        if "/submit" in u:
+            rid = u.split("/cam-reports/")[1].split("/")[0]
+            self.reports[rid]["status"] = "Submitted"
+            self.reports[rid]["document_id"] = body.get("document_id")
+            return httpx.Response(200, json=self.reports[rid],
+                                  request=httpx.Request("POST", u))
+        if "/documents/upload" in u:
+            return httpx.Response(201, json={"id": "doc-cam-1", "checksum": "c" * 64},
+                                  request=httpx.Request("POST", u))
+        return httpx.Response(404, request=httpx.Request("POST", u))
+
+
+async def _call(app, method: str, path: str, **kw):  # noqa: ANN001, ANN003
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        return await c.request(method, path,
+                               headers={"X-API-Key": "k", "X-Tenant": "EVAM",
+                                        "X-User-Email": "bhavana@evamfinance.com"}, **kw)
+
+
+async def test_generate_refine_finalise_with_the_stub_engine(monkeypatch):
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1", "pdf-1"], "prompt_doc_id": "prompt-1"})
+    assert gen.status_code == 201, gen.text
+    body = gen.json()
+    # The stub engine drafted; the version is open on the register with its transcript.
+    assert "CAM" in body["draft_md"] and body["engine"] == "stub:offline"
+    # No silent omission: the PDF that could not be read as text is NAMED, with why.
+    assert [s["doc_id"] for s in body["skipped"]] == ["pdf-1"]
+    assert "binary" in body["skipped"][0]["reason"]
+    assert [i["doc_id"] for i in body["included"]] == ["fin-1"]
+    assert [t["role"] for t in stub.turns] == ["user", "assistant"]
+
+    ref = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
+                      json={"instruction": "Tighten the collateral section."})
+    assert ref.status_code == 200, ref.text
+    assert [t["role"] for t in stub.turns] == ["user", "assistant", "user", "assistant"]
+
+    fin = await _call(app, "POST", f"/v1/cam/{LENDING}/finalise", json={})
+    assert fin.status_code == 200, fin.text
+    out = fin.json()
+    assert out["status"] == "Submitted" and out["document_id"] == "doc-cam-1"
+    assert stub.reports[out["report_id"]]["status"] == "Submitted"
+
+
+async def test_no_readable_prompt_doc_means_no_draft(monkeypatch):
+    """The prompt doc IS the brief — the workbench refuses to invent one."""
+    app = _app(monkeypatch)
+    app.state.http = _RegisterStub()
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1"], "prompt_doc_id": "missing"})
+    assert r.status_code == 422, r.text
+    assert "prompt document" in r.json()["error"]["detail"]
+
+    # And a selection where NOTHING is readable refuses too, naming each reason.
+    r2 = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["pdf-1"], "prompt_doc_id": "prompt-1"})
+    assert r2.status_code == 422, r2.text
+    assert "pdf-1" in r2.json()["error"]["detail"]
+
+
+async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypatch):
+    app = _app(monkeypatch)
+    app.state.http = _RegisterStub()
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
+                    json={"instruction": "anything"})
+    assert r.status_code == 404, r.text

@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (235 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (243 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -6873,6 +6873,282 @@
               }
             },
             {
+              "name": "POST /v1/internal/cam-reports \u2014 Open a CAM version (Draft \u2014 the workbench writes into it)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lending_id\": \"sample\",\n  \"deal_id\": \"sample\",\n  \"engine\": \"sample\",\n  \"source_doc_ids\": [\n    \"sample\"\n  ],\n  \"prompt_doc_id\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/cam-reports \u2014 CAM version history for a lending line",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports"
+                  ],
+                  "query": [
+                    {
+                      "key": "lending_id",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/cam-reports/{report_id} \u2014 One CAM version, with its workbench transcript",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports",
+                    "{{report_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/cam-reports/{report_id}/decide \u2014 Committee decision on the CAM: Approve / Return / Reject",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}/decide",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "decide"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"decision\": \"REPLACE-to-match-^(Approved|Returned|\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/cam-reports/{report_id}/submit \u2014 Submit the CAM to the committee (maker)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "submit"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"document_id\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/cam-reports/{report_id}/turns \u2014 Append a workbench turn (and the new draft)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}/turns",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "turns"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"role\": \"REPLACE-to-match-^(user|assistant)$\",\n  \"content\": \"sample\",\n  \"draft_md\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/covenants/run-sweep \u2014 Covenant sweep: generate due observations, mark overdue, expire lapsed waivers (idempotent)",
               "request": {
                 "method": "POST",
@@ -8162,6 +8438,96 @@
                       "language": "json"
                     }
                   }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/sanction-terms \u2014 Enter the sanctioned terms (seeds the CP/CS checklist + covenants)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/sanction-terms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "sanction-terms"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lending_id\": \"sample\",\n  \"deal_id\": \"sample\",\n  \"amount_cr\": 1.0,\n  \"rate_kind\": \"REPLACE-to-match-^(Fixed|Floating)$\",\n  \"rate_pct\": 1.0,\n  \"spread_pct\": 1.0,\n  \"tenor_months\": 1,\n  \"emi_amount\": 1.0,\n  \"repayment_start\": \"2026-01-31\",\n  \"day_count\": \"REPLACE-to-match-^(365|360)$\",\n  \"penal_rate_pct\": 1.0,\n  \"moratorium_months\": 1,\n  \"schedule_kind\": \"REPLACE-to-match-^(EMI|Bullet|Custom)\",\n  \"cp_items\": [\n    {\n      \"key\": \"sample\",\n      \"label\": \"sample\",\n      \"required\": false,\n      \"note\": \"sample\"\n    }\n  ],\n  \"cs_items\": [\n    {\n      \"key\": \"sample\",\n      \"label\": \"sample\",\n      \"required\": false,\n      \"note\": \"sample\"\n    }\n  ],\n  \"covenants\": [\n    {\n      \"name\": \"sample\",\n      \"covenant_type\": \"REPLACE-to-match-^(Financial|Reportin\",\n      \"description\": \"sample\",\n      \"metric\": \"sample\",\n      \"operator\": \"REPLACE-to-match-^(>=|<=|>|<|=)$\",\n      \"threshold\": 1.0,\n      \"frequency\": \"sample\",\n      \"first_due_on\": \"2026-01-31\",\n      \"grace_days\": 1,\n      \"breach_severity\": \"REPLACE-to-match-^(Amber|Red)$\"\n    }\n  ],\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/sanction-terms \u2014 The sanctioned terms for a lending line",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/sanction-terms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "sanction-terms"
+                  ],
+                  "query": [
+                    {
+                      "key": "lending_id",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
                 }
               }
             },
@@ -11673,8 +12039,163 @@
       ]
     },
     {
-      "name": "Orchestrator  (43 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (46 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
+        {
+          "name": "CAM",
+          "item": [
+            {
+              "name": "POST /orchestrator/v1/cam/{lending_id}/finalise \u2014 File the draft to the Data Register and submit it to committee",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/{{lending_id}}/finalise",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "{{lending_id}}",
+                    "finalise"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/cam/{lending_id}/generate \u2014 Draft a CAM from selected documents + the prompt doc",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/{{lending_id}}/generate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "{{lending_id}}",
+                    "generate"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source_doc_ids\": [\n    \"sample\"\n  ],\n  \"prompt_doc_id\": \"sample\",\n  \"deal_id\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/cam/{lending_id}/refine \u2014 Rework the current CAM draft with a further instruction",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/{{lending_id}}/refine",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "{{lending_id}}",
+                    "refine"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"instruction\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
         {
           "name": "Decisions",
           "item": [

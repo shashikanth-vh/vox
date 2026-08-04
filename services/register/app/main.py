@@ -28,6 +28,7 @@ from app.api.notifications import router as notifications_router
 from app.api.rbac import router as rbac_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
+from app.api.sanction import router as sanction_router
 from app.api.tenants import router as tenants_router
 from app.api.tranches import router as tranches_router
 from app.core.config import get_settings
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
         custom_router,
         decisions_router,
         cpcs_router,
+        sanction_router,
         handover_router,
         # The MANUAL Advaya attestation lane is ALWAYS on — it exists precisely for
         # deployments where the real integration is not live yet: an authorised human

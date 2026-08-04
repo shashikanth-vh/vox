@@ -3625,6 +3625,13 @@ def create_app() -> FastAPI:
                             detail or f"Register answered {resp2.status_code}.")
         return ORJSONResponse(status_code=201, content=resp2.json())
 
+    # The CAM workbench (docs/LENDING_WORKFLOW_DESIGN.md §B) — the analyst's drafting
+    # loop over the register's cam_reports lifecycle. Mounted last: it reuses the same
+    # front-door key, verified identity and signed-context helpers as every other lane.
+    from app.cam import mount_cam
+    mount_cam(app, settings, denied=denied, verified_email=_verified_email,
+              caller_context=_caller_context, problem=_problem)
+
     return app
 
 

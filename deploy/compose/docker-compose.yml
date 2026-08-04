@@ -455,6 +455,11 @@ services:
       # Named service principal (svc_workflows allowlist) — least privilege.
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
       WORKFLOWS_REGISTER_TENANT: EVAM
+      # The CAM workbench engine. Set WORKFLOWS_ANTHROPIC_API_KEY in deploy/compose/.env
+      # (never in this file) — without it the deterministic stub engine runs, which
+      # exercises the whole lifecycle but drafts a placeholder instead of a real CAM.
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
+      WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
       # Re-mint the caller's signed context so a conversion writes as the human, not the key.
       WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       WORKFLOWS_LOG_JSON: "true"

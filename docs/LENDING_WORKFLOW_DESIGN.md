@@ -324,14 +324,19 @@ Each increment ships independently and is useful on its own.
 
 | # | Increment | Contents | New surface |
 | --- | --- | --- | --- |
-| 1 | **Sanction terms + seeds** | `sanction_terms` table + entry screen; seeding CP/CS checklists + covenant rows + (later) LMS account from one save | register + UI |
-| 2 | **CAM workbench** | `cam_reports`/`cam_turns`, generate/refine/finalise with Haiku, committee Approve/Amend/Reject wired to the existing evidence gate | workflows + register + UI |
+| 1 ✅ | **Sanction terms + seeds** | `sanction_terms` table + entry screen; seeding CP/CS checklists + covenant rows + (later) LMS account from one save | register + UI |
+| 2 ✅ | **CAM workbench** | `cam_reports`/`cam_turns`, generate/refine/finalise with Haiku, committee Approve/Amend/Reject wired to the existing evidence gate | workflows + register + UI |
 | 3 | **CP exceptions** | Deferred-with-reason items, approval-with-exceptions record, handover note carries them | register + UI (small) |
 | 4 | **LMS core** | `loan_accounts`/`loan_ledger`/`lms_config`, tranche→ledger hook, manual postings, statement view | register + UI |
 | 5 | **Accrual + classification jobs** | daily Temporal crons, DPD buckets, provisioning; status onto the statement header | workflows |
 | 6 | **CS reminders** | `CsFollowUpWorkflow` + notifications/calendar + escalation (checklist seeded at sanction; the chase starts on CP approval, parallel with disbursement) | workflows |
 | 7 | **Covenant cycles** | `CovenantCycleWorkflow`, `covenant_reviews`, breach→EWS | workflows + register |
 | 8 | **Closure** | closure action (gated: zero balance), stops G/H/I, terminal ledger row | register |
+
+Increments 1–2 are BUILT (register migration 0002; `register/app/api/sanction.py`;
+`workflows/app/cam.py`; the default sanction template ships as bootstrap seed —
+`register/app/seed/templates/sanction_letter_default.docx`, the credit team's own
+letterhead, replaceable by upload). Their UI screens land with increment 3.
 
 Ordering rationale: **1 first** because D is the fan-out point — every later phase is
 seeded from sanction terms, and capturing them structured from day one avoids a

@@ -6,6 +6,7 @@ from app.db.base import AuditLog, Base
 from app.models.advaya import AdvayaHandoff, AdvayaHandoverPackage
 from app.models.calendar import CalendarEvent
 from app.models.covenants import Covenant, EwsCase
+from app.models.sanction import CamReport, CamTurn, SanctionTerms
 from app.models.cpcs import CpcsChecklist
 from app.models.deals import Deal, Lead
 from app.models.decisions import WorkflowDecision, WorkflowDecisionOutbox
@@ -68,4 +69,7 @@ __all__ = [
     "NotificationDelivery",
     "Covenant",
     "EwsCase",
+    "SanctionTerms",
+    "CamReport",
+    "CamTurn",
 ]

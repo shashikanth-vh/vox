@@ -1020,6 +1020,63 @@
         "title": "FacilityDecision",
         "type": "object"
       },
+      "FinaliseIn": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "FinaliseIn",
+        "type": "object"
+      },
+      "GenerateIn": {
+        "additionalProperties": false,
+        "properties": {
+          "deal_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deal Id"
+          },
+          "prompt_doc_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Prompt Doc Id",
+            "type": "string"
+          },
+          "source_doc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 25,
+            "minItems": 1,
+            "title": "Source Doc Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_doc_ids",
+          "prompt_doc_id"
+        ],
+        "title": "GenerateIn",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1441,6 +1498,22 @@
           "by"
         ],
         "title": "OfferIn",
+        "type": "object"
+      },
+      "RefineIn": {
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Instruction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instruction"
+        ],
+        "title": "RefineIn",
         "type": "object"
       },
       "SyndicationDecisionIn": {
@@ -1953,6 +2026,162 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/cam/{lending_id}/finalise": {
+      "post": {
+        "operationId": "cam_finalise_v1_cam__lending_id__finalise_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinaliseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Finalise V1 Cam  Lending Id  Finalise Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "File the draft to the Data Register and submit it to committee",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/{lending_id}/generate": {
+      "post": {
+        "operationId": "cam_generate_v1_cam__lending_id__generate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Generate V1 Cam  Lending Id  Generate Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft a CAM from selected documents + the prompt doc",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/{lending_id}/refine": {
+      "post": {
+        "operationId": "cam_refine_v1_cam__lending_id__refine_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefineIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Refine V1 Cam  Lending Id  Refine Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rework the current CAM draft with a further instruction",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
     "/v1/decisions/waiver": {
       "post": {
         "description": "The waiver DECISION through the front door. The Register's single-winner\ndecision store accepts writes only from the workflow service principal carrying a\nverified approver identity \u2014 so the human records it here: the caller is verified\n(bearer under require_auth; header trust in dev) and this service persists the\ndecision under its principal with the approver's delegated, route-bound context.\n``/v1/monitoring/{id}/waive`` then verifies that record \u2014 authority, subject\nbinding, validity window \u2014 before any breach is excused.",
