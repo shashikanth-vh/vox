@@ -1,4 +1,5 @@
 import { orchestrator } from '../api/orchestratorClient';
+import { gwClient } from '../api/axiosClient';
 import { errText, USE_REAL_API } from '../api/http';
 import { settled } from './workflowRun';
 
@@ -33,6 +34,12 @@ export interface WorkflowAction {
   label: string;
   method: 'POST' | 'PATCH';
   url: string;
+  /**
+   * Which service answers `url`. The catalogue spans both planes — starting a workflow is
+   * the orchestrator's, filing evidence is the register's — and sending every action to
+   * the orchestrator 404s the register ones. The plane is the plane's to declare.
+   */
+  plane?: 'orchestrator' | 'register';
   enabled: boolean;
   /** Present only when `enabled` is false — why not, in words for the user. */
   reason?: string;
@@ -90,10 +97,21 @@ export const workflowActionsService = {
       if (!action.form.some((f) => f.name === k) && v !== undefined) body[k] = v;
     });
     Object.assign(body, action.body);
+    // The register plane is reached through the ORIGIN-rooted client: its urls already
+    // carry the /v1 prefix, so the register client (based at /v1) would double it.
+    const send = async (): Promise<any> => {
+      if (action.plane === 'register') {
+        const r = action.method === 'PATCH'
+          ? await gwClient.patch<any>(action.url, body)
+          : await gwClient.post<any>(action.url, body);
+        return r.data;
+      }
+      return action.method === 'PATCH'
+        ? orchestrator.patch<any>(action.url, body)
+        : orchestrator.post<any>(action.url, body);
+    };
     try {
-      const data = action.method === 'PATCH'
-        ? await orchestrator.patch<any>(action.url, body)
-        : await orchestrator.post<any>(action.url, body);
+      const data = await send();
       // A 202 means the RUN STARTED, not that the step succeeded. A CP/CS checklist that
       // the register refused failed inside its workflow seconds later, while the screen
       // said "sent for checking" and nothing ever reached the approver's queue. So when a

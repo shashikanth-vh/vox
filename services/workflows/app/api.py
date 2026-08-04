@@ -353,6 +353,19 @@ _RUN_ID_FOR: dict[str, tuple[str, str]] = {
 _RETURNED_STATES = {"ReturnedForInformation", "Returned", "ReturnedToMaker"}
 
 
+def _plane_of(spec: dict, url: str) -> str:
+    """'orchestrator' or 'register' — which service answers this action's url.
+
+    Derived from the prefix, because every orchestrator route lives under /v1/workflows
+    and everything else in the catalogue is a register route; an action that needs to say
+    otherwise sets "plane" on its spec explicitly.
+    """
+    declared = spec.get("plane")
+    if declared:
+        return str(declared)
+    return "orchestrator" if url.startswith("/v1/workflows") else "register"
+
+
 def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
                      run_state: str) -> tuple[bool, str]:
     """Is this action available, and if not, what does the user need to know?
@@ -2996,6 +3009,12 @@ def create_app() -> FastAPI:
             actions.append({
                 "key": spec["key"], "label": spec["label"], "method": spec["method"],
                 "url": url, "enabled": enabled,
+                # WHICH SERVICE the url belongs to. The catalogue spans both planes —
+                # starting a workflow is the orchestrator's, filing evidence is the
+                # register's — and a client that assumed one of them sent every register
+                # action to the orchestrator and got 404s. The client must be TOLD, not
+                # left to guess: that is the whole point of a described action.
+                "plane": _plane_of(spec, url),
                 # Named screen for the steps a flat form cannot express; absent means the
                 # client builds its dialog from `form`.
                 **({"screen": spec["screen"]} if spec.get("screen") else {}),

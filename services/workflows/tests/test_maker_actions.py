@@ -373,3 +373,42 @@ def test_the_executed_agreement_still_offers_a_flat_form_as_the_fallback():
     names = {f["name"] for f in spec["form"]}
     assert {"reference", "sha256"} <= names
     assert all(f.get("required") for f in spec["form"] if f["name"] in {"reference", "sha256"})
+
+
+def test_every_action_declares_which_service_answers_it():
+    """The catalogue spans BOTH planes, so it has to say which.
+
+    Starting a workflow is the orchestrator's; filing evidence, submitting a handover and
+    attesting an Advaya event are the register's. A client that assumed one plane sent the
+    register actions to the orchestrator and got a 404 on POST /orchestrator/v1/evidence —
+    reported to the user as a workflow failure, on a screen that had done nothing wrong.
+    """
+    from app.api import _plane_of
+
+    for actions in _MAKER_ACTIONS.values():
+        for spec in actions:
+            plane = _plane_of(spec, spec["url"])
+            assert plane in ("orchestrator", "register"), spec["key"]
+            # The rule, stated the other way round, so a new action cannot quietly
+            # inherit the wrong plane from a prefix that looks similar.
+            if spec["url"].startswith("/v1/workflows"):
+                assert plane == "orchestrator", spec["key"]
+            else:
+                assert plane == "register", spec["key"]
+
+    # The three that bit: register routes that are NOT under /v1/workflows.
+    by_key = {s["key"]: s for acts in _MAKER_ACTIONS.values() for s in acts}
+    for key in ("evidence.executed-agreement", "handover.submit", "advaya.attest"):
+        assert _plane_of(by_key[key], by_key[key]["url"]) == "register", key
+
+
+def test_the_actions_response_carries_the_plane():
+    """Declared in the payload, not inferred by the client from the url — the client is
+    told where to send each action, exactly as it is told the method and the form."""
+    import inspect
+
+    from app import api as api_mod
+
+    src = inspect.getsource(api_mod)
+    assert '"plane": _plane_of(spec, url)' in src, (
+        "the serialised action must carry its plane")
