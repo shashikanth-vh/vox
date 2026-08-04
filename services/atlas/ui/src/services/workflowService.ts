@@ -232,7 +232,6 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
           headline: `CAM v${row?.report_version ?? '?'} submitted for the committee — `
             + (row?.draft_md ? 'the draft is below.' : 'the filed document is attached.'),
           facts: clean([...base, ['Prepared by', row?.prepared_by || w.requestedBy],
-            ['Drafting engine', row?.engine],
             ['Filed document', document?.name]]),
           preview: row?.draft_md || undefined,
           document,

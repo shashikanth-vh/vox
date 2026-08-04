@@ -133,12 +133,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   // DOWNLOAD now — a Word template to fill — not a row competing with real documents.)
   const sources: EntityDoc[] = docs;
 
-  // Entering a working version (straight after "Summarise first", or reopening the
-  // dialog): its draft — usually the summary — IS the conversation's starting content.
-  useEffect(() => {
-    if (working && !instruction.trim()) setInstruction(working.draft_md || '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [working?.id]);
 
   const run = async (what: string, fn: () => Promise<string>) => {
     setErr(''); setInfo(''); setBusy(what);
@@ -165,8 +159,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           : { prompt_doc_id: promptDoc }),
       ...(action?.body?.deal_id ? { deal_id: action.body.deal_id } : {}),
     });
+    // The reply lands in the conversation box — the one place the analyst looks.
+    setInstruction(out.draft_md || '');
     const skipped = (out.skipped || []).length;
-    return `Draft v? ready (engine ${out.engine}).`
+    return 'The summary is in the box below — edit it or add your next question.'
       + (skipped ? ` ${skipped} document(s) skipped — see the transcript.` : '');
   });
 
@@ -261,7 +257,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             {reports.map((r) => (
               <Chip key={r.id} size="small" color={TONE[r.status] || 'default'}
                 variant={live?.id === r.id ? 'filled' : 'outlined'}
-                label={`v${r.report_version} · ${r.status}${r.engine ? ` · ${r.engine}` : ''}`} />
+                label={`v${r.report_version} · ${r.status}`} />
             ))}
           </Box>
         )}
@@ -366,15 +362,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   sx={{ whiteSpace: 'nowrap' }}>Clear</Button>
               </Box>
             </Box>
-            {defaults.prompt && (
-              <Button size="small" disabled={!!busy} sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.2 }}
-                onClick={() => void camService.docText(defaults.prompt!.id)
-                  .then((t) => setInstruction(t.text || ''))
-                  .catch((e: any) => setErr(e?.message || String(e)))}>
-                Insert the master prompt
-              </Button>
-            )}
-
             {/* Documents — folded until wanted. */}
             {sources.length > 0 && (
               <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
