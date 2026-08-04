@@ -120,9 +120,41 @@ async function ensurePersonRow(emp: Employee): Promise<string | undefined> {
   }
 }
 
+/**
+ * Reconcile the roster FROM Access (register endpoint): a user created through Postman
+ * or a script — any path that never wrote the people table — becomes a roster row the
+ * next time anyone opens the Employees screen. Fail-quiet by design: an unreachable
+ * register must not break a page that is otherwise reading fine; the register audits
+ * every run it does apply.
+ */
+async function syncFromAccess(): Promise<void> {
+  if (!USE_REAL_API) return;
+  try {
+    const out = await api.post<any>('/internal/people/sync-access');
+    if (out?.created?.length || out?.updated?.length) {
+      await hydrateRoster();
+      void referenceService.hydrate();
+    }
+  } catch (e) {
+    console.warn('[api] roster sync from Access skipped:', e);
+  }
+}
+
+/** Is this (Access-sourced) employee on the register roster? Matched by e-mail first —
+ *  the join key — then by either name, for rows created before e-mails were kept. */
+function onRoster(e: Employee): boolean {
+  const mail = (e.email || '').trim().toLowerCase();
+  return (db().people as Employee[]).some((p: any) =>
+    (mail && (p.email || '').trim().toLowerCase() === mail)
+    || (p.name || '').trim().toLowerCase() === (e.name || '').trim().toLowerCase()
+    || (p.full || '').trim().toLowerCase() === (e.full || '').trim().toLowerCase());
+}
+
 export const employeesService = {
   bookRollup,
   hydrateRoster,
+  syncFromAccess,
+  onRoster,
   // Employees ARE Access users — the same records the sign-in flow resolves against — so
   // the grid reads GET /access/v1/users rather than the Register's /employees route.
   // Access answers with a bare array (no {rows,total}), so paging/sorting/column filters

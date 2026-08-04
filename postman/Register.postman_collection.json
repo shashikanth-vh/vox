@@ -9425,6 +9425,48 @@
           }
         },
         {
+          "name": "POST /v1/internal/people/sync-access",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/people/sync-access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "people",
+                "sync-access"
+              ]
+            }
+          }
+        },
+        {
           "name": "GET /v1/internal/sanction-terms",
           "request": {
             "method": "GET",

@@ -196,3 +196,60 @@ async def test_the_default_sanction_template_seeds_once_and_only_once(client: As
     assert row is not None
     assert row.inline_content and len(row.inline_content) == tpl.stat().st_size
     assert row.content_type.endswith("wordprocessingml.document")
+
+
+async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatch):
+    """Access users become roster rows automatically — keyed by e-mail, roles copied,
+    roster-only fields untouched, never deleted, collisions reported not guessed."""
+    from app.api import people_sync
+
+    ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin",
+             "X-User-Id": "8c5a2c1e-0000-4000-8000-00000000000a"}
+
+    # An existing roster row with roster-only data the sync must not touch —
+    # and an OUTDATED role Access has since changed.
+    assert (await client.post("/v1/people", json={
+        "name": "Priya", "full_name": "E2E Priya Nair", "role": "RM",
+        "email": "e2e.rm@evamfinance.com", "geography": "Karnataka"},
+        headers=ADMIN)).status_code == 201
+
+    access_users = [
+        {"id": "u1", "email": "e2e.rm@evamfinance.com", "full_name": "E2E Priya Nair",
+         "short_name": "Priya", "roles": ["BDRM", "Syn RM", "AM RM"], "is_active": True},
+        {"id": "u2", "email": "e2e.checker@evamfinance.com", "full_name": "E2E Divya Rao",
+         "roles": ["Management"], "is_active": True},
+        {"id": "u3", "email": "gone@evamfinance.com", "full_name": "Left The Firm",
+         "roles": ["BDRM"], "is_active": False},
+        {"id": "u4", "email": "", "full_name": "No Mailbox", "roles": ["BDRM"],
+         "is_active": True},
+    ]
+
+    async def fake_list(tenant_code):  # noqa: ANN001
+        return access_users
+
+    monkeypatch.setattr(people_sync, "_list_access_users", fake_list)
+
+    r = await client.post("/v1/internal/people/sync-access", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert set(out["created"]) == {"e2e.checker@evamfinance.com", "gone@evamfinance.com"}
+    assert out["updated"] == ["e2e.rm@evamfinance.com"]          # role refreshed
+    assert out["skipped"][0]["reason"].startswith("no e-mail")
+
+    # Priya: role now matches Access; geography (roster-only) survived.
+    got = (await client.get("/v1/people/resolve",
+                            params={"name": "e2e.rm@evamfinance.com"},
+                            headers=ADMIN)).json()
+    assert got["resolved"]["role"] == "BDRM, Syn RM, AM RM"
+    # Divya is now on the roster (no short_name in Access → handle = e-mail local
+    # part, the same key VocX uses); the leaver is inactive, not deleted.
+    divya = (await client.get("/v1/people/resolve", params={"name": "E2E Divya Rao"},
+                              headers=ADMIN)).json()
+    assert divya["resolved"] and divya["resolved"]["name"] == "e2e.checker"
+    leaver = (await client.get("/v1/people/resolve", params={"name": "gone"},
+                               headers=ADMIN)).json()
+    assert leaver["resolved"]["inactive"] is True
+
+    # Idempotent: a second run changes nothing.
+    again = (await client.post("/v1/internal/people/sync-access", headers=ADMIN)).json()
+    assert again["created"] == [] and again["updated"] == []

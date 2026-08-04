@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (243 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (244 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -8438,6 +8438,42 @@
                       "language": "json"
                     }
                   }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/people/sync-access \u2014 Upsert the people roster from Access's user list",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/people/sync-access",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "people",
+                    "sync-access"
+                  ]
                 }
               }
             },

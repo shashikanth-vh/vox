@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Chip, Box, Typography, ToggleButtonGroup, ToggleButton, Stack } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import TableRowsIcon from '@mui/icons-material/TableRows';
@@ -34,6 +34,13 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
   const [del, setDel] = useState<Employee | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['employees'] });
 
+  // Reconcile the roster from Access on open: a user provisioned through Postman (or
+  // any path that never wrote the people table) becomes a roster row — and therefore
+  // a name the BDRM/Analyst dropdowns can offer — the moment someone looks here.
+  useEffect(() => {
+    void employeesService.syncFromAccess().then(refresh);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Card view has no MRT toolbar, so it gets its own "Export this view" (the full team).
   const exportCsv = async () => {
     const res = await employeesService.list({ pageIndex: 0, pageSize: 100000, globalFilter: '', sorting: [], columnFilters: [] });
@@ -46,6 +53,10 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
       accessorKey: 'name', header: 'Name', size: 210,
       Cell: ({ row }) => (
         <span>
+          {!employeesService.onRoster(row.original) && (
+            <Chip label="sign-in only" size="small" title={'This person can sign in but has no register roster row yet — no dropdown can offer them. Save them once from this screen (or run the roster sync) to fix it.'}
+              sx={{ mr: 0.6, height: 18, fontSize: 10, bgcolor: '#FFF3E0', color: '#8A5300' }} />
+          )}
           <Box component="b" title="Filter Dashboard to this person’s book"
             onClick={(e) => { e.stopPropagation(); filterDash(row.original.name); }}
             sx={{ color: tokens.teal, cursor: 'pointer', fontWeight: 700, '&:hover': { textDecoration: 'underline' } }}>{row.original.name}</Box>{' '}
