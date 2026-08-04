@@ -296,3 +296,62 @@ async def test_a_leavers_book_hands_over_whole(client: AsyncClient):
     self_h = await client.post("/v1/internal/people/handover", json={
         "from_person": "Kiran", "to_person": "kiran@evamfinance.com"}, headers=ADMIN)
     assert self_h.status_code == 422
+
+
+async def test_a_row_naming_you_is_your_book_everywhere(client: AsyncClient):
+    """The field report: a BDRM opened a lead whose RM column literally named her and
+    was told "not in your scope" — because scope counted only assignments, created_by
+    and vertical-head defaults, never the NAME on the row. Now that rm/analyst resolve
+    against the roster, the name is an ownership fact, and it must hold on every
+    surface at once: the list, the direct GET, the write, and the company reads."""
+    ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin",
+             "X-User-Id": "8c5a2c1e-0000-4000-8000-00000000000a"}
+    PRIYA = {"X-User-Email": "e2e.rm@evamfinance.com", "X-User-Roles": "BDRM",
+             "X-User-Id": "8c5a2c1e-0000-4000-8000-0000000000b1"}
+    assert (await client.post("/v1/people", json={
+        "name": "Priya", "full_name": "E2E Priya Nair", "role": "BDRM",
+        "email": "e2e.rm@evamfinance.com"}, headers=ADMIN)).status_code == 201
+
+    ent = (await client.post("/v1/entities", json={
+        "code": f"NB-{uuid.uuid4().hex[:6]}", "legal_name": "NameBook Co"},
+        headers=ADMIN)).json()
+    # Admin creates the lead (so created_by is NOT Priya, and no assignment exists) —
+    # but the rm column names her, in three different spellings across three rows.
+    lead_ids = []
+    for rm in ("Priya", "E2E Priya Nair", "e2e.rm"):
+        lead = (await client.post("/v1/leads", json={
+            "company": "NameBook Co", "entity_id": ent["id"], "rm": rm},
+            headers=ADMIN)).json()
+        lead_ids.append(lead["id"])
+
+    # LIST: all three are her book.
+    lst = (await client.get("/v1/leads", params={"limit": 100}, headers=PRIYA)).json()
+    ids = {r["id"] for r in (lst.get("items") or lst)}
+    assert set(lead_ids) <= ids, "a lead naming the user must appear in their list"
+
+    # DIRECT GET + WRITE on the row that names her by the raw local part.
+    got = await client.get(f"/v1/leads/{lead_ids[2]}", headers=PRIYA)
+    assert got.status_code == 200, got.text
+    patched = await client.patch(f"/v1/leads/{lead_ids[2]}",
+                                 json={"temperature": "Hot"}, headers=PRIYA)
+    assert patched.status_code == 200, patched.text
+
+    # COMPANY surfaces follow: the dossier of a company whose line names her opens.
+    dossier = await client.get(f"/v1/entities/{ent['id']}/dossier", headers=PRIYA)
+    assert dossier.status_code == 200, dossier.text
+
+    # And a row naming SOMEBODY ELSE is still not hers.
+    other = (await client.post("/v1/leads", json={
+        "company": "NameBook Co", "entity_id": ent["id"], "rm": "Somebody Else"},
+        headers=ADMIN)).json()
+    # The company is in her scope (its other lines name her), so the row is readable —
+    # but remove the company link and the name alone decides:
+    ent2 = (await client.post("/v1/entities", json={
+        "code": f"NB-{uuid.uuid4().hex[:6]}", "legal_name": "NotHers Co"},
+        headers=ADMIN)).json()
+    foreign = (await client.post("/v1/leads", json={
+        "company": "NotHers Co", "entity_id": ent2["id"], "rm": "Somebody Else"},
+        headers=ADMIN)).json()
+    assert other["id"]  # (readable via company connection — intended)
+    denied = await client.get(f"/v1/leads/{foreign['id']}", headers=PRIYA)
+    assert denied.status_code == 403, denied.text
