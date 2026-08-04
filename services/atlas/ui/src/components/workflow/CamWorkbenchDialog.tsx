@@ -6,6 +6,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { camService, type CamReport, type EntityDoc } from '../../services/camService';
+import { documentsService } from '../../services/documentsService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
 import { useAuth } from '../../auth/AuthContext';
 import { getSession } from '../../auth/session';
@@ -209,6 +210,45 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     return 'Submitted to the committee.';
   });
 
+  // ---- the Word lane: download the template, fill it OUTSIDE, upload the result ----
+  const asEntry = (id: string, name: string) =>
+    ({ id, name, size: 0, type: '', when: '', by: '', label: '' });
+  const extFor = (ct: string) =>
+    /wordprocessingml/.test(ct) ? '.docx' : /pdf/.test(ct) ? '.pdf'
+      : /markdown/.test(ct) ? '.md' : /plain/.test(ct) ? '.txt' : '';
+
+  const downloadTemplate = async () => {
+    if (!defaults.example) return;
+    setErr('');
+    const out = await documentsService.download(
+      asEntry(defaults.example.id, `${defaults.example.title}.docx`) as any);
+    if (!out.ok) setErr(out.error || 'The template download failed.');
+  };
+
+  // The completed CAM (a filled .docx, usually) is filed on the line and THAT document
+  // is submitted to the committee — with or without an in-app draft underneath.
+  const uploadFinal = (file: File | null) => {
+    if (!file) return;
+    void run('upload-final', async () => {
+      const doc = await camService.uploadDoc(subjectId, file, 'CAM', 'Sanction');
+      await camService.finalise(subjectId,
+        title.trim() || file.name.replace(/\.[^.]+$/, ''), String(doc.id));
+      onDone(`Completed CAM "${file.name}" filed and submitted to the committee.`);
+      return 'Submitted to the committee.';
+    });
+  };
+
+  const downloadFiled = async (docId: string) => {
+    setErr('');
+    try {
+      const all = await camService.lendingDocs(subjectId);
+      const d = all.find((x) => x.id === docId);
+      const out = await documentsService.download(
+        asEntry(docId, `${d?.title || 'CAM'}${extFor(d?.content_type || '')}`) as any);
+      if (!out.ok) setErr(out.error || 'The download failed.');
+    } catch (e: any) { setErr(e?.message || String(e)); }
+  };
+
   const decide = (decision: 'Approved' | 'Returned' | 'Rejected') => run(decision, async () => {
     if (decision !== 'Approved' && !note.trim()) {
       throw new Error(`A ${decision.toLowerCase()} must say why — the note reaches the analyst.`);
@@ -265,6 +305,12 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     + '(four-eyes) — it is on Today for Credit Head / Management.'
                   : 'It appears on Today for Credit Head / Management.'}
             </Typography>
+            {!!submitted.document_id && (
+              <Button size="small" variant="outlined" sx={{ textTransform: 'none', mb: 0.8 }}
+                onClick={() => void downloadFiled(submitted.document_id!)}>
+                Download the filed CAM document
+              </Button>
+            )}
             {!!submitted.draft_md && (
               <Box component="pre" sx={{
                 whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2,
@@ -344,6 +390,17 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 </Button>
               )}
             </Box>
+            {defaults.example && (
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: -0.6, mb: 1.2, ml: 0.4 }}>
+                Prefer Word?{' '}
+                <Box component="span" onClick={() => void downloadTemplate()}
+                  sx={{ color: 'primary.main', cursor: 'pointer', textDecoration: 'underline' }}>
+                  Download the CAM template
+                </Box>
+                {' '}— fill it in Word while you ask below, then upload the completed CAM at
+                the bottom; that file goes to the committee.
+              </Typography>
+            )}
 
             {/* The conversation — the centre of the screen. */}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
@@ -398,13 +455,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     {docsOpen ? '▾' : '▸'} Documents ({sources.length})
                     {sel.size > 0 && ` — ${sel.size} will ride with the next Rework/Ask`}
                   </Typography>
-                  {docsOpen && (
-                    <Button size="small" disabled={!sel.size || !!busy}
-                      onClick={(e) => { e.stopPropagation(); void ask(SUMMARY_BRIEF); }}
-                      sx={{ textTransform: 'none', fontSize: 11.5, minWidth: 0 }}>
-                      {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
-                    </Button>
-                  )}
+                  <Button size="small" variant="outlined" disabled={!sel.size || !!busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!sel.size) { setDocsOpen(true); return; }
+                      void ask(SUMMARY_BRIEF);
+                    }}
+                    title="The engine digests the ticked documents — facts, figures, gaps — and the summary appears as an answer"
+                    sx={{ textTransform: 'none', fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
+                  </Button>
                 </Box>
                 {docsOpen && (
                   <Box sx={{ maxHeight: 150, overflow: 'auto' }}>
@@ -452,6 +512,13 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               <TextField size="small" sx={{ flex: 1 }} label="Filed title"
                 placeholder={`CAM v${working.report_version}`}
                 value={title} onChange={(e) => setTitle(e.target.value)} />
+              <Button component="label" variant="outlined" size="small" disabled={!!busy}
+                title="Filled the Word template outside? Upload it — that document goes to the committee"
+                sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
+                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM…'}
+                <input hidden type="file" accept=".docx,.pdf,.md,.txt"
+                  onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </Button>
               <Button variant="contained" size="small" disabled={!working.draft_md || !!busy}
                 onClick={() => void finalise()}>
                 {busy === 'finalise' ? 'Filing…' : 'File & submit to committee'}
@@ -470,6 +537,23 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 not read. PDF and Word documents are read as text; a <b>scanned</b> PDF is
                 handed to the engine to read visually.
               </Typography>
+              <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1, mb: 1,
+                display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography sx={{ fontSize: 12, color: tokens.muted, flex: 1 }}>
+                  Prefer Word? Download the CAM template, fill it in, and upload the
+                  completed CAM — that file goes straight to the committee.
+                </Typography>
+                {defaults.example && (
+                  <Button size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+                    onClick={() => void downloadTemplate()}>Download the CAM template</Button>
+                )}
+                <Button component="label" variant="outlined" size="small" disabled={!!busy}
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
+                  {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM…'}
+                  <input hidden type="file" accept=".docx,.pdf,.md,.txt"
+                    onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
+                </Button>
+              </Box>
               {!docs.length && (
                 <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
                   Nothing on the company's file yet — upload the source documents in the

@@ -151,6 +151,8 @@ export interface ApprovalContext {
   facts: [string, string][];
   /** Long-form content to verify (a CAM draft, a checklist) — rendered scrollable. */
   preview?: string;
+  /** The filed artefact itself (an uploaded CAM .docx) — the dialog offers a download. */
+  document?: { id: string; name: string };
 }
 
 const rows = (x: any): any[] => (Array.isArray(x) ? x : (x?.items ?? []));
@@ -213,11 +215,27 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
         const all = rows(await api.get<any>('/internal/cam-reports',
           { lending_id: w.subjectId }).catch(() => []));
         const row = all.filter((r: any) => r.status === 'Submitted').pop();
+        // An analyst who finished the CAM in Word filed a DOCUMENT — that file is what
+        // the committee reads, so name it and offer it for download.
+        let document: { id: string; name: string } | undefined;
+        if (row?.document_id) {
+          const docs = rows(await api.get<any>(`/lending/${w.subjectId}/documents`)
+            .catch(() => []));
+          const d = docs.find((x: any) => x.id === row.document_id);
+          const ct = String(d?.content_type || '');
+          const ext = ct.includes('wordprocessingml') ? '.docx' : ct.includes('pdf') ? '.pdf'
+            : ct.includes('markdown') ? '.md' : ct.includes('plain') ? '.txt' : '';
+          document = { id: String(row.document_id),
+            name: `${d?.title || `CAM v${row.report_version}`}${ext}` };
+        }
         return {
-          headline: `CAM v${row?.report_version ?? '?'} submitted for the committee — the draft is below.`,
+          headline: `CAM v${row?.report_version ?? '?'} submitted for the committee — `
+            + (row?.draft_md ? 'the draft is below.' : 'the filed document is attached.'),
           facts: clean([...base, ['Prepared by', row?.prepared_by || w.requestedBy],
-            ['Drafting engine', row?.engine]]),
+            ['Drafting engine', row?.engine],
+            ['Filed document', document?.name]]),
           preview: row?.draft_md || undefined,
+          document,
         };
       }
       const pkg = await api.get<any>(`/lending/${w.subjectId}/handover-package`).catch(() => null);

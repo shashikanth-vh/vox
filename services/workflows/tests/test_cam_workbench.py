@@ -144,6 +144,38 @@ async def test_generate_refine_finalise_with_the_stub_engine(monkeypatch):
     assert stub.reports[out["report_id"]]["status"] == "Submitted"
 
 
+async def test_an_uploaded_cam_document_submits_without_an_inapp_draft(monkeypatch):
+    """The Word lane: the analyst downloads the template, fills it OUTSIDE, uploads the
+    file — finalise with its document_id opens a version row (none existed), records the
+    filing on the transcript, and submits THAT document to the committee."""
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+
+    fin = await _call(app, "POST", f"/v1/cam/{LENDING}/finalise",
+                      json={"document_id": "doc-word-1"})
+    assert fin.status_code == 200, fin.text
+    out = fin.json()
+    assert out["status"] == "Submitted" and out["document_id"] == "doc-word-1"
+    row = stub.reports[out["report_id"]]
+    assert row["status"] == "Submitted" and row["document_id"] == "doc-word-1"
+    assert row["engine"] == "analyst:document"       # no engine drafted this one
+    assert any("[uploaded CAM]" in t["content"] for t in stub.turns)
+
+    # With an OPEN draft the uploaded file joins that version — no second row.
+    stub2 = _RegisterStub()
+    app.state.http = stub2
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1"], "prompt_doc_id": "prompt-1"})
+    rid = gen.json()["report_id"]
+    fin2 = await _call(app, "POST", f"/v1/cam/{LENDING}/finalise",
+                       json={"document_id": "doc-word-2"})
+    assert fin2.status_code == 200, fin2.text
+    assert fin2.json()["report_id"] == rid
+    assert stub2.reports[rid]["document_id"] == "doc-word-2"
+    assert len(stub2.reports) == 1
+
+
 async def test_no_readable_prompt_doc_means_no_draft(monkeypatch):
     """The brief comes from the credit team — a document or typed text; the workbench
     refuses to invent one."""

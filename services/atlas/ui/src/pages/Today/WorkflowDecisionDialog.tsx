@@ -9,6 +9,7 @@ import {
   kindLabel, since, noteRequired,
   type ApprovalContext, type PendingWorkflow, type DecisionAction,
 } from '../../services/workflowService';
+import { documentsService } from '../../services/documentsService';
 import { tokens } from '../../theme';
 
 // Per-verb copy. Return is the middle verb of the triad: NON-terminal — it goes back
@@ -118,6 +119,14 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
               <FieldGrid>
                 {ctx.facts.map(([label, value]) => <Fact key={label} label={label} value={value} />)}
               </FieldGrid>
+            )}
+            {ctx.document && (
+              <Button size="small" variant="outlined" sx={{ textTransform: 'none', mt: 1 }}
+                onClick={() => void documentsService.download({ id: ctx.document!.id,
+                  name: ctx.document!.name, size: 0, type: '', when: '', by: '', label: '' } as any)
+                  .then((r) => { if (!r.ok) setErr(r.error || 'The download failed.'); })}>
+                Download the filed document — {ctx.document.name}
+              </Button>
             )}
             {ctx.preview && (
               <Box component="pre" sx={{

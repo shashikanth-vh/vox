@@ -131,11 +131,14 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
-  /** File the draft to the Data Register and submit it to the committee. */
-  async finalise(lendingId: string, title?: string): Promise<{ document_id: string }> {
+  /** File the draft to the Data Register and submit it to the committee. Passing a
+   *  documentId instead submits that ALREADY-UPLOADED file (the Word-template lane) —
+   *  it becomes the committee copy, with or without an in-app draft. */
+  async finalise(lendingId: string, title?: string,
+                 documentId?: string): Promise<{ document_id: string }> {
     try {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/finalise`,
-        title ? { title } : {});
+        { ...(title ? { title } : {}), ...(documentId ? { document_id: documentId } : {}) });
     } catch (e) { throw new Error(msg(e, 'finalise the CAM')); }
   },
 
