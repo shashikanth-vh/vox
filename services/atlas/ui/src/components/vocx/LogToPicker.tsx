@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Box, Chip, MenuItem, TextField, Typography } from '@mui/material';
 import { listAll } from '../../api/http';
-import { tokens } from '../../theme';
+import { vx, label as lblSx, chip as chipSx2, input as inputSx } from './vocxStyles';
 
 /**
  * Where this interaction gets filed.
@@ -60,35 +60,34 @@ export default function LogToPicker({ entityId, value, onChange }: {
   };
 
   return (
-    <Box sx={{ borderLeft: `3px solid ${tokens.tealHi}`, borderRadius: '4px',
-      bgcolor: 'rgba(255,255,255,.03)', p: 1.2, my: 1.4 }}>
-      <Typography sx={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.7px',
-        color: 'rgba(232,238,242,.55)', fontWeight: 700, mb: 0.6 }}>Log to</Typography>
+    <Box sx={{ borderLeft: `3px solid ${vx.grn}`, borderRadius: '12px',
+      bgcolor: vx.card2, p: 1.8, my: 1.75 }}>
+      <Typography sx={lblSx}>Log to</Typography>
 
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6 }}>
-        <Chip size="small" label="Auto" clickable onClick={() => pickType('')}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
+        <Chip label="Auto" clickable onClick={() => pickType('')}
           sx={chipSx(!type)} />
         {LINES.map((l) => (
-          <Chip key={l.type} size="small" label={l.label} clickable
+          <Chip key={l.type} label={l.label} clickable
             onClick={() => pickType(l.type)} sx={chipSx(type === l.type)} />
         ))}
       </Box>
 
       {!type && (
-        <Typography sx={{ fontSize: 11, color: 'rgba(232,238,242,.5)', mt: 0.6 }}>
+        <Typography sx={{ fontSize: 14, color: vx.mut, mt: 0.8 }}>
           VocX files it against whatever it resolved from the conversation.
         </Typography>
       )}
 
       {!!type && !entityId && (
-        <Typography sx={{ fontSize: 11.5, color: tokens.warn, mt: 0.6 }}>
+        <Typography sx={{ fontSize: 14, color: vx.amberInk, mt: 0.8 }}>
           Link this capture to a company first — the lines to choose from are its own.
         </Typography>
       )}
 
       {!!type && !!entityId && (
         <TextField
-          select fullWidth size="small" sx={{ mt: 1 }}
+          select fullWidth sx={{ ...inputSx, mt: 1.4 }}
           label={loading ? 'Loading…' : `${type} row`}
           value={value?.subject_id || ''}
           onChange={(e) => onChange(e.target.value
@@ -97,7 +96,7 @@ export default function LogToPicker({ entityId, value, onChange }: {
           helperText={err || (!loading && !rows.length ? 'This company has no such line yet.' : '')}
         >
           {rows.map((r) => (
-            <MenuItem key={r.id} value={r.id} sx={{ fontSize: 12.5 }}>{rowLabel(r)}</MenuItem>
+            <MenuItem key={r.id} value={r.id} sx={{ fontSize: 15 }}>{rowLabel(r)}</MenuItem>
           ))}
         </TextField>
       )}
@@ -105,9 +104,4 @@ export default function LogToPicker({ entityId, value, onChange }: {
   );
 }
 
-const chipSx = (on: boolean) => ({
-  height: 24, fontSize: 11.5, fontWeight: 700,
-  bgcolor: on ? tokens.tealHi : 'rgba(255,255,255,.06)',
-  color: on ? '#04241B' : 'rgba(232,238,242,.75)',
-  '&:hover': { bgcolor: on ? tokens.tealHi : 'rgba(255,255,255,.12)' },
-});
+const chipSx = (on: boolean) => chipSx2(on);

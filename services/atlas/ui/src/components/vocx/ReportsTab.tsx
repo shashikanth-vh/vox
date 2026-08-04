@@ -4,7 +4,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { vocxService, type VocxPreview, type VocxReportRow } from '../../services/vocxService';
 import { currentRm } from './rm';
 import ReportCard from './ReportCard';
-import { tokens } from '../../theme';
+import { vx } from './vocxStyles';
 
 /**
  * Past captures — and the queue of ones still waiting to be filed.
@@ -17,7 +17,7 @@ import { tokens } from '../../theme';
  */
 
 const TONE: Record<string, { bg: string; fg: string }> = {
-  committed: { bg: 'rgba(45,214,163,.15)', fg: tokens.tealHi },
+  committed: { bg: 'rgba(45,214,163,.15)', fg: vx.grn },
   ready: { bg: 'rgba(240,180,60,.18)', fg: '#F0B43C' },
   draft: { bg: 'rgba(232,238,242,.12)', fg: 'rgba(232,238,242,.75)' },
 };
@@ -94,23 +94,23 @@ export default function ReportsTab({ epoch }: { epoch: number }) {
         onClose={() => setErr('')}>{err}</Alert>}
 
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.8 }}>
-        <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.6)', flex: 1 }}>
+        <Typography sx={{ fontSize: 11.5, color: vx.mut, flex: 1 }}>
           {pending > 0
             ? `${pending} waiting to be approved`
             : rows.length ? 'All captures filed' : ''}
         </Typography>
         <Button size="small" onClick={() => void load()} disabled={loading}
-          sx={{ textTransform: 'none', fontSize: 11.5, color: tokens.tealHi }}>Refresh</Button>
+          sx={{ textTransform: 'none', fontSize: 11.5, color: vx.grn }}>Refresh</Button>
       </Box>
 
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={22} sx={{ color: tokens.tealHi }} />
+          <CircularProgress size={22} sx={{ color: vx.grn }} />
         </Box>
       )}
 
       {!loading && !rows.length && !err && (
-        <Typography sx={{ fontSize: 12.5, color: 'rgba(232,238,242,.55)', py: 3, textAlign: 'center' }}>
+        <Typography sx={{ fontSize: 12.5, color: vx.mut, py: 3, textAlign: 'center' }}>
           Nothing captured yet. Record a note on the Record tab and it will appear here.
         </Typography>
       )}
@@ -126,29 +126,29 @@ export default function ReportsTab({ epoch }: { epoch: number }) {
             onClick={() => void openReport(r)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openReport(r); } }}
             sx={{
-              display: 'flex', gap: 1, alignItems: 'flex-start', p: 1, mb: 0.6,
-              borderRadius: '8px', cursor: 'pointer',
-              border: `1px solid ${isPending(r) ? 'rgba(240,180,60,.35)' : tokens.line}`,
-              bgcolor: 'rgba(255,255,255,.03)',
-              '&:hover': { bgcolor: 'rgba(255,255,255,.07)' },
-              '&:focus-visible': { outline: `2px solid ${tokens.tealHi}`, outlineOffset: 2 },
+              display: 'flex', gap: 1, alignItems: 'flex-start', p: 1.5, mb: 1,
+              borderRadius: '12px', cursor: 'pointer',
+              border: `1px solid ${isPending(r) ? 'rgba(240,180,60,.35)' : vx.line}`,
+              bgcolor: vx.card,
+              '&:hover': { bgcolor: vx.card2 },
+              '&:focus-visible': { outline: `2px solid ${vx.grn}`, outlineOffset: 2 },
             }}
           >
             <Chip size="small" label={opening === r.capture_id ? '…' : status}
               sx={{ height: 19, fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
                 bgcolor: tone.bg, color: tone.fg, flexShrink: 0 }} />
             <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#E8EEF2',
+              <Typography sx={{ fontSize: 16, fontWeight: 700, color: vx.ink,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {r.company || r.summary || r.capture_id}
               </Typography>
               {r.summary && r.company && (
-                <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.6)',
+                <Typography sx={{ fontSize: 11.5, color: vx.mut,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.summary}
                 </Typography>
               )}
-              <Typography sx={{ fontSize: 10.5, color: 'rgba(232,238,242,.42)' }}>
+              <Typography sx={{ fontSize: 10.5, color: vx.mut }}>
                 {[r.entity_code, when(r.updated_at)].filter(Boolean).join(' · ')}
               </Typography>
             </Box>

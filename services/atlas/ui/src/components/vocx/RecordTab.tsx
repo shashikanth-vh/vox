@@ -6,7 +6,7 @@ import { useRecorder, MAX_SECONDS } from './useRecorder';
 import { vocxService, currentPosition, type VocxPreview } from '../../services/vocxService';
 import { currentRm } from './rm';
 import ReportCard from './ReportCard';
-import { tokens } from '../../theme';
+import { vx, pill, pillPrimary, input as inputSx } from './vocxStyles';
 
 /** m:ss */
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -70,18 +70,18 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           onClose={() => setErr('')}>{err || rec.error}</Alert>
       )}
 
-      <Typography sx={{ fontSize: 19, fontWeight: 800, mb: 0.3 }}>Tap. Speak. Done.</Typography>
-      <Typography sx={{ fontSize: 12, color: 'rgba(232,238,242,.6)', mb: 2 }}>
+      <Typography sx={{ fontSize: 34, fontWeight: 700, mb: 0.8, mt: 1 }}>Tap. Speak. Done.</Typography>
+      <Typography sx={{ fontSize: 15, color: vx.mut, mb: 3, maxWidth: 380, mx: 'auto' }}>
         Up to {MAX_SECONDS / 60} minutes. Any language — EN, HI, Hinglish. VocX handles
         transcription, structure and filing.
       </Typography>
 
       {/* The mic. The ring tracks the live input level, so a dead microphone is visible
           before the user has spoken for three minutes into nothing. */}
-      <Box sx={{ position: 'relative', width: 132, height: 132, mx: 'auto', mb: 1.2 }}>
+      <Box sx={{ position: 'relative', width: 200, height: 200, mx: 'auto', mb: 2 }}>
         <Box aria-hidden sx={{
           position: 'absolute', inset: 0, borderRadius: '50%',
-          border: `2px solid ${recording ? tokens.tealHi : 'rgba(45,214,163,.25)'}`,
+          border: `2px solid ${recording ? vx.grn : vx.line}`,
           transform: `scale(${1 + (recording ? rec.level * 0.28 : 0)})`,
           transition: 'transform 90ms linear, border-color 200ms',
         }} />
@@ -93,25 +93,25 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           aria-label={recording ? 'Stop recording' : 'Start recording'}
           aria-pressed={recording}
           sx={{
-            position: 'absolute', inset: 14, borderRadius: '50%', border: 0,
+            position: 'absolute', inset: 26, borderRadius: '50%', border: 0,
             cursor: busy || !rm ? 'not-allowed' : 'pointer',
-            bgcolor: recording ? '#E0554E' : tokens.tealHi,
-            color: recording ? '#fff' : '#04241B',
+            bgcolor: recording ? vx.red : vx.grn,
+            color: recording ? '#fff' : vx.onGrn,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: busy || !rm ? 0.5 : 1,
             transition: 'background-color 200ms',
-            '&:focus-visible': { outline: `3px solid ${tokens.tealHi}`, outlineOffset: 3 },
+            '&:focus-visible': { outline: `3px solid ${vx.grn}`, outlineOffset: 3 },
           }}
         >
-          {recording ? <StopIcon sx={{ fontSize: 44 }} /> : <MicIcon sx={{ fontSize: 46 }} />}
+          {recording ? <StopIcon sx={{ fontSize: 64 }} /> : <MicIcon sx={{ fontSize: 68 }} />}
         </Box>
       </Box>
 
-      <Typography sx={{ fontSize: 13, fontWeight: 700, color: recording ? '#E0554E' : 'inherit',
+      <Typography sx={{ fontSize: 30, fontWeight: 700, color: recording ? vx.red : vx.grn, minHeight: 38,
         fontVariantNumeric: 'tabular-nums' }}>
         {recording ? clock(rec.seconds) : busy ? '' : 'Tap the mic and start speaking'}
       </Typography>
-      <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.55)', minHeight: 18 }}>
+      <Typography sx={{ fontSize: 15, color: vx.mut, minHeight: 22 }}>
         {status
           || (recording
             ? `Tap again to stop · ${clock(Math.max(0, remaining))} left`
@@ -120,14 +120,14 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
 
       {recording && (
         <Button size="small" onClick={rec.cancel} sx={{ textTransform: 'none', mt: 0.5,
-          color: 'rgba(232,238,242,.6)' }}>Cancel</Button>
+          color: vx.mut }}>Cancel</Button>
       )}
 
       {!recording && (
         <Box sx={{ mt: 1.5 }}>
           {!showTyped ? (
-            <Button size="small" onClick={() => setShowTyped(true)} disabled={busy || !rm}
-              sx={{ textTransform: 'none', color: tokens.tealHi }}>Type instead</Button>
+            <Button onClick={() => setShowTyped(true)} disabled={busy || !rm}
+              sx={{ textTransform: 'none', fontSize: 15, color: vx.grn2 }}>Type instead</Button>
           ) : (
             <Box sx={{ textAlign: 'left' }}>
               <TextField
@@ -135,18 +135,15 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
                 onChange={(e) => setTyped(e.target.value)}
                 placeholder="Met the EcoSoch team about the term loan…"
                 inputProps={{ 'aria-label': 'Type the note' }}
-                sx={{
-                  '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,.04)', color: '#E8EEF2', fontSize: 12.5 },
-                  '& fieldset': { borderColor: tokens.line },
-                }}
+                sx={inputSx}
               />
               <Box sx={{ display: 'flex', gap: 0.8, mt: 0.8 }}>
-                <Button size="small" variant="contained" onClick={analyseTyped}
-                  disabled={busy || !typed.trim()} sx={{ textTransform: 'none' }}>
+                <Button onClick={analyseTyped}
+                  disabled={busy || !typed.trim()} sx={pillPrimary}>
                   {busy ? 'Reading…' : 'Analyse'}
                 </Button>
-                <Button size="small" onClick={() => { setShowTyped(false); setTyped(''); }}
-                  sx={{ textTransform: 'none', color: 'rgba(232,238,242,.6)' }}>Cancel</Button>
+                <Button onClick={() => { setShowTyped(false); setTyped(''); }}
+                  sx={pill}>Cancel</Button>
               </Box>
             </Box>
           )}

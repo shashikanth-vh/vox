@@ -7,7 +7,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { useDraggable } from './useDraggable';
 import RecordTab from './RecordTab';
 import ReportsTab from './ReportsTab';
-import { tokens } from '../../theme';
+import { vx } from './vocxStyles';
 
 /**
  * The VocX capture panel — FLOATING, not modal.
@@ -23,8 +23,8 @@ import { tokens } from '../../theme';
  * dragged off the edge of a 390px screen is a worse answer than a sheet.
  */
 
-const PANEL_W = 420;
-const PANEL_H = 620;
+const PANEL_W = 468;
+const PANEL_H = 680;
 const MOBILE_MAX = 760;
 
 export default function VocxPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -85,9 +85,9 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        bgcolor: '#0E1B2C',
-        color: '#E8EEF2',
-        border: `1px solid ${tokens.line}`,
+        bgcolor: vx.bg,
+        color: vx.ink,
+        border: `1px solid ${vx.line}`,
         // No transition on position: a dragged panel must track the pointer exactly.
         boxShadow: '0 18px 48px rgba(0,0,0,.45)',
       }}
@@ -97,17 +97,17 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         {...(mobile ? {} : drag.handleProps)}
         sx={{
           display: 'flex', alignItems: 'center', gap: 0.5, px: 1, py: 0.75,
-          bgcolor: '#132539', borderBottom: `1px solid ${tokens.line}`,
+          bgcolor: vx.card, borderBottom: `1px solid ${vx.line}`,
           cursor: mobile ? 'default' : (drag.dragging ? 'grabbing' : 'grab'),
           userSelect: 'none', flexShrink: 0,
         }}
       >
-        {!mobile && <DragIndicatorIcon sx={{ fontSize: 18, color: 'rgba(232,238,242,.45)' }} />}
+        {!mobile && <DragIndicatorIcon sx={{ fontSize: 18, color: vx.mut }} />}
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 800, letterSpacing: '.5px', lineHeight: 1.1 }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 700, letterSpacing: '.02em', lineHeight: 1.05 }}>
             VOCX
           </Typography>
-          <Typography sx={{ fontSize: 9.5, color: 'rgba(232,238,242,.55)', letterSpacing: '1px' }}>
+          <Typography sx={{ fontSize: 9.5, color: vx.mut, letterSpacing: '.18em' }}>
             EVAM · FIELD INTEL
           </Typography>
         </Box>
@@ -115,7 +115,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
           <Tooltip title={rolled ? 'Expand' : 'Roll up'}>
             <IconButton size="small" onClick={() => setRolled((r) => !r)}
               aria-label={rolled ? 'Expand VocX' : 'Roll up VocX'}
-              sx={{ color: 'rgba(232,238,242,.7)' }}>
+              sx={{ color: vx.mut, '&:hover': { color: vx.ink } }}>
               {rolled ? <OpenInFullIcon sx={{ fontSize: 16 }} />
                       : <MinimizeIcon sx={{ fontSize: 16 }} />}
             </IconButton>
@@ -123,7 +123,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         )}
         <Tooltip title="Close">
           <IconButton size="small" onClick={onClose} aria-label="Close VocX"
-            sx={{ color: 'rgba(232,238,242,.7)' }}>
+            sx={{ color: vx.mut, '&:hover': { color: vx.ink } }}>
             <CloseIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
@@ -136,14 +136,14 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
             onChange={(_, v) => setTab(v)}
             variant="fullWidth"
             sx={{
-              minHeight: 38, flexShrink: 0,
-              borderBottom: `1px solid ${tokens.line}`,
+              minHeight: 46, flexShrink: 0,
+              borderBottom: `1px solid ${vx.line}`,
               '& .MuiTab-root': {
-                minHeight: 38, fontSize: 12.5, textTransform: 'none', fontWeight: 700,
-                color: 'rgba(232,238,242,.6)',
+                minHeight: 46, fontSize: 15, textTransform: 'none', fontWeight: 600,
+                color: vx.mut,
               },
-              '& .Mui-selected': { color: `${tokens.tealHi} !important` },
-              '& .MuiTabs-indicator': { backgroundColor: tokens.tealHi },
+              '& .Mui-selected': { color: `${vx.grn2} !important` },
+              '& .MuiTabs-indicator': { backgroundColor: vx.grn, height: 3 },
             }}
           >
             <Tab label="Record" id="vocx-tab-record" aria-controls="vocx-panel-record" />

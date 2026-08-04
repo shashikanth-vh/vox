@@ -19,7 +19,8 @@ import { check, rulesFor, type Completeness } from './completeness';
 import ApproveDialog from './ApproveDialog';
 import LogToPicker, { type LogTo } from './LogToPicker';
 import ClientPicker, { type ClientChoice } from './ClientPicker';
-import { tokens } from '../../theme';
+import { vx, card, heading, microHeading, label as lbl2, input as inputSx,
+         pill, pillPrimary, pillGhost, pillDanger, chip as chipSx, badge, banner } from './vocxStyles';
 
 /**
  * One capture, reviewed and filed.
@@ -48,16 +49,9 @@ const DETAILS: [string, string][] = [
   ['turnover', 'Turnover'],
 ];
 
-const lbl = {
-  fontSize: 10.5, textTransform: 'uppercase' as const, letterSpacing: '.7px',
-  color: 'rgba(232,238,242,.55)', fontWeight: 700,
-};
-const sec = { ...lbl, color: tokens.tealHi, mt: 1.6, mb: 0.6 };
-const field = {
-  '& .MuiInputBase-root': { bgcolor: 'rgba(255,255,255,.04)', color: '#E8EEF2', fontSize: 12.5 },
-  '& fieldset': { borderColor: tokens.line },
-  '& .MuiInputLabel-root': { fontSize: 12.5, color: 'rgba(232,238,242,.6)' },
-};
+const lbl = lbl2;
+const sec = microHeading;
+const field = inputSx;
 
 export default function ReportCard({ preview, initialStatus, onFiled, onDiscarded }: {
   preview: VocxPreview;
@@ -226,36 +220,33 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         onClose={() => setNote('')}>{note}</Alert>}
 
       {/* Status + temperature */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, flexWrap: 'wrap' }}>
-        <Chip size="small" label={status.toUpperCase()}
-          sx={{ height: 21, fontSize: 10, fontWeight: 800,
-            bgcolor: committed ? 'rgba(45,214,163,.16)' : status === 'ready'
-              ? tokens.tealHi : 'rgba(240,180,60,.18)',
-            color: committed ? tokens.tealHi : status === 'ready' ? '#04241B' : '#F0B43C' }} />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Box component="span" sx={badge(status)}>{status.toUpperCase()}</Box>
         {TEMPS.map((t) => (
-          <Chip key={t} size="small" label={t} clickable={!committed}
+          <Chip key={t} label={t} clickable={!committed}
             onClick={() => { if (!committed) { rep.deal_temp = rep.deal_temp === t ? null : t; redraw(); } }}
-            sx={{ height: 21, fontSize: 11,
-              bgcolor: rep.deal_temp === t ? tokens.tealHi : 'rgba(255,255,255,.06)',
-              color: rep.deal_temp === t ? '#04241B' : 'rgba(232,238,242,.75)' }} />
+            sx={chipSx(rep.deal_temp === t)} />
         ))}
       </Box>
 
-      <Typography sx={{ fontSize: 17, fontWeight: 800, mt: 0.8, lineHeight: 1.25 }}>
+      <Typography sx={{ fontSize: 26, fontWeight: 700, mt: 1.2, lineHeight: 1.15 }}>
         {rep.title || match.canonical_name || ext.company_mentioned || 'Field report'}
       </Typography>
-      <Typography sx={{ fontSize: 11, color: 'rgba(232,238,242,.5)' }}>
-        {[rep.sector, ext._meta?.language?.toUpperCase(),
-          ext._meta?.duration ? `${Math.round(ext._meta.duration)}s` : '']
-          .filter(Boolean).join(' · ')}
+      {rep.sector && (
+        <Typography sx={{ fontSize: 17, color: vx.grn2, mt: 0.2 }}>{rep.sector}</Typography>
+      )}
+      <Typography sx={{ fontSize: 13.5, color: vx.mut, mt: 0.4 }}>
+        {[new Date().toLocaleString(),
+          ext._meta?.duration ? `⏱ ${Math.floor(ext._meta.duration / 60)}:${String(Math.round(ext._meta.duration % 60)).padStart(2, '0')}` : '',
+          (ext._meta?.language || 'en').toUpperCase()].filter(Boolean).join(' · ')}
       </Typography>
 
       {/* Completeness — visible before the approve dialog, not only inside it. */}
       <Box sx={{ mt: 1 }}>
         <LinearProgress variant="determinate" value={pct}
           sx={{ height: 4, borderRadius: 2, bgcolor: 'rgba(255,255,255,.08)',
-            '& .MuiLinearProgress-bar': { bgcolor: state.missingRequired.length ? tokens.warn : tokens.tealHi } }} />
-        <Typography sx={{ fontSize: 10.5, color: 'rgba(232,238,242,.5)', mt: 0.3 }}>
+            '& .MuiLinearProgress-bar': { bgcolor: state.missingRequired.length ? vx.amberInk : vx.grn } }} />
+        <Typography sx={{ fontSize: 10.5, color: vx.mut, mt: 0.3 }}>
           {state.filled}/{state.total} captured
           {state.missingRequired.length ? ` · ${state.missingRequired.length} required missing` : ''}
         </Typography>
@@ -271,54 +262,58 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
 
       {/* Actions */}
       <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mt: 1.2 }}>
-        <Button size="small" variant="contained" disabled={!!busy || committed}
-          onClick={() => setAskApprove(true)} sx={{ textTransform: 'none', fontWeight: 700 }}>
-          Approve
-        </Button>
-        <Button size="small" variant="outlined" disabled={!!busy || committed}
-          onClick={saveDraft} sx={{ textTransform: 'none' }}>Save changes</Button>
+        <Button disabled={!!busy || committed}
+          onClick={() => setAskApprove(true)} sx={pillPrimary}>Approve</Button>
+        <Button disabled={!!busy || committed} onClick={saveDraft} sx={pill}>Save changes</Button>
         <Tooltip title="Opens the print view — use your browser's Save as PDF">
-          <Button size="small" startIcon={<DownloadIcon sx={{ fontSize: 15 }} />}
+          <Button startIcon={<DownloadIcon sx={{ fontSize: 17 }} />}
             onClick={() => window.open(
               `${VOCX_URL}/v1/reports/print?rm=${encodeURIComponent(rm)}&id=${encodeURIComponent(captureId)}`,
               '_blank', 'noopener')}
-            sx={{ textTransform: 'none', color: 'rgba(232,238,242,.7)' }}>PDF</Button>
+            sx={pill}>Download PDF</Button>
         </Tooltip>
         <Box sx={{ flex: 1 }} />
-        <IconButton size="small" onClick={remove} disabled={!!busy} aria-label="Delete this report"
-          sx={{ color: tokens.bad }}><DeleteOutlineIcon sx={{ fontSize: 18 }} /></IconButton>
+        <IconButton onClick={remove} disabled={!!busy} aria-label="Delete this report"
+          sx={{ ...pillDanger, px: 1.4 }}><DeleteOutlineIcon sx={{ fontSize: 19 }} /></IconButton>
       </Box>
       {busy && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mt: 0.8 }}>
-          <CircularProgress size={13} sx={{ color: tokens.tealHi }} />
-          <Typography sx={{ fontSize: 11.5, color: tokens.tealHi }}>{busy}</Typography>
+          <CircularProgress size={13} sx={{ color: vx.grn }} />
+          <Typography sx={{ fontSize: 11.5, color: vx.grn }}>{busy}</Typography>
         </Box>
       )}
 
       {audioUrl && (
         <>
-          <Typography sx={sec}>Original audio</Typography>
+          <Typography sx={microHeading}>Original audio</Typography>
           <audio controls src={audioUrl} style={{ width: '100%', height: 34 }} />
         </>
       )}
 
-      <Typography sx={sec}>Summary</Typography>
-      <TextField multiline minRows={2} fullWidth size="small" sx={field}
-        disabled={committed}
-        inputRef={(el) => { focusRef.current.summary = el; }}
-        value={rep.summary || ''}
-        onChange={(e) => { rep.summary = e.target.value; redraw(); }} />
+      <Box sx={card}>
+        <Typography sx={microHeading}>Summary</Typography>
+        <TextField multiline minRows={2} fullWidth sx={field}
+          disabled={committed}
+          inputRef={(el) => { focusRef.current.summary = el; }}
+          value={rep.summary || ''}
+          onChange={(e) => { rep.summary = e.target.value; redraw(); }} />
+      </Box>
 
-      <BulletList title="Key intel" rows={listOf('key_intel')} disabled={committed}
-        anchor={(el) => { focusRef.current.key_intel = el; }}
-        onChange={redraw} addLabel="Add bullet" />
+      <Box sx={card}>
+        <BulletList title="Key intel" rows={listOf('key_intel')} disabled={committed}
+          anchor={(el) => { focusRef.current.key_intel = el; }}
+          onChange={redraw} addLabel="Add bullet" />
+        <Box sx={{ mt: 2 }}>
+          <Typography sx={microHeading}>Nuances &amp; soft signals</Typography>
+          <BulletList title="" rows={listOf('nuances')} disabled={committed}
+            anchor={(el) => { focusRef.current.nuances = el; }}
+            onChange={redraw} addLabel="Add nuance" />
+        </Box>
+      </Box>
 
-      <BulletList title="Nuances & soft signals" rows={listOf('nuances')} disabled={committed}
-        anchor={(el) => { focusRef.current.nuances = el; }}
-        onChange={redraw} addLabel="Add nuance" />
-
+      <Box sx={card}>
       {/* Next steps — owner / action / date, as the extraction produces them. */}
-      <Typography sx={sec}>Next steps</Typography>
+      <Typography sx={heading}>Next steps</Typography>
       {listOf('next_steps').map((s: any, i: number) => (
         <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
           <TextField size="small" placeholder="owner" sx={{ ...field, width: 92 }} disabled={committed}
@@ -330,17 +325,17 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
             value={s.date || ''} onChange={(e) => { s.date = e.target.value || null; redraw(); }} />
           <IconButton size="small" disabled={committed} aria-label="Remove step"
             onClick={() => { listOf('next_steps').splice(i, 1); redraw(); }}>
-            <CloseIcon sx={{ fontSize: 15, color: 'rgba(232,238,242,.5)' }} />
+            <CloseIcon sx={{ fontSize: 15, color: vx.mut }} />
           </IconButton>
         </Box>
       ))}
       {!listOf('next_steps').length && <Empty />}
       <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} disabled={committed}
         onClick={() => { listOf('next_steps').push({ owner: null, action: '', date: null }); redraw(); }}
-        sx={ghost}>Add next step</Button>
+        sx={pillGhost}>Add next step</Button>
 
       {/* Next meeting + what will actually happen on approve. */}
-      <Typography sx={sec}>Next meeting</Typography>
+      <Typography sx={heading}>Next meeting</Typography>
       <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
         <TextField size="small" type="date" label="Follow-up" sx={{ ...field, flex: '1 1 140px' }}
           InputLabelProps={{ shrink: true }} disabled={committed}
@@ -366,31 +361,36 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         </Alert>
       )}
 
+      </Box>
+
       {/* Transcript */}
       <Accordion sx={acc} disableGutters>
-        <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'rgba(232,238,242,.6)' }} />}>
-          <Typography sx={{ fontSize: 13, fontWeight: 700 }}>Full transcript</Typography>
-          <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.45)', ml: 1,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: vx.mut }} />}>
+          <Typography sx={{ fontSize: 19, fontWeight: 700 }}>Full transcript</Typography>
+          <Typography sx={{ fontSize: 14, color: vx.mut, ml: 1.2, alignSelf: 'center',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
             {transcript.slice(0, 48)}
           </Typography>
         </AccordionSummary>
         <AccordionDetails>
-          <Typography sx={{ fontSize: 11, color: 'rgba(232,238,242,.55)', mb: 0.6 }}>
-            Fix any mis-heard word, then re-read — the whole report is rebuilt from it.
+          <Typography sx={{ fontSize: 14, color: vx.mut, mb: 1 }}>
+            Edit any mis-heard words, then re-analyse to rebuild the report.
           </Typography>
           <TextField multiline minRows={4} fullWidth size="small" sx={field} disabled={committed}
             value={transcript} onChange={(e) => setTranscript(e.target.value)} />
           <Button size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />}
             disabled={!!busy || committed} onClick={reanalyse}
-            sx={{ ...ghost, mt: 0.8 }}>Re-analyse from transcript</Button>
+            sx={{ ...pillGhost, mt: 1.2 }}>Re-analyse from transcript</Button>
         </AccordionDetails>
       </Accordion>
 
       {/* Additional details */}
       <Accordion sx={acc} disableGutters defaultExpanded>
-        <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'rgba(232,238,242,.6)' }} />}>
-          <Typography sx={{ fontSize: 13, fontWeight: 700 }}>Additional details</Typography>
+        <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: vx.mut }} />}>
+          <Typography sx={{ fontSize: 19, fontWeight: 700, flex: 1 }}>Additional details</Typography>
+          <Typography sx={{ fontSize: 14, color: vx.mut, alignSelf: 'center', mr: 1 }}>
+            {rep.sector || ''}
+          </Typography>
         </AccordionSummary>
         <AccordionDetails>
           <TextField size="small" fullWidth label="Client name" sx={{ ...field, mb: 1 }}
@@ -398,15 +398,15 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
             inputRef={(el) => { focusRef.current.title = el; }}
             value={rep.title || ''} onChange={(e) => { rep.title = e.target.value; redraw(); }} />
 
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.2 }}>
             {DETAILS.map(([k, label]) => (
               <TextField key={k} size="small" label={label} disabled={committed}
-                sx={{ ...field, flex: '1 1 45%' }}
+                sx={{ ...field, flex: '1 1 200px' }}
                 inputRef={(el) => { focusRef.current[k] = el; }}
                 value={rep[k] || ''} onChange={(e) => { rep[k] = e.target.value || null; redraw(); }} />
             ))}
             <TextField size="small" select label="Pipeline stage" disabled={committed}
-              sx={{ ...field, flex: '1 1 45%' }}
+              sx={{ ...field, flex: '1 1 200px' }}
               inputRef={(el) => { focusRef.current.pipeline_stage = el; }}
               value={rep.pipeline_stage || ''}
               onChange={(e) => { rep.pipeline_stage = e.target.value || null; redraw(); }}>
@@ -420,7 +420,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
             <Button size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
               disabled={!!busy || committed || !tplFields.length}
               onClick={() => autoFill(tplFields)}
-              sx={{ ...ghost, mt: 0 }}>Auto-fill from transcript</Button>
+              sx={{ ...pillGhost, py: 0.7, fontSize: 13.5 }}>Auto-fill from transcript</Button>
           </Box>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
             {((caps?.report_templates || []) as any[]).map((t) => {
@@ -430,11 +430,8 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
                   label={on ? t.label : `+ ${t.label}`}
                   onDelete={on && !committed ? () => void toggleTemplate(t) : undefined}
                   onClick={() => { if (!committed) void toggleTemplate(t); }}
-                  sx={{ height: 24, fontSize: 11.5,
-                    bgcolor: on ? tokens.tealHi : 'transparent',
-                    color: on ? '#04241B' : tokens.tealHi,
-                    border: `1px ${on ? 'solid' : 'dashed'} ${tokens.tealHi}`,
-                    '& .MuiChip-deleteIcon': { color: '#04241B', fontSize: 15 } }} />
+                  sx={{ ...chipSx(on, true),
+                    '& .MuiChip-deleteIcon': { color: vx.onGrn, fontSize: 17, ml: 0.5 } }} />
               );
             })}
           </Box>
@@ -458,11 +455,11 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
                   value={(rep.extra || {})[f.key] || ''}
                   onChange={(e) => { (rep.extra = rep.extra || {})[f.key] = e.target.value || null; redraw(); }} />
               )}
-              {f.required && <Typography sx={{ fontSize: 15, color: tokens.warn }} title="Required">*</Typography>}
+              {f.required && <Typography sx={{ fontSize: 15, color: vx.amberInk }} title="Required">*</Typography>}
             </Box>
           ))}
           {!tplFields.length && (
-            <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.5)' }}>
+            <Typography sx={{ fontSize: 11.5, color: vx.mut }}>
               Pick a template above and VocX fills it from what was said.
             </Typography>
           )}
@@ -473,25 +470,26 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
               const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
               (rep._custom = rep._custom || []).push({ key, label: name });
               redraw();
-            }} sx={ghost}>Add field</Button>
+            }} sx={pillGhost}>Add field</Button>
 
           <Typography sx={{ ...lbl, mt: 1.6, mb: 0.6 }}>Opportunity score (1–5)</Typography>
-          <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
             {[1, 2, 3, 4, 5].map((n) => (
               <Box key={n} component="button" type="button" disabled={committed}
                 ref={n === 1 ? (el: any) => { focusRef.current.opportunity_score = el; } : undefined}
                 onClick={() => { rep.opportunity_score = rep.opportunity_score === n ? null : n; redraw(); }}
                 aria-pressed={rep.opportunity_score === n}
-                sx={{ width: 38, height: 34, borderRadius: '8px', cursor: 'pointer', fontWeight: 700,
-                  border: `1px solid ${tokens.line}`,
-                  bgcolor: rep.opportunity_score === n ? tokens.tealHi : 'rgba(255,255,255,.04)',
-                  color: rep.opportunity_score === n ? '#04241B' : 'rgba(232,238,242,.75)' }}>
+                sx={{ width: 52, height: 52, borderRadius: '11px', cursor: 'pointer',
+                  fontSize: 18, fontWeight: rep.opportunity_score === n ? 700 : 400,
+                  border: `1px solid ${rep.opportunity_score === n ? vx.grn : '#2C5A44'}`,
+                  bgcolor: rep.opportunity_score === n ? vx.grn : '#173A2C',
+                  color: rep.opportunity_score === n ? vx.onGrn : vx.ink }}>
                 {n}
               </Box>
             ))}
           </Box>
 
-          <Typography sx={sec}>Attendees</Typography>
+          <Typography sx={microHeading}>Attendees</Typography>
           {listOf('attendees').map((a: any, i: number) => (
             <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
               {(['name', 'role', 'company'] as const).map((k) => (
@@ -502,14 +500,14 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
               ))}
               <IconButton size="small" disabled={committed} aria-label="Remove attendee"
                 onClick={() => { listOf('attendees').splice(i, 1); redraw(); }}>
-                <CloseIcon sx={{ fontSize: 15, color: 'rgba(232,238,242,.5)' }} />
+                <CloseIcon sx={{ fontSize: 15, color: vx.mut }} />
               </IconButton>
             </Box>
           ))}
           {!listOf('attendees').length && <Empty />}
           <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} disabled={committed}
             onClick={() => { listOf('attendees').push({ name: '', role: null, company: null }); redraw(); }}
-            sx={ghost}>Add attendee</Button>
+            sx={pillGhost}>Add attendee</Button>
         </AccordionDetails>
       </Accordion>
 
@@ -522,18 +520,18 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
 
 // --------------------------------------------------------------------------------- //
 
-const ghost = {
-  textTransform: 'none' as const, fontSize: 11.5, color: tokens.tealHi,
-  border: `1px dashed ${tokens.line}`, mt: 0.4,
-};
 const acc = {
-  bgcolor: 'rgba(255,255,255,.03)', border: `1px solid ${tokens.line}`,
-  borderRadius: '10px !important', mt: 1.6, color: '#E8EEF2',
+  ...card,
+  p: 0,
+  borderRadius: '16px !important',
+  color: vx.ink,
   '&:before': { display: 'none' },
+  '& .MuiAccordionSummary-root': { px: 2, minHeight: 58 },
+  '& .MuiAccordionDetails-root': { px: 2, pb: 2 },
 };
 
 const Empty = () => (
-  <Typography sx={{ fontSize: 11.5, color: 'rgba(232,238,242,.45)' }}>None yet.</Typography>
+  <Typography sx={{ fontSize: 15, color: vx.mut, py: 0.5 }}>None yet.</Typography>
 );
 
 /** A simple string list — key intel, nuances. */
@@ -543,22 +541,22 @@ function BulletList({ title, rows, disabled, addLabel, onChange, anchor }: {
 }) {
   return (
     <>
-      <Typography sx={sec}>{title}</Typography>
+      {title && <Typography sx={heading}>{title}</Typography>}
       {rows.map((v, i) => (
-        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-          <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: tokens.tealHi, flexShrink: 0 }} />
+        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.8 }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: vx.grn, flexShrink: 0 }} />
           <TextField size="small" fullWidth sx={field} disabled={disabled}
             inputRef={i === 0 ? anchor : undefined}
             value={v} onChange={(e) => { rows[i] = e.target.value; onChange(); }} />
           <IconButton size="small" disabled={disabled} aria-label={`Remove from ${title}`}
             onClick={() => { rows.splice(i, 1); onChange(); }}>
-            <CloseIcon sx={{ fontSize: 15, color: 'rgba(232,238,242,.5)' }} />
+            <CloseIcon sx={{ fontSize: 15, color: vx.mut }} />
           </IconButton>
         </Box>
       ))}
       {!rows.length && <Empty />}
       <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} disabled={disabled}
-        onClick={() => { rows.push(''); onChange(); }} sx={ghost}>{addLabel}</Button>
+        onClick={() => { rows.push(''); onChange(); }} sx={pillGhost}>{addLabel}</Button>
     </>
   );
 }

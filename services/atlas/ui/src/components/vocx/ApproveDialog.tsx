@@ -5,7 +5,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import type { Completeness } from './completeness';
-import { tokens } from '../../theme';
+import { vx, pill, pillPrimary } from './vocxStyles';
 
 /**
  * The last thing between a capture and the register.
@@ -40,14 +40,14 @@ export default function ApproveDialog({ open, state, busy, onFill, onFile, onClo
   const list = (gaps: typeof missingRequired, colour: string) => (
     <Box component="ul" sx={{ m: 0, pl: 2.2, mb: 1 }}>
       {gaps.map((g) => (
-        <Box component="li" key={g.key} sx={{ fontSize: 12.8, color: colour, mb: 0.2 }}>
+        <Box component="li" key={g.key} sx={{ fontSize: 15, color: colour, mb: 0.4 }}>
           <Box component="span"
             onClick={() => onFill(g.key)}
             sx={{ cursor: 'pointer', textDecoration: 'underline dotted' }}>
             {g.label}
           </Box>
           {g.from && (
-            <Typography component="span" sx={{ fontSize: 11, color: tokens.muted, ml: 0.6 }}>
+            <Typography component="span" sx={{ fontSize: 13, color: vx.mut, ml: 0.6 }}>
               — {g.from}
             </Typography>
           )}
@@ -57,15 +57,17 @@ export default function ApproveDialog({ open, state, busy, onFill, onFile, onClo
   );
 
   return (
-    <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth>
-      <DialogTitle sx={{ fontSize: 15.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-        {clean ? <CheckCircleIcon sx={{ color: tokens.ok, fontSize: 20 }} />
-               : missingRequired.length ? <ErrorOutlineIcon sx={{ color: tokens.warn, fontSize: 20 }} />
-                                        : <InfoOutlinedIcon sx={{ color: tokens.muted, fontSize: 20 }} />}
+    <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth
+      PaperProps={{ sx: { bgcolor: vx.card, color: vx.ink, borderRadius: '16px',
+        border: `1px solid ${vx.line}` } }}>
+      <DialogTitle sx={{ fontSize: 19, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+        {clean ? <CheckCircleIcon sx={{ color: vx.grn, fontSize: 20 }} />
+               : missingRequired.length ? <ErrorOutlineIcon sx={{ color: vx.amberInk, fontSize: 20 }} />
+                                        : <InfoOutlinedIcon sx={{ color: vx.mut, fontSize: 20 }} />}
         {clean ? 'Ready to file' : 'Before you file'}
       </DialogTitle>
-      <DialogContent dividers>
-        <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 1.2 }}>
+      <DialogContent dividers sx={{ borderColor: vx.line }}>
+        <Typography sx={{ fontSize: 14, color: vx.mut, mb: 1.4 }}>
           {filled} of {total} details captured. Filing puts this interaction on the
           client's permanent timeline — it cannot be taken back.
         </Typography>
@@ -75,33 +77,33 @@ export default function ApproveDialog({ open, state, busy, onFill, onFile, onClo
             <Alert severity="warning" sx={{ py: 0, fontSize: 12, mb: 0.8 }}>
               {missingRequired.length === 1 ? 'One required detail is' : `${missingRequired.length} required details are`} missing.
             </Alert>
-            {list(missingRequired, tokens.warn)}
+            {list(missingRequired, vx.amberInk)}
           </>
         )}
 
         {!!missingOptional.length && (
           <>
             <Typography sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px',
-              color: tokens.muted, fontWeight: 700, mt: 1, mb: 0.4 }}>
+              color: vx.mut, fontWeight: 700, mt: 1.4, mb: 0.6 }}>
               Optional, not captured
             </Typography>
-            {list(missingOptional, tokens.muted)}
-            <Typography sx={{ fontSize: 11, color: tokens.muted }}>
+            {list(missingOptional, vx.mut)}
+            <Typography sx={{ fontSize: 13.5, color: vx.mut }}>
               These are worth having but nothing waits on them.
             </Typography>
           </>
         )}
 
         {clean && (
-          <Typography sx={{ fontSize: 12.8 }}>
+          <Typography sx={{ fontSize: 15 }}>
             Everything this report asks for is filled in.
           </Typography>
         )}
       </DialogContent>
-      <DialogActions sx={{ gap: 0.5 }}>
-        <Button onClick={onClose} disabled={busy} sx={{ textTransform: 'none' }}>Cancel</Button>
+      <DialogActions sx={{ gap: 0.8, p: 2, borderTop: `1px solid ${vx.line}` }}>
+        <Button onClick={onClose} disabled={busy} sx={pill}>Cancel</Button>
         {!!missingRequired.length && (
-          <Button variant="contained" disabled={busy} sx={{ textTransform: 'none' }}
+          <Button disabled={busy} sx={pillPrimary}
             onClick={() => onFill(missingRequired[0].key)}>
             Go back and fill
           </Button>
@@ -109,9 +111,9 @@ export default function ApproveDialog({ open, state, busy, onFill, onFile, onClo
         <Button
           onClick={onFile}
           disabled={busy}
-          variant={missingRequired.length ? 'outlined' : 'contained'}
-          color={missingRequired.length ? 'warning' : 'primary'}
-          sx={{ textTransform: 'none', fontWeight: 700 }}
+          sx={missingRequired.length
+            ? { ...pill, color: vx.amberInk, borderColor: '#4A3D1D' }
+            : pillPrimary}
         >
           {busy ? 'Filing…'
                 : missingRequired.length ? 'File without them'
