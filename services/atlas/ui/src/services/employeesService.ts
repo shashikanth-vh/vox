@@ -1,8 +1,8 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { withFallback, remote, listAll, USE_REAL_API } from '../api/http';
+import { api, errText, withFallback, remote, listAll, USE_REAL_API } from '../api/http';
 import { accessService, toAccessUser, fromAccessUser } from './accessService';
-import { servedByRegister } from './referenceService';
+import { referenceService, servedByRegister } from './referenceService';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
 import type { Employee, BookRollup } from '../pages/Employees/employee.types';
@@ -76,6 +76,50 @@ async function hydrateRoster(): Promise<void> {
   }
 }
 
+/** Employee → the Register's PersonCreate/Update shape (only the fields it accepts). */
+function toPersonBody(e: Partial<Employee>): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (e.name !== undefined) out.name = e.name;
+  if (e.full !== undefined) out.full_name = e.full || e.name;
+  if (e.role !== undefined) out.role = e.role;
+  if (e.email !== undefined) out.email = e.email || null;
+  if (e.phone !== undefined) out.phone = e.phone || null;
+  if (e.geography !== undefined) out.geography = e.geography || null;
+  if (e.sectors !== undefined) out.sectors = e.sectors || null;
+  if (e.startedOn !== undefined) out.started_on = e.startedOn || null;
+  if (e.reportsTo !== undefined) out.reports_to = e.reportsTo || null;
+  if (e.inactive !== undefined) out.inactive = !!e.inactive;
+  if (e.notes !== undefined) out.notes = e.notes || null;
+  return out;
+}
+
+/**
+ * The ROSTER half of provisioning: the register people row, created if the register
+ * does not already hold this person (matched by e-mail via /v1/people/resolve, so a
+ * retry completes rather than colliding with the one-mailbox rule). Returns the row id.
+ */
+async function ensurePersonRow(emp: Employee): Promise<string | undefined> {
+  const email = (emp.email || '').trim();
+  if (email) {
+    try {
+      const got = await api.get<any>('/people/resolve', { name: email });
+      if (got?.resolved) return undefined; // already on the roster — nothing to create
+    } catch { /* resolve unavailable → fall through to the create, which validates */ }
+  }
+  try {
+    const created = await api.post<any>('/people', {
+      role: 'BDRM', ...toPersonBody(emp), name: emp.name, full_name: emp.full || emp.name,
+    });
+    return created?.id;
+  } catch (e: any) {
+    const detail = (e?.response?.data ? errText(e.response.data) : '') || e?.message || '';
+    throw new Error(
+      `The sign-in identity was created, but the person could not be added to the `
+      + `register roster${detail ? ` — ${detail}` : ''}. Until they are on the roster, `
+      + `no dropdown can offer them. Fix the field and save again to finish.`);
+  }
+}
+
 export const employeesService = {
   bookRollup,
   hydrateRoster,
@@ -128,25 +172,52 @@ export const employeesService = {
   },
   update(name: string, patch: Partial<Employee>, by: string) {
     const p = this.find(name); if (!p) return;
-    remote('patch', '/employees/' + name, patch);
+    // The roster row lives at /v1/people/{id}. (The old '/employees/' + name path does
+    // not exist on the Register, so every edit 404ed silently for as long as this was
+    // fire-and-forget.)
+    if (p.registerId) remote('patch', '/people/' + p.registerId, toPersonBody(patch));
     Object.assign(p, patch); writeAudit(by, 'Employee updated', name, Object.keys(patch).join(','));
   },
-  // Adding an employee is a PROVISIONING act, not a row insert: the person needs an
-  // Access identity before they can sign in, and Access owns the roles that drive RBAC.
-  // So this one write is awaited rather than fire-and-forget — a duplicate email or a
-  // rejected role has to reach the user, not console.warn. The local store is only
-  // updated once Access has accepted.
+  // Adding an employee is a PROVISIONING act with TWO halves, both awaited:
+  //
+  //   Access  — the sign-in identity; owns the roles that drive RBAC.
+  //   Register people — the roster every name resolves against. The BDRM/RM/Analyst
+  //     dropdowns are served live from it (/v1/ref), conversions validate rm/analyst
+  //     against it, and VocX binds captures through it. This half was simply MISSING:
+  //     an added employee could sign in, but no dropdown offered them and no lead
+  //     could name them — the "unable to select BDRM" dead end.
+  //
+  // Await both; a duplicate e-mail or rejected role must reach the user, not
+  // console.warn. Each half is idempotent-by-lookup so a retry after a partial
+  // failure completes the other half instead of failing on "already exists".
   async create(input: Partial<Employee>, by: string): Promise<Employee> {
     const emp: Employee = { name: input.name || 'New', full: input.full || input.name || 'New', role: input.role || 'BDRM', username: '', email: '', phone: '', geography: '', sectors: '', startedOn: '', reportsTo: '', inactive: false, notes: '', ...input } as Employee;
     if (USE_REAL_API) {
-      const created = await accessService.createUser(toAccessUser(emp));
-      emp.accessId = created.id;
+      const email = (emp.email || '').trim().toLowerCase();
+      try {
+        const created = await accessService.createUser(toAccessUser(emp));
+        emp.accessId = created.id;
+      } catch (e: any) {
+        // Retry after a partial failure: if Access already holds this mailbox, attach
+        // to that identity rather than refusing to finish the roster half.
+        const existing = email
+          ? (await accessService.findUsers(email).catch(() => []))
+              .find((u) => (u.email || '').toLowerCase() === email)
+          : undefined;
+        if (!existing) throw e;
+        emp.accessId = existing.id;
+      }
+      emp.registerId = await ensurePersonRow(emp);
+      // The new name reaches the BDRM/RM dropdowns through /v1/ref — refresh them now,
+      // so the person is offerable the moment the dialog closes, not after a reload.
+      void referenceService.hydrate();
     }
     db().people.push(emp); writeAudit(by, 'Employee added', emp.name, emp.full); return emp;
   },
   remove(name: string, by: string) {
-    remote('del', '/employees/' + name);
-    const i = db().people.findIndex((p: Employee) => p.name === name);
+    const p = this.find(name);
+    if (p?.registerId) remote('del', '/people/' + p.registerId);
+    const i = db().people.findIndex((x: Employee) => x.name === name);
     if (i > -1) { db().people.splice(i, 1); writeAudit(by, 'Employee deleted', name, ''); }
   },
 };
