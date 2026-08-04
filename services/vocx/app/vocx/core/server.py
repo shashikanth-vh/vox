@@ -135,7 +135,12 @@ class VocxApp:
         kind, payload = got
         if kind == "url":
             return 200, "application/json", _j({"ok": True, "url": payload})
-        return 200, "audio/wav", payload
+        # The clip's own magic bytes name the type. It was hardcoded "audio/wav" while
+        # the browser records webm/opus — Chromium sniffed past the lie, Edge trusted it
+        # and played silence. Sniffing (not the stored extension) also heals every clip
+        # archived under the old `.wav` name.
+        from app.vocx.speech.audio_store import sniff_audio_type
+        return 200, sniff_audio_type(payload), payload
 
     # ---- server-side report list (drafts → ready → committed) ---------------
     def _reports_list(self, query):
@@ -483,7 +488,8 @@ class VocxApp:
         ref = None
         astore = self.audio_store()
         if astore is not None:
-            ref = astore.save(bytes(body), _one(query, "ts") or "", rm)
+            ref = astore.save(bytes(body), _one(query, "ts") or "", rm,
+                              content_type=_one(query, "ct") or "")
         result = vocx_pipeline.process_audio_capture(
             bytes(body), rm=rm, capture_ts=_one(query, "ts"),
             transcript_ref=ref,

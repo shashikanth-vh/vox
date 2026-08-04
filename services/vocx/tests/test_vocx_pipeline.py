@@ -281,9 +281,12 @@ def _s3_store(tmp_path, fake):
 def test_s3_audio_store_puts_and_returns_the_reference(tmp_path):
     fake = _FakeS3()
     store = _s3_store(tmp_path, fake)
-    ref = store.save(b"RIFFdata", "2026-07-30T15:02:11", "Priya")
+    # A real RIFF/WAVE header: the archive now names a clip from its CONTENT (or the
+    # upload's declared type), so the fixture has to actually be what it claims.
+    wav = b"RIFF" + b"\x24\x00\x00\x00" + b"WAVE" + b"\x00" * 16
+    ref = store.save(wav, "2026-07-30T15:02:11", "Priya")
     assert ref == "s3://caps/captures/2026/07/20260730_150211_Priya.wav"
-    assert fake.objects[ref.split("caps/")[1]] == b"RIFFdata"
+    assert fake.objects[ref.split("caps/")[1]] == wav
     # Retention became a bucket lifecycle rule, not an app cron.
     assert fake.lifecycle["Rules"][0]["Expiration"]["Days"] == 30
 
@@ -1062,3 +1065,63 @@ async def test_a_captured_row_is_attributed_to_the_rm_who_dictated_it(stub_regis
     claimed = [h for h in stub_register.get("on_behalf", []) if h]
     assert claimed, "every register write from a capture must say who it was for"
     assert set(claimed) == {"priya@evamfinance.com"}, claimed
+
+
+def test_a_recording_keeps_its_real_container_type(tmp_path):
+    """The browser records webm/opus; the archive must not rename it `.wav` and playback
+    must not label it `audio/wav`. Chromium sniffed past that lie — Edge trusted it and
+    played silence under a working timeline, which the field reported as "I cannot hear
+    the audio". The magic bytes are the authority, so clips archived under the old
+    `.wav` name heal on playback too.
+    """
+    from app.vocx.speech.audio_store import LocalAudioStore, ext_for, sniff_audio_type
+
+    webm = b"\x1a\x45\xdf\xa3" + b"\x00" * 64          # EBML magic — what MediaRecorder emits
+    wav = b"RIFF" + b"\x24\x00\x00\x00" + b"WAVE" + b"\x00" * 64
+
+    assert sniff_audio_type(webm) == "audio/webm"
+    assert sniff_audio_type(wav) == "audio/wav"
+    assert sniff_audio_type(b"OggS" + b"\x00" * 16) == "audio/ogg"
+    assert sniff_audio_type(b"\x00" * 20) == "application/octet-stream"
+    assert ext_for("audio/webm;codecs=opus") == ".webm"
+
+    store = LocalAudioStore(str(tmp_path))
+    ref = store.save(webm, "2026-08-04T10:00:00", "priya",
+                     content_type="audio/webm;codecs=opus")
+    assert ref and ref.endswith(".webm"), ref
+    kind, payload = store.playback(ref)
+    assert kind == "bytes" and payload == webm
+
+    # A clip archived by the OLD build — named .wav, containing webm — still sniffs true.
+    legacy = store.save(webm, "2026-08-04T11:00:00", "priya")
+    assert sniff_audio_type(store.playback(legacy)[1]) == "audio/webm"
+
+
+async def test_playback_is_served_with_the_clips_own_type(stub_register, monkeypatch,
+                                                          tmp_path):
+    """End to end through the route: post a webm capture, read /v1/audio back, and the
+    response Content-Type is the clip's own — not a hardcoded label."""
+    from app.vocx import identity
+    from app.vocx.speech import stt as vocx_stt
+
+    monkeypatch.setenv("VOCX_TOKENS_DIR", str(tmp_path / "vox"))
+    monkeypatch.setenv("VOCX_STT_BACKEND", "stub")
+    monkeypatch.setattr(vocx_stt, "build_transcriber", lambda config: vocx_stt.StubTranscriber(
+        "Met the EcoSoch Solar team about the term loan."))
+    get_settings.cache_clear()
+    identity.reset_cache()
+    app = create_app()
+
+    webm = b"\x1a\x45\xdf\xa3" + b"\x00" * 2048
+    async with await _client(app, "priya@evamfinance.com") as c:
+        prev = await c.post("/v1/capture_audio?offline=true",
+                            content=webm,
+                            headers={"Content-Type": "audio/webm;codecs=opus"})
+        assert prev.status_code == 200, prev.text
+        ref = (prev.json()["extraction"].get("_meta") or {}).get("transcript_ref") or ""
+        assert ref.endswith(".webm"), ref
+
+        got = await c.get("/v1/audio", params={"ref": ref})
+        assert got.status_code == 200, got.text
+        assert got.headers["content-type"].startswith("audio/webm"), got.headers
+        assert got.content == webm

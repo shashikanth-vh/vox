@@ -213,6 +213,15 @@ export const vocxService = {
   async audioUrl(ref: string): Promise<Result<string>> {
     try {
       const blob = await vocx.blob('/v1/audio', { ref });
+      // Two honest answers live on this route: the clip's bytes (typed by its own
+      // container — webm/ogg/wav — so the <audio> element decodes with sound), or,
+      // on presign deployments, JSON {url}. The JSON used to be object-URL'd as if it
+      // were audio, which gave the player a file it could never play.
+      if ((blob.type || '').includes('json')) {
+        const parsed = JSON.parse(await blob.text());
+        if (parsed?.url) return ok(String(parsed.url));
+        return fail(String(parsed?.error || 'VocX returned no playable audio.'));
+      }
       return ok(URL.createObjectURL(blob));
     } catch (e) { return fail(vocxError(e, 'play that recording')); }
   },

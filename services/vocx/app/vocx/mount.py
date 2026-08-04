@@ -263,6 +263,11 @@ def build_vocx_router(settings: Any) -> APIRouter:
                                 _delete_everywhere, app, query, body, keys)
                         return await run_in_threadpool(
                             _first_hit, app, request.method, route_path, query, body, keys)
+                # The recording's real container type rides along to the archive — the
+                # adapter contract (method, path, query, body) carries no headers, so
+                # the Content-Type the browser declared travels as a query value.
+                if route_path == "/v1/capture_audio":
+                    query["ct"] = [request.headers.get("content-type") or ""]
                 # The audio ref is opaque but not unguessable, and its payload is the raw
                 # meeting recording — so it is checked on its own terms, not by trusting
                 # that the caller asked with the right rm.

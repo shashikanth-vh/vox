@@ -31,6 +31,40 @@ log = logging.getLogger("vocx")
 
 AudioInput = Any  # bytes | file path — mirrors vocx_stt
 
+# What the browser actually records → an honest extension. MediaRecorder produces
+# webm/opus (Chromium) or mp4 (Safari); nothing here has ever produced WAV, yet every
+# clip was archived as `.wav` and served back as `audio/wav`. Chromium sniffs past the
+# lie; Edge's platform decoders take the label at its word and play SILENCE with a
+# working timeline — a bug report that reads "I cannot hear the audio".
+_EXT_FOR_TYPE: tuple[tuple[str, str], ...] = (
+    ("webm", ".webm"), ("ogg", ".ogg"), ("opus", ".ogg"), ("mp4", ".m4a"),
+    ("m4a", ".m4a"), ("aac", ".m4a"), ("mpeg", ".mp3"), ("mp3", ".mp3"), ("wav", ".wav"),
+)
+
+
+def ext_for(content_type: str) -> str:
+    ct = (content_type or "").lower()
+    return next((ext for token, ext in _EXT_FOR_TYPE if token in ct), ".webm")
+
+
+def sniff_audio_type(payload: bytes) -> str:
+    """The container's own magic bytes → its media type. Trusting the bytes rather than
+    a stored label also heals every clip archived as `.wav` before this fix."""
+    head = payload[:16]
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return "audio/webm"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
+    if head.startswith(b"RIFF") and payload[8:12] == b"WAVE":
+        return "audio/wav"
+    if head.startswith(b"ID3") or head.startswith(b"\xff\xfb") or head.startswith(b"\xff\xf3"):
+        return "audio/mpeg"
+    if payload[4:8] == b"ftyp":
+        return "audio/mp4"
+    # Unknown container: say nothing rather than something wrong — an octet-stream makes
+    # every browser fall back to its own sniffing.
+    return "application/octet-stream"
+
 
 def _safe_name(capture_ts: str, rm: str, ext: str = ".wav") -> tuple[str, str, str]:
     """(yyyy, mm, filename) — deterministic, filesystem- and key-safe. A client that
@@ -46,10 +80,12 @@ def _safe_name(capture_ts: str, rm: str, ext: str = ".wav") -> tuple[str, str, s
     return yyyy, mm, f"{ts}_{safe_rm}{ext}"
 
 
-def _read_bytes(audio: AudioInput) -> tuple[bytes | None, str]:
-    """(payload, extension) from bytes or a file path; (None, ...) when unreadable."""
+def _read_bytes(audio: AudioInput, content_type: str = "") -> tuple[bytes | None, str]:
+    """(payload, extension) from bytes or a file path; (None, ...) when unreadable.
+    Raw bytes are named by the upload's own Content-Type — the clip is whatever the
+    browser recorded, not whatever a default said."""
     if isinstance(audio, bytes):
-        return audio, ".wav"
+        return audio, (ext_for(content_type) if content_type else ext_for(sniff_audio_type(audio)))
     if isinstance(audio, str) and os.path.exists(audio):
         try:
             with open(audio, "rb") as fh:
@@ -82,8 +118,9 @@ class LocalAudioStore:
         except OSError:
             return None
 
-    def save(self, audio: AudioInput, capture_ts: str, rm: str) -> str | None:
-        payload, ext = _read_bytes(audio)
+    def save(self, audio: AudioInput, capture_ts: str, rm: str,
+             content_type: str = "") -> str | None:
+        payload, ext = _read_bytes(audio, content_type)
         if payload is None:
             return None
         try:
@@ -223,20 +260,21 @@ class S3AudioStore:
             return None
 
     # -- save -----------------------------------------------------------------
-    def save(self, audio: AudioInput, capture_ts: str, rm: str) -> str | None:
-        payload, ext = _read_bytes(audio)
+    def save(self, audio: AudioInput, capture_ts: str, rm: str,
+             content_type: str = "") -> str | None:
+        payload, ext = _read_bytes(audio, content_type)
         if payload is None:
             return None
         yyyy, mm, name = _safe_name(capture_ts, rm, ext)
         key = f"{self.prefix}/{yyyy}/{mm}/{name}"
         try:
             self._s3().put_object(Bucket=self.bucket, Key=key, Body=payload,
-                                  ContentType="audio/wav")
+                                  ContentType=sniff_audio_type(payload))
             return f"s3://{self.bucket}/{key}"
         except Exception as e:  # noqa: BLE001 — degrade, never discard the recording
             log.error("vocx audio: S3 put failed (%s) — falling back to local", e)
             if self.fallback is not None:
-                return self.fallback.save(payload, capture_ts, rm)
+                return self.fallback.save(payload, capture_ts, rm, content_type)
             return None
 
 
