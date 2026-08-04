@@ -13,8 +13,9 @@ dependency pointing one way and leaves Access knowing nothing about business tab
 
 Semantics, chosen to be safe to run any time:
 * keyed by e-mail (lowercased) — the one identity string both halves share;
-* creates missing rows (short handle from Access's short_name, else the e-mail local
-  part — the same value VocX keys captures by);
+* creates missing rows for ACTIVE users (short handle from Access's short_name, else
+  the e-mail local part — the same value VocX keys captures by); a deactivated user
+  with no roster row is left alone — creating one is how deleted employees came back;
 * updates role / full_name / inactive on existing rows — Access is authoritative for
   who a person IS and what they hold; roster-only fields (geography, sectors,
   reporting line, notes) are never touched;
@@ -110,6 +111,15 @@ async def sync_people_from_access(ctx: RequestContext = Depends(get_context)) ->
         role = ", ".join(u.get("roles") or []) or "—"
         inactive = not bool(u.get("is_active", True))
         row = by_email.get(email.lower())
+        if row is None and inactive:
+            # No roster row and no sign-in: nothing cites this person (anything that did
+            # would have created the row while they were active). Creating one anyway is
+            # how a DELETED employee came back — remove() deactivates in Access and
+            # soft-deletes the roster row, and the next sync resurrected them, holding
+            # their full name against any future hire. Deactivated users only UPDATE
+            # rows that still exist; they never mint new ones.
+            unchanged += 1
+            continue
         if row is None:
             clash = by_full.get(full.lower())
             if clash is not None and (clash.email or "").strip().lower() not in ("", email.lower()):

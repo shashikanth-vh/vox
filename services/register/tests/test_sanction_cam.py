@@ -212,6 +212,10 @@ async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatc
         "name": "Priya", "full_name": "E2E Priya Nair", "role": "RM",
         "email": "e2e.rm@evamfinance.com", "geography": "Karnataka"},
         headers=ADMIN)).status_code == 201
+    # A leaver who IS on the roster: the sync marks them inactive (never deletes).
+    assert (await client.post("/v1/people", json={
+        "name": "gone", "full_name": "Left The Firm", "role": "BDRM",
+        "email": "gone@evamfinance.com"}, headers=ADMIN)).status_code == 201
 
     access_users = [
         {"id": "u1", "email": "e2e.rm@evamfinance.com", "full_name": "E2E Priya Nair",
@@ -232,8 +236,10 @@ async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatc
     r = await client.post("/v1/internal/people/sync-access", headers=ADMIN)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert set(out["created"]) == {"e2e.checker@evamfinance.com", "gone@evamfinance.com"}
-    assert out["updated"] == ["e2e.rm@evamfinance.com"]          # role refreshed
+    # The inactive u3 UPDATES its existing row; an inactive user with NO row would be
+    # skipped, not created — creating one is how deleted employees used to resurrect.
+    assert set(out["created"]) == {"e2e.checker@evamfinance.com"}
+    assert set(out["updated"]) == {"e2e.rm@evamfinance.com", "gone@evamfinance.com"}
     assert out["skipped"][0]["reason"].startswith("no e-mail")
 
     # Priya: role now matches Access; geography (roster-only) survived.
@@ -253,6 +259,49 @@ async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatc
     # Idempotent: a second run changes nothing.
     again = (await client.post("/v1/internal/people/sync-access", headers=ADMIN)).json()
     assert again["created"] == [] and again["updated"] == []
+
+
+async def test_a_deleted_person_frees_their_name(client: AsyncClient, monkeypatch):
+    """Removing an employee releases their full name for a future hire — and while a
+    live row still holds the name, the refusal says WHO, not 'constraint violated'.
+    The sync must not undo the release by resurrecting the deactivated user."""
+    from app.api import people_sync
+
+    ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin",
+             "X-User-Id": "8c5a2c1e-0000-4000-8000-00000000000a"}
+
+    first = (await client.post("/v1/people", json={
+        "name": "Arun", "full_name": "Arun Menon", "role": "Credit Head",
+        "email": "e2e.maker@evamfinance.com"}, headers=ADMIN))
+    assert first.status_code == 201, first.text
+
+    # Same full name, different mailbox → refused, naming the holder.
+    dup = await client.post("/v1/people", json={
+        "name": "Arun", "full_name": "Arun Menon", "role": "Credit Head",
+        "email": "arun.menon@evamfinance.com"}, headers=ADMIN)
+    assert dup.status_code == 422, dup.text
+    assert "already on the roster" in dup.text
+    assert "e2e.maker@evamfinance.com" in dup.text
+
+    # The employee is deleted (Access keeps the deactivated user; roster soft-deletes).
+    assert (await client.delete(f"/v1/people/{first.json()['id']}",
+                                headers=ADMIN)).status_code == 204
+
+    # A sync that still sees the deactivated Access user must NOT resurrect the row.
+    async def fake_list(tenant_code):  # noqa: ANN001
+        return [{"id": "u9", "email": "e2e.maker@evamfinance.com",
+                 "full_name": "Arun Menon", "roles": ["Credit Head"],
+                 "is_active": False}]
+    monkeypatch.setattr(people_sync, "_list_access_users", fake_list)
+    synced = (await client.post("/v1/internal/people/sync-access",
+                                headers=ADMIN)).json()
+    assert synced["created"] == []
+
+    # The name is free: the successor (or namesake) can be hired.
+    again = await client.post("/v1/people", json={
+        "name": "Arun", "full_name": "Arun Menon", "role": "Credit Head",
+        "email": "arun.menon@evamfinance.com"}, headers=ADMIN)
+    assert again.status_code == 201, again.text
 
 
 async def test_a_leavers_book_hands_over_whole(client: AsyncClient):

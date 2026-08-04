@@ -11,7 +11,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,8 +29,10 @@ class Entity(RegisterBase):
 
     __tablename__ = "entities"
     __table_args__ = (
-        # ATLAS borrower-code is unique per tenant (used for promoter-level grouping).
-        UniqueConstraint("tenant_id", "code", name="entities_tenant_code"),
+        # ATLAS borrower-code is unique per tenant (used for promoter-level grouping) —
+        # among LIVE rows only, so a deleted entity does not reserve its code forever.
+        Index("entities_tenant_code", "tenant_id", "code", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
         Index("ix_entities_tenant_sector", "tenant_id", "sector"),
         Index("ix_entities_tenant_cin", "tenant_id", "cin"),
     )
@@ -79,7 +81,10 @@ class Person(RegisterBase):
     """
 
     __tablename__ = "people"
-    __table_args__ = (UniqueConstraint("tenant_id", "full_name", name="people_tenant_full_name"),)
+    # Full name denotes ONE person — among LIVE rows. A soft-deleted leaver keeps their
+    # history but stops reserving the name, so their eventual namesake can be hired.
+    __table_args__ = (Index("people_tenant_full_name", "tenant_id", "full_name", unique=True,
+                            postgresql_where=text("deleted_at IS NULL")),)
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # short handle, e.g. "Shubh"
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -102,7 +107,8 @@ class Counterparty(RegisterBase):
     """
 
     __tablename__ = "counterparties"
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="counterparties_tenant_name"),)
+    __table_args__ = (Index("counterparties_tenant_name", "tenant_id", "name", unique=True,
+                            postgresql_where=text("deleted_at IS NULL")),)
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(60))
