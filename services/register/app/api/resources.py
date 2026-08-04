@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.crud_router import ResourceSpec, build_crud_router
+from app.api.people_rules import person_pre_write
 from app.models import (
     AssetMonetisation,
     ContractAsset,
@@ -47,6 +48,9 @@ _SPECS: list[ResourceSpec] = [
         # Directory data: readable by any employee (employees view = READ for all roles),
         # editable only by Admin/Management (edit_employee).
         view_name="employees", write_operation="edit_employee",
+        # One person, one mailbox — the e-mail is what Access, VocX and every other
+        # service resolve this person by (app.core.people).
+        pre_write=person_pre_write,
     ),
     ResourceSpec(
         name="counterparty", prefix="/v1/counterparties", tags=["Counterparties"],

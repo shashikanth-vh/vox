@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
@@ -403,9 +404,21 @@ async def _role_name_lists(ctx: RequestContext) -> dict[str, list[dict]]:
             .order_by(Person.name)
         )
     ).scalars().all()
+    # A SHARED handle is not an identifier. Two colleagues can both be "Priya" on the
+    # roster (only the full name is unique per tenant), and a picker that offered the
+    # handle for both would put a string in `rm` that names neither of them in
+    # particular — the register refuses it at conversion, correctly but late. Those
+    # people are offered under their full name instead; everyone else keeps the short
+    # handle the rest of the platform stores.
+    shared = {h for h, n in Counter((p.name or "").strip().lower()
+                                    for p in people).items() if h and n > 1}
+
+    def _value(p: Person) -> str:
+        return (p.full_name or p.name) if (p.name or "").strip().lower() in shared else p.name
+
     out: dict[str, list[dict]] = {}
     for category, wanted in _ROLE_LISTS.items():
-        named = [{"value": p.name, "label": p.full_name or p.name}
+        named = [{"value": _value(p), "label": p.full_name or p.name}
                  for p in people
                  if any(w.lower() in (p.role or "").lower() for w in wanted)]
         if named:

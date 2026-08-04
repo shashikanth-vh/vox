@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, Header, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 
 from app import authz
 from app.authz.matrix import PRIMARY_ASSIGNMENT_ROLE
@@ -433,7 +433,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
 
     import orjson
 
-    from app.models import AssetMonetisation, Deal, LendingTracker, Person, SyndicationTracker
+    from app.models import AssetMonetisation, Deal, LendingTracker, SyndicationTracker
     from app.models import Lead as _Lead
     from app.models.users import LineAssignment
     from app.repositories.crud import CRUDRepository as _Repo
@@ -491,26 +491,18 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
 
     # rm / analyst, if named, must be known people in this tenant — not free-text.
     #
-    # A person is on record under EITHER of their two names: the short handle the rest of
-    # the platform addresses them by ("Shubh" — what leads, deals and trackers store in
-    # `rm`/`analyst`) or the full name ("Shubh Dave"). Matching full_name alone refused a
-    # conversion whose RM was seeded from that very roster, because the lead carried the
-    # handle and the check read the other column. Case-insensitive: the operator typing
-    # "shubh" means the same person.
-    lowered = func.lower(func.trim(Person.full_name))
-    handle = func.lower(func.trim(Person.name))
+    # Resolution lives in app.core.people and accepts EVERY string that honestly denotes
+    # a person: the short handle the platform stores ("Priya"), the full name a picker
+    # shows ("Priya Nair"), the e-mail, or its local part (what VocX keys a capture
+    # under). Matching one column alone is what refused a conversion whose RM had been
+    # seeded from that very roster. An ambiguous string is refused rather than guessed.
+    from app.core.people import canonical_name, require_person
+
+    resolved: dict[str, str] = {}
     for label, name in (("rm", payload.rm), ("analyst", payload.analyst)):
-        wanted = (name or "").strip().lower()
-        if wanted:
-            known = (await ctx.session.execute(
-                select(Person.id).where(Person.tenant_id == ctx.tenant_id,
-                                        or_(lowered == wanted, handle == wanted),
-                                        Person.deleted_at.is_(None)).limit(1))
-            ).scalar_one_or_none()
-            if known is None:
-                raise ValidationAppError(
-                    f"Unknown {label} '{name}' — not a person on record. Add them under "
-                    f"People (Employees) first, or pick a name from that list.")
+        if (name or "").strip():
+            person = await require_person(ctx.session, ctx.tenant_id, name, label=label)
+            resolved[label] = canonical_name(person)
 
     # The assignee IDs that will receive an auto-assignment must be real, active Access
     # users holding the right role — verified through Access when configured (a no-op in
@@ -518,13 +510,20 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     from app.core.access_client import AccessUnavailableError, verify_assignee
 
     # (id, assignment role, the display name that MUST denote that same identity)
+    #
+    # The name sent to Access is the one the ROSTER holds, not the string the caller
+    # typed. Access knows people by full name and e-mail; a picker that (correctly)
+    # offers the short handle would otherwise fail this binding for anyone whose handle
+    # is not their e-mail's local part — "Priya" against priya.nair@ matched neither.
     to_verify: list[tuple[Any, str, str | None]] = []
+    rm_name = resolved.get("rm", payload.rm)
+    analyst_name = resolved.get("analyst", payload.analyst)
     if payload.is_lending and payload.analyst_id:
-        to_verify.append((payload.analyst_id, "Deal Analyst", payload.analyst))
+        to_verify.append((payload.analyst_id, "Deal Analyst", analyst_name))
     if payload.is_syndication and payload.rm_id:
-        to_verify.append((payload.rm_id, "Syn RM", payload.rm))
+        to_verify.append((payload.rm_id, "Syn RM", rm_name))
     if payload.is_asset_mon and payload.rm_id:
-        to_verify.append((payload.rm_id, "AM RM", payload.rm))
+        to_verify.append((payload.rm_id, "AM RM", rm_name))
     for uid, role, name in to_verify:
         try:
             problem = await verify_assignee(ctx.tenant_code, str(uid), role,

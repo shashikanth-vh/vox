@@ -87,15 +87,22 @@ async def _resolve(tenant_code: str, user_id: str) -> _Cached | None:
 
 def _name_matches(entry: _Cached, expected_name: str) -> bool:
     """The provided display name must denote the SAME identity as the id — so a caller
-    can't pass one person's UUID with another's name. Matches on full name or the e-mail
-    local part, case-insensitively."""
+    can't pass one person's UUID with another's name.
+
+    Matches the full name, the e-mail, or its local part, case-insensitively. Callers in
+    the Register resolve the name against the people roster first and send the roster's
+    full name (app.core.people.canonical_name), so a picker offering a short handle is
+    not compared against a mailbox it was never derived from.
+    """
     want = expected_name.strip().lower()
     if not want:
         return True
     if entry.full_name and entry.full_name.strip().lower() == want:
         return True
-    local = entry.email.split("@")[0].strip().lower() if entry.email else ""
-    return local == want
+    if not entry.email:
+        return False
+    email = entry.email.strip().lower()
+    return want in (email, email.split("@")[0])
 
 
 async def verify_assignee(tenant_code: str, user_id: str, assignment_role: str,

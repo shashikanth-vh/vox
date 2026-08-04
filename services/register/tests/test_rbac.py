@@ -428,3 +428,87 @@ async def test_assignment_reports_an_access_outage_as_503_not_422(client: AsyncC
         headers=_as("admin@evamfinance.com", "Admin"))
     assert r.status_code == 503, r.text
     assert "Access service is not answering" in r.text
+
+
+async def test_a_person_resolves_by_e_mail_and_by_the_handle_vocx_uses(client: AsyncClient):
+    """Every dialect the platform uses for "who is this?" must reach the same person.
+
+    Leads and deals store the short handle, a picker shows the full name, Access knows the
+    e-mail, and VocX keys a capture under the e-mail's LOCAL PART. Resolving one column
+    and calling it identity is what produced "Unknown rm 'Priya'" while Priya Nair sat in
+    the roster the picker had just read.
+    """
+    ent = (await client.post("/v1/entities", json={
+        "code": f"ID-{uuid.uuid4().hex[:6]}", "legal_name": "Identity Co"})).json()
+    assert (await client.post("/v1/people", json={
+        "name": "Priya", "full_name": "Priya Nair", "role": "BDRM",
+        "email": "priya.nair@evamfinance.com"})).status_code == 201
+
+    async def convert(rm: str) -> int:
+        lead = (await client.post("/v1/leads", json={
+            "company": "Identity Co", "entity_id": ent["id"], "status": "Active"})).json()
+        return (await client.post(f"/v1/leads/{lead['id']}/convert", json={
+            "is_lending": True, "product_type": "Term Loan", "amount_cr": 5,
+            "rm": rm})).status_code
+
+    assert await convert("Priya") == 200                            # handle
+    assert await convert("Priya Nair") == 200                       # full name
+    assert await convert("priya.nair@evamfinance.com") == 200       # the real identity
+    assert await convert("priya.nair") == 200                       # what VocX files under
+    assert await convert("Priya Sharma") == 422                     # a different person
+
+
+async def test_a_shared_handle_is_refused_rather_than_guessed(client: AsyncClient):
+    """Two colleagues can be "Priya". That string then names neither of them.
+
+    Picking the first match would file one person's book against the other's name and
+    nothing would ever report it, so the register refuses and says who the candidates
+    are. The full name still works, because it is unique per tenant.
+    """
+    ent = (await client.post("/v1/entities", json={
+        "code": f"AM-{uuid.uuid4().hex[:6]}", "legal_name": "Ambiguous Co"})).json()
+    for full, email in (("Priya Nair", "priya.nair@evamfinance.com"),
+                        ("Priya Sharma", "priya.sharma@evamfinance.com")):
+        assert (await client.post("/v1/people", json={
+            "name": "Priya", "full_name": full, "role": "BDRM",
+            "email": email})).status_code == 201
+
+    async def convert(rm: str):
+        lead = (await client.post("/v1/leads", json={
+            "company": "Ambiguous Co", "entity_id": ent["id"], "status": "Active"})).json()
+        return await client.post(f"/v1/leads/{lead['id']}/convert", json={
+            "is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": rm})
+
+    clash = await convert("Priya")
+    assert clash.status_code == 422, clash.text
+    assert "Priya Nair" in clash.text and "Priya Sharma" in clash.text, clash.text
+    assert (await convert("Priya Nair")).status_code == 200
+    assert (await convert("priya.sharma@evamfinance.com")).status_code == 200
+
+    # And the picker stops offering a value that cannot identify anybody: the two Priyas
+    # come back under their full names, everyone else keeps the short handle.
+    ref = (await client.get("/v1/ref")).json()
+    bdrms = {o["value"] for o in ref.get("RM", []) + ref.get("BDRM", [])}
+    assert "Priya" not in bdrms, bdrms
+    assert {"Priya Nair", "Priya Sharma"} <= bdrms, bdrms
+
+
+async def test_one_person_one_mailbox(client: AsyncClient):
+    """A second roster row for the same e-mail would make the identity itself ambiguous —
+    the one string that is supposed to settle every other question."""
+    assert (await client.post("/v1/people", json={
+        "name": "Devi", "full_name": "Devi Krishnan", "role": "RM",
+        "email": "devi@evamfinance.com"})).status_code == 201
+    dup = await client.post("/v1/people", json={
+        "name": "Devi K", "full_name": "Devi Krishnan Iyer", "role": "RM",
+        "email": "DEVI@evamfinance.com"})
+    assert dup.status_code == 422, dup.text
+    assert "already on record" in dup.text
+    # An edit that would collide is refused too; editing that same row is not.
+    ok = await client.post("/v1/people", json={
+        "name": "Nila", "full_name": "Nila Menon", "role": "RM",
+        "email": "nila@evamfinance.com"})
+    assert ok.status_code == 201
+    moved = await client.patch(f"/v1/people/{ok.json()['id']}",
+                               json={"email": "devi@evamfinance.com"})
+    assert moved.status_code == 422, moved.text

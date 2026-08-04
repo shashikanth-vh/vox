@@ -57,6 +57,7 @@ class ResourceSpec:
         company_scoped: bool = False,
         write_operation: str | None = None,
         parent_scope: tuple | None = None,
+        pre_write: Any = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -83,6 +84,10 @@ class ResourceSpec:
         # edit_fi_record for financials, edit_contract for contracts. Enforced in
         # addition to view access, so a READ-only viewer of the module cannot mutate it.
         self.write_operation = write_operation
+        # An async (ctx, body, obj_id|None) -> None hook run immediately before a create
+        # or update lands, for the invariants a column constraint cannot express — see
+        # app.api.people_rules. It raises; it never edits the body.
+        self.pre_write = pre_write
         # For a child resource with no entity_id of its own (syndication lenders), scope
         # by the PARENT line's company: (parent_model, fk_attr_name).
         self.parent_scope = parent_scope
@@ -458,6 +463,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                     response.headers["Idempotency-Replay"] = "true"
                     return existing.response_body
 
+            if spec.pre_write is not None:
+                await spec.pre_write(ctx, body, None)
             obj = await repo.create(ctx.session, ctx.tenant_id, ctx.actor, body)
 
             # Spec: the creator AUTOMATICALLY owns the new line when they hold its
@@ -659,6 +666,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             expected = data.pop("expected_version", None)
             if expected is None:
                 expected = _parse_if_match(if_match)
+            if spec.pre_write is not None:
+                await spec.pre_write(ctx, data, obj_id)
             obj = await repo.update(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, data, expected_version=expected
             )
