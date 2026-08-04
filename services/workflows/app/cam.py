@@ -167,7 +167,10 @@ def build_engine(settings: Any) -> CamEngine:
 class GenerateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_doc_ids: list[str] = Field(min_length=1, max_length=25)
-    prompt_doc_id: str = Field(min_length=1, max_length=64)
+    # The drafting brief: EITHER a Data Register document (the credit team's master
+    # prompt, or a case-specific upload) OR text typed in the workbench. One required.
+    prompt_doc_id: str | None = Field(default=None, max_length=64)
+    prompt_text: str | None = Field(default=None, max_length=100_000)
     deal_id: str | None = Field(default=None, max_length=64)
 
 
@@ -307,13 +310,21 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return err
         caller, _ = caller_context(request, who)
 
-        # The prompt doc IS the brief — read it first, and refuse without it.
-        prompt_text, skip = await _doc_text(request, caller, who, payload.prompt_doc_id)
-        if not prompt_text.strip():
+        # The brief comes from the credit team — a prompt DOCUMENT or TYPED text; the
+        # workbench never invents one. Refuse without either.
+        if payload.prompt_text and payload.prompt_text.strip():
+            prompt_text = payload.prompt_text
+        elif payload.prompt_doc_id:
+            prompt_text, skip = await _doc_text(request, caller, who, payload.prompt_doc_id)
+            if not prompt_text.strip():
+                return problem(422, "Validation failed",
+                               f"The prompt document could not be read"
+                               f"{f' ({skip})' if skip else ''} — the workbench drafts only "
+                               "from the credit team's own prompts.")
+        else:
             return problem(422, "Validation failed",
-                           f"The prompt document could not be read"
-                           f"{f' ({skip})' if skip else ''} — the workbench drafts only "
-                           "from the credit team's own prompts.")
+                           "Pick a prompt document or type the drafting brief — the "
+                           "workbench drafts only from the credit team's own prompts.")
 
         included: list[dict[str, str]] = []
         skipped: list[dict[str, str]] = []
@@ -373,8 +384,10 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         content: Any = ([*attachments, {"type": "text", "text": first_ask}]
                         if attachments else first_ask)
         try:
+            brief = (f"prompt doc {payload.prompt_doc_id}" if payload.prompt_doc_id
+                     else "typed brief")
             await _record_turn(request, caller, who, report["id"], "user",
-                               f"[generate] prompt doc {payload.prompt_doc_id}; "
+                               f"[generate] {brief}; "
                                f"documents: {', '.join(d['doc_id'] for d in included)}"
                                + (f"; {len(attachments)} scanned PDF(s) attached"
                                   if attachments else ""))

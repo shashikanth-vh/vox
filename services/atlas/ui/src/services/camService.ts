@@ -95,9 +95,11 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, 'read that CAM version')); }
   },
 
-  /** Draft a new version from the selected documents + the prompt doc. */
+  /** Draft a new version from the selected documents + the brief (a prompt document
+   *  or text typed in the workbench — exactly one). */
   async generate(lendingId: string, input: {
-    source_doc_ids: string[]; prompt_doc_id: string; deal_id?: string;
+    source_doc_ids: string[]; prompt_doc_id?: string; prompt_text?: string;
+    deal_id?: string;
   }): Promise<{ report_id: string; draft_md: string; engine: string;
                 included: any[]; skipped: any[] }> {
     try {

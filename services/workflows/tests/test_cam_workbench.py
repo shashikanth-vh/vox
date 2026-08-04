@@ -145,13 +145,35 @@ async def test_generate_refine_finalise_with_the_stub_engine(monkeypatch):
 
 
 async def test_no_readable_prompt_doc_means_no_draft(monkeypatch):
-    """The prompt doc IS the brief — the workbench refuses to invent one."""
+    """The brief comes from the credit team — a document or typed text; the workbench
+    refuses to invent one."""
     app = _app(monkeypatch)
     app.state.http = _RegisterStub()
     r = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
         "source_doc_ids": ["fin-1"], "prompt_doc_id": "missing"})
     assert r.status_code == 422, r.text
     assert "prompt document" in r.json()["error"]["detail"]
+
+    # Neither a document nor typed text: refused with what to do.
+    none = await _call(app, "POST", f"/v1/cam/{LENDING}/generate",
+                       json={"source_doc_ids": ["fin-1"]})
+    assert none.status_code == 422, none.text
+    assert "type the drafting brief" in none.json()["error"]["detail"]
+
+
+async def test_a_typed_brief_drafts_without_any_prompt_document(monkeypatch):
+    """The analyst may TYPE the brief in the workbench — document + typed prompt go to
+    the engine exactly like document + prompt-doc."""
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1"],
+        "prompt_text": "Draft a CAM covering financials and risks."})
+    assert r.status_code == 201, r.text
+    assert "CAM" in r.json()["draft_md"]
+    # The transcript records a typed brief (no invented document id).
+    assert any("typed brief" in t["content"] for t in stub.turns if t["role"] == "user")
 
     # And a selection where NOTHING is readable refuses too, naming each reason.
     r2 = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={

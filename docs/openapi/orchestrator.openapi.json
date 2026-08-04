@@ -1083,10 +1083,28 @@
             "title": "Deal Id"
           },
           "prompt_doc_id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Prompt Doc Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Doc Id"
+          },
+          "prompt_text": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Text"
           },
           "source_doc_ids": {
             "items": {
@@ -1099,8 +1117,7 @@
           }
         },
         "required": [
-          "source_doc_ids",
-          "prompt_doc_id"
+          "source_doc_ids"
         ],
         "title": "GenerateIn",
         "type": "object"

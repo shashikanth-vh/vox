@@ -28,6 +28,9 @@ import { tokens } from '../../theme';
 
 const COMMITTEE = ['Credit Head', 'Management', 'Admin'];
 
+/** Sentinel select value: the analyst types the drafting brief instead of picking a doc. */
+const TYPED = '__typed__';
+
 const TONE: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   Draft: 'info', Submitted: 'warning', Approved: 'success',
   Returned: 'warning', Rejected: 'error',
@@ -50,6 +53,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     example?: { id: string; title: string } }>({});
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [promptDoc, setPromptDoc] = useState('');
+  const [typedBrief, setTypedBrief] = useState('');
   const [uploading, setUploading] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [editing, setEditing] = useState(false);
@@ -118,7 +122,9 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
   const generate = () => run('generate', async () => {
     const out = await camService.generate(subjectId, {
-      source_doc_ids: [...sel], prompt_doc_id: promptDoc,
+      source_doc_ids: [...sel],
+      ...(promptDoc === TYPED ? { prompt_text: typedBrief.trim() }
+        : { prompt_doc_id: promptDoc }),
       ...(action?.body?.deal_id ? { deal_id: action.body.deal_id } : {}),
     });
     const skipped = (out.skipped || []).length;
@@ -325,6 +331,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   {docs.map((d) => (
                     <MenuItem key={d.id} value={d.id} sx={{ fontSize: 13 }}>{d.title}</MenuItem>
                   ))}
+                  <MenuItem value={TYPED} sx={{ fontSize: 13 }}>Type the brief by hand…</MenuItem>
                 </TextField>
                 <Button component="label" variant="outlined" size="small" disabled={uploading}
                   sx={{ whiteSpace: 'nowrap', textTransform: 'none', flexShrink: 0 }}>
@@ -333,9 +340,15 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     onChange={(e) => { void uploadPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
                 </Button>
               </Box>
+              {promptDoc === TYPED && (
+                <TextField fullWidth multiline minRows={4} sx={{ mb: 1 }}
+                  label="Drafting brief — what should the CAM cover, in your words"
+                  placeholder={'Draft a CAM for this term loan. Cover promoter background, business model, financial analysis with DSCR, security, and risks with mitigants…'}
+                  value={typedBrief} onChange={(e) => setTypedBrief(e.target.value)} />
+              )}
               <Button variant="contained" size="small"
                 startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                disabled={!sel.size || !promptDoc || !!busy}
+                disabled={!sel.size || !promptDoc || (promptDoc === TYPED && !typedBrief.trim()) || !!busy}
                 onClick={() => void generate()}>
                 {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
               </Button>

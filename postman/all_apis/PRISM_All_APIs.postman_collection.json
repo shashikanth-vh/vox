@@ -12263,7 +12263,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"source_doc_ids\": [\n    \"sample\"\n  ],\n  \"prompt_doc_id\": \"sample\",\n  \"deal_id\": \"sample\"\n}",
+                  "raw": "{\n  \"source_doc_ids\": [\n    \"sample\"\n  ],\n  \"prompt_doc_id\": \"sample\",\n  \"prompt_text\": \"sample\",\n  \"deal_id\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

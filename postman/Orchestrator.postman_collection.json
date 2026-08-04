@@ -109,7 +109,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"prompt_doc_id\": \"{{id}}\",\n  \"source_doc_ids\": [\n    \"sample source_doc_ids\"\n  ]\n}",
+              "raw": "{\n  \"deal_id\": \"{{id}}\",\n  \"prompt_doc_id\": \"{{id}}\",\n  \"prompt_text\": \"sample prompt_text\",\n  \"source_doc_ids\": [\n    \"sample source_doc_ids\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
