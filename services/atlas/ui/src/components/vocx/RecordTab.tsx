@@ -173,7 +173,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
                    flexWrap: 'wrap', px: 1 }}>
           {[
             ['Capture', `raw intell in EN, HI or Hinglish — up to ${MAX_SECONDS / 60} minutes`],
-            ['Structure', 'PRISM maps the client, key insights and actions'],
+            ['Structure', 'VocX maps the client, key insights and actions'],
             ['Execute', 'file, sync and close — on your approval'],
           ].map(([title, sub]) => (
             <Box key={title} sx={{ flex: '1 1 118px', maxWidth: 148, textAlign: 'left',
@@ -188,12 +188,6 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         </Box>
       )}
 
-      {!recording && !busy && (
-        <Typography sx={{ fontSize: 11, color: vx.mut, letterSpacing: '.08em', mt: 1.6,
-                          textTransform: 'uppercase' }}>
-          Zero friction · Maximum momentum
-        </Typography>
-      )}
 
       {!recording && (
         <Box sx={{ mt: 1.5 }}>
