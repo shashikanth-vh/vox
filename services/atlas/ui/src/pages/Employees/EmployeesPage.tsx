@@ -52,7 +52,10 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
       accessorKey: 'name', header: 'Name', size: 210,
       Cell: ({ row }) => (
         <span>
-          {!employeesService.onRoster(row.original) && (
+          {(row.original as any).noSignIn ? (
+            <Chip label="no sign-in" size="small" title={'On the roster (dropdowns and conversions accept them) but they CANNOT log in — no Access identity exists. Create their user via Add employee with this e-mail to grant sign-in.'}
+              sx={{ mr: 0.6, height: 18, fontSize: 10, bgcolor: '#E3F2FD', color: '#0D47A1' }} />
+          ) : !employeesService.onRoster(row.original) && (
             <Chip label="sign-in only" size="small" title={'This person can sign in but has no register roster row yet — no dropdown can offer them. Save them once from this screen (or run the roster sync) to fix it.'}
               sx={{ mr: 0.6, height: 18, fontSize: 10, bgcolor: '#FFF3E0', color: '#8A5300' }} />
           )}

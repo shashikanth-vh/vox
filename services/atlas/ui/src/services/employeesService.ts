@@ -185,7 +185,35 @@ export const employeesService = {
         // server-side search over the fields Access indexes, and the local pass covers
         // the ATLAS-only ones (role, username) it cannot see.
         const users = await accessService.listUsers(q.globalFilter || undefined);
-        return applyQuery(users.map(fromAccessUser), { ...q, searchFields });
+        const rows: Employee[] = users.map(fromAccessUser);
+        // The UNION of both halves. A person can exist as sign-in only (Access, no
+        // roster row) or roster only (created via POST /v1/people, no sign-in) — and a
+        // grid that lists just one half makes the other invisible until a dropdown or
+        // a login mysteriously fails. Roster-only people join the list here, flagged.
+        try {
+          const roster = await listAll('/people', { key: 'people' });
+          const byMail = new Set(rows.map((r) => (r.email || '').toLowerCase()).filter(Boolean));
+          const byName = new Set(rows.flatMap((r) => [
+            (r.full || '').trim().toLowerCase(), (r.name || '').trim().toLowerCase(),
+          ]).filter(Boolean));
+          roster.forEach((per: any) => {
+            const mail = (per.email || '').trim().toLowerCase();
+            if (mail && byMail.has(mail)) return;
+            if (byName.has((per.full_name || '').trim().toLowerCase())
+                || byName.has((per.name || '').trim().toLowerCase())) return;
+            rows.push({
+              name: per.name || per.full_name, full: per.full_name || per.name,
+              role: per.role || '', username: '', email: per.email || '',
+              phone: per.phone || '', geography: per.geography || '',
+              sectors: per.sectors || '', startedOn: per.started_on || '',
+              reportsTo: per.reports_to || '', inactive: !!per.inactive,
+              notes: per.notes || '', registerId: per.id, noSignIn: true,
+            } as any as Employee);
+          });
+        } catch (e) {
+          console.warn('[api] roster read for the employees union skipped:', e);
+        }
+        return applyQuery(rows, { ...q, searchFields });
       },
       async () => {
         await delay();
