@@ -281,9 +281,29 @@ export const employeesService = {
     }
     db().people.push(emp); writeAudit(by, 'Employee added', emp.name, emp.full); return emp;
   },
-  remove(name: string, by: string) {
+  /**
+   * "Delete" an employee = REVOKE their sign-in and retire their roster row — never a
+   * hard erase. Approvals, decisions and assignments cite the Access user id, and
+   * "who approved this?" must still resolve years after the person left; the register
+   * soft-deletes for the same reason. The Access revocation comes FIRST and is
+   * awaited: removing a leaver whose door stays open is the failure that matters.
+   */
+  async remove(name: string, by: string): Promise<void> {
     const p = this.find(name);
-    if (p?.registerId) remote('del', '/people/' + p.registerId);
+    if (USE_REAL_API && p) {
+      const mail = (p.email || '').trim().toLowerCase();
+      let id = (p as any).accessId as string | undefined;
+      if (!id && mail) {
+        const hits = await accessService.findUsers(mail).catch(() => []);
+        id = hits.find((u) => (u.email || '').toLowerCase() === mail)?.id;
+      }
+      if (id) await accessService.updateUser(id, { is_active: false });
+      else if (mail) {
+        throw new Error('Could not find this person\'s sign-in identity in Access — '
+          + 'their access was NOT revoked, so nothing was removed.');
+      }
+      if (p.registerId) await api.del('/people/' + p.registerId);
+    }
     const i = db().people.findIndex((x: Employee) => x.name === name);
     if (i > -1) { db().people.splice(i, 1); writeAudit(by, 'Employee deleted', name, ''); }
   },

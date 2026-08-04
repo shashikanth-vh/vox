@@ -136,7 +136,15 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
 
       {dialog && <EmployeeDialog mode={dialog.mode} emp={dialog.emp} onClose={() => setDialog(null)} onDone={refresh} />}
       <ConfirmDialog open={!!del} title="Delete employee" message={`Remove ${del?.full}?`}
-        onCancel={() => setDel(null)} onConfirm={() => { if (del) employeesService.remove(del.name, user.full); setDel(null); refresh(); }} />
+        onCancel={() => setDel(null)}
+        onConfirm={() => {
+          if (!del) return;
+          // Awaited: revoking the sign-in is the part that matters, and a refusal
+          // (identity not found in Access) must be SEEN, not swallowed by a refresh.
+          void employeesService.remove(del.name, user.full)
+            .catch((e) => alert(e?.message || 'Could not remove this employee.'))
+            .finally(() => { setDel(null); refresh(); });
+        }} />
     </>
   );
 }
