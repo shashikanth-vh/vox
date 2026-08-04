@@ -156,6 +156,25 @@ export const vocxService = {
     } catch (e) { return fail(vocxError(e, 'check your Google connection')); }
   },
 
+  /**
+   * Where to send the browser to connect this RM's Google account.
+   *
+   * Fetched WITH the bearer and then opened, rather than navigating straight at
+   * `/v1/auth/start` — a `window.open` carries no Authorization header, so the gateway
+   * would answer 401 and the user would see a blank tab. Exempting the route from auth
+   * instead would let anyone begin a flow that binds Google tokens to a name they chose;
+   * VocX now derives the RM from the verified caller, so a connect can only ever be your
+   * own.
+   */
+  async googleAuthUrl(): Promise<Result<string>> {
+    try {
+      const r = await vocx.get<any>('/v1/auth/start');
+      const url = String(r?.url || '');
+      if (!url) return fail('VocX did not return a Google sign-in link.');
+      return ok(url);
+    } catch (e) { return fail(vocxError(e, 'start the Google connection')); }
+  },
+
   /** Ask the service to fill a template's fields from the transcript. */
   async templateFill(transcript: string, fields: any[]): Promise<Result<Record<string, any>>> {
     try {

@@ -79,6 +79,21 @@ class PrismVocxApp(VocxApp):
         return result
 
 
+def _rebind_body(body: bytes, rm: str) -> bytes:
+    """Replace a JSON body's `rm` with the verified caller's. Non-JSON bodies (the raw
+    audio a capture posts) pass through untouched."""
+    import json as _json
+
+    try:
+        data = _json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return body
+    if not isinstance(data, dict) or "rm" not in data:
+        return body
+    data["rm"] = rm
+    return _json.dumps(data).encode("utf-8")
+
+
 def build_vocx_router(settings: Any) -> APIRouter:
     router = APIRouter(tags=["VOX"])
     state: dict[str, PrismVocxApp] = {}
@@ -98,6 +113,29 @@ def build_vocx_router(settings: Any) -> APIRouter:
         return Response(status_code=401, media_type="application/json",
                         content=b'{"error": {"type": "unauthorized", "title": "Unauthorized",'
                                 b' "detail": "Missing or invalid X-API-Key."}}')
+
+    # Routes whose subject is a PERSON's own captures. On these the RM is not a parameter
+    # the caller chooses: it is the verified caller. `/v1/auth/callback` is absent on
+    # purpose — Google calls it back with no ATLAS identity, carrying the rm in `state`.
+    _OWNED = {
+        "/v1/capture", "/v1/capture_audio", "/v1/commit",
+        "/v1/reports", "/v1/reports/get", "/v1/reports/print",
+        "/v1/reports/save", "/v1/reports/delete",
+        "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test",
+        "/v1/suggest", "/v1/template_fill",
+    }
+
+    def _unauthenticated() -> Response:
+        return Response(status_code=401, media_type="application/json",
+                        content=b'{"error": {"type": "unauthorized", "title": "Unauthorized",'
+                                b' "detail": "This route acts on your own captures and needs'
+                                b' a verified user identity."}}')
+
+    def _forbidden(detail: bytes) -> Response:
+        return Response(status_code=403, media_type="application/json",
+                        content=b'{"error": {"type": "forbidden", "title": "Forbidden",'
+                                b' "detail": "' + detail + b'"}}')
+
 
     # Explicit route table — each endpoint is a real OpenAPI operation (it shows up
     # individually in generated collections) and nothing can shadow the service's other
@@ -133,6 +171,33 @@ def build_vocx_router(settings: Any) -> APIRouter:
             query: dict[str, list[str]] = {}
             for k, v in request.query_params.multi_items():
                 query.setdefault(k, []).append(v)
+
+            if route_path in _OWNED:
+                # BIND the RM to the verified caller. Previously this came from `?rm=`,
+                # so any signed-in user could list, open, edit, delete and play back
+                # anyone else's captures by changing one parameter. A draft belongs to
+                # whoever recorded it; there is no supervisor view, by design.
+                from app.vocx import identity
+
+                email = (request.headers.get("X-User-Email") or "").strip()
+                if not email:
+                    return _unauthenticated()
+                who = await run_in_threadpool(identity.rm_for, email, settings)
+                if not who:
+                    return _unauthenticated()
+                query["rm"] = [who]
+                # The audio ref is opaque but not unguessable, and its payload is the raw
+                # meeting recording — so it is checked on its own terms, not by trusting
+                # that the caller asked with the right rm.
+                if route_path == "/v1/audio":
+                    ref = (query.get("ref") or [""])[0]
+                    if ref and not identity.owns_audio_ref(ref, who):
+                        return _forbidden(b"That recording belongs to another user.")
+                # Body-carried rm (capture / commit / reports.save) is rewritten too — a
+                # forged one there would file a capture under someone else\'s name.
+                if body:
+                    body = _rebind_body(body, who)
+
             status, ctype, payload = await run_in_threadpool(
                 _app().handle, request.method, route_path, query, body)
             return Response(content=payload, status_code=status, media_type=ctype)

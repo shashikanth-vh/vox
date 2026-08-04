@@ -49,6 +49,15 @@ def _register_stub(state: dict):
             return httpx.Response(200, json={"items": [{
                 "id": str(uuid.uuid4()), "entity_id": ENTITY_ID, "rm": "Priya",
                 "code": "DL-1"}], "next_cursor": None})
+        if request.method == "GET" and path == "/v1/people":
+            # The roster the RM handle is resolved from: VocX binds a capture to the
+            # VERIFIED caller, and this is where the e-mail becomes the short handle the
+            # rest of the platform addresses that person by.
+            return httpx.Response(200, json={"items": [
+                {"name": "Priya", "full_name": "Priya Nair",
+                 "email": "priya@evamfinance.com"},
+                {"name": "Arun", "full_name": "Arun Menon",
+                 "email": "arun@evamfinance.com"}], "next_cursor": None})
         if request.method == "GET" and path == "/v1/ref":
             return httpx.Response(200, json={"interaction_types": [
                 {"value": "In-Person Meeting"}, {"value": "Phone Call"}]})
@@ -90,8 +99,12 @@ def stub_register(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
-async def _client(app):
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+async def _client(app, email: str = "priya@evamfinance.com"):
+    """Every per-person route now acts on the VERIFIED caller's own captures, so the
+    client carries the identity the gateway forwards. Without it the route answers 401 —
+    which is the point: the RM used to be a query parameter anyone could change."""
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://t",
+                       headers={"X-User-Email": email})
 
 
 async def test_capture_preview_resolves_against_the_register(stub_register):
@@ -855,3 +868,86 @@ async def test_templates_mark_their_own_required_fields(stub_register):
     lending = {f["key"]: f for f in tpl["lending"]["fields"]}
     assert lending["tenor"].get("required") is True
     assert lending["sanction_stage"].get("required") is True
+
+
+async def test_a_draft_belongs_to_the_person_who_recorded_it(stub_register, monkeypatch,
+                                                             tmp_path):
+    """One user's unfiled capture is not another's to read, edit, delete or listen to.
+
+    VocX authenticated the SERVICE and never the person: its front door checks the shared
+    key the gateway injects for every signed-in ATLAS user, and each per-person route then
+    took the RM from `?rm=`. So changing one query parameter read someone else's drafts —
+    and played back their meeting audio, which is the sharpest edge of it.
+
+    There is deliberately no supervisor view. An unfiled capture is an unfinished note,
+    not a record; nothing supervises it until it is committed, and a committed one is a
+    register interaction governed by the register's own scoping.
+    """
+    from app.vocx import identity
+
+    monkeypatch.setenv("VOCX_REPORTS_DIR", str(tmp_path / "reports"))
+    get_settings.cache_clear()
+    identity.reset_cache()
+    app = create_app()
+
+    # Priya records something and leaves it unfiled.
+    async with await _client(app, "priya@evamfinance.com") as c:
+        prev = await c.post("/v1/capture", json={
+            "rm": "Priya", "offline": True,
+            "transcript": "Met the EcoSoch Solar team about the term loan."})
+        assert prev.status_code == 200, prev.text
+        cid = prev.json()["extraction"]["_meta"]["capture_id"]
+        mine = await c.get("/v1/reports")
+        assert mine.status_code == 200, mine.text
+        assert any(r["capture_id"] == cid for r in mine.json()["reports"]), mine.text
+
+    # Arun signs in. He cannot see it — not by asking plainly, and not by naming her.
+    async with await _client(app, "arun@evamfinance.com") as c:
+        his = await c.get("/v1/reports")
+        assert his.status_code == 200, his.text
+        assert not any(r["capture_id"] == cid for r in his.json()["reports"])
+
+        forged = await c.get("/v1/reports", params={"rm": "Priya"})
+        assert forged.status_code == 200
+        assert not any(r["capture_id"] == cid for r in forged.json()["reports"]), (
+            "naming another RM must not widen what a caller can see")
+
+        # Nor open it, nor delete it, by citing her name with the id.
+        got = await c.get("/v1/reports/get", params={"rm": "Priya", "id": cid})
+        assert got.status_code == 404 or not (got.json().get("report") or {})
+
+        gone = await c.post("/v1/reports/delete", json={"rm": "Priya", "capture_id": cid})
+        assert gone.status_code in (200, 404)
+
+    # And hers is still there afterwards — the delete landed in HIS space, not hers.
+    async with await _client(app, "priya@evamfinance.com") as c:
+        still = await c.get("/v1/reports")
+        assert any(r["capture_id"] == cid for r in still.json()["reports"]), (
+            "another user's delete must not reach this draft")
+
+
+async def test_a_route_that_acts_on_your_captures_needs_an_identity(stub_register):
+    """No verified caller, no per-person route. The shared front-door key says a SERVICE
+    is calling; it says nothing about who."""
+    app = create_app()
+    anon = AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+    async with anon as c:
+        assert (await c.get("/v1/reports")).status_code == 401
+        assert (await c.get("/v1/audio", params={"ref": "x"})).status_code == 401
+        # Deployment-wide facts stay open — they name no person.
+        assert (await c.get("/v1/capabilities")).status_code == 200
+
+
+def test_recording_ownership_is_read_from_the_reference():
+    """The audio ref is opaque but not unguessable, and its payload is raw meeting audio —
+    so it is checked on its own terms rather than by trusting the caller's `rm`."""
+    from app.vocx.identity import owns_audio_ref
+
+    ref = "s3://bucket/vocx/2026/08/20260804_143000_Priya.wav"
+    assert owns_audio_ref(ref, "Priya")
+    assert owns_audio_ref(ref, "priya")            # case is not a boundary
+    assert not owns_audio_ref(ref, "Arun")
+    assert not owns_audio_ref(ref, "")             # no rm, no access
+    assert not owns_audio_ref("", "Priya")
+    # A ref shaped to look like someone else's does not become theirs.
+    assert not owns_audio_ref("/data/audio/20260804_143000_Priyanka.wav", "Priya")

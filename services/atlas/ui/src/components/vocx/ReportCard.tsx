@@ -358,6 +358,16 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
             : caps?.google_configured
               ? `${rm} has not connected Google — the follow-up is recorded in the register, but no calendar event is created.`
               : 'Google is not configured on this deployment — the follow-up is recorded, with no calendar event.'}
+          {!googleConnected && caps?.google_configured && (
+            <Button size="small" disabled={!!busy} sx={{ ...pillGhost, ml: 1, py: 0.4 }}
+              onClick={async () => {
+                setErr(''); setBusy('Opening Google…');
+                const r = await vocxService.googleAuthUrl();
+                setBusy('');
+                if (!r.ok) { setErr(r.error); return; }
+                window.open(r.data, '_blank', 'noopener');
+              }}>Connect Google</Button>
+          )}
         </Alert>
       )}
 
