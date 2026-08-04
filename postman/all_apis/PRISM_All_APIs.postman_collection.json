@@ -12246,11 +12246,55 @@
       ]
     },
     {
-      "name": "Orchestrator  (49 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (50 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
           "item": [
+            {
+              "name": "GET /orchestrator/v1/cam/doc-text \u2014 What the engine will actually read from one document",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/doc-text",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "doc-text"
+                  ],
+                  "query": [
+                    {
+                      "key": "doc_id",
+                      "value": "sample",
+                      "disabled": false
+                    }
+                  ]
+                },
+                "description": "The extracted text of a Data Register document \u2014 the workbench shows it so\nthe analyst can SEE what goes to the engine (and copy it if they want to work\noutside). A document with no extractable text answers with the reason instead;\na scanned PDF says it will be attached visually."
+              }
+            },
             {
               "name": "POST /orchestrator/v1/cam/{lending_id}/finalise \u2014 File the draft to the Data Register and submit it to committee",
               "request": {

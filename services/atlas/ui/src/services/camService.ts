@@ -95,6 +95,15 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, 'read that CAM version')); }
   },
 
+  /** The text the engine will actually read from one document — for the workbench's
+   *  preview pane (and for anyone who wants to copy it out). */
+  async docText(docId: string): Promise<{ text: string; reason?: string;
+                                          truncated?: boolean; attachable?: boolean }> {
+    try {
+      return await orchestrator.get<any>('/v1/cam/doc-text', { doc_id: docId });
+    } catch (e) { throw new Error(msg(e, 'read that document')); }
+  },
+
   /** Draft a new version from the selected documents + the brief (a prompt document
    *  or text typed in the workbench — exactly one). */
   async generate(lendingId: string, input: {

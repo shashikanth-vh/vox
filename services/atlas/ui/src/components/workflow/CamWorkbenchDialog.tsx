@@ -56,6 +56,23 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [promptDoc, setPromptDoc] = useState('');
   const [typedBrief, setTypedBrief] = useState('');
   const [uploading, setUploading] = useState(false);
+  // "Show me what the engine will read" — the extracted text of any pickable document,
+  // in place. Copyable, so the analyst can also work with it outside the workbench.
+  const [preview, setPreview] = useState<{ title: string; text: string; note?: string } | null>(null);
+
+  const viewDoc = async (id: string, docTitle: string) => {
+    setErr('');
+    try {
+      const out = await camService.docText(id);
+      setPreview({
+        title: docTitle,
+        text: out.text || '',
+        note: out.reason
+          ? out.reason + (out.attachable ? ' — it will be attached for the engine to read visually.' : '')
+          : out.truncated ? 'Truncated to the per-document limit.' : undefined,
+      });
+    } catch (e: any) { setErr(e?.message || String(e)); }
+  };
   const [instruction, setInstruction] = useState('');
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState('');
@@ -328,6 +345,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                       <Typography sx={{ fontSize: 11, color: tokens.muted }}>
                         {[d.section, d.doc_type].filter(Boolean).join(' · ')}
                       </Typography>
+                      <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
+                        sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
                     </Box>
                   ))}
                 </Box>
@@ -357,6 +376,35 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   label="Drafting brief — what should the CAM cover, in your words"
                   placeholder={'Draft a CAM for this term loan. Cover promoter background, business model, financial analysis with DSCR, security, and risks with mitigants…'}
                   value={typedBrief} onChange={(e) => setTypedBrief(e.target.value)} />
+              )}
+              {promptDoc && promptDoc !== TYPED && (
+                <Button size="small" onClick={() => void viewDoc(promptDoc,
+                  defaults.prompt?.id === promptDoc ? defaults.prompt.title : 'Prompt document')}
+                  sx={{ textTransform: 'none', fontSize: 11.5, mb: 1 }}>
+                  View the prompt text
+                </Button>
+              )}
+              {preview && (
+                <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
+                      What the engine reads — {preview.title}
+                    </Typography>
+                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                      onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
+                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                      onClick={() => setPreview(null)}>Close</Button>
+                  </Box>
+                  {preview.note && (
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.5 }}>{preview.note}</Typography>
+                  )}
+                  {preview.text && (
+                    <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
+                      fontFamily: 'inherit', maxHeight: 200, overflow: 'auto', m: 0 }}>
+                      {preview.text}
+                    </Box>
+                  )}
+                </Box>
               )}
               <Button variant="contained" size="small"
                 startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}

@@ -299,6 +299,31 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             raise RuntimeError(f"the register refused the workbench turn "
                                f"(HTTP {r.status_code}): {r.text[:300]}")
 
+    @app.get("/v1/cam/doc-text", tags=["CAM"],
+             summary="What the engine will actually read from one document")
+    async def cam_doc_text(doc_id: str, request: Request) -> Any:
+        """The extracted text of a Data Register document — the workbench shows it so
+        the analyst can SEE what goes to the engine (and copy it if they want to work
+        outside). A document with no extractable text answers with the reason instead;
+        a scanned PDF says it will be attached visually."""
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        caller, _ = caller_context(request, who)
+        blob, ctype, fetch_err = await _doc_fetch(request, caller, who, doc_id)
+        if fetch_err is not None:
+            return problem(404, "Not found", f"Document {doc_id!r}: {fetch_err}")
+        text, reason = extract_text(ctype, blob or b"")
+        truncated = len(text) > max_doc_chars
+        out: dict[str, Any] = {"doc_id": doc_id, "content_type": ctype,
+                               "text": text[:max_doc_chars], "truncated": truncated}
+        if reason is not None:
+            out["reason"] = reason
+            out["attachable"] = (reason == _SCANNED_PDF and engine.supports_documents)
+        return out
+
     @app.post("/v1/cam/{lending_id}/generate", status_code=201, tags=["CAM"],
               summary="Draft a CAM from selected documents + the prompt doc")
     async def cam_generate(lending_id: str, payload: GenerateIn,

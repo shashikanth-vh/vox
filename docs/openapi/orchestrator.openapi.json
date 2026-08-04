@@ -2071,6 +2071,49 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/cam/doc-text": {
+      "get": {
+        "description": "The extracted text of a Data Register document \u2014 the workbench shows it so\nthe analyst can SEE what goes to the engine (and copy it if they want to work\noutside). A document with no extractable text answers with the reason instead;\na scanned PDF says it will be attached visually.",
+        "operationId": "cam_doc_text_v1_cam_doc_text_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Doc Text V1 Cam Doc Text Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "What the engine will actually read from one document",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
     "/v1/cam/{lending_id}/finalise": {
       "post": {
         "operationId": "cam_finalise_v1_cam__lending_id__finalise_post",
