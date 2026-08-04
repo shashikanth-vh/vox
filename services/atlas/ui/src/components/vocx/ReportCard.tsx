@@ -76,6 +76,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
   const [logTo, setLogTo] = useState<LogTo | null>(null);
   const [client, setClient] = useState<ClientChoice | null>(null);
   const [audioUrl, setAudioUrl] = useState('');
+  const [audioErr, setAudioErr] = useState('');
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -102,7 +103,13 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
     const ref = ext._meta?.transcript_ref;
     if (!ref) return;
     let url = '';
-    void vocxService.audioUrl(ref).then((r) => { if (r.ok) { url = r.data; setAudioUrl(url); } });
+    // A failed fetch must SAY WHY. This used to fail silently, so a 403 (a clip keyed
+    // under another user), a 404 (archive expired) and an unreachable store all looked
+    // identical: "I cannot hear the audio", with nothing to go on.
+    void vocxService.audioUrl(ref).then((r) => {
+      if (r.ok) { url = r.data; setAudioUrl(url); setAudioErr(''); }
+      else setAudioErr(r.error);
+    });
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [ext._meta?.transcript_ref]);
 
@@ -302,11 +309,15 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         </Box>
       )}
 
-      {audioUrl && (
+      {(audioUrl || audioErr) && (
         <>
           <Typography sx={microHeading}>Original audio</Typography>
-          <audio controls src={audioUrl}
-            style={{ width: '100%', maxWidth: '100%', height: 34 }} />
+          {audioUrl
+            ? <audio controls src={audioUrl}
+                style={{ width: '100%', maxWidth: '100%', height: 34 }} />
+            : <Typography sx={{ fontSize: 12, color: vx.amberInk }}>
+                Recording unavailable — {audioErr}
+              </Typography>}
         </>
       )}
 

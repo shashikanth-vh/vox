@@ -10,6 +10,7 @@ import { interactionService, type Interaction } from '../../services/interaction
 import LogInteractionDialog from '../Deals/LogInteractionDialog';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
+import { employeesService } from '../../services/employeesService';
 import { tokens } from '../../theme';
 import type { Lead } from './lead.types';
 
@@ -42,6 +43,14 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
     let alive = true;
     leadsService.get(lead).then((full) => { if (alive && full) setRow(full); });
     interactionService.forLead(lead).then((list) => { if (alive) setInts(list); });
+    // Empty name lists on open = a boot-time /v1/ref (or roster) fetch that failed —
+    // retry it now, so one bad moment at login does not leave every dropdown dead
+    // until a full page reload.
+    if (!referenceService.getRefSync('RM').length) {
+      void referenceService.hydrate()
+        .then(() => employeesService.hydrateRoster())
+        .then(() => { if (alive) setRow((r) => (r ? { ...r } : r)); });
+    }
     return () => { alive = false; };
   }, [lead?.id, lead?.apiId]);
 
@@ -111,7 +120,19 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
             <SelectFld label="Source" required value={v('source')} disabled={ro} onChange={(x) => set('source', x)} options={ref.getRefSync('Source')} />
             {/* Reassigning the BDRM is Admin / Mgmt / BD Head only — a BDRM can't change
                 their own ownership (Operations matrix: Reassign lead). */}
-            <SelectFld label="BDRM" required value={v('rm')} disabled={!can(user.roles, 'reassignLead')} onChange={(x) => set('rm', x)} options={ref.getRefSync('RM')} />
+            {/* The list is LIVE from the register's people roster (/v1/ref). An empty
+                roster renders a select with nothing in it and no way forward, so: the
+                lead's CURRENT value is always offerable (validation happens at the
+                register, which explains itself), a fresh hydrate retries a boot-time
+                fetch that failed, and the empty state SAYS what to do about it. */}
+            <SelectFld label="BDRM" required value={v('rm')} disabled={!can(user.roles, 'reassignLead')} onChange={(x) => set('rm', x)}
+              options={[...new Set([...(v('rm') ? [v('rm')] : []), ...ref.getRefSync('RM')])]} />
+            {!ref.getRefSync('RM').length && (
+              <Alert severity="info" sx={{ gridColumn: '1 / -1', py: 0, fontSize: 12 }}>
+                No BDRMs on the roster yet — add the person (with their e-mail) under
+                Masters ▸ Employees, and this list fills immediately.
+              </Alert>
+            )}
             <SelectFld label="Temperature" value={v('temp')} disabled={ro} onChange={(x) => set('temp', x)} options={ref.getRefSync('Temperature')} />
             <SelectFld label="Status" value={v('status')} disabled={ro} onChange={(x) => set('status', x)} options={['Active', 'Dropped']} />
             <TextFld label="Contact" value={v('contact')} disabled={ro} onChange={(x) => set('contact', x)} />
