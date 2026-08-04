@@ -25,9 +25,9 @@ export default function ClientsPage() {
   const [err, setErr] = useState('');
   const refresh = () => qc.invalidateQueries();
 
-  const doDelete = () => {
+  const doDelete = async () => {
     if (!del) return;
-    const r = clientsService.remove(del.code, user.full);
+    const r = await clientsService.remove(del.code, user.full);
     setDel(null);
     if (!r.ok) { setErr(r.error || 'Could not delete'); return; }
     refresh();

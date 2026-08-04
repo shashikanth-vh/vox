@@ -4,6 +4,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { REQ_DOCS, documentsService } from '../../services/documentsService';
 import type { DocEntry, DocIndex } from '../../services/documentsService';
 import { clientsService } from '../../services/clientsService';
+import { api, errText } from '../../api/http';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { tokens } from '../../theme';
@@ -51,6 +52,23 @@ export default function DataRegisterDialog({ code, open, onClose }: { code: stri
     reload();
   };
 
+  // "Entity … not found" here means the COMPANY ROW was deleted while its book lived
+  // on (possible before the register's referential guard existed). Soft-deleted rows
+  // are restorable, and this id is exactly the row to bring back.
+  const senior = user.roles.includes('Admin') || user.roles.includes('Management');
+  const entityGone = /entity .* not found/i.test(err);
+  const restore = async () => {
+    if (!entityId) return;
+    setBusy('restore'); setErr('');
+    try {
+      await api.post(`/entities/${entityId}/restore`);
+      reload();
+    } catch (e: any) {
+      setErr(errText(e?.response?.data) || 'The restore was refused.');
+    }
+    setBusy('');
+  };
+
   let totReq = 0, gotReq = 0;
   REQ_DOCS.forEach((s) => s.d.forEach((dd) => { if (dd.req) { totReq++; if (docs[s.k]?.[dd.k]) gotReq++; } }));
   const pct = totReq ? Math.round((gotReq / totReq) * 100) : 0;
@@ -71,8 +89,20 @@ export default function DataRegisterDialog({ code, open, onClose }: { code: stri
             This company is not linked to a register record yet, so uploads stay in this session only.
           </Alert>
         )}
-        {err && <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
-          onClose={() => setErr('')}>{err}</Alert>}
+        {err && (
+          <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
+            onClose={() => setErr('')}
+            action={entityGone && senior && entityId ? (
+              <Button size="small" color="inherit" disabled={busy === 'restore'}
+                onClick={() => void restore()} sx={{ textTransform: 'none' }}>
+                {busy === 'restore' ? 'Restoring…' : 'Restore company row'}
+              </Button>
+            ) : undefined}>
+            {err}{entityGone && (
+              ' — the company\'s register row was deleted while this line still points '
+              + 'at it. An Admin can restore it in place.')}
+          </Alert>
+        )}
 
         {REQ_DOCS.map((s) => {
           const sStore = docs[s.k] || {};

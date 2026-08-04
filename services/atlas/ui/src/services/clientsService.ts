@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { withFallback, remote, USE_REAL_API } from '../api/http';
+import { api, errText, remote, withFallback, USE_REAL_API } from '../api/http';
 import { writeAudit } from './auditService';
 import { entitiesService, entityError } from './entitiesService';
 import { mintCode } from './conversionService';
@@ -116,11 +116,25 @@ export const clientsService = {
     const d: any = db();
     return [d.deals, d.lending, d.syn, d.am].some((arr: any[]) => (arr || []).some((x: any) => x.code === code));
   },
-  remove(code: string, by: string): { ok: boolean; error?: string } {
-    if (this.inUse(code)) return { ok: false, error: 'Remove this client’s deal & product rows first' };
+  /**
+   * The REGISTER is the referee on whether a company may go: its delete refuses (409,
+   * naming what the company still carries) when live leads/deals/lines reference it.
+   * The local inUse() check only sees rows this tab happened to load — on a fresh tab
+   * it is empty, which is exactly how a company was once deleted out from under its
+   * lending line, leaving the line's Data Register answering "Entity … not found".
+   */
+  async remove(code: string, by: string): Promise<{ ok: boolean; error?: string }> {
     const name = db().clients[code]?.name || code;
     const eid = (db().clients[code] as any)?.entityId;
-    if (eid) remote('del', '/entities/' + eid);
+    if (USE_REAL_API && eid) {
+      try {
+        await api.del('/entities/' + eid);
+      } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data) || 'The register refused the delete.' };
+      }
+    } else if (this.inUse(code)) {
+      return { ok: false, error: 'Remove this client’s deal & product rows first' };
+    }
     delete db().clients[code];
     writeAudit(by, 'Deleted', code, `Client row — ${name}`);
     return { ok: true };

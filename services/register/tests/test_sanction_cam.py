@@ -207,6 +207,27 @@ async def test_the_default_sanction_template_seeds_once_and_only_once(client: As
     assert row.content_type.endswith("wordprocessingml.document")
 
 
+async def test_a_company_carrying_live_rows_cannot_be_deleted(client: AsyncClient):
+    """Deleting a company under a live book leaves every dependant — and the Data
+    Register — pointing at nothing, so the register refuses and NAMES what it still
+    carries. Clear the book and the delete lands; a mistake is restorable."""
+    ent = (await client.post("/v1/entities", json={
+        "code": f"GUARD-{uuid.uuid4().hex[:6]}", "legal_name": "Guarded Co"})).json()
+    lead = (await client.post("/v1/leads", json={
+        "company": "Guarded Co", "entity_id": ent["id"], "rm": "Priya"})).json()
+    lend = (await client.post("/v1/lending", json={"entity_id": ent["id"]})).json()
+
+    refused = await client.delete(f"/v1/entities/{ent['id']}")
+    assert refused.status_code == 409, refused.text
+    assert "still carries" in refused.text
+    assert "1 lead" in refused.text and "1 lending line" in refused.text
+
+    assert (await client.delete(f"/v1/leads/{lead['id']}")).status_code == 204
+    assert (await client.delete(f"/v1/lending/{lend['id']}")).status_code == 204
+    assert (await client.delete(f"/v1/entities/{ent['id']}")).status_code == 204
+    assert (await client.post(f"/v1/entities/{ent['id']}/restore")).status_code == 200
+
+
 async def test_the_default_templates_resolve_by_doc_type(client: AsyncClient):
     """/v1/templates/{doc_type} answers what 'use the default' means — the newest
     tenant Template of that kind; an unknown kind is a 404 that says what to do."""

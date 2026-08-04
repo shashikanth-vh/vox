@@ -58,6 +58,7 @@ class ResourceSpec:
         write_operation: str | None = None,
         parent_scope: tuple | None = None,
         pre_write: Any = None,
+        pre_delete: Any = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -88,6 +89,10 @@ class ResourceSpec:
         # or update lands, for the invariants a column constraint cannot express — see
         # app.api.people_rules. It raises; it never edits the body.
         self.pre_write = pre_write
+        # An async (ctx, obj_id) -> None hook run before a soft-delete lands — for
+        # referential invariants (an entity carrying live product rows must not be
+        # deletable out from under them). It raises; it never deletes anything itself.
+        self.pre_delete = pre_delete
         # For a child resource with no entity_id of its own (syndication lenders), scope
         # by the PARENT line's company: (parent_model, fk_attr_name).
         self.parent_scope = parent_scope
@@ -690,6 +695,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
 
             enforce_operation(ctx.user, "delete_row")
             await revalidate_sensitive(ctx, "delete_row")
+            if spec.pre_delete is not None:
+                await spec.pre_delete(ctx, obj_id)
             expected = expected_version if expected_version is not None else _parse_if_match(if_match)
             await repo.soft_delete(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, expected_version=expected

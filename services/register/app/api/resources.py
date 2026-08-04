@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.crud_router import ResourceSpec, build_crud_router
+from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.people_rules import person_pre_write
 from app.models import (
     AssetMonetisation,
@@ -38,6 +39,7 @@ _SPECS: list[ResourceSpec] = [
         filterable=["sector", "lens", "register_status", "entity_type", "state",
                     "promoter_group_code", "code"],
         subject_type="Entity", view_name="clients",
+        pre_delete=_entity_pre_delete,
     ),
     ResourceSpec(
         name="person", prefix="/v1/people", tags=["People"],
