@@ -164,17 +164,30 @@ export const camService = {
     }
   },
 
-  /** Put a prompt (or any workbench input) on the lending line's file. */
-  async uploadDoc(lendingId: string, file: File, docType: string): Promise<{ id: string }> {
+  /** Put a prompt / sanction letter / any workbench input on the lending line's file. */
+  async uploadDoc(lendingId: string, file: File, docType: string,
+                  section = 'CAM'): Promise<{ id: string }> {
     const form = new FormData();
     form.append('file', file);
-    form.append('section', 'CAM');
+    form.append('section', section);
     form.append('title', file.name.replace(/\.[^.]+$/, ''));
     form.append('doc_type', docType);
     form.append('status', 'On File');
     try {
       return await api.post<any>(`/lending/${lendingId}/documents/upload`, form);
     } catch (e) { throw new Error(msg(e, 'upload that document')); }
+  },
+
+  /** Everything filed on the LENDING LINE itself (CAMs, prompts, the sanction letter). */
+  async lendingDocs(lendingId: string): Promise<EntityDoc[]> {
+    const rows = await listAll(`/lending/${lendingId}/documents`, { key: 'documents' });
+    return rows
+      .filter((r: any) => String(r.status) !== 'Superseded')
+      .map((r: any): EntityDoc => ({
+        id: r.id, title: r.title || r.original_filename || 'document',
+        section: r.section || '', doc_type: r.doc_type || '',
+        content_type: r.content_type || '', status: r.status || '',
+      }));
   },
 
   /** The sanctioned terms for a line — null when none have been entered yet. */

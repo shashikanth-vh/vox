@@ -6,7 +6,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import { camService, type SanctionTermsOut } from '../../services/camService';
+import { camService, type SanctionTermsOut, type EntityDoc } from '../../services/camService';
+import { documentsService } from '../../services/documentsService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
 
@@ -50,6 +51,39 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+  // The sanction LETTER: the analyst fills the credit team's template (shipped as the
+  // tenant default; a case-specific upload wins) and files the signed letter here.
+  const [tmpl, setTmpl] = useState<{ id: string; title: string } | null>(null);
+  const [letter, setLetter] = useState<EntityDoc | null>(null);
+  const [letterBusy, setLetterBusy] = useState('');
+
+  const loadLetter = async (id: string) => {
+    try {
+      const docs = await camService.lendingDocs(id);
+      setLetter(docs.filter((d) => d.doc_type === 'sanction_letter').pop() || null);
+    } catch { /* the letter block simply shows no file yet */ }
+  };
+
+  const downloadTemplate = async () => {
+    if (!tmpl) return;
+    setLetterBusy('template');
+    const r = await documentsService.download({ id: tmpl.id,
+      name: 'sanction_letter_template.docx' } as any);
+    if (!r.ok) setErr(r.error || 'Could not fetch the template.');
+    setLetterBusy('');
+  };
+
+  const uploadLetter = async (file: File | null) => {
+    if (!file || !lendingId) return;
+    setErr(''); setLetterBusy('upload');
+    try {
+      await camService.uploadDoc(lendingId, file, 'sanction_letter', 'Sanction');
+      setInfo(`Sanction letter "${file.name}" filed on this line.`);
+      await loadLetter(lendingId);
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setLetterBusy('');
+  };
 
   const [f, setF] = useState<Record<string, string>>({});
   const [cpText, setCpText] = useState('');
@@ -59,13 +93,16 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
 
   useEffect(() => {
     if (!open || !lendingId) return;
-    setErr(''); setBusy(false); setF({ rate_kind: 'Fixed', day_count: '365', schedule_kind: 'EMI' });
-    setCpText(''); setCsText(''); setCovs([]);
+    setErr(''); setInfo(''); setBusy(false);
+    setF({ rate_kind: 'Fixed', day_count: '365', schedule_kind: 'EMI' });
+    setCpText(''); setCsText(''); setCovs([]); setLetter(null);
     setLoading(true);
     camService.terms(lendingId)
       .then(setExisting)
       .catch((e: any) => setErr(e?.message || String(e)))
       .finally(() => setLoading(false));
+    void camService.template('sanction_template').then(setTmpl);
+    void loadLetter(lendingId);
   }, [open, lendingId]);
 
   const save = async () => {
@@ -122,6 +159,29 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       </DialogTitle>
       <DialogContent dividers>
         {err && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setErr('')}>{err}</Alert>}
+        {info && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setInfo('')}>{info}</Alert>}
+
+        {/* ---- the sanction LETTER: template out, signed letter in ------------------- */}
+        <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.4 }}>
+          <Typography sx={{ fontSize: 12.5, fontWeight: 600, mb: 0.4 }}>Sanction letter</Typography>
+          <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
+            {letter
+              ? <>On file: <b>{letter.title}</b> — replace it by uploading a newer version.</>
+              : 'Download the letterhead template, fill it from the committee\'s approval, and file the signed letter here.'}
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button size="small" variant="outlined" disabled={!tmpl || letterBusy === 'template'}
+              onClick={() => void downloadTemplate()} sx={{ textTransform: 'none' }}>
+              {letterBusy === 'template' ? 'Fetching…' : tmpl ? 'Download template' : 'No template on record'}
+            </Button>
+            <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
+              disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
+              {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace letter…' : 'Upload signed letter…'}
+              <input hidden type="file" accept=".docx,.pdf"
+                onChange={(e) => { void uploadLetter(e.target.files?.[0] || null); e.target.value = ''; }} />
+            </Button>
+          </Box>
+        </Box>
 
         {existing ? (
           <Box>
