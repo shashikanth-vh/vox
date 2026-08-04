@@ -35,6 +35,8 @@ def _register_stub(state: dict):
         if request.method == "POST":
             state.setdefault("idempotency_keys", []).append(
                 request.headers.get("Idempotency-Key"))
+            state.setdefault("on_behalf", []).append(
+                request.headers.get("X-On-Behalf-Of"))
         if request.method == "GET" and path == "/v1/entities":
             return httpx.Response(200, json={"items": [{
                 "id": ENTITY_ID, "code": "ECOSOCH", "legal_name": "EcoSoch Solar Private Limited",
@@ -1036,3 +1038,27 @@ def test_a_persons_keys_are_their_own_and_nobody_elses(monkeypatch):
     identity.reset_cache()
     monkeypatch.setattr(identity, "_lookup", lambda *a, **k: "Arun")
     assert identity.aliases_for("priya@evamfinance.com", None) == ["priya"]
+
+
+async def test_a_captured_row_is_attributed_to_the_rm_who_dictated_it(stub_register):
+    """VocX writes with its own service key, but the lead belongs to the RM.
+
+    The register scopes a row to its creator (created_by), so a lead stamped with the
+    service lands in nobody's book: the RM who recorded the capture cannot see what they
+    just filed, while an Admin can. VocX has already verified the person at its own front
+    door, so it says who that is — attribution only; the register keeps enforcing VocX's
+    own permissions.
+    """
+    app = create_app()
+    async with await _client(app, "priya@evamfinance.com") as c:
+        prev = await c.post("/v1/capture", json={
+            "rm": "ignored", "offline": True,
+            "transcript": "First meeting with Windward Renewables about a 20 crore loan."})
+        ext = prev.json()["extraction"]
+        r = await c.post("/v1/commit", json={
+            "rm": "ignored", "extraction": ext, "new_lead": True,
+            "company": "Windward Renewables", "summary": "Intro meeting"})
+    assert r.status_code == 200, r.text
+    claimed = [h for h in stub_register.get("on_behalf", []) if h]
+    assert claimed, "every register write from a capture must say who it was for"
+    assert set(claimed) == {"priya@evamfinance.com"}, claimed

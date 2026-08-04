@@ -213,7 +213,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
   const pct = state.total ? Math.round((state.filled / state.total) * 100) : 0;
 
   return (
-    <Box sx={{ p: 1.4 }}>
+    <Box sx={{ p: 1.4, minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere' }}>
       {err && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }}
         onClose={() => setErr('')}>{err}</Alert>}
       {note && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }}
@@ -286,7 +286,8 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       {audioUrl && (
         <>
           <Typography sx={microHeading}>Original audio</Typography>
-          <audio controls src={audioUrl} style={{ width: '100%', height: 34 }} />
+          <audio controls src={audioUrl}
+            style={{ width: '100%', maxWidth: '100%', height: 34 }} />
         </>
       )}
 
@@ -315,10 +316,11 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       {/* Next steps — owner / action / date, as the extraction produces them. */}
       <Typography sx={heading}>Next steps</Typography>
       {listOf('next_steps').map((s: any, i: number) => (
-        <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
+        <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5, flexWrap: 'wrap' }}>
           <TextField size="small" placeholder="owner" sx={{ ...field, width: 92 }} disabled={committed}
             value={s.owner || ''} onChange={(e) => { s.owner = e.target.value || null; redraw(); }} />
-          <TextField size="small" placeholder="action…" sx={{ ...field, flex: 1 }} disabled={committed}
+          <TextField size="small" placeholder="action…" sx={{ ...field, flex: '1 1 130px' }}
+            disabled={committed}
             inputRef={i === 0 ? (el) => { focusRef.current.next_steps = el; } : undefined}
             value={s.action || ''} onChange={(e) => { s.action = e.target.value; redraw(); }} />
           <TextField size="small" type="date" sx={{ ...field, width: 138 }} disabled={committed}
@@ -483,7 +485,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
             }} sx={pillGhost}>Add field</Button>
 
           <Typography sx={{ ...lbl, mt: 1.6, mb: 0.6 }}>Opportunity score (1–5)</Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {[1, 2, 3, 4, 5].map((n) => (
               <Box key={n} component="button" type="button" disabled={committed}
                 ref={n === 1 ? (el: any) => { focusRef.current.opportunity_score = el; } : undefined}
@@ -501,9 +503,9 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
 
           <Typography sx={microHeading}>Attendees</Typography>
           {listOf('attendees').map((a: any, i: number) => (
-            <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
+            <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5, flexWrap: 'wrap' }}>
               {(['name', 'role', 'company'] as const).map((k) => (
-                <TextField key={k} size="small" placeholder={k} sx={{ ...field, flex: 1 }}
+                <TextField key={k} size="small" placeholder={k} sx={{ ...field, flex: '1 1 108px' }}
                   disabled={committed}
                   inputRef={i === 0 && k === 'name' ? (el) => { focusRef.current.attendees = el; } : undefined}
                   value={a[k] || ''} onChange={(e) => { a[k] = e.target.value || null; redraw(); }} />

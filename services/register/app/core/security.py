@@ -83,6 +83,7 @@ async def get_context(
     x_tenant: str | None = Header(default=None, alias="X-Tenant"),
     x_actor: str | None = Header(default=None, alias="X-Actor"),
     x_user_email: str | None = Header(default=None, alias="X-User-Email"),
+    x_on_behalf_of: str | None = Header(default=None, alias="X-On-Behalf-Of"),
     x_user_roles: str | None = Header(default=None, alias="X-User-Roles"),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_gateway_auth: str | None = Header(default=None, alias="X-Gateway-Auth"),
@@ -180,6 +181,24 @@ async def get_context(
                 # X-Actor is client-controlled and must never masquerade as a person.
                 # (Own-book scope matches rows on created_by == user e-mail.)
                 actor = user.email[:120]
+            # ATTRIBUTION for a service acting FOR a person.
+            #
+            # VocX writes with its own service key: it holds the authority, but the lead
+            # and the company it creates were dictated by an RM who has already been
+            # verified at VocX's own front door. Stamped with the service, those rows
+            # land in nobody's own book (scope rule 3, created_by = the user's e-mail) —
+            # so the RM who recorded the capture could not see what they had just filed,
+            # while an Admin could. That is the opposite of the intended default.
+            #
+            # This header changes WHO THE ROW BELONGS TO, never what the caller may do:
+            # `user` stays None, so authorisation remains the service's, least-privilege
+            # and unchanged. Honoured only for a NAMED service key (a generic key or a
+            # human request cannot use it), and ignored outright once a verified user
+            # identity is present — a person's own e-mail always wins over a claim.
+            if service and user is None and x_on_behalf_of:
+                claimed = x_on_behalf_of.strip()[:120]
+                if "@" in claimed:
+                    actor = claimed
             tenant_ctx.set(tenant_code)
             actor_ctx.set(actor)
             request.state.tenant_id = tenant_id

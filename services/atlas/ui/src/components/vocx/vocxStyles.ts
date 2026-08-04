@@ -25,7 +25,12 @@ export const vx = {
   teal: '#35B8A4',
   amber: '#C9A227',
   amberInk: '#E0C05D',
-  red: '#E05D5D',
+  // LIVE — the microphone is open. Deliberately cyan and not red: red reads as an error
+  // in a surface whose errors are amber, and it clashed with the green-tinted dark the
+  // rest of VocX is built from. Cyan is the one hue here that nothing else uses, so it
+  // means exactly one thing wherever it appears.
+  live: '#22D3EE',
+  liveSoft: 'rgba(34,211,238,.55)',
   onGrn: '#06251A',
 };
 
@@ -66,8 +71,15 @@ export const label = {
   display: 'block',
 };
 
-/** Inputs: tall, rounded, dark — comfortable for a thumb. */
+/** Inputs: tall, rounded, dark — comfortable for a thumb.
+ *
+ * `minWidth: 0` is load-bearing, not tidiness. A TextField carries an intrinsic minimum
+ * width of about 180px, so `flex: 1` inside a 420px card does NOT shrink it: three of
+ * them in a row (attendees) reserved 540px, the row overflowed, and the panel's scroll
+ * container quietly scrolled sideways with the content sliding out past a clipped edge.
+ * A field that may sit in a flex row has to be allowed to be narrow. */
 export const input = {
+  minWidth: 0,
   '& .MuiInputBase-root': {
     bgcolor: vx.card2,
     color: vx.ink,
@@ -115,12 +127,14 @@ export const pillGhost = {
   '&:hover': { bgcolor: 'rgba(255,255,255,.03)', borderColor: vx.grn2, color: vx.grn2 },
 };
 
+/** Destructive, without red. It must not look like the primary action and must not
+ *  look LIVE either — so it is the one neutral control on the surface. */
 export const pillDanger = {
   ...pill,
-  bgcolor: '#2A1414',
-  borderColor: '#5A2C2C',
-  color: '#F0B0B0',
-  '&:hover': { bgcolor: '#3A1B1B', borderColor: '#7A3C3C' },
+  bgcolor: 'transparent',
+  borderColor: '#3A4A44',
+  color: vx.mut,
+  '&:hover': { bgcolor: 'rgba(255,255,255,.05)', borderColor: vx.ink, color: vx.ink },
 };
 
 /** A selectable chip — temperature, log-to lane, template. */

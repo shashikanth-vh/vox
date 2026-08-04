@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Box, Button, TextField, Typography } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import StopIcon from '@mui/icons-material/Stop';
 import { useRecorder, MAX_SECONDS } from './useRecorder';
 import { vocxService, currentPosition, type VocxPreview } from '../../services/vocxService';
 import { currentRm } from './rm';
+import { useVocx } from './VocxProvider';
 import ReportCard from './ReportCard';
 import { vx, pill, pillPrimary, input as inputSx } from './vocxStyles';
 
@@ -33,6 +34,17 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
   }, [rm]);
 
   const rec = useRecorder(send);
+
+  // Tell the rest of VocX the microphone is live, so the panel refuses to close and the
+  // launcher shows it. `finishing` counts: the clip is encoded but not yet handed off,
+  // and unmounting there loses it just as surely.
+  const { setRecording } = useVocx();
+  const live = rec.state === 'recording' || rec.state === 'requesting'
+    || rec.state === 'finishing';
+  useEffect(() => {
+    setRecording(live);
+    return () => setRecording(false);
+  }, [live, setRecording]);
 
   const analyseTyped = async () => {
     const t = typed.trim();
@@ -81,7 +93,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
       <Box sx={{ position: 'relative', width: 200, height: 200, mx: 'auto', mb: 2 }}>
         <Box aria-hidden sx={{
           position: 'absolute', inset: 0, borderRadius: '50%',
-          border: `2px solid ${recording ? vx.grn : vx.line}`,
+          border: `2px solid ${recording ? vx.live : vx.line}`,
           transform: `scale(${1 + (recording ? rec.level * 0.28 : 0)})`,
           transition: 'transform 90ms linear, border-color 200ms',
         }} />
@@ -95,8 +107,8 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           sx={{
             position: 'absolute', inset: 26, borderRadius: '50%', border: 0,
             cursor: busy || !rm ? 'not-allowed' : 'pointer',
-            bgcolor: recording ? vx.red : vx.grn,
-            color: recording ? '#fff' : vx.onGrn,
+            bgcolor: recording ? vx.live : vx.grn,
+            color: vx.onGrn,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: busy || !rm ? 0.5 : 1,
             transition: 'background-color 200ms',
@@ -107,7 +119,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         </Box>
       </Box>
 
-      <Typography sx={{ fontSize: 30, fontWeight: 700, color: recording ? vx.red : vx.grn, minHeight: 38,
+      <Typography sx={{ fontSize: 30, fontWeight: 700, color: recording ? vx.live : vx.grn, minHeight: 38,
         fontVariantNumeric: 'tabular-nums' }}>
         {recording ? clock(rec.seconds) : busy ? '' : 'Tap the mic and start speaking'}
       </Typography>

@@ -24,10 +24,20 @@ local part (see aliases_for for why that limit is a boundary and not a nicety).
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 import time
 from typing import Any
+
+#: The verified e-mail of the person this request is being served for, set by the mount
+#: adapter and read by the register writer so a row VocX creates is ATTRIBUTED to the RM
+#: who dictated it. Without it the row is stamped with the service and belongs to nobody:
+#: the RM who recorded the capture cannot see the lead they just filed, while an Admin
+#: can. A ContextVar because the pipeline is synchronous and runs in a threadpool — the
+#: context is copied into the worker, so this stays per-request rather than global.
+caller_email: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "vocx_caller_email", default="")
 
 _TTL_S = 300.0
 _cache: dict[str, tuple[str, float]] = {}

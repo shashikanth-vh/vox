@@ -127,3 +127,59 @@ async def test_export_skips_unviewable_tables_and_gates_deleted(client: AsyncCli
     mgmt = _as("mgmt@evamfinance.com", "Management")
     r = await client.get("/v1/export/counts", params={"include_deleted": True}, headers=mgmt)
     assert r.status_code == 403, r.text
+
+
+# --------------------------------------------------------------------------- #
+# Attribution: a service acting FOR a verified person
+# --------------------------------------------------------------------------- #
+async def test_a_service_may_attribute_a_row_to_the_person_it_acted_for(
+        client: AsyncClient, _service_keys):
+    """VocX holds the authority; the RM dictated the row.
+
+    Stamped with the service, a captured lead lands in nobody's own book (scope rule 3
+    matches created_by against the user's e-mail) — so the RM who recorded it could not
+    see what they had just filed, while an Admin could. X-On-Behalf-Of moves the
+    ATTRIBUTION without moving the authority.
+    """
+    ent = (await client.post("/v1/entities",
+                             json={"code": f"OB-{uuid.uuid4().hex[:6]}",
+                                   "legal_name": "OnBehalf Co"})).json()
+    lead = await client.post("/v1/leads", json={"company": "OnBehalf Co", "entity_id": ent["id"]},
+                             headers={"X-API-Key": VOX_KEY,
+                                      "X-On-Behalf-Of": "priya@evamfinance.com"})
+    assert lead.status_code == 201, lead.text
+    assert lead.json()["created_by"] == "priya@evamfinance.com"
+
+    # Authority is UNCHANGED — it is still the service's allowlist that decides. A
+    # principal that may not create a lead does not gain the right by naming a person.
+    denied = await client.post("/v1/leads", json={"company": "OnBehalf Co", "entity_id": ent["id"]},
+                               headers={"X-API-Key": PULSE_KEY,
+                                        "X-On-Behalf-Of": "priya@evamfinance.com"})
+    assert denied.status_code == 403, denied.text
+
+
+async def test_on_behalf_of_is_ignored_without_a_named_service_key(client: AsyncClient):
+    """A generic key is not a principal that has verified anybody, and a claim is not an
+    identity: the header is honoured only for a named service."""
+    ent = (await client.post("/v1/entities",
+                             json={"code": f"OB-{uuid.uuid4().hex[:6]}",
+                                   "legal_name": "NoService Co"})).json()
+    lead = await client.post("/v1/leads", json={"company": "NoService Co", "entity_id": ent["id"]},
+                             headers={"X-On-Behalf-Of": "someone.else@evamfinance.com"})
+    assert lead.status_code == 201, lead.text
+    assert lead.json()["created_by"] != "someone.else@evamfinance.com"
+
+
+async def test_a_verified_user_always_outranks_an_attribution_claim(
+        client: AsyncClient, _service_keys):
+    """When the caller IS a person, their own verified e-mail is the actor — a header
+    cannot make their write look like someone else's."""
+    ent = (await client.post("/v1/entities",
+                             json={"code": f"OB-{uuid.uuid4().hex[:6]}",
+                                   "legal_name": "Verified Co"})).json()
+    lead = await client.post(
+        "/v1/leads", json={"company": "Verified Co", "entity_id": ent["id"]},
+        headers={**_as("arun@evamfinance.com", "BDRM"),
+                 "X-API-Key": VOX_KEY, "X-On-Behalf-Of": "priya@evamfinance.com"})
+    assert lead.status_code == 201, lead.text
+    assert lead.json()["created_by"] == "arun@evamfinance.com"

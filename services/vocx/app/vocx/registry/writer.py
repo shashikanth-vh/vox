@@ -97,7 +97,17 @@ class RegisterWriter:
         self._minted: dict[str, str] = {}    # LD-V## → created Register lead uuid
 
     def _headers(self) -> dict[str, str]:
-        return {"X-API-Key": self.api_key, "X-Tenant": self.tenant, "X-Actor": "vocx-vox"}
+        headers = {"X-API-Key": self.api_key, "X-Tenant": self.tenant,
+                   "X-Actor": "vocx-vox"}
+        # ATTRIBUTION, not authority. The register keeps enforcing VocX's own service
+        # permissions; this only decides whose created_by the new rows carry, which is
+        # what puts a captured lead in the recording RM's own scope instead of nobody's.
+        from app.vocx.identity import caller_email
+
+        who = (caller_email.get() or "").strip()
+        if who:
+            headers["X-On-Behalf-Of"] = who
+        return headers
 
     def _post(self, path: str, body: dict[str, Any], op: str) -> dict[str, Any]:
         headers = self._headers()

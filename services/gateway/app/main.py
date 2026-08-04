@@ -52,7 +52,12 @@ _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
                          "x-api-key",
                          # The tenant-admin credential is injected by the gateway for a
                          # verified Admin only — a client can never present its own.
-                         "x-admin-key"}
+                         "x-admin-key",
+                         # Attribution-on-behalf-of is a claim only a NAMED SERVICE may
+                         # make about a person it has itself verified (VocX, for the RM
+                         # who dictated a capture). Forwarded from a browser it would let
+                         # anyone file rows under a colleague's name.
+                         "x-on-behalf-of"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 

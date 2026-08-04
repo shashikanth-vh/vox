@@ -3,6 +3,7 @@ import { Badge, Box, Tooltip } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import { useDraggable } from './useDraggable';
 import { useVocx } from './VocxProvider';
+import { vx } from './vocxStyles';
 import { tokens } from '../../theme';
 
 /**
@@ -24,10 +25,12 @@ import { tokens } from '../../theme';
 
 const FAB = 56;
 
-function MicButton({ pending, open, big }: { pending: number; open: boolean; big: boolean }) {
+function MicButton({ pending, open, big, recording }:
+                  { pending: number; open: boolean; big: boolean; recording: boolean }) {
+  const d = big ? FAB : 40;
   return (
     <Badge
-      badgeContent={pending}
+      badgeContent={recording ? 0 : pending}
       max={99}
       overlap="circular"
       sx={{ '& .MuiBadge-badge': {
@@ -39,11 +42,24 @@ function MicButton({ pending, open, big }: { pending: number; open: boolean; big
         tabIndex={-1}
         aria-hidden
         sx={{
-          width: big ? FAB : 40, height: big ? FAB : 40, borderRadius: '50%',
+          width: d, height: d, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          bgcolor: open ? '#E0554E' : tokens.tealHi, color: open ? '#fff' : '#04241B',
+          bgcolor: recording ? vx.live : (open ? vx.grn2 : tokens.tealHi),
+          color: '#04241B',
           boxShadow: big ? '0 8px 22px rgba(0,0,0,.45)' : 'none',
           transition: 'background-color 180ms',
+          // A HALO, not a size change: the button keeps its hit area (and the phone's
+          // draggable one keeps its geometry) while an expanding ring says, from
+          // anywhere in the app, that the microphone is open. Respects
+          // prefers-reduced-motion — a persistent pulse is exactly what that setting is
+          // for, so the colour alone carries it there.
+          '@keyframes vocxHalo': {
+            '0%': { boxShadow: `0 0 0 0 ${vx.liveSoft}` },
+            '70%': { boxShadow: `0 0 0 ${big ? 16 : 11}px rgba(34,211,238,0)` },
+            '100%': { boxShadow: '0 0 0 0 rgba(34,211,238,0)' },
+          },
+          ...(recording ? { animation: 'vocxHalo 1.5s ease-out infinite' } : {}),
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
         }}
       >
         <MicIcon sx={{ fontSize: big ? 28 : 22 }} />
@@ -54,23 +70,27 @@ function MicButton({ pending, open, big }: { pending: number; open: boolean; big
 
 /** Desktop: a plain toolbar control. */
 export function VocxNavButton() {
-  const { open, toggle, pending } = useVocx();
+  const { open, toggle, pending, recording } = useVocx();
   return (
-    <Tooltip title={pending ? `VocX — ${pending} awaiting approval` : 'VocX field intel'}>
+    <Tooltip title={recording
+      ? 'VocX is recording — stop or minimise from the panel'
+      : (pending ? `VocX — ${pending} awaiting approval` : 'VocX field intel')}>
       <Box
         component="button"
         type="button"
         onClick={toggle}
-        aria-label={pending
-          ? `VocX field intel — ${pending} capture(s) awaiting approval`
-          : 'VocX field intel'}
+        aria-label={recording
+          ? 'VocX field intel — recording in progress'
+          : (pending
+            ? `VocX field intel — ${pending} capture(s) awaiting approval`
+            : 'VocX field intel')}
         aria-expanded={open}
         sx={{
           background: 'none', border: 0, p: 0, cursor: 'pointer', display: 'inline-flex',
           '&:focus-visible': { outline: `3px solid ${tokens.tealHi}`, outlineOffset: 3, borderRadius: '50%' },
         }}
       >
-        <MicButton pending={pending} open={open} big={false} />
+        <MicButton pending={pending} open={open} big={false} recording={recording} />
       </Box>
     </Tooltip>
   );
@@ -78,7 +98,7 @@ export function VocxNavButton() {
 
 /** Mobile: draggable, and remembered where it was left. */
 export function VocxFab() {
-  const { open, setOpen, pending } = useVocx();
+  const { open, setOpen, pending, recording } = useVocx();
   const [show, setShow] = useState(
     () => typeof window !== 'undefined' && window.innerWidth <= 760);
 
@@ -107,10 +127,12 @@ export function VocxFab() {
       // as a tap, so both gestures live on one control with no separate handle.
       onClick={() => { if (drag.wasTap()) setOpen(!open); }}
       onDoubleClick={drag.reset}
-      title="Drag to move · double-tap to reset"
-      aria-label={pending
-        ? `VocX field intel — ${pending} capture(s) awaiting approval. Drag to move.`
-        : 'VocX field intel. Drag to move.'}
+      title={recording ? 'Recording — open VocX to stop' : 'Drag to move · double-tap to reset'}
+      aria-label={recording
+        ? 'VocX field intel — recording in progress. Drag to move.'
+        : (pending
+          ? `VocX field intel — ${pending} capture(s) awaiting approval. Drag to move.`
+          : 'VocX field intel. Drag to move.')}
       aria-expanded={open}
       sx={{
         position: 'fixed', left: drag.pos.x, top: drag.pos.y, zIndex: 1260,
@@ -119,7 +141,7 @@ export function VocxFab() {
         '&:focus-visible': { outline: `3px solid ${tokens.tealHi}`, outlineOffset: 3, borderRadius: '50%' },
       }}
     >
-      <MicButton pending={pending} open={open} big />
+      <MicButton pending={pending} open={open} big recording={recording} />
     </Box>
   );
 }

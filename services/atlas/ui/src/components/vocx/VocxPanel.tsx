@@ -4,9 +4,11 @@ import CloseIcon from '@mui/icons-material/Close';
 import MinimizeIcon from '@mui/icons-material/Minimize';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import { useDraggable } from './useDraggable';
 import RecordTab from './RecordTab';
 import ReportsTab from './ReportsTab';
+import { useVocx } from './VocxProvider';
 import { vx } from './vocxStyles';
 
 /**
@@ -35,6 +37,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
   /** Bumped to make the reports list refetch after a capture is filed. */
   const [reportsEpoch, setReportsEpoch] = useState(0);
   const paperRef = useRef<HTMLDivElement | null>(null);
+  const { recording } = useVocx();
 
   useEffect(() => {
     const onResize = () => setMobile(window.innerWidth <= MOBILE_MAX);
@@ -55,12 +58,12 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || recording) return;      // a live mic is not dismissable
       if (paperRef.current?.contains(document.activeElement)) { e.stopPropagation(); onClose(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, recording]);
 
   const placement = useMemo(() => (mobile
     ? { left: 0, right: 0, bottom: 0, top: 'auto' as const,
@@ -111,26 +114,46 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
             EVAM · FIELD INTEL
           </Typography>
         </Box>
-        {!mobile && (
-          <Tooltip title={rolled ? 'Expand' : 'Roll up'}>
-            <IconButton size="small" onClick={() => setRolled((r) => !r)}
-              aria-label={rolled ? 'Expand VocX' : 'Roll up VocX'}
-              sx={{ color: vx.mut, '&:hover': { color: vx.ink } }}>
-              {rolled ? <OpenInFullIcon sx={{ fontSize: 16 }} />
-                      : <MinimizeIcon sx={{ fontSize: 16 }} />}
-            </IconButton>
-          </Tooltip>
+        {recording && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4, mr: 0.5,
+                     '@keyframes vocxBlink': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.25 } } }}>
+            <FiberManualRecordIcon sx={{ fontSize: 12, color: vx.live,
+                                         animation: 'vocxBlink 1.1s ease-in-out infinite' }} />
+            <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: vx.live,
+                              letterSpacing: '.08em' }}>REC</Typography>
+          </Box>
         )}
-        <Tooltip title="Close">
-          <IconButton size="small" onClick={onClose} aria-label="Close VocX"
+        {/* Roll up is always available — including mid-take, which is the point: the
+            panel gets out of the way without the recorder being unmounted. On a phone
+            the sheet is the whole surface, so it rolls up there too. */}
+        <Tooltip title={rolled ? 'Expand' : 'Minimise'}>
+          <IconButton size="small" onClick={() => setRolled((r) => !r)}
+            aria-label={rolled ? 'Expand VocX' : 'Minimise VocX'}
             sx={{ color: vx.mut, '&:hover': { color: vx.ink } }}>
-            <CloseIcon sx={{ fontSize: 18 }} />
+            {rolled ? <OpenInFullIcon sx={{ fontSize: 16 }} />
+                    : <MinimizeIcon sx={{ fontSize: 16 }} />}
           </IconButton>
+        </Tooltip>
+        {/* Closing unmounts the recorder, and an unmounted recorder loses the take —
+            so while the microphone is live the only ways out are Stop and Minimise. */}
+        <Tooltip title={recording ? 'Recording — stop first, or minimise' : 'Close'}>
+          <Box component="span">
+            <IconButton size="small" onClick={onClose} disabled={recording}
+              aria-label={recording ? 'Cannot close while recording' : 'Close VocX'}
+              sx={{ color: vx.mut, '&:hover': { color: vx.ink },
+                    '&.Mui-disabled': { color: 'rgba(232,238,242,.25)' } }}>
+              <CloseIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Box>
         </Tooltip>
       </Box>
 
-      {!rolled && (
-        <>
+      {/* The body is HIDDEN, never unmounted. Rolling up or switching tabs used to
+          destroy whichever tab was mounted — and with it a recorder holding an
+          in-progress take. Nothing the user does to the panel's chrome may cost them a
+          recording, so both tabs stay alive and only their visibility changes. */}
+      <Box sx={{ display: rolled ? 'none' : 'flex', flexDirection: 'column',
+                 flex: 1, minHeight: 0, minWidth: 0 }}>
           <Tabs
             value={tab}
             onChange={(_, v) => setTab(v)}
@@ -150,20 +173,24 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
             <Tab label="Reports" id="vocx-tab-reports" aria-controls="vocx-panel-reports" />
           </Tabs>
 
-          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto',
+          {/* overflowX HIDDEN, deliberately. With only overflowY set, CSS promotes the
+              other axis to `auto`, so a card a few pixels too wide let the whole body
+              scroll sideways — content slid out past the panel's clipped edge with no
+              scrollbar to say so, which is exactly what a report looked like. Anything
+              wide now wraps or truncates inside the panel instead. */}
+          <Box sx={{ flex: 1, minHeight: 0, minWidth: 0,
+                     overflowY: 'auto', overflowX: 'hidden',
                      maxHeight: mobile ? 'calc(85vh - 88px)' : PANEL_H - 88 }}>
-            {tab === 0 ? (
-              <Box role="tabpanel" id="vocx-panel-record" aria-labelledby="vocx-tab-record">
-                <RecordTab onFiled={() => { setReportsEpoch((n) => n + 1); setTab(1); }} />
-              </Box>
-            ) : (
-              <Box role="tabpanel" id="vocx-panel-reports" aria-labelledby="vocx-tab-reports">
-                <ReportsTab epoch={reportsEpoch} />
-              </Box>
-            )}
+            <Box role="tabpanel" id="vocx-panel-record" aria-labelledby="vocx-tab-record"
+                 hidden={tab !== 0} sx={{ display: tab === 0 ? 'block' : 'none' }}>
+              <RecordTab onFiled={() => { setReportsEpoch((n) => n + 1); setTab(1); }} />
+            </Box>
+            <Box role="tabpanel" id="vocx-panel-reports" aria-labelledby="vocx-tab-reports"
+                 hidden={tab !== 1} sx={{ display: tab === 1 ? 'block' : 'none' }}>
+              <ReportsTab epoch={reportsEpoch} active={tab === 1} />
+            </Box>
           </Box>
-        </>
-      )}
+      </Box>
     </Paper>
   );
 }

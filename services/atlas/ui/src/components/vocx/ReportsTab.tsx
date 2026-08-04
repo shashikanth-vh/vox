@@ -36,7 +36,8 @@ function when(iso?: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export default function ReportsTab({ epoch }: { epoch: number }) {
+export default function ReportsTab({ epoch, active = true }:
+                                   { epoch: number; active?: boolean }) {
   const rm = currentRm();
   const [rows, setRows] = useState<VocxReportRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +60,9 @@ export default function ReportsTab({ epoch }: { epoch: number }) {
     setRows([...r.data].sort((a, b) => Number(isPending(b)) - Number(isPending(a))));
   }, [rm]);
 
-  useEffect(() => { void load(); }, [load, epoch]);
+  // Both tabs stay mounted (see VocxPanel) so a recording survives a tab switch — so
+  // the list fetches when it is actually on screen, not every time the panel opens.
+  useEffect(() => { if (active) void load(); }, [load, epoch, active]);
 
   const openReport = async (row: VocxReportRow) => {
     setErr(''); setOpening(row.capture_id);

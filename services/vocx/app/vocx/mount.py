@@ -240,6 +240,9 @@ def build_vocx_router(settings: Any) -> APIRouter:
                 email = (request.headers.get("X-User-Email") or "").strip()
                 if not email:
                     return _unauthenticated()
+                # Carried to the register writer so a lead or company created from this
+                # capture lands in the RECORDING RM's own book, not the service's.
+                identity.caller_email.set(email)
                 who = await run_in_threadpool(identity.rm_for, email, settings)
                 if not who:
                     return _unauthenticated()
