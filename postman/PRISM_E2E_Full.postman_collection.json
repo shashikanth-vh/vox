@@ -1257,74 +1257,7 @@
           ]
         },
         {
-          "name": "POST /v1/people \u2014 Priya (BDRM / Syn RM / AM RM on record)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people"
-              ]
-            },
-            "description": "Conversion refuses an rm that is not a Person on record; the dropdowns and identity binding both resolve through this row.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
-                  "if (_v) pm.environment.set('rmPersonId', String(_v)); else pm.environment.unset('rmPersonId');",
-                  "pm.test('captured rmPersonId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
-                  "console.log('rmPersonId =', pm.environment.get('rmPersonId'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/people \u2014 Arun (Deal Analyst / Credit Head on record)",
+          "name": "POST /v1/people \u2014 Priya (create if missing)",
           "request": {
             "method": "POST",
             "header": [
@@ -1365,7 +1298,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
+              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"inactive\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1379,18 +1312,330 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "let _v; try { _v = (pm.response.json() || {}).id; } catch (e) {}",
-                  "if (_v) pm.environment.set('analystPersonId', String(_v)); else pm.environment.unset('analystPersonId');",
-                  "pm.test('captured analystPersonId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
-                  "console.log('analystPersonId =', pm.environment.get('analystPersonId'));"
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "POST /v1/people \u2014 Divya (Management on record)",
+          "name": "GET /v1/people \u2014 resolve Priya's roster row",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people?q=E2E Priya Nair&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "E2E Priya Nair"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = (pm.response.json().items || pm.response.json());",
+                  "const hit = rows.find(r => r.full_name === 'E2E Priya Nair');",
+                  "pm.test('Priya roster row exists', () => pm.expect(hit).to.be.an('object'));",
+                  "if (hit) pm.environment.set('rmPersonId', hit.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /v1/people \u2014 Priya to known-good (role/e-mail/handle)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{rmPersonId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{rmPersonId}}"
+              ]
+            },
+            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Arun (create if missing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/people \u2014 resolve Arun's roster row",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people?q=E2E Arun Menon&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "E2E Arun Menon"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = (pm.response.json().items || pm.response.json());",
+                  "const hit = rows.find(r => r.full_name === 'E2E Arun Menon');",
+                  "pm.test('Arun roster row exists', () => pm.expect(hit).to.be.an('object'));",
+                  "if (hit) pm.environment.set('analystPersonId', hit.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /v1/people \u2014 Arun to known-good (role/e-mail/handle)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{analystPersonId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{analystPersonId}}"
+              ]
+            },
+            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Divya (create if missing)",
           "request": {
             "method": "POST",
             "header": [
@@ -1446,6 +1691,133 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/people \u2014 resolve Divya's roster row",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people?q=E2E Divya Rao&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "E2E Divya Rao"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const rows = (pm.response.json().items || pm.response.json());",
+                  "const hit = rows.find(r => r.full_name === 'E2E Divya Rao');",
+                  "pm.test('Divya roster row exists', () => pm.expect(hit).to.be.an('object'));",
+                  "if (hit) pm.environment.set('checkerPersonId', hit.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /v1/people \u2014 Divya to known-good (role/e-mail/handle)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people/{{checkerPersonId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people",
+                "{{checkerPersonId}}"
+              ]
+            },
+            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Divya\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"role\": \"Management\",\n  \"email\": \"{{checkerEmail}}\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
                 ]
               }
             }
