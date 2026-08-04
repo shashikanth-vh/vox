@@ -8,6 +8,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { camService, type CamReport, type EntityDoc } from '../../services/camService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
 import { useAuth } from '../../auth/AuthContext';
+import { getSession } from '../../auth/session';
 import { tokens } from '../../theme';
 
 /**
@@ -188,14 +189,24 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           </Box>
         )}
 
-        {/* ---- committee: a SUBMITTED version awaits the decision -------------------- */}
-        {submitted && (
+        {/* ---- committee: a SUBMITTED version awaits the decision --------------------
+            Four-eyes: the register refuses a decision by whoever prepared the version,
+            so the PREPARER never sees decision buttons — a button that can only bounce
+            teaches nothing. They see who decides instead. */}
+        {submitted && (() => {
+          const me = (getSession()?.email || '').trim().toLowerCase();
+          const preparer = (submitted.prepared_by || '').trim().toLowerCase();
+          const mayDecide = committee && (!me || me !== preparer);
+          return (
           <Box sx={{ mb: 1.5 }}>
             <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.6 }}>
               v{submitted.report_version} was submitted by <b>{submitted.prepared_by}</b> and
-              awaits the committee. {committee
-                ? 'You hold committee authority — decide below (the preparer cannot decide their own CAM).'
-                : 'It appears on Today for Credit Head / Management.'}
+              awaits the committee. {mayDecide
+                ? 'You hold committee authority — decide below.'
+                : me && me === preparer
+                  ? 'You prepared this version, so a DIFFERENT committee member decides it '
+                    + '(four-eyes) — it is on Today for Credit Head / Management.'
+                  : 'It appears on Today for Credit Head / Management.'}
             </Typography>
             {!!submitted.draft_md && (
               <Box component="pre" sx={{
@@ -203,7 +214,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 320, overflow: 'auto',
               }}>{submitted.draft_md}</Box>
             )}
-            {committee && (
+            {mayDecide && (
               <>
                 <TextField fullWidth size="small" multiline minRows={2} sx={{ mt: 1 }}
                   label="Committee note (required to return or reject)"
@@ -221,7 +232,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               </>
             )}
           </Box>
-        )}
+          );
+        })()}
 
         {/* ---- analyst: an open draft to rework and finalise ------------------------- */}
         {working && (
