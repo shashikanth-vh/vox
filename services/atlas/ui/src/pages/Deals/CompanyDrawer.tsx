@@ -6,6 +6,7 @@ import { FieldGrid, TextFld, SelectFld, DrawerSection, FieldShell } from '../../
 import { CodeText, LensPill, TempPill, ProductFlags } from '../../components/common/Pills';
 import { referenceService } from '../../services/referenceService';
 import { clientsService } from '../../services/clientsService';
+import { entitiesService } from '../../services/entitiesService';
 import { dealsService } from '../../services/dealsService';
 import { lendingService, LEND_GREEN } from '../../services/lendingService';
 import { syndicationService } from '../../services/syndicationService';
@@ -78,6 +79,23 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
     if (!loaded(assetMonService.byCode(code))) jobs.push(assetMonService.list(page as any));
     if (!loaded(syndicationService.byCode(code))) jobs.push(syndicationService.hydrate());
     if (jobs.length) Promise.allSettled(jobs).then(() => force((n) => n + 1));
+  }, [code]);
+  // The entity id every document/workbench dialog uses comes from the client cache —
+  // which can hold a STALE id (a previous database's, a deleted row's) and then every
+  // upload answers "Entity … not found" on a perfectly healthy company. Re-resolve it
+  // from the register by Group Code on open and heal the cache when it drifted.
+  useEffect(() => {
+    if (!code || !USE_REAL_API) return;
+    let alive = true;
+    void entitiesService.byCode(code).then((row) => {
+      if (!alive || !row?.entityId) return;
+      const cur = (db().clients[code] || {}) as any;
+      if (cur.entityId !== row.entityId) {
+        db().clients[code] = { ...cur, ...row };
+        force((n) => n + 1);
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
   }, [code]);
   if (!code) return null;
 

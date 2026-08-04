@@ -178,6 +178,19 @@ export const entitiesService = {
       || normName(e?.display_name) === wanted);
     return hit ? toClientRow(hit) : null;
   },
+  /**
+   * The register's CURRENT row for a Group Code — the authoritative answer to "which
+   * entity id does this company have right now?". The local client cache can hold a
+   * stale id (a previous database's, a deleted row's), and every dialog that trusted
+   * it hit "Entity … not found" on a perfectly healthy company.
+   */
+  async byCode(code: string): Promise<ClientRow | null> {
+    const wanted = (code || '').trim().toUpperCase();
+    if (!wanted) return null;
+    const rows = await listAll('/entities', { key: 'entities', params: { q: wanted }, max: 50 });
+    const hit = rows.find((e: any) => String(e?.code || '').toUpperCase() === wanted);
+    return hit ? toClientRow(hit) : null;
+  },
   /** GET {{baseUrl}}/v1/entities/:id/dossier — the entity plus everything hanging off it. */
   async dossier(entityId: string): Promise<any> {
     return api.get<any>(`/entities/${entityId}/dossier`);
