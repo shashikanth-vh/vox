@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, MenuItem, TextField, Alert,
+  MenuItem, TextField, Alert,
 } from '@mui/material';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import AddIcon from '@mui/icons-material/Add';
 import { documentsService } from '../../services/documentsService';
 import { workflowActionsService, type WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -33,9 +31,8 @@ export default function HandoverPackageDialog({ action, code, entityId, onClose,
   onDone: (message: string) => void;
 }) {
   const open = !!action;
-  const [onFile, setOnFile] = useState<{ ref: string; label: string }[]>([]);
+  const [onFile, setOnFile] = useState<{ ref: string; label: string; sha256?: string }[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [extra, setExtra] = useState<string[]>([]);
   const [recipient, setRecipient] = useState('');
   const [delivery, setDelivery] = useState('SFTP');
   const [note, setNote] = useState('');
@@ -44,28 +41,50 @@ export default function HandoverPackageDialog({ action, code, entityId, onClose,
 
   useEffect(() => {
     if (!open) return;
-    setPicked({}); setExtra([]); setRecipient(''); setDelivery('SFTP');
+    setPicked({}); setRecipient(''); setDelivery('SFTP');
     setNote(''); setErr(''); setBusy(false);
     documentsService.load(code, entityId).then((index) => {
-      const rows: { ref: string; label: string }[] = [];
+      const rows: { ref: string; label: string; sha256?: string }[] = [];
       Object.values(index).forEach((section) => {
         Object.values(section).forEach((e: any) => {
-          if (e?.id) rows.push({ ref: e.id, label: `${e.label || e.name}${e.status === 'Verified' ? ' · verified' : ''}` });
+          // Only a document whose DIGEST the register holds can go in the package: the
+          // package names bytes, not titles, and a ref without one is refused.
+          if (e?.id && e.checksum) {
+            rows.push({ ref: e.label || e.name, label: `${e.label || e.name}${e.status === 'Verified' ? ' · verified' : ''}`,
+                        sha256: e.checksum });
+          }
         });
       });
       setOnFile(rows);
     }).catch(() => setOnFile([]));
   }, [open, code, entityId]);
 
-  const refs = () => [
-    ...onFile.filter((d) => picked[d.ref]).map((d) => d.ref),
-    ...extra.map((r) => r.trim()).filter(Boolean),
-  ];
+  /**
+   * What the package cites. The executed agreement is MANDATORY and comes from the plane
+   * (the register reconciles the submitted refs against the evidence on file and refuses
+   * a package that omits it), so it always leads; the maker adds whatever else went with
+   * it. Each entry is {reference, sha256} — the register stores digests, not titles.
+   */
+  const refs = (): { reference: string; sha256: string }[] => {
+    const out = [...(action?.evidence_refs || [])];
+    const seen = new Set(out.map((r) => r.sha256.toLowerCase()));
+    onFile.filter((d) => picked[d.ref] && d.sha256).forEach((d) => {
+      if (!seen.has(d.sha256!.toLowerCase())) {
+        seen.add(d.sha256!.toLowerCase());
+        out.push({ reference: d.ref, sha256: d.sha256! });
+      }
+    });
+    return out;
+  };
 
   const submit = async () => {
     if (!recipient.trim()) { setErr('Name the recipient at Advaya.'); return; }
     const documents = refs();
-    if (!documents.length) { setErr('A handover package must name at least one executed document.'); return; }
+    if (!documents.length) {
+      setErr('No executed agreement is on file for this line, so there is nothing to hand '
+             + 'over. Record it first.');
+      return;
+    }
     if (!action) return;
     setBusy(true);
     const r = await workflowActionsService.run({ ...action, form: [] }, {
@@ -107,8 +126,8 @@ export default function HandoverPackageDialog({ action, code, entityId, onClose,
 
         {onFile.length === 0 && (
           <Alert severity="info" sx={{ mb: 1, py: 0, fontSize: 12 }}>
-            Nothing is on this company's Data Register yet — add references below, or upload
-            the executed documents first so the package can point at them.
+            Nothing on this company's Data Register carries a digest yet. The executed
+            agreement is included automatically; upload anything else under Documents.
           </Alert>
         )}
         {onFile.map((d) => (
@@ -119,17 +138,13 @@ export default function HandoverPackageDialog({ action, code, entityId, onClose,
           </Box>
         ))}
 
-        {extra.map((v, i) => (
-          <Box key={i} sx={{ display: 'flex', gap: 1, mt: 0.8 }}>
-            <TextField size="small" fullWidth label="Document reference" value={v}
-              onChange={(e) => setExtra((rows) => rows.map((r, n) => (n === i ? e.target.value : r)))} />
-            <IconButton size="small" onClick={() => setExtra((rows) => rows.filter((_, n) => n !== i))}>
-              <DeleteOutlineIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        ))}
-        <Button size="small" startIcon={<AddIcon />} sx={{ textTransform: 'none', mt: 0.6 }}
-          onClick={() => setExtra((rows) => [...rows, ''])}>Add a reference</Button>
+        {/* No free-text refs: the register stores DIGESTS, and a reference without one
+            cannot be reconciled against what is on file — it would be refused at submit.
+            Anything that belongs in the package goes on the Data Register first. */}
+        <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 1 }}>
+          Only documents whose digest the register holds can be cited. Upload anything
+          missing under Documents first — it is hashed on the way in.
+        </Typography>
 
         <TextField fullWidth multiline minRows={2} size="small" label="Note for the checker"
           value={note} onChange={(e) => setNote(e.target.value)} sx={{ mt: 1.4 }} />

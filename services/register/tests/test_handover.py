@@ -289,3 +289,95 @@ async def test_checker_reject_is_terminal_then_fresh_cycle_allowed(client):
     re_prep = await client.post("/v1/internal/handover-packages", json=_prepare_body(lid),
                                 headers=ADMIN)
     assert re_prep.status_code == 201 and re_prep.json()["status"] == "Prepared"
+
+
+async def test_the_lane_the_ui_drives_end_to_end(client):
+    """Steps 4-6 exactly as the console sends them: prepare -> approve -> submit -> attest.
+
+    Every earlier refusal on this lane was found by a user, one round trip at a time,
+    because the action catalogue was written from endpoint NAMES while the rules live deep
+    in the handlers. This walks the remaining lane with the bodies the UI actually
+    produces, so the next rule is found here instead.
+
+    What it pins, in the order it bit:
+      * the package cites {reference, sha256} objects — NOT document ids, which is what the
+        handover screen sent until this test existed;
+      * the submitted refs must include the on-file executed_agreement digest, so the
+        client cannot assemble a package from arbitrary documents;
+      * approve is FOUR-EYES — the preparer may not approve their own package;
+      * submit is only legal from Approved, and is idempotent on resend;
+      * the manual Advaya attestation closes the line, and needs a human identity.
+    """
+    eid = await _entity(client)
+    lid = await _ready_lending(client, eid)
+    MAKER = {"X-User-Email": "maker@evamfinance.com", "X-User-Roles": "Credit Head"}
+
+    # 4a. PREPARE — the shape the dialog now builds: the mandatory executed-agreement ref
+    #     (handed to it by the plane) plus whatever else the maker picked.
+    prep = await client.post("/v1/internal/handover-packages",
+                             json=_prepare_body(lid), headers=MAKER)
+    assert prep.status_code in (200, 201), prep.text
+    assert prep.json()["status"] == "Prepared"
+
+    # Re-preparing the SAME line returns the package already on file rather than
+    # validating a new body — so the reconciliation guard has to be shown on a fresh line.
+    lid2 = await _ready_lending(client, await _entity(client))
+    other = await client.post(
+        "/v1/internal/handover-packages",
+        json=_prepare_body(lid2, executed_document_refs=[{"reference": "misc/1",
+                                                          "sha256": "b" * 64}]),
+        headers=MAKER)
+    assert other.status_code == 422, other.text
+    assert "executed_agreement digest" in other.text
+
+    # 4b. APPROVE — four eyes. The preparer cannot approve their own package.
+    same = await client.post(f"/v1/internal/handover-packages/{lid}/approve",
+                             json={"note": "ok"}, headers=MAKER)
+    assert same.status_code in (403, 409, 422), same.text
+
+    appr = await client.post(f"/v1/internal/handover-packages/{lid}/approve",
+                             json={"note": "checked"}, headers=ADMIN)
+    assert appr.status_code == 200, appr.text
+    assert appr.json()["status"] == "Approved"
+
+    # 5. SUBMIT — legal only from Approved, and idempotent when resent.
+    sub = await client.post(f"/v1/internal/handover-packages/{lid}/submit", headers=ADMIN)
+    assert sub.status_code == 200, sub.text
+    assert sub.json()["status"] == "Submitted"
+    again = await client.post(f"/v1/internal/handover-packages/{lid}/submit", headers=ADMIN)
+    assert again.status_code == 200 and again.json()["status"] == "Submitted"
+
+    # 6. ATTEST — the human lane records what Advaya actually did.
+    # Attestation has TWO beats, in order: Advaya ACCEPTS the handover, and only then can
+    # a disbursement tranche be recorded against it. Recording the tranche first is a 409 —
+    # a rule a user driving the panel will meet, since the confirmation dropdown offers
+    # all three outcomes and says nothing about their order.
+    early = await client.post(f"/v1/lending/{lid}/advaya-events",
+                              json={"event": "disbursed", "amount_cr": 8.0,
+                                    "disbursed_on": "2026-03-05",
+                                    "reference": "ADV/2026/1"}, headers=ADMIN)
+    assert early.status_code == 409, early.text
+    assert "ACCEPTED" in early.text
+
+    acc = await client.post(f"/v1/lending/{lid}/advaya-events",
+                            json={"event": "accepted", "reference": "ADV/ACK/2026/1"},
+                            headers=ADMIN)
+    assert acc.status_code == 201, acc.text
+
+    # The field is `disbursed_on` — the value date Advaya confirmed, not a generic
+    # "occurred on". (The action catalogue already had this right; this test did not,
+    # which is the same class of mistake the catalogue itself once made.)
+    att = await client.post(f"/v1/lending/{lid}/advaya-events",
+                            json={"event": "disbursed", "amount_cr": 8.0,
+                                  "disbursed_on": "2026-03-05",
+                                  "reference": "ADV/2026/1"}, headers=ADMIN)
+    assert att.status_code == 201, att.text
+
+    # An attestation with no citable reference is just an assertion — refused.
+    bare = await client.post(f"/v1/lending/{lid}/advaya-events",
+                             json={"event": "accepted"}, headers=ADMIN)
+    assert bare.status_code == 422, bare.text
+
+    # And the line ends where the lifecycle says it should.
+    final = (await client.get(f"/v1/lending/{lid}")).json()
+    assert final["stage"] in ("Disbursed", "Ready for Disbursement"), final["stage"]

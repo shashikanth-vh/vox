@@ -210,10 +210,17 @@ def _openapi() -> dict:
 def _schema_for(spec: dict, specs: dict) -> tuple[set[str], set[str]] | None:
     """(accepted field names, required field names) for an action's endpoint, or None
     when the route takes no body."""
-    path = (spec["url"].replace("{workflow_id}", "{workflow_id}")
-            .replace("{subject_id}", "{lending_id}"))
+    # The subject's id appears under different parameter names depending on the route:
+    # a bespoke route names it for its subject ({lending_id}), while the generic CRUD
+    # router names it {obj_id}. Try each rather than assume one.
+    candidates = [spec["url"].replace("{subject_id}", name)
+                  for name in ("{lending_id}", "{obj_id}", "{subject_id}")]
     for doc in specs.values():
-        op = (doc.get("paths", {}).get(path, {}) or {}).get(spec["method"].lower())
+        op = None
+        for path in candidates:
+            op = (doc.get("paths", {}).get(path, {}) or {}).get(spec["method"].lower())
+            if op is not None:
+                break
         if op is None:
             continue
         ref = ((op.get("requestBody", {}).get("content", {})
@@ -222,7 +229,8 @@ def _schema_for(spec: dict, specs: dict) -> tuple[set[str], set[str]] | None:
             return set(), set()
         model = doc["components"]["schemas"][ref.split("/")[-1]]
         return set(model.get("properties") or {}), set(model.get("required") or [])
-    raise AssertionError(f"{spec['key']}: no such route {spec['method']} {path}")
+    raise AssertionError(
+        f"{spec['key']}: no such route {spec['method']} {candidates[0]}")
 
 
 def test_every_action_matches_its_endpoints_schema():
@@ -458,3 +466,39 @@ def test_a_lending_citation_names_the_per_line_decision():
         "the citation must be verified against the register before it is offered")
     # And it is only used when the register confirms the subject matches.
     assert 'str(decision.get("subject_id") or "") == str(subject_id)' in src
+
+
+def test_the_stage_move_is_offered_and_names_what_it_is_waiting_for():
+    """'CP/CS Completed' was reachable only by knowing about a dropdown.
+
+    The register gates that stage on two evidences and nothing else — no field lock, no
+    role lock on the stage itself — so the move is a plain write that simply starts being
+    accepted once both are on file. Nothing said so: the evidence landed, the stage did
+    not move, and the screen was silent about which half was missing. It is an action now,
+    and while it is unavailable it says what it is waiting for, by name.
+    """
+    from app.api import _EVIDENCE_LABEL
+
+    spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == "lending.cpcs-complete")
+    assert spec["constant"]["stage"] == "CP/CS Completed"
+    assert spec["stages"] == {"Sanctioned"}          # it moves the line ON from Sanctioned
+    assert tuple(spec["evidence"]) == ("cp_cs_completion", "executed_agreement")
+    # The two evidence kinds the register's own policy requires for that stage.
+    from evam_backend_core.policy import EVIDENCE_FOR_STAGE
+    assert set(spec["evidence"]) == set(EVIDENCE_FOR_STAGE["Lending"]["CP/CS Completed"]), (
+        "the action must gate on exactly what the register gates on")
+    # And every kind it can wait for has words a credit manager would use.
+    for kind in spec["evidence"]:
+        assert kind in _EVIDENCE_LABEL and " " in _EVIDENCE_LABEL[kind], kind
+
+
+def test_an_evidence_gated_action_is_refused_by_name_not_by_silence():
+    """The reason a step is unavailable is the most useful thing on the panel."""
+    from app.api import _EVIDENCE_LABEL
+
+    # Every kind named by any action's evidence gate must have a human label, or the
+    # reason degrades to the raw enum.
+    for actions in _MAKER_ACTIONS.values():
+        for spec in actions:
+            for kind in (spec.get("evidence") or ()):
+                assert kind in _EVIDENCE_LABEL, f"{spec['key']} waits on unlabelled {kind}"

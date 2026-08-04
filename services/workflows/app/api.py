@@ -211,7 +211,26 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _NOTE],
         },
         {
+            "key": "lending.cpcs-complete",
+            "label": "Move to CP/CS Completed",
+            "method": "PATCH", "url": "/v1/lending/{subject_id}",
+            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
+            "stage_reason": "The line moves here from 'Sanctioned', once both governance "
+                            "evidences are on file.",
+            # The register gates this stage on TWO evidences and nothing else — no field
+            # lock, no role lock on the stage itself. So the step is a plain write, and the
+            # only interesting question is whether the evidence is there. Before this
+            # existed the evidence would land, the stage would not move, and nothing on
+            # screen said which of the two was missing: the user was left to discover a
+            # dropdown. `evidence` names what the plane must confirm before offering it.
+            "evidence": ("cp_cs_completion", "executed_agreement"),
+            "constant": {"stage": "CP/CS Completed"},
+            "form": [],
+        },
+        {
             "key": "handover.prepare",
+            # The package must cite the executed agreement's digest; the plane supplies it.
+            "needs_evidence_refs": True,
             "label": "Prepare the Advaya handover package",
             "method": "POST", "url": "/v1/workflows/advaya-handover",
             "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed", "Ready for Disbursement"},
@@ -242,8 +261,14 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": {"Credit Head", "Management", "Admin"},
             "stages": {"Ready for Disbursement", "CP/CS Completed"},
             "stage_reason": "Available once the handover has been submitted to Advaya.",
+            # ORDER MATTERS and the register enforces it: a disbursement tranche may only
+            # be recorded once Advaya has ACCEPTED the handover, so recording one first is
+            # a 409. The options are listed in the order they happen, and say so, rather
+            # than leaving a user to discover the sequence by being refused.
             "form": [_f("event", "Confirmation", "select", required=True,
-                        options=["accepted", "rejected", "disbursed"]),
+                        options=["accepted", "rejected", "disbursed"],
+                        help_text="Advaya accepts (or rejects) the handover first; a "
+                                  "disbursement can only be recorded after an acceptance."),
                      _f("reference", "Advaya reference / UTR", required=True,
                         help_text="The reference on the confirmation you received. "
                                   "Recorded as the evidence for this step."),
@@ -334,6 +359,9 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "handover.prepare": ("requested_by",),
     "handover.submit": (),
     "advaya.attest": (),
+    # A plain stage write: the register attributes it to the verified caller from
+    # the forwarded identity, so there is no identity FIELD to fill.
+    "lending.cpcs-complete": (),
     "syndication.start": ("requested_by",),
     "syndication.lender-update": ("by",),
     "syndication.allocate": ("by",),
@@ -353,6 +381,16 @@ _RUN_ID_FOR: dict[str, tuple[str, str]] = {
 
 # Business statuses that mean "the maker has it back".
 _RETURNED_STATES = {"ReturnedForInformation", "Returned", "ReturnedToMaker"}
+
+
+# Evidence kinds in the words a credit manager uses, for the "still waiting on …" reason.
+_EVIDENCE_LABEL: dict[str, str] = {
+    "cp_cs_completion": "an approved CP/CS checklist",
+    "executed_agreement": "the executed agreement",
+    "credit_committee_approval": "the credit committee's approval",
+    "sanction_letter": "the sanction letter",
+    "advaya_acknowledgement": "Advaya's acknowledgement",
+}
 
 
 def _plane_of(spec: dict, url: str) -> str:
@@ -2984,6 +3022,29 @@ def create_app() -> FastAPI:
                                 "stage": business,
                                 "status_url": f"/v1/workflows/{workflow_id}"}
 
+        # What governance evidence is already on file for this subject — read once, so an
+        # action that depends on it can be offered (or refused, by name) without the user
+        # having to submit to find out.
+        on_file: set[str] = set()
+        evidence_refs: list[dict[str, str]] = []
+        ev_rows, ev_problem = await _register_get_as(
+            request, f"/v1/evidence?subject_type={subject_type}&subject_id={subject_id}",
+            who, caller)
+        if ev_problem is None:
+            for row_ev in (ev_rows.get("items") or []):
+                if row_ev.get("invalidated"):
+                    continue
+                kind = str(row_ev.get("evidence_kind") or "")
+                on_file.add(kind)
+                # The handover package must reference the EXECUTED AGREEMENT by digest —
+                # the register reconciles the submitted refs against the evidence on file
+                # and refuses a package that omits it. That is not something to ask a user
+                # to retype; hand the client the ref it must include.
+                if kind == "executed_agreement" and row_ev.get("sha256"):
+                    evidence_refs.append({"reference": str(row_ev.get("reference") or
+                                                           "Executed facility agreement"),
+                                          "sha256": str(row_ev["sha256"])})
+
         # The citation a governance evidence must carry.
         #
         # Not the run's own id: a deal's structuring workflow covers every facility on that
@@ -3034,6 +3095,11 @@ def create_app() -> FastAPI:
             # — the register refuses invented values, and rightly. An action that needs it
             # and has no run to cite is disabled with that reason, instead of failing at
             # submit after the user has filled the form in.
+            needed = [k for k in (spec.get("evidence") or ()) if k not in on_file]
+            if needed and enabled:
+                enabled, reason = False, (
+                    "Still waiting on " + " and ".join(_EVIDENCE_LABEL.get(k, k) for k in needed)
+                    + ".")
             if spec.get("provenance"):
                 if run_prov:
                     body.update(run_prov)
@@ -3058,6 +3124,11 @@ def create_app() -> FastAPI:
                 # Named screen for the steps a flat form cannot express; absent means the
                 # client builds its dialog from `form`.
                 **({"screen": spec["screen"]} if spec.get("screen") else {}),
+                # Refs the client must include in what it sends (the handover's mandatory
+                # executed-agreement digest). Kept OUT of `body` because the client adds to
+                # them rather than replacing them.
+                **({"evidence_refs": evidence_refs}
+                   if spec.get("needs_evidence_refs") and evidence_refs else {}),
                 **({"reason": reason} if not enabled else {}),
                 "body": body, "form": form,
             })

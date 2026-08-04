@@ -47,6 +47,13 @@ export interface WorkflowAction {
   screen?: 'cpcs-checklist' | 'handover-package' | 'executed-agreement';
   /** Ids and constants the plane pre-filled; merged under the form's own values. */
   body: Record<string, any>;
+  /**
+   * Document refs the client must INCLUDE in what it sends — the handover package has to
+   * cite the executed agreement's digest, and the register reconciles the submitted refs
+   * against the evidence on file. Kept out of `body` because the client adds to these
+   * rather than replacing them.
+   */
+  evidence_refs?: { reference: string; sha256: string }[];
   form: ActionField[];
 }
 
