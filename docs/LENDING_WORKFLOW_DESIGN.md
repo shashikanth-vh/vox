@@ -142,6 +142,22 @@ POST /v1/cam/{lending_id}/finalise     → renders the draft to a Data Register 
                                          (checksum recorded), status Submitted
 ```
 
+**Provider seam — today Claude, tomorrow whatever wins.** The workbench never calls
+Anthropic directly; it calls an engine interface (the same shape as VocX's pluggable
+STT backends):
+
+```
+CamEngine.generate(system, turns, docs) -> text      # one implementation per provider
+engine = build_engine(settings)                      # CAM_ENGINE=anthropic:claude-haiku-…
+```
+
+`cam_reports.model` records the provider AND model that produced each version, so two
+CAMs drafted by different engines are distinguishable forever. Adding a provider is a
+new implementation + a config value — no workbench, UI, or register change. The
+selected documents and the prompt doc are the engine's ONLY inputs, which is what
+makes the engine swappable: all the credit judgement lives in the analyst's prompt
+doc, none in provider-specific code.
+
 Mechanics, all proven elsewhere in the repo:
 * Document content is pulled from the Data Register by id; the **prompt doc is data,
   not code** — analysts own it, exactly like `config.json` owns VocX templates.
@@ -169,10 +185,21 @@ already enforces.
 
 ### [D] Sanction letter + terms capture — *small new piece, high leverage*
 
-On committee approval the analyst fills the **sanction letter template** (a Data
-Register template doc; Haiku `template_fill` can pre-fill from the CAM + committee
-note, human corrects). Filing it mints the `sanction_letter` evidence → the existing
-gate lets the stage move to **Sanctioned**.
+On committee approval the analyst fills the **sanction letter template**. The template
+itself is chosen, not hardcoded — resolution order:
+
+1. **Uploaded for this line** — the analyst uploads a case-specific template against
+   the lending line (Data Register, section "Sanction", kind `sanction_template`);
+2. **Tenant default** — otherwise the deployment's default sanction template, itself
+   just a Data Register document an Admin maintains (replacing the default is an
+   upload, not a deploy).
+
+The fill screen offers the choice explicitly: "use the default template" or "upload
+one for this case". The engine ([B]'s same provider seam) can pre-fill the chosen
+template from the CAM + committee note; the human corrects and files. Filing mints
+the `sanction_letter` evidence → the existing gate lets the stage move to
+**Sanctioned** — and the filed letter records WHICH template (document id + checksum)
+it was produced from.
 
 The important part is that the sanction terms are captured **structured**, not only
 as prose, because three downstream phases are born from them:
