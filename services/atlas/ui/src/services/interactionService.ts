@@ -41,7 +41,9 @@ function fromWire(r: any, refId: string): Interaction {
 }
 
 export const interactionService = {
-  types(): string[] { return db().interactionTypes || []; },
+  // Live mode: the vocabulary comes from /v1/ref like every other dropdown; the
+  // bundled list only backs mock/offline development.
+  types(): string[] { return db().ref?.['Interaction Type'] || db().interactionTypes || []; },
   for(refId: string): Interaction[] {
     return (db().interactions || []).filter((i: any) => i.refId === refId)
       .sort((a: any, b: any) => ((b.occurredAt || '') + (b.loggedAt || '')).localeCompare((a.occurredAt || '') + (a.loggedAt || '')));
