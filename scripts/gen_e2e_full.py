@@ -412,15 +412,33 @@ F.append(("01 · Users, roles & people  (Access via the gateway)", [
         "/v1/resolve?email={{rmEmail}}", headers=_ADMIN,
         tests=[OK, "pm.test('leads view is SCOPED for a BDRM', () => "
                    "pm.expect(pm.response.json().views.leads).to.eql('SCOPED'));"]),
-    req("POST /v1/people — Priya Nair (RM on record)", "POST", REG, "/v1/people",
-        body={"name": "Priya Nair", "full_name": "E2E Priya Nair", "role": "RM",
+    # The roster half of each persona. Three fields are load-bearing and were missing:
+    #   role   — the BDRM/Analyst dropdowns are populated from Employees WHERE the role
+    #            matches the bucket ("BDRM", "Deal Analyst", …). The old bodies said
+    #            "RM"/"Analyst", which match NO bucket, so every name list stayed empty
+    #            ("unable to select BDRM") even with the people on record.
+    #   email  — what binds this roster row to the Access sign-in, to VocX captures,
+    #            and to /v1/people/resolve.
+    #   name   — the SHORT handle leads/deals/trackers store.
+    req("POST /v1/people — Priya (BDRM / Syn RM / AM RM on record)", "POST", REG,
+        "/v1/people",
+        body={"name": "Priya", "full_name": "E2E Priya Nair",
+              "role": "BDRM, Syn RM, AM RM", "email": "{{rmEmail}}",
               "geography": "Karnataka", "inactive": False},
         tests=cap("rmPersonId"),
-        desc="Conversion refuses an rm that is not a Person on record — full_name matches."),
-    req("POST /v1/people — Arun Menon (Analyst on record)", "POST", REG, "/v1/people",
-        body={"name": "Arun Menon", "full_name": "E2E Arun Menon", "role": "Analyst",
+        desc="Conversion refuses an rm that is not a Person on record; the dropdowns "
+             "and identity binding both resolve through this row."),
+    req("POST /v1/people — Arun (Deal Analyst / Credit Head on record)", "POST", REG,
+        "/v1/people",
+        body={"name": "Arun", "full_name": "E2E Arun Menon",
+              "role": "Deal Analyst, Credit Head", "email": "{{makerEmail}}",
               "geography": "Karnataka", "inactive": False},
         tests=cap("analystPersonId")),
+    req("POST /v1/people — Divya (Management on record)", "POST", REG, "/v1/people",
+        body={"name": "Divya", "full_name": "E2E Divya Rao",
+              "role": "Management", "email": "{{checkerEmail}}",
+              "inactive": False},
+        tests=[OK_OR_EXISTS]),
 ]))
 
 F.append(("02 · Client (Entity) — the company master row", [

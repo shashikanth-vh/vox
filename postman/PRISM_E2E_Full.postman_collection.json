@@ -1257,7 +1257,7 @@
           ]
         },
         {
-          "name": "POST /v1/people \u2014 Priya Nair (RM on record)",
+          "name": "POST /v1/people \u2014 Priya (BDRM / Syn RM / AM RM on record)",
           "request": {
             "method": "POST",
             "header": [
@@ -1296,10 +1296,10 @@
                 "people"
               ]
             },
-            "description": "Conversion refuses an rm that is not a Person on record \u2014 full_name matches.",
+            "description": "Conversion refuses an rm that is not a Person on record; the dropdowns and identity binding both resolve through this row.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Priya Nair\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"RM\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
+              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1324,7 +1324,7 @@
           ]
         },
         {
-          "name": "POST /v1/people \u2014 Arun Menon (Analyst on record)",
+          "name": "POST /v1/people \u2014 Arun (Deal Analyst / Credit Head on record)",
           "request": {
             "method": "POST",
             "header": [
@@ -1365,7 +1365,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Arun Menon\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Analyst\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
+              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"geography\": \"Karnataka\",\n  \"inactive\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1384,6 +1384,68 @@
                   "if (_v) pm.environment.set('analystPersonId', String(_v)); else pm.environment.unset('analystPersonId');",
                   "pm.test('captured analystPersonId', () => pm.expect(_v, 'id missing from the response \u2014 the create failed; downstream requests would have fired with a null id').to.exist);",
                   "console.log('analystPersonId =', pm.environment.get('analystPersonId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/people \u2014 Divya (Management on record)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "e2e-runner"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-User-Roles",
+                "value": "Admin"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "people"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Divya\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"role\": \"Management\",\n  \"email\": \"{{checkerEmail}}\",\n  \"inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
                 ]
               }
             }
