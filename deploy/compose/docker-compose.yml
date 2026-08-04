@@ -549,6 +549,11 @@ services:
       # The orchestrator calls the Register directly for durable decision records + the handover
       # approval (server-minted delegated context), so it needs the Register's in-network URL.
       WORKFLOWS_REGISTER_BASE_URL: http://register:8000
+      # The CAM workbench engine lives HERE (the orchestrator serves /v1/cam/*), not on
+      # the worker — the key must reach THIS container or the workbench drafts with the
+      # offline stub while `docker compose exec workflows env` swears the key is set.
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
+      WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
       # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
       WORKFLOWS_API_KEYS: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
