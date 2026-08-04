@@ -1,0 +1,573 @@
+{
+  "info": {
+    "name": "PRISM Demo Users (Divya \u00b7 Arun \u00b7 Priya)",
+    "description": "One click instead of the Add-employee dialog three times: sign in as ADMIN, provision the demo trio in Access, sync the roster, set the reporting lines. Idempotent \u2014 run it after every fresh start.\n\nUse the PRISM_Full (or PRISM_Full_Dex) environment. Sign-in passwords for all three ship in the Dex dev config: 'prism'.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "POST /dex/token \u2014 sign in as ADMIN",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "url": {
+          "raw": "{{dexUrl}}/dex/token",
+          "host": [
+            "{{dexUrl}}"
+          ],
+          "path": [
+            "dex",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "password"
+            },
+            {
+              "key": "client_id",
+              "value": "prism"
+            },
+            {
+              "key": "scope",
+              "value": "openid email profile"
+            },
+            {
+              "key": "username",
+              "value": "{{userEmail}}"
+            },
+            {
+              "key": "password",
+              "value": "{{ssoPassword}}"
+            }
+          ]
+        },
+        "description": "Production posture only \u2014 captures the ID token the gateway verifies. Dev posture (empty dexUrl) skips this and rides on header trust."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.environment.get('dexUrl')) {",
+              "  pm.environment.set('adminToken', '');",
+              "  console.log('dexUrl empty \u2014 dev posture, header trust.');",
+              "  if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const b = pm.response.code === 200 ? pm.response.json() : {};",
+              "const tok = b.id_token || b.access_token || '';",
+              "pm.environment.set('adminToken', tok);",
+              "pm.test('admin signed in', () => pm.expect(tok, 'no token \u2014 check dexUrl/ssoPassword and that the admin exists in Dex').to.not.eql(''));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /access/v1/users \u2014 Divya (Management)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{accessUrl}}/v1/users",
+          "host": [
+            "{{accessUrl}}"
+          ],
+          "path": [
+            "v1",
+            "users"
+          ]
+        },
+        "description": "Identity + roles (the RBAC half). 409 = already provisioned \u2014 fine.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"divya.rao@evamfinance.com\",\n  \"full_name\": \"Divya Rao\",\n  \"short_name\": \"Divya\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Management\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /access/v1/users \u2014 Arun (Credit Head, Deal Analyst)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{accessUrl}}/v1/users",
+          "host": [
+            "{{accessUrl}}"
+          ],
+          "path": [
+            "v1",
+            "users"
+          ]
+        },
+        "description": "Identity + roles (the RBAC half). 409 = already provisioned \u2014 fine.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"arun.menon@evamfinance.com\",\n  \"full_name\": \"Arun Menon\",\n  \"short_name\": \"Arun\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Credit Head\",\n    \"Deal Analyst\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /access/v1/users \u2014 Priya (BDRM, Syn RM, AM RM)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{accessUrl}}/v1/users",
+          "host": [
+            "{{accessUrl}}"
+          ],
+          "path": [
+            "v1",
+            "users"
+          ]
+        },
+        "description": "Identity + roles (the RBAC half). 409 = already provisioned \u2014 fine.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"priya.nair@evamfinance.com\",\n  \"full_name\": \"Priya Nair\",\n  \"short_name\": \"Priya\",\n  \"phone\": \"+91-9800000001\",\n  \"is_active\": true,\n  \"roles\": [\n    \"BDRM\",\n    \"Syn RM\",\n    \"AM RM\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /v1/internal/people/sync-access \u2014 roster catches up",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/internal/people/sync-access",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "internal",
+            "people",
+            "sync-access"
+          ]
+        },
+        "description": "The register reconciles its people table FROM Access \u2014 dropdowns, scope and VocX all read this half."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+              "const b = pm.response.json() || {};",
+              "pm.test('roster holds the demo team', () => pm.expect(b.roster_total || 0).to.be.at.least(3));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /v1/people/resolve \u2014 arun",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/resolve?name=arun.menon@evamfinance.com",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "resolve"
+          ],
+          "query": [
+            {
+              "key": "name",
+              "value": "arun.menon@evamfinance.com"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+              "const r = (pm.response.json() || {}).resolved;",
+              "if (r && r.id) pm.environment.set('demo_arun_personId', r.id); else pm.environment.unset('demo_arun_personId');",
+              "pm.test('arun is on the roster', () => pm.expect(r, 'not resolved \u2014 did the sync request fail?').to.exist);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PATCH /v1/people \u2014 arun reports to Divya",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/{{demo_arun_personId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "{{demo_arun_personId}}"
+          ]
+        },
+        "description": "The reporting line drives team scope (a Head sees their reports' book). Roster-only \u2014 Access keys users by id, so the line lives here.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reports_to\": \"Divya\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /v1/people/resolve \u2014 priya",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/resolve?name=priya.nair@evamfinance.com",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "resolve"
+          ],
+          "query": [
+            {
+              "key": "name",
+              "value": "priya.nair@evamfinance.com"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+              "const r = (pm.response.json() || {}).resolved;",
+              "if (r && r.id) pm.environment.set('demo_priya_personId', r.id); else pm.environment.unset('demo_priya_personId');",
+              "pm.test('priya is on the roster', () => pm.expect(r, 'not resolved \u2014 did the sync request fail?').to.exist);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PATCH /v1/people \u2014 priya reports to Divya",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/{{demo_priya_personId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "{{demo_priya_personId}}"
+          ]
+        },
+        "description": "The reporting line drives team scope (a Head sees their reports' book). Roster-only \u2014 Access keys users by id, so the line lives here.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reports_to\": \"Divya\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
