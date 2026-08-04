@@ -934,7 +934,7 @@
             "description": "Sends the committee decision, prepares CP/CS and the handover package, owns the covenant register and the waiver.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{makerEmail}}\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Credit Head\",\n    \"Deal Analyst\"\n  ]\n}",
+              "raw": "{\n  \"email\": \"{{makerEmail}}\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"short_name\": \"Arun\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Credit Head\",\n    \"Deal Analyst\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -997,7 +997,7 @@
             "description": "Every APPROVAL that needs a different senior human: the lead-conversion approve, CP/CS + handover approvals, the syndication and AM decisions, the escalated EWS closure. Self-approval is refused throughout.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{checkerEmail}}\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Management\"\n  ]\n}",
+              "raw": "{\n  \"email\": \"{{checkerEmail}}\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"short_name\": \"Divya\",\n  \"is_active\": true,\n  \"roles\": [\n    \"Management\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

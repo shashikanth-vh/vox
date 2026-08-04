@@ -146,6 +146,14 @@ async def sync_people_from_access(ctx: RequestContext = Depends(get_context)) ->
                 changes["full_name"] = full
         if bool(row.inactive) != inactive:
             changes["inactive"] = inactive
+        # Handle upgrade — but ONLY off the defaulted value. A row whose handle is still
+        # the e-mail local part (what the sync mints when Access has no short_name) takes
+        # Access's short_name once one appears; a handle anyone chose deliberately, or
+        # that records may already cite, is never rewritten.
+        handle = (u.get("short_name") or "").strip()
+        if handle and (row.name or "").strip().lower() == email.split("@")[0].lower():
+            if handle.lower() != (row.name or "").strip().lower():
+                changes["name"] = handle
         if not changes:
             unchanged += 1
             continue

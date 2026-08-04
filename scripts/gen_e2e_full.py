@@ -393,6 +393,7 @@ F.append(("01 · Users, roles & people  (Access via the gateway)", [
     req("POST /access/v1/users — MAKER (Credit Head + Deal Analyst)", "POST", ACC, "/v1/users",
         headers=_ADMIN,
         body={"email": "{{makerEmail}}", "full_name": "E2E Arun Menon",
+              "short_name": "Arun",
               "is_active": True, "roles": ["Credit Head", "Deal Analyst"]},
         tests=[OK_OR_EXISTS],
         desc="Sends the committee decision, prepares CP/CS and the handover package, owns the "
@@ -400,6 +401,7 @@ F.append(("01 · Users, roles & people  (Access via the gateway)", [
     req("POST /access/v1/users — CHECKER (Management)", "POST", ACC, "/v1/users",
         headers=_ADMIN,
         body={"email": "{{checkerEmail}}", "full_name": "E2E Divya Rao",
+              "short_name": "Divya",
               "is_active": True, "roles": ["Management"]},
         tests=[OK_OR_EXISTS],
         desc="Every APPROVAL that needs a different senior human: the lead-conversion approve, "
