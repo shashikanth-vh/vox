@@ -436,3 +436,25 @@ def test_governance_evidence_cites_the_run_that_produced_it():
     # The register's own rule, restated: governance evidence needs a digest too, and the
     # digest IS the user's to supply (they hold the signed file).
     assert any(f["name"] == "sha256" and f.get("required") for f in spec["form"])
+
+
+def test_a_lending_citation_names_the_per_line_decision():
+    """A deal's structuring run covers EVERY facility on that deal.
+
+    Citing that run against one lending line is a claim the register rejects — "belongs to
+    a different subject (Deal …)" — because the decision it verifies against is recorded
+    per line, under "{run}:lending:{id}". The plane therefore asks the register which
+    decision it holds for the subject and cites THAT, rather than composing an identifier
+    and hoping it resolves.
+    """
+    import inspect
+
+    from app import api as api_mod
+
+    src = inspect.getsource(api_mod)
+    assert 'f"{workflow_id}:lending:{subject_id}"' in src, (
+        "a Lending citation must name the per-line decision, not the deal's run")
+    assert '/v1/internal/decisions/{candidate}' in src, (
+        "the citation must be verified against the register before it is offered")
+    # And it is only used when the register confirms the subject matches.
+    assert 'str(decision.get("subject_id") or "") == str(subject_id)' in src

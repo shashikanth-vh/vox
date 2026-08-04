@@ -2967,12 +2967,12 @@ def create_app() -> FastAPI:
         # reading it only while RUNNING left the executed-agreement action with no
         # workflow_id to cite, and the register refuses evidence that cannot name one.
         run_prov: dict[str, str] = {}
+        run_uuid = ""
         if workflow_id:
             with contextlib.suppress(RPCError, TemporalError, AttributeError):
                 handle = request.app.state.temporal.get_workflow_handle(workflow_id)
                 desc = await handle.describe()
-                if getattr(desc, "run_id", None):
-                    run_prov = {"workflow_id": workflow_id, "run_id": str(desc.run_id)}
+                run_uuid = str(getattr(desc, "run_id", "") or "")
                 if desc.status == WorkflowExecutionStatus.RUNNING:
                     run_state = "live"
                     business = ""
@@ -2983,6 +2983,23 @@ def create_app() -> FastAPI:
                     run_info = {"workflow_id": workflow_id, "status": "RUNNING",
                                 "stage": business,
                                 "status_url": f"/v1/workflows/{workflow_id}"}
+
+        # The citation a governance evidence must carry.
+        #
+        # Not the run's own id: a deal's structuring workflow covers every facility on that
+        # deal, so citing it against ONE lending line is a claim the register rejects — the
+        # decision it verifies against is recorded PER LINE, under "{run}:lending:{id}".
+        # So the plane asks the register which decision it actually holds for this subject
+        # and cites that, rather than composing an identifier and hoping. A subject with no
+        # recorded decision yields no citation, and the action that needs one is disabled
+        # with that reason instead of failing at submit.
+        if run_uuid and workflow_id:
+            candidate = (f"{workflow_id}:lending:{subject_id}"
+                         if subject_type == "Lending" else workflow_id)
+            decision, problem = await _register_get_as(
+                request, f"/v1/internal/decisions/{candidate}", who, caller)
+            if problem is None and str(decision.get("subject_id") or "") == str(subject_id):
+                run_prov = {"workflow_id": candidate, "run_id": run_uuid}
 
         # The NEXT CP/CS version, so the screen opens on it. A checklist is keyed on
         # (lending, version), so a client that always defaults to 1 hands the user a 409
