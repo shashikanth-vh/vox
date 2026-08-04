@@ -93,6 +93,13 @@ export const input = {
   '& .Mui-focused fieldset': { borderColor: `${vx.grn} !important` },
   '& .MuiInputLabel-root': { fontSize: 13, color: vx.mut },
   '& .MuiSelect-icon': { color: vx.mut },
+  // READ-ONLY IS NOT INVISIBLE. A committed report disables every field, and MUI's
+  // disabled inputs take the app theme's text-fill — a grey meant for a white page,
+  // illegible on this dark surface. The user's word for it was exact: the report
+  // "won't show the fields". Filed intel is the record; it stays fully readable.
+  '& .MuiInputBase-input.Mui-disabled': { WebkitTextFillColor: vx.ink, opacity: 0.88 },
+  '& .MuiInputBase-root.Mui-disabled': { bgcolor: vx.card2 },
+  '& .MuiInputLabel-root.Mui-disabled': { color: vx.mut },
 };
 
 /** A pill button — the design's default control. */

@@ -82,10 +82,12 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           onClose={() => setErr('')}>{err || rec.error}</Alert>
       )}
 
-      <Typography sx={{ fontSize: 34, fontWeight: 700, mb: 0.8, mt: 1 }}>Tap. Speak. Done.</Typography>
-      <Typography sx={{ fontSize: 15, color: vx.mut, mb: 3, maxWidth: 380, mx: 'auto' }}>
-        Up to {MAX_SECONDS / 60} minutes. Any language — EN, HI, Hinglish. VocX handles
-        transcription, structure and filing.
+      <Typography sx={{ fontSize: 34, fontWeight: 700, mb: 0.6, mt: 1, letterSpacing: '-.01em' }}>
+        Tap. Speak. Done.
+      </Typography>
+      <Typography sx={{ fontSize: 15, color: vx.mut, mb: 2.4, maxWidth: 400, mx: 'auto' }}>
+        Speak your field intel — a client meeting, a site visit, market colour.
+        Up to {MAX_SECONDS / 60} minutes, in any language: EN, HI, Hinglish.
       </Typography>
 
       {/* The mic. Recording is MOTION, not a colour swap: the button keeps the
@@ -161,6 +163,31 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
       {recording && (
         <Button size="small" onClick={rec.cancel} sx={{ textTransform: 'none', mt: 0.5,
           color: vx.mut }}>Cancel</Button>
+      )}
+
+      {/* What PRISM does with a spoken note — shown while idle, gone once a take is
+          running (the timer owns that moment). Not marketing: each step is literally
+          the next screen the user will see. */}
+      {!recording && !busy && (
+        <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'center', mt: 2.2,
+                   flexWrap: 'wrap', px: 1 }}>
+          {[
+            ['1', 'PRISM listens', 'transcribed in English, whatever you spoke'],
+            ['2', 'Structures the intel', 'client matched · key intel · next steps'],
+            ['3', 'Files on your approval', 'register interaction · lead · calendar'],
+          ].map(([n, title, sub]) => (
+            <Box key={n} sx={{ flex: '1 1 118px', maxWidth: 148, textAlign: 'left',
+                               bgcolor: vx.card, border: `1px solid ${vx.line}`,
+                               borderRadius: '12px', p: 1.1 }}>
+              <Typography sx={{ fontSize: 10, fontWeight: 800, color: vx.grn,
+                                letterSpacing: '.14em', mb: 0.3 }}>STEP {n}</Typography>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: vx.ink,
+                                lineHeight: 1.25 }}>{title}</Typography>
+              <Typography sx={{ fontSize: 10.5, color: vx.mut, mt: 0.3,
+                                lineHeight: 1.35 }}>{sub}</Typography>
+            </Box>
+          ))}
+        </Box>
       )}
 
       {!recording && (
