@@ -131,13 +131,43 @@ export const accessService = {
     }
   },
 
-  /** PATCH {{accessUrl}}/v1/users/:id — Access is keyed by id, not by short name. */
+  /** PATCH {{accessUrl}}/v1/users/:id — Access is keyed by id, not by short name.
+   *  Identity fields ONLY: the update schema deliberately forbids `roles` (a role
+   *  change bumps the permissions epoch and is audited per grant) — use setRoles. */
   async updateUser(id: string, patch: Partial<AccessUserInput>): Promise<AccessUser> {
     try {
       const { data } = await access.patch<AccessUser>(`${requireAccessUrl()}/v1/users/${id}`, patch);
       return data;
     } catch (e) {
       throw accessError(e, 'update this user');
+    }
+  },
+
+  /**
+   * Reconcile a user's role set through Access's dedicated role endpoints
+   * (POST /v1/users/:id/roles, DELETE /v1/users/:id/roles/:role) — grants what is
+   * missing, revokes what is no longer held. 409 on grant ("already holds") and 404
+   * on revoke ("does not hold") are SUCCESS for a reconcile, so a retry after a
+   * partial failure completes instead of failing on the half that already landed.
+   */
+  async setRoles(id: string, want: string[], current: string[]): Promise<void> {
+    const wantSet = new Set(want);
+    const haveSet = new Set(current);
+    for (const r of want) {
+      if (haveSet.has(r)) continue;
+      try {
+        await access.post(`${requireAccessUrl()}/v1/users/${id}/roles`, { role: r });
+      } catch (e: any) {
+        if (e?.response?.status !== 409) throw accessError(e, `grant the role '${r}'`);
+      }
+    }
+    for (const r of current) {
+      if (wantSet.has(r)) continue;
+      try {
+        await access.delete(`${requireAccessUrl()}/v1/users/${id}/roles/${encodeURIComponent(r)}`);
+      } catch (e: any) {
+        if (e?.response?.status !== 404) throw accessError(e, `revoke the role '${r}'`);
+      }
     }
   },
 

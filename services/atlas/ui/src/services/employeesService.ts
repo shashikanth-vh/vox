@@ -286,24 +286,30 @@ export const employeesService = {
           .catch((e) => { throw new Error('The roster refused the edit: '
             + ((e?.response?.data && errText(e.response.data)) || e?.message || e)); });
       }
-      // Resolve the Access identity by id or e-mail; identity-relevant fields only.
+      // Resolve the Access identity by id or e-mail. Identity fields travel on the
+      // user PATCH; ROLES do not — Access's update schema forbids them (each grant/
+      // revoke bumps the permissions epoch and is audited individually), so the role
+      // set is reconciled through the dedicated role endpoints instead.
       const accessPatch: Record<string, any> = {};
-      if (patch.role !== undefined) {
-        accessPatch.roles = String(patch.role).split(',').map((r) => r.trim()).filter(Boolean);
-      }
+      const wantRoles = patch.role !== undefined
+        ? String(patch.role).split(',').map((r) => r.trim()).filter(Boolean) : undefined;
       if (patch.full !== undefined) accessPatch.full_name = patch.full;
       if (patch.name !== undefined) accessPatch.short_name = patch.name;
       if (patch.phone !== undefined) accessPatch.phone = patch.phone;
       if (patch.inactive !== undefined) accessPatch.is_active = !patch.inactive;
-      if (Object.keys(accessPatch).length) {
+      if (Object.keys(accessPatch).length || wantRoles) {
         let id = (p as any).accessId as string | undefined;
+        let heldRoles: string[] | undefined;
         const mail = (p.email || patch.email || '').trim().toLowerCase();
-        if (!id && mail) {
+        if (mail && (!id || wantRoles)) {
           const hits = await accessService.findUsers(mail).catch(() => []);
-          id = hits.find((u) => (u.email || '').toLowerCase() === mail)?.id;
+          const hit = hits.find((u) => (u.email || '').toLowerCase() === mail);
+          id = id || hit?.id;
+          heldRoles = hit?.roles;
         }
         if (id) {
-          await accessService.updateUser(id, accessPatch);
+          if (Object.keys(accessPatch).length) await accessService.updateUser(id, accessPatch);
+          if (wantRoles) await accessService.setRoles(id, wantRoles, heldRoles ?? []);
         } else if (accessPatch.is_active === false) {
           // Refusing to pretend: a deactivation that cannot reach the sign-in is not done.
           throw new Error('Could not find this person\'s sign-in identity in Access — '
