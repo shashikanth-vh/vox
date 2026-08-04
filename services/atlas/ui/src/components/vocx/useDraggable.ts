@@ -98,9 +98,12 @@ export function useDraggable(opts: {
     // calls setPointerCapture, which retargets every following pointer event — including
     // the pointerup that would have completed the click — to the handle. So the close and
     // roll-up buttons in the panel's header simply stopped working: the panel could not
-    // be shut. Interactive descendants opt out of the drag entirely.
-    if ((e.target as HTMLElement)?.closest?.(
-      'button, a, input, textarea, select, [role="button"], [role="tab"]')) {
+    // be shut. Interactive DESCENDANTS opt out of the drag entirely — but only
+    // descendants: the phone's mic FAB is itself a <button> that drags by its own body,
+    // and matching the handle too froze it in place ("the mic icon is not floating").
+    const control = (e.target as HTMLElement)?.closest?.(
+      'button, a, input, textarea, select, [role="button"], [role="tab"]');
+    if (control && control !== e.currentTarget) {
       return;
     }
     const el = e.currentTarget as HTMLElement;
