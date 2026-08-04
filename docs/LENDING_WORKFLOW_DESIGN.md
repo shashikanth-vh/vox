@@ -30,18 +30,20 @@ Lead ──(approved conversion)──▶ Deal + Lending line (Data Awaited)
                             terms captured as structured data: CP items, CS items,
                             covenants, and the LMS account terms
                                       │
-                       [E] CP (conditions precedent) — versioned checklist
-                            items met / pending / waived; approval WITH exceptions
-                            recorded  →  stage: CP/CS Completed → Ready for Disb.
-                                      │
-                       [F] Disbursement — Advaya, MANUAL handshake
-                            handover package → operator executes in Advaya →
-                            manual acknowledgement (existing lane) → Disbursed
-                            LMS account OPENS on first tranche
-                                      │
-                       [G] CS (conditions subsequent) — post-disbursement docs
-                            reminder workflow nags analyst until every item lands
-                                      │
+                       [E] CP (conditions precedent)      [G] CS (conditions
+                            versioned checklist; items          subsequent) — runs IN
+                            met / pending / waived;             PARALLEL from sanction:
+                            approval WITH exceptions            never blocks E or F,
+                            → CP/CS Completed →                 continues long after
+                            Ready for Disbursement              disbursement; reminder
+                                      │                         workflow nags until
+                       [F] Disbursement — Advaya,               every item lands
+                            MANUAL handshake                          │
+                            handover package → operator               │
+                            executes in Advaya → manual               │
+                            acknowledgement → Disbursed               │
+                            LMS account OPENS on 1st tranche          │
+                                      │◀──────────────────────────────┘
                        [H] Covenants — periodic until closure
                             scheduler mints each due cycle; docs + metric tests;
                             breach → EWS case (severity from the covenant)
@@ -209,11 +211,16 @@ Excel).
 
 ### [G] CS + reminder workflow — *new Temporal workflow, existing carriers*
 
-CS checklist = another `CpcsChecklist` (kind `CS`), seeded from sanction terms,
-opened automatically when the line reaches **Disbursed**.
+CS checklist = another `CpcsChecklist` (kind `CS`), seeded from sanction terms and
+opened **at sanction, not at disbursement** — CS runs in parallel with CP and the
+disbursement lane. That is the nature of conditions subsequent: they never block the
+money going out, and the analyst keeps collecting them long after it has. A customer
+who hands over a CS paper early files it early; one who stalls keeps being chased
+after disbursement — same checklist, same reminders, no phase boundary to wait for.
 
-`CsFollowUpWorkflow` (Temporal, one per lending line): sleeps on a configurable
-cadence (default: 7 days), and while any required CS item is `Pending`:
+`CsFollowUpWorkflow` (Temporal, one per lending line, started when the CS checklist
+is seeded): sleeps on a configurable cadence (default: 7 days), and while any
+required CS item is `Pending`:
 * mints a **Notification** to the analyst ("call the customer — N documents
   outstanding: …") and a **CalendarEvent**;
 * escalates to the Credit Head after a configurable number of silent cycles;
@@ -287,7 +294,7 @@ Each increment ships independently and is useful on its own.
 | 3 | **CP exceptions** | Deferred-with-reason items, approval-with-exceptions record, handover note carries them | register + UI (small) |
 | 4 | **LMS core** | `loan_accounts`/`loan_ledger`/`lms_config`, tranche→ledger hook, manual postings, statement view | register + UI |
 | 5 | **Accrual + classification jobs** | daily Temporal crons, DPD buckets, provisioning; status onto the statement header | workflows |
-| 6 | **CS reminders** | `CsFollowUpWorkflow` + notifications/calendar + escalation | workflows |
+| 6 | **CS reminders** | `CsFollowUpWorkflow` + notifications/calendar + escalation (starts at sanction — no dependency on the disbursement increments) | workflows |
 | 7 | **Covenant cycles** | `CovenantCycleWorkflow`, `covenant_reviews`, breach→EWS | workflows + register |
 | 8 | **Closure** | closure action (gated: zero balance), stops G/H/I, terminal ledger row | register |
 
