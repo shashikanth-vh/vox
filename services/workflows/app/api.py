@@ -2157,6 +2157,30 @@ def create_app() -> FastAPI:
             return _problem(403, "Forbidden",
                             "Handing a facility over to Advaya requires Credit Head / Management / "
                             "Admin authority.")
+        # The package carries the CONDITIONS STILL OPEN at handover — the CS items (and
+        # CPs deferred as CS) the analyst keeps chasing while the money moves. Advaya
+        # sees exactly what was outstanding; the frozen snapshot proves it later.
+        note = payload.note
+        try:
+            cl = await request.app.state.http.get(
+                f"{settings.register_base_url.rstrip('/')}/v1/internal/cpcs-checklists",
+                params={"lending_id": payload.lending_id, "limit": 50},
+                headers={"X-API-Key": settings.register_api_key, "X-Tenant": caller.tenant})
+            rows = cl.json() if cl.status_code == 200 else []
+            rows = rows.get("items", rows) if isinstance(rows, dict) else rows
+            approved = [x for x in rows if x.get("status") == "Approved"]
+            latest = max(approved, key=lambda x: x.get("checklist_version") or 0,
+                         default=None)
+            open_conditions = [
+                f"{i.get('label') or i.get('key')} — {i.get('status') or 'Pending'}"
+                for i in ((latest or {}).get("items") or [])
+                if str(i.get("status") or "Pending") not in ("Completed", "Waived")]
+            if open_conditions:
+                note = (((note + "\n\n") if note else "")
+                        + "Conditions outstanding at handover (subsequent / deferred — "
+                          "being chased in parallel):\n- " + "\n- ".join(open_conditions))
+        except (httpx.HTTPError, AttributeError, ValueError):
+            pass   # the handover proceeds; the conditions ride on best-effort
         wf_id = f"handover-{_tenant_slug(caller.tenant)}-{payload.lending_id}"
         memo = {"initiator": (caller.email or requested_by or ""), "tenant": caller.tenant,
                 "lending_id": payload.lending_id}
@@ -2167,7 +2191,7 @@ def create_app() -> FastAPI:
                 executed_document_refs=[d.model_dump() for d in payload.executed_document_refs],
                 cpcs_checklist_version=payload.cpcs_checklist_version,
                 delivery_method=payload.delivery_method, recipient=payload.recipient,
-                note=payload.note,
+                note=note,
                 approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={
@@ -3510,6 +3534,40 @@ def create_app() -> FastAPI:
                     "approve_url": f"{base}/approve",
                     "return_url": f"{base}/return",
                     "reject_url": f"{base}/reject", **extra})
+        # REMINDERS — not decisions. The register computes what must keep being raised
+        # (CS conditions still open after CP approval; covenant cycles due on disbursed
+        # lines) and Today shows them until the work lands. No verbs: there is nothing
+        # to approve here, only documents to chase and compliance to record.
+        _REMINDER_KINDS = {"cs-followup", "covenant-due"}
+        _REMINDER_ROLES = {"Deal Analyst", "Credit Head", "Management", "Admin"}
+        if (kind is None or kind in _REMINDER_KINDS) and (
+                caller_roles is None or caller_roles & _REMINDER_ROLES):
+            try:
+                fu = await request.app.state.http.get(
+                    f"{settings.register_base_url.rstrip('/')}/v1/internal/follow-ups",
+                    headers={"X-API-Key": settings.register_api_key, "X-Tenant": tenant})
+                for row in (fu.json().get("items", []) if fu.status_code == 200 else []):
+                    if kind is not None and row.get("kind") != kind:
+                        continue
+                    company = row.get("company") or ""
+                    if row.get("kind") == "cs-followup":
+                        stage_txt = (f"{row.get('count')} condition(s) outstanding"
+                                     + (f" · {company}" if company else "")
+                                     + " — chase the documents")
+                    else:
+                        stage_txt = (f"Covenant '{row.get('name')}' "
+                                     + ("OVERDUE since " if row.get("overdue") else "due ")
+                                     + str(row.get("due_on") or "")
+                                     + (f" · {company}" if company else ""))
+                    pending.append({
+                        "kind": row["kind"],
+                        "subject_id": row.get("lending_id") or row.get("entity_id") or "",
+                        "workflow_id": None, "status": "Reminder", "stage": stage_txt,
+                        "requested_by": row.get("prepared_by") or "",
+                        "started_at": row.get("created_at") or row.get("due_on") or ""})
+            except (httpx.HTTPError, AttributeError, ValueError):
+                pass   # reminders are additive; the decision queue still serves
+
         pending.sort(key=lambda r: r["started_at"] or "")
         # Always say WHAT the list was scoped to. An empty queue then distinguishes
         # "nothing is waiting" from "you hold no approver role" — the second one is a

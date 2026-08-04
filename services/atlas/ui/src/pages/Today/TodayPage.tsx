@@ -103,7 +103,13 @@ export default function TodayPage() {
   // queue (CP/CS checklists, handover packages) — the approver saw a fraction of their
   // work. The plane already scopes this list to the caller's approver roles.
   const wfActionable = canDecideWf ? wfPending.filter((w) => actionsFor(w).length > 0) : [];
-  const wfMine = wfPending.filter((w) => !wfActionable.includes(w) && w.requestedBy.toLowerCase() === myEmail);
+  // REMINDERS — the plane's standing chases (CS conditions outstanding, covenant cycles
+  // due). No verbs: nothing to approve, only documents to collect and compliance to
+  // record; they stay on Today until the underlying rows say the work landed.
+  const REMINDER_KINDS: Record<string, string> = { 'cs-followup': 'CS chase', 'covenant-due': 'Covenant' };
+  const wfReminders = wfPending.filter((w) => w.kind in REMINDER_KINDS);
+  const wfMine = wfPending.filter((w) => !wfActionable.includes(w) && !wfReminders.includes(w)
+    && w.requestedBy.toLowerCase() === myEmail);
   const wfDone = () => { refetchWf(); refresh(); };
 
   // Export the whole worklist (every section) as one CSV.
@@ -114,6 +120,7 @@ export default function TodayPage() {
     [...data.stageRed, ...data.stageAmber].forEach((a) => rows.push([`Stage ${a.sev}`, a.isLead || data.nameOf(a.code), `${a.rule} · ${a.why} · with ${a.owner}`, a.code]));
     [...reqActionable, ...reqMine].forEach((r) => rows.push(['Stage-change request', coName(r.code), `${r.line}: ${r.currentStage || '—'} → ${r.targetStage}`, r.status]));
     [...wfActionable, ...wfMine].forEach((w) => rows.push(['Workflow approval', kindLabel(w.kind), `${w.stage} · raised by ${w.requestedBy} ${since(w.startedAt)}`, w.workflowId]));
+    wfReminders.forEach((w) => rows.push(['Reminder', REMINDER_KINDS[w.kind] || kindLabel(w.kind), w.stage, w.subjectId]));
     data.snoozed.forEach((s) => rows.push(['Parked', s.label, `parked ${s.when}${s.by ? ' · by ' + s.by : ''}`, '']));
     saveCsv(toCsv(['Item', 'Name', 'Detail', 'Ref'], rows), 'atlas_today');
   };
@@ -149,7 +156,7 @@ export default function TodayPage() {
   );
 
   const empty = !data.due.length && !data.contactRed.length && !data.contactAmber.length && !data.stageRed.length && !data.stageAmber.length
-    && !wfActionable.length && !wfMine.length;
+    && !wfActionable.length && !wfMine.length && !wfReminders.length;
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto' }}>
@@ -191,6 +198,18 @@ export default function TodayPage() {
               <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDF1F3', color: tokens.muted, whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
               <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
               {hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
+            </ChLine>
+          ))}
+        </Section>
+      )}
+
+      {wfReminders.length > 0 && (
+        <Section title="Chase & monitor" count={wfReminders.length} defaultOpen>
+          {wfReminders.map((w, i) => (
+            <ChLine key={pendingKey(w) + i}>
+              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#FFF3E0', color: '#9A6A00', whiteSpace: 'nowrap' }}>{REMINDER_KINDS[w.kind]}</Box>
+              <Box component="b" sx={{ color: tokens.ink }}>{w.stage}</Box>
+              {hint(w.requestedBy ? `owner ${w.requestedBy}` : 'standing reminder — clears when the work lands')}
             </ChLine>
           ))}
         </Section>

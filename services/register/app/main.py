@@ -22,6 +22,7 @@ from app.api.documents_lifecycle import router as documents_lifecycle_router
 from app.api.evidence import router as evidence_router
 from app.api.ews import router as ews_router
 from app.api.export import router as export_router
+from app.api.followups import router as followups_router
 from app.api.handover import router as handover_router
 from app.api.imports import router as import_router
 from app.api.notifications import router as notifications_router
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
         documents_lifecycle_router,
         notifications_router,
         covenants_router,
+        followups_router,
         ews_router,
         closure_router,
         reconciliation_router,

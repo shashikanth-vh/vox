@@ -207,6 +207,55 @@ async def test_the_default_sanction_template_seeds_once_and_only_once(client: As
     assert row.content_type.endswith("wordprocessingml.document")
 
 
+async def test_follow_ups_raise_cs_chases_and_covenant_cycles(client: AsyncClient):
+    """The standing reminders: an APPROVED checklist with conditions still open keeps a
+    cs-followup alive, and an active covenant on a DISBURSED line raises its current
+    cycle (overdue when past grace). Both carry the company name — a reminder that
+    reads as a UUID chases nobody."""
+    from datetime import date, timedelta
+
+    from app.db.session import get_sessionmaker
+    from app.models import LendingTracker
+    from app.models.covenants import Covenant
+    from app.models.cpcs import CpcsChecklist
+    from app.seed.loader import ensure_tenant
+
+    ent = (await client.post("/v1/entities", json={
+        "code": f"FU-{uuid.uuid4().hex[:6]}", "legal_name": "Followup Energy"})).json()
+    lend = (await client.post("/v1/lending", json={"entity_id": ent["id"]})).json()
+
+    sm = get_sessionmaker()
+    async with sm() as session:
+        tenant_id = await ensure_tenant(session, "EVAM", "Evam Finance")
+        row = await session.get(LendingTracker, uuid.UUID(lend["id"]))
+        row.stage = "Disbursed"           # covenant cycles start when money moves
+        session.add(CpcsChecklist(
+            tenant_id=tenant_id, lending_id=lend["id"], checklist_version=1,
+            status="Approved", prepared_by="arun.menon@evamfinance.com",
+            items=[{"key": "end-use", "label": "End-use certificate",
+                    "condition_type": "CS", "status": "Pending"},
+                   {"key": "board", "label": "Board resolution",
+                    "condition_type": "CP", "status": "Completed"}],
+            created_by="test"))
+        session.add(Covenant(
+            tenant_id=tenant_id, entity_id=uuid.UUID(ent["id"]),
+            lending_id=uuid.UUID(lend["id"]), name="DSCR >= 1.2",
+            covenant_type="Financial", metric="dscr", operator=">=", threshold=1.2,
+            frequency="Quarterly", first_due_on=date.today() - timedelta(days=10),
+            created_by="test"))
+        await session.commit()
+
+    out = (await client.get("/v1/internal/follow-ups")).json()
+    mine = [i for i in out["items"] if i.get("lending_id") == lend["id"]]
+    cs = next(i for i in mine if i["kind"] == "cs-followup")
+    assert cs["count"] == 1 and cs["outstanding"] == ["End-use certificate"]
+    assert cs["company"] == "Followup Energy"
+    assert cs["prepared_by"] == "arun.menon@evamfinance.com"
+    cov = next(i for i in mine if i["kind"] == "covenant-due")
+    assert cov["name"] == "DSCR >= 1.2" and cov["overdue"] is True
+    assert cov["company"] == "Followup Energy"
+
+
 async def test_a_company_carrying_live_rows_cannot_be_deleted(client: AsyncClient):
     """Deleting a company under a live book leaves every dependant — and the Data
     Register — pointing at nothing, so the register refuses and NAMES what it still

@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (246 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (248 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -7851,6 +7851,48 @@
               }
             },
             {
+              "name": "GET /v1/internal/follow-ups \u2014 Open CS chases and covenant cycles due \u2014 computed fresh",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/follow-ups",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "follow-ups"
+                  ],
+                  "query": [
+                    {
+                      "key": "window_days",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/handover-packages \u2014 MAKER prepares the Advaya handover package (does NOT advance the stage)",
               "request": {
                 "method": "POST",
@@ -9025,6 +9067,43 @@
                     "download"
                   ]
                 }
+              }
+            },
+            {
+              "name": "GET /v1/lending/{lending_id}/tranches \u2014 The tranche schedule (T1, T2, \u2026) as the drawer shows it",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/tranches",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "tranches"
+                  ]
+                },
+                "description": "The USER-facing read of the same schedule \u2014 the internal route stays service-only\n(it is the write lane's mirror), while the drawer needs to show T1/T2, amounts,\nUTRs and what remains. Gated like every other company-composite read."
               }
             }
           ]

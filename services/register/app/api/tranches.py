@@ -194,17 +194,38 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
     return _serialize(row)
 
 
+def _schedule(line: LendingTracker, rows: list[DisbursementTranche],
+              lending_id: str) -> dict[str, Any]:
+    """The tranche SCHEDULE as people talk about it: T1, T2, … in the order the money
+    moved, with the reconciliation totals."""
+    total = sum(float(r.amount) for r in rows)
+    ceiling = _ceiling(line)
+    return {"lending_id": lending_id, "stage": line.stage,
+            "items": [{**_serialize(r), "tranche_no": f"T{i + 1}"}
+                      for i, r in enumerate(rows)],
+            "total_disbursed": total, "ceiling": ceiling,
+            "fully_disbursed": (ceiling is not None and total >= ceiling - 1e-9),
+            "remaining": (None if ceiling is None else max(ceiling - total, 0.0))}
+
+
 @router.get("/v1/internal/lending/{lending_id}/tranches", tags=["Internal"],
             summary="A line's disbursement tranches + reconciliation totals")
 async def list_tranches(lending_id: str,
                         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     _require_service(ctx)
     line = await _line(ctx, lending_id)
-    rows = await _existing(ctx, lending_id)
-    total = sum(float(r.amount) for r in rows)
-    ceiling = _ceiling(line)
-    return {"lending_id": lending_id, "stage": line.stage,
-            "items": [_serialize(r) for r in rows],
-            "total_disbursed": total, "ceiling": ceiling,
-            "fully_disbursed": (ceiling is not None and total >= ceiling - 1e-9),
-            "remaining": (None if ceiling is None else max(ceiling - total, 0.0))}
+    return _schedule(line, await _existing(ctx, lending_id), lending_id)
+
+
+@router.get("/v1/lending/{lending_id}/tranches", tags=["Lending"],
+            summary="The tranche schedule (T1, T2, …) as the drawer shows it")
+async def list_tranches_user(lending_id: str,
+                             ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The USER-facing read of the same schedule — the internal route stays service-only
+    (it is the write lane's mirror), while the drawer needs to show T1/T2, amounts,
+    UTRs and what remains. Gated like every other company-composite read."""
+    from app.api.custom import _ensure_company_read
+
+    line = await _line(ctx, lending_id)
+    await _ensure_company_read(ctx, line.entity_id)
+    return _schedule(line, await _existing(ctx, lending_id), lending_id)

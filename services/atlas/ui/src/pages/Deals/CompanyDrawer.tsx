@@ -211,6 +211,11 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
             {/* What the workflow plane says this user may do next on this
                 line — served, not guessed. */}
             <ActionsPanel subjectType="Lending" subjectId={r.id} code={code} entityId={(c as any)?.entityId} />
+            {/* T1, T2, … — Advaya's disbursement evidence. Rendered once the line can
+                carry tranches; the register writes them only from Advaya confirmations. */}
+            {isRegisterId(r.id) && ['Ready for Disbursement', 'Disbursed', 'Closed'].includes(r.stage) && (
+              <TranchesBlock lendingId={r.id} />
+            )}
             <Box sx={{ mt: 1 }}><TextFld label="Remarks" value={r.remarks} disabled={roLend} onChange={(v) => updL(r.id, 'remarks', v)} multiline /></Box>
           </DrawerSection>
         ))}
@@ -294,5 +299,52 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
       <DataRegisterDialog code={code} open={regOpen} onClose={() => setRegOpen(false)} />
       <StageChangeDialog open={!!stageReq} code={code} presetLine={stageReq?.line} refId={stageReq?.refId} currentStage={stageReq?.current} onClose={() => setStageReq(null)} onDone={bump} />
     </Drawer>
+  );
+}
+
+/**
+ * T1, T2, … — the disbursement tranches Advaya confirmed, with the reconciliation the
+ * register keeps (cumulative vs ceiling). Read-only here by design: tranches are written
+ * ONLY from Advaya confirmations ("Record an Advaya confirmation"), never typed into a
+ * grid — the actuals belong to the party that moved the money.
+ */
+function TranchesBlock({ lendingId }: { lendingId: string }) {
+  const [data, setData] = useState<any | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void import('../../api/http').then(({ api }) =>
+      api.get<any>(`/lending/${lendingId}/tranches`)
+        .then((d) => { if (alive) setData(d); })
+        .catch(() => { if (alive) setData(null); }));
+    return () => { alive = false; };
+  }, [lendingId]);
+  if (!data) return null;
+  const items: any[] = data.items || [];
+  return (
+    <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2 }}>
+      <Typography sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px', color: tokens.muted, fontWeight: 700, mb: 0.6 }}>
+        Disbursement tranches
+      </Typography>
+      {items.length === 0 && (
+        <Typography sx={{ fontSize: 12, color: tokens.muted }}>
+          None yet — each Advaya confirmation with event <b>disbursed</b> records the next tranche.
+        </Typography>
+      )}
+      {items.map((t) => (
+        <Box key={t.id} sx={{ display: 'flex', gap: 1, alignItems: 'baseline', py: 0.4, borderBottom: `1px dashed ${tokens.line}`, flexWrap: 'wrap' }}>
+          <Typography sx={{ fontSize: 12, fontWeight: 700, minWidth: 26 }}>{t.tranche_no}</Typography>
+          <Typography sx={{ fontSize: 12.5 }}>₹ {t.amount} Cr</Typography>
+          <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+            {[t.disbursed_on, t.advaya_reference || t.tranche_ref, t.recorded_by].filter(Boolean).join(' · ')}
+          </Typography>
+        </Box>
+      ))}
+      {items.length > 0 && (
+        <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
+          Disbursed <b>₹ {data.total_disbursed} Cr</b>
+          {data.ceiling != null && <> of ₹ {data.ceiling} Cr{data.fully_disbursed ? ' — fully disbursed' : ` · remaining ₹ ${data.remaining} Cr`}</>}
+        </Typography>
+      )}
+    </Box>
   );
 }
