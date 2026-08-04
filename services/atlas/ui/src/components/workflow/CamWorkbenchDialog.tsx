@@ -290,7 +290,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
                 Pick the source documents and the credit team's <b>prompt document</b> — the
                 engine drafts only from what you select, and says which documents it could
-                not read. PDF and Word documents are read as text.
+                not read. PDF and Word documents are read as text; a <b>scanned</b> PDF is
+                handed to the engine to read visually.
               </Typography>
               {!docs.length && (
                 <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>

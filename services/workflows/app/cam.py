@@ -68,8 +68,19 @@ def extract_text(ctype: str, blob: bytes) -> tuple[str, str | None]:
             return "", f"could not read the PDF ({exc})"
         if text.strip():
             return text, None
-        return "", "the PDF has no extractable text (a scan needs OCR, which is not wired)"
+        return "", _SCANNED_PDF
     return "", f"binary content ({ctype or 'unknown type'}) — no extractor for this format"
+
+
+# The marker reason for a PDF with no text layer — a SCAN. Not a dead end: an engine
+# that reads documents visually (Anthropic's PDF support) is handed the file itself.
+_SCANNED_PDF = "the PDF has no text layer (a scan)"
+_PDF_ATTACH_MAX_BYTES = 10 * 1024 * 1024   # Anthropic's request cap is 32MB total
+_PDF_ATTACH_MAX_DOCS = 4                   # …and ~100 pages across attached PDFs
+
+
+def is_pdf(ctype: str, blob: bytes) -> bool:
+    return (ctype or "").lower().startswith("application/pdf") or blob[:5] == b"%PDF-"
 _SYSTEM = (
     "You are drafting a Credit Assessment Memo (CAM) for a climate-finance lender. "
     "Work ONLY from the supplied documents and the analyst's prompt document; where a "
@@ -83,12 +94,18 @@ _SYSTEM = (
 # --------------------------------------------------------------------------- #
 class CamEngine:
     """One drafting engine. ``generate`` gets the full conversation each call —
-    engines are stateless; the register's cam_turns is the memory."""
+    engines are stateless; the register's cam_turns is the memory.
+
+    ``supports_documents``: whether a turn's content may be a BLOCK LIST carrying
+    base64 PDF documents (how scanned files reach an engine that reads them
+    visually). Engines that cannot get plain strings only.
+    """
 
     name = "stub:none"
+    supports_documents = False
 
     async def generate(self, http: Any, system: str,
-                       turns: list[dict[str, str]]) -> str:  # pragma: no cover - interface
+                       turns: list[dict[str, Any]]) -> str:  # pragma: no cover - interface
         raise NotImplementedError
 
 
@@ -106,12 +123,14 @@ class StubEngine(CamEngine):
 
 
 class AnthropicEngine(CamEngine):
+    supports_documents = True   # the Messages API reads PDFs, scanned pages included
+
     def __init__(self, model: str, api_key: str) -> None:
         self.model = model
         self.api_key = api_key
         self.name = f"anthropic:{model}"
 
-    async def generate(self, http: Any, system: str, turns: list[dict[str, str]]) -> str:
+    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]]) -> str:
         r = await http.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
@@ -196,25 +215,60 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 headers["X-User-Roles"] = ",".join(caller.roles)
         return headers
 
-    async def _doc_text(request: Request, caller: Any, who: str,
-                        doc_id: str) -> tuple[str, str | None]:
-        """(text, skip_reason). Text-like content comes back whole (bounded);
-        binary formats are skipped WITH the reason."""
+    async def _doc_fetch(request: Request, caller: Any, who: str,
+                         doc_id: str) -> tuple[bytes | None, str, str | None]:
+        """(blob, content_type, fetch_error) — one read, shared by text extraction
+        and the scanned-PDF attachment path."""
         path = f"/v1/documents/{doc_id}/content"
         r = await request.app.state.http.get(
             f"{base}{path}",
             headers=_reg_headers(request, caller, who, "GET", path),
             follow_redirects=True)
         if r.status_code == 404:
-            return "", "not found on the register"
+            return None, "", "not found on the register"
         if r.status_code >= 300:
-            return "", f"register refused the read (HTTP {r.status_code})"
-        text, reason = extract_text(r.headers.get("content-type") or "", r.content)
+            return None, "", f"register refused the read (HTTP {r.status_code})"
+        return r.content, r.headers.get("content-type") or "", None
+
+    async def _doc_text(request: Request, caller: Any, who: str,
+                        doc_id: str) -> tuple[str, str | None]:
+        """(text, skip_reason). Text-like content comes back whole (bounded);
+        formats with no extractor are skipped WITH the reason."""
+        blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
+        if err is not None:
+            return "", err
+        text, reason = extract_text(ctype, blob or b"")
         if reason is not None:
             return "", reason
         if len(text) > max_doc_chars:
             return text[:max_doc_chars], f"truncated to {max_doc_chars} characters"
         return text, None
+
+    def _pdf_block(blob: bytes) -> dict[str, Any]:
+        import base64
+
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf",
+                           "data": base64.b64encode(blob).decode("ascii")}}
+
+    async def _scan_blocks(request: Request, caller: Any, who: str,
+                           doc_ids: list[str]) -> list[dict[str, Any]]:
+        """Document blocks for the SCANNED PDFs among doc_ids — the files an engine
+        with visual PDF support reads itself. Bounded; failures drop silently here
+        because the caller already reported each document's fate at generate time."""
+        blocks: list[dict[str, Any]] = []
+        for doc_id in doc_ids:
+            if len(blocks) >= _PDF_ATTACH_MAX_DOCS:
+                break
+            blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
+            if err is not None or not blob or not is_pdf(ctype, blob):
+                continue
+            if len(blob) > _PDF_ATTACH_MAX_BYTES:
+                continue
+            _text, reason = extract_text(ctype, blob)
+            if reason == _SCANNED_PDF:
+                blocks.append(_pdf_block(blob))
+        return blocks
 
     async def _open_report(request: Request, caller: Any, who: str,
                            lending_id: str) -> dict[str, Any] | None:
@@ -264,16 +318,40 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         included: list[dict[str, str]] = []
         skipped: list[dict[str, str]] = []
         parts: list[str] = []
+        attachments: list[dict[str, Any]] = []
         for doc_id in payload.source_doc_ids:
-            text, reason = await _doc_text(request, caller, who, doc_id)
+            blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
+            if err is not None:
+                skipped.append({"doc_id": doc_id, "reason": err})
+                continue
+            text, reason = extract_text(ctype, blob or b"")
             if text.strip():
-                included.append({"doc_id": doc_id, **({"note": reason} if reason else {})})
+                note = None
+                if len(text) > max_doc_chars:
+                    text = text[:max_doc_chars]
+                    note = f"truncated to {max_doc_chars} characters"
+                included.append({"doc_id": doc_id, **({"note": note} if note else {})})
                 parts.append(f"\n\n===== DOCUMENT {doc_id} =====\n{text}")
-            else:
-                skipped.append({"doc_id": doc_id, "reason": reason or "empty"})
+                continue
+            # A SCAN has no text layer — but an engine with visual PDF support reads
+            # the file itself, so hand it over instead of refusing.
+            if (reason == _SCANNED_PDF and engine.supports_documents and blob
+                    and len(blob) <= _PDF_ATTACH_MAX_BYTES
+                    and len(attachments) < _PDF_ATTACH_MAX_DOCS):
+                attachments.append(_pdf_block(blob))
+                included.append({"doc_id": doc_id,
+                                 "note": "scanned PDF — attached for the engine to read"})
+                continue
+            if reason == _SCANNED_PDF:
+                reason = ("scanned PDF — " + (
+                    "over the attachment limits for one draft"
+                    if engine.supports_documents else
+                    "the offline stub engine cannot read scans; configure the "
+                    "Anthropic engine (WORKFLOWS_ANTHROPIC_API_KEY) to include it"))
+            skipped.append({"doc_id": doc_id, "reason": reason or "empty"})
         if not included:
             return problem(422, "Validation failed",
-                           "None of the selected documents could be read as text — "
+                           "None of the selected documents could be read — "
                            + "; ".join(f"{s['doc_id']}: {s['reason']}" for s in skipped))
 
         # Open the register's CAM version (one Draft at a time — the register enforces it).
@@ -290,12 +368,18 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         report = opened.json()
 
         first_ask = (f"{prompt_text.strip()}\n{''.join(parts)}")
+        # Scanned PDFs ride as document blocks beside the text — the engine reads them
+        # visually. (The durable transcript records WHICH documents, not the bytes.)
+        content: Any = ([*attachments, {"type": "text", "text": first_ask}]
+                        if attachments else first_ask)
         try:
             await _record_turn(request, caller, who, report["id"], "user",
                                f"[generate] prompt doc {payload.prompt_doc_id}; "
-                               f"documents: {', '.join(d['doc_id'] for d in included)}")
+                               f"documents: {', '.join(d['doc_id'] for d in included)}"
+                               + (f"; {len(attachments)} scanned PDF(s) attached"
+                                  if attachments else ""))
             draft = await engine.generate(request.app.state.http, _SYSTEM,
-                                          [{"role": "user", "content": first_ask}])
+                                          [{"role": "user", "content": content}])
             await _record_turn(request, caller, who, report["id"], "assistant",
                                draft, draft=draft)
         except RuntimeError as exc:
@@ -324,7 +408,15 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             f"{base}{path}", headers=_reg_headers(request, caller, who, "GET", path))
         turns = [{"role": t["role"], "content": t["content"]}
                  for t in (full.json().get("turns") or [])] if full.status_code < 300 else []
-        turns.append({"role": "user", "content": payload.instruction})
+        # The transcript stores text only, so scanned sources are RE-ATTACHED on each
+        # rework — the engine keeps seeing the same pages the first draft saw.
+        content: Any = payload.instruction
+        if engine.supports_documents and report.get("source_doc_ids"):
+            blocks = await _scan_blocks(request, caller, who,
+                                        list(report["source_doc_ids"]))
+            if blocks:
+                content = [*blocks, {"type": "text", "text": payload.instruction}]
+        turns.append({"role": "user", "content": content})
         try:
             await _record_turn(request, caller, who, report["id"], "user",
                                payload.instruction)

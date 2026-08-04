@@ -75,7 +75,8 @@ class _RegisterStub:
             rid = f"cam-{self._n}"
             self.reports[rid] = {"id": rid, "lending_id": body["lending_id"],
                                  "report_version": self._n, "status": "Draft",
-                                 "engine": body.get("engine"), "draft_md": ""}
+                                 "engine": body.get("engine"), "draft_md": "",
+                                 "source_doc_ids": body.get("source_doc_ids") or []}
             return httpx.Response(201, json=self.reports[rid],
                                   request=httpx.Request("POST", u))
         if "/turns" in u:
@@ -165,6 +166,82 @@ async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypat
     r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
                     json={"instruction": "anything"})
     assert r.status_code == 404, r.text
+
+
+async def test_scanned_pdfs_reach_an_engine_that_reads_them(monkeypatch):
+    """A PDF with no text layer is not a dead end: an engine with visual PDF support
+    gets the FILE as a document block — on the first draft AND re-attached on every
+    rework (the durable transcript stores text, not bytes). The offline stub cannot
+    read scans, and the skip reason says exactly that."""
+    from app import cam as cam_mod
+
+    real_extract = cam_mod.extract_text
+
+    def fake_extract(ctype, blob):  # noqa: ANN001 — the stub's scan marker
+        if b"scanned" in blob:
+            return "", cam_mod._SCANNED_PDF
+        return real_extract(ctype, blob)
+
+    monkeypatch.setattr(cam_mod, "extract_text", fake_extract)
+
+    class _SeeingEngine(cam_mod.CamEngine):
+        name = "test:seeing"
+        supports_documents = True
+
+        def __init__(self) -> None:
+            self.seen: list[list[dict]] = []
+
+        async def generate(self, http, system, turns):  # noqa: ANN001
+            self.seen.append(turns)
+            return "# CAM from the scans"
+
+    engine = _SeeingEngine()
+    monkeypatch.setattr(cam_mod, "build_engine", lambda _s: engine)
+
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    stub.docs["scan-1"] = ("application/pdf", "%PDF-1.7 scanned pages")
+    app.state.http = stub
+
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["scan-1", "fin-1"], "prompt_doc_id": "prompt-1"})
+    assert gen.status_code == 201, gen.text
+    body = gen.json()
+    assert {d["doc_id"] for d in body["included"]} == {"scan-1", "fin-1"}
+    scan_note = next(d for d in body["included"] if d["doc_id"] == "scan-1")["note"]
+    assert "attached" in scan_note
+    first = engine.seen[0][0]["content"]
+    assert isinstance(first, list) and first[0]["type"] == "document"
+    assert first[0]["source"]["media_type"] == "application/pdf"
+    assert first[-1]["type"] == "text" and "prompt" not in first[-1]["text"][:0]
+
+    # Rework: the scan rides along again, so the engine keeps seeing the same pages.
+    ref = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
+                      json={"instruction": "Deepen the collateral section."})
+    assert ref.status_code == 200, ref.text
+    last_turn = engine.seen[1][-1]["content"]
+    assert isinstance(last_turn, list) and last_turn[0]["type"] == "document"
+
+
+async def test_the_stub_engine_names_why_a_scan_is_skipped(monkeypatch):
+    from app import cam as cam_mod
+
+    real_extract = cam_mod.extract_text
+    monkeypatch.setattr(cam_mod, "extract_text",
+                        lambda c, b: ("", cam_mod._SCANNED_PDF) if b"scanned" in b
+                        else real_extract(c, b))
+    app = _app(monkeypatch)   # no key → StubEngine, supports_documents=False
+    stub = _RegisterStub()
+    stub.docs["scan-1"] = ("application/pdf", "%PDF-1.7 scanned pages")
+    app.state.http = stub
+
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["scan-1", "fin-1"], "prompt_doc_id": "prompt-1"})
+    assert gen.status_code == 201, gen.text
+    body = gen.json()
+    assert [d["doc_id"] for d in body["included"]] == ["fin-1"]
+    reason = next(s for s in body["skipped"] if s["doc_id"] == "scan-1")["reason"]
+    assert "stub engine cannot read scans" in reason
 
 
 def test_docx_and_unreadable_formats_extract_or_say_why():
