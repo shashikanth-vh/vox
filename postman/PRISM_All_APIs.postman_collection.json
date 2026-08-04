@@ -12436,7 +12436,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"instruction\": \"sample\",\n  \"update_draft\": false\n}",
+                  "raw": "{\n  \"instruction\": \"sample\",\n  \"update_draft\": false,\n  \"source_doc_ids\": [\n    \"sample\"\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"

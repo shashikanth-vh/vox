@@ -181,6 +181,9 @@ class RefineIn(BaseModel):
     # False: an ASK — the reply comes back (and joins the transcript) but the analyst's
     # working draft stays untouched; they copy what is useful into it themselves.
     update_draft: bool = True
+    # Documents to SEND WITH this turn — the conversation is not frozen at generate
+    # time; a summary of two fresh files mid-drafting is an ordinary move.
+    source_doc_ids: list[str] = Field(default_factory=list, max_length=25)
 
 
 class FinaliseIn(BaseModel):
@@ -450,18 +453,44 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             f"{base}{path}", headers=_reg_headers(request, caller, who, "GET", path))
         turns = [{"role": t["role"], "content": t["content"]}
                  for t in (full.json().get("turns") or [])] if full.status_code < 300 else []
-        # The transcript stores text only, so scanned sources are RE-ATTACHED on each
-        # rework — the engine keeps seeing the same pages the first draft saw.
-        content: Any = payload.instruction
+        # Documents sent WITH this turn: text extracts inline, scans as attachments,
+        # anything unreadable named in the response — same honesty as generate.
+        extra_parts: list[str] = []
+        turn_attachments: list[dict[str, Any]] = []
+        doc_notes: list[dict[str, str]] = []
+        for doc_id in payload.source_doc_ids:
+            blob, ctype, fetch_err = await _doc_fetch(request, caller, who, doc_id)
+            if fetch_err is not None:
+                doc_notes.append({"doc_id": doc_id, "reason": fetch_err})
+                continue
+            text, reason = extract_text(ctype, blob or b"")
+            if text.strip():
+                extra_parts.append(f"\n\n===== DOCUMENT {doc_id} =====\n"
+                                   + text[:max_doc_chars])
+                doc_notes.append({"doc_id": doc_id, "included": "text"})
+            elif (reason == _SCANNED_PDF and engine.supports_documents and blob
+                    and len(blob) <= _PDF_ATTACH_MAX_BYTES
+                    and len(turn_attachments) < _PDF_ATTACH_MAX_DOCS):
+                turn_attachments.append(_pdf_block(blob))
+                doc_notes.append({"doc_id": doc_id, "included": "attached"})
+            else:
+                doc_notes.append({"doc_id": doc_id, "reason": reason or "empty"})
+        ask_text = payload.instruction + "".join(extra_parts)
+        # The transcript stores text only, so the ORIGINAL scanned sources are
+        # RE-ATTACHED on each turn — the engine keeps seeing the same pages.
+        content: Any = ask_text
+        blocks: list[dict[str, Any]] = list(turn_attachments)
         if engine.supports_documents and report.get("source_doc_ids"):
-            blocks = await _scan_blocks(request, caller, who,
-                                        list(report["source_doc_ids"]))
-            if blocks:
-                content = [*blocks, {"type": "text", "text": payload.instruction}]
+            blocks = [*await _scan_blocks(request, caller, who,
+                                          list(report["source_doc_ids"])), *blocks]
+        if blocks:
+            content = [*blocks, {"type": "text", "text": ask_text}]
         turns.append({"role": "user", "content": content})
         try:
+            sent = [d["doc_id"] for d in doc_notes if d.get("included")]
             await _record_turn(request, caller, who, report["id"], "user",
-                               payload.instruction)
+                               payload.instruction
+                               + (f"\n[documents sent: {', '.join(sent)}]" if sent else ""))
             reply = await engine.generate(request.app.state.http, _SYSTEM, turns)
             # An ASK records the exchange (the transcript stays the audit answer to
             # "where did this figure come from?") but leaves draft_md alone.
@@ -471,7 +500,8 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return problem(502, "Drafting failed", str(exc))
         return {"report_id": report["id"], "report_version": report["report_version"],
                 "engine": engine.name, "draft_md": reply,
-                "updated_draft": payload.update_draft}
+                "updated_draft": payload.update_draft,
+                **({"documents": doc_notes} if payload.source_doc_ids else {})}
 
     @app.post("/v1/cam/{lending_id}/finalise", tags=["CAM"],
               summary="File the draft to the Data Register and submit it to committee")

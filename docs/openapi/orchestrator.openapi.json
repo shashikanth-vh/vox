@@ -1554,6 +1554,14 @@
             "title": "Instruction",
             "type": "string"
           },
+          "source_doc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 25,
+            "title": "Source Doc Ids",
+            "type": "array"
+          },
           "update_draft": {
             "default": true,
             "title": "Update Draft",

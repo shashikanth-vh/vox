@@ -128,6 +128,14 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const working = live && (live.status === 'Draft' || live.status === 'Returned') ? live : undefined;
   const submitted = live && live.status === 'Submitted' ? live : undefined;
 
+  // Everything pickable, in BOTH states: the company's file plus the deployment's
+  // example CAM (a format reference the engine may be shown).
+  const sources: EntityDoc[] = [
+    ...docs,
+    ...(defaults.example ? [{ id: defaults.example.id, title: defaults.example.title,
+      section: 'Template', doc_type: 'cam_example', content_type: '', status: '' }] : []),
+  ];
+
   const run = async (what: string, fn: () => Promise<string>) => {
     setErr(''); setInfo(''); setBusy(what);
     try {
@@ -161,17 +169,21 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   // The ASK lane's latest answer — shown beside the draft, never written into it.
   const [answer, setAnswer] = useState('');
 
+  // Ticked documents ride along with the NEXT Rework/Ask, then untick themselves.
   const refine = () => run('refine', async () => {
-    await camService.refine(subjectId, instruction.trim());
-    setInstruction('');
+    await camService.refine(subjectId, instruction.trim(), true, [...sel]);
+    setInstruction(''); setSel(new Set());
     return 'Draft reworked.';
   });
 
-  const ask = () => run('ask', async () => {
-    const out = await camService.refine(subjectId, instruction.trim(), false);
+  const ask = (text?: string) => run('ask', async () => {
+    const out = await camService.refine(subjectId, (text || instruction).trim(), false, [...sel]);
     setAnswer(out.draft_md || '');
-    setInstruction('');
-    return 'Answer below — your draft is untouched; copy in what is useful.';
+    if (!text) setInstruction('');
+    setSel(new Set());
+    const skipped = (out.documents || []).filter((d: any) => !d.included);
+    return 'Answer below — your draft is untouched; copy in what is useful.'
+      + (skipped.length ? ` ${skipped.length} document(s) could not be read.` : '');
   });
 
   const loadExample = () => run('example', async () => {
@@ -320,6 +332,58 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 300, overflow: 'auto',
               }}>{working.draft_md || 'No draft text yet — generate below.'}</Box>
             )}
+            {/* One screen for everything: the documents stay pickable WHILE drafting —
+                tick, view/copy, or summarise; ticked ones ride with the next turn. */}
+            {sources.length > 0 && (
+              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.4 }}>
+                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, flex: 1 }}>
+                    Documents — tick to send with your next Rework/Ask · view to read/copy
+                  </Typography>
+                  <Button size="small" disabled={!sel.size || !!busy}
+                    onClick={() => void ask(SUMMARY_BRIEF)}
+                    sx={{ textTransform: 'none', fontSize: 11.5, minWidth: 0 }}>
+                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
+                  </Button>
+                </Box>
+                <Box sx={{ maxHeight: 130, overflow: 'auto' }}>
+                  {sources.map((d) => (
+                    <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
+                      borderTop: `1px solid ${tokens.line}` }}>
+                      <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
+                      <Typography sx={{ fontSize: 12, flex: 1 }}>{d.title}</Typography>
+                      <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
+                        {[d.section, d.doc_type].filter(Boolean).join(' · ')}
+                      </Typography>
+                      <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
+                        sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            )}
+            {preview && (
+              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
+                    What the engine reads — {preview.title}
+                  </Typography>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => setPreview(null)}>Close</Button>
+                </Box>
+                {preview.note && (
+                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.5 }}>{preview.note}</Typography>
+                )}
+                {preview.text && (
+                  <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
+                    fontFamily: 'inherit', maxHeight: 180, overflow: 'auto', m: 0 }}>
+                    {preview.text}
+                  </Box>
+                )}
+              </Box>
+            )}
             <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'flex-start' }}>
               <TextField fullWidth size="small" multiline minRows={2}
                 label="Instruction / question — paste anything (doc extracts, figures, prompts)"
@@ -377,14 +441,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
         {/* ---- no live version: pick documents and generate -------------------------- */}
         {!live && !loading && (() => {
-          // Sources: the company's file, plus the deployment's example CAM (a format
-          // reference the engine may be shown). The prompt: the credit team's default
-          // ships with the deployment; a case-specific upload overrides it.
-          const sources: EntityDoc[] = [
-            ...docs,
-            ...(defaults.example ? [{ id: defaults.example.id, title: defaults.example.title,
-              section: 'Template', doc_type: 'cam_example', content_type: '', status: '' }] : []),
-          ];
           return (
             <Box>
               <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>

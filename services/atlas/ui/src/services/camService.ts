@@ -121,11 +121,13 @@ export const camService = {
    * it); false is an ASK — the reply comes back for the analyst to mine, the working
    * draft stays theirs. Both land on the transcript.
    */
-  async refine(lendingId: string, instruction: string,
-               updateDraft = true): Promise<{ draft_md: string; updated_draft?: boolean }> {
+  async refine(lendingId: string, instruction: string, updateDraft = true,
+               sourceDocIds: string[] = []): Promise<{ draft_md: string;
+                 updated_draft?: boolean; documents?: any[] }> {
     try {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/refine`,
-        { instruction, update_draft: updateDraft });
+        { instruction, update_draft: updateDraft,
+          ...(sourceDocIds.length ? { source_doc_ids: sourceDocIds } : {}) });
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
