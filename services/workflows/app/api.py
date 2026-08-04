@@ -393,6 +393,17 @@ _EVIDENCE_LABEL: dict[str, str] = {
 }
 
 
+# The signed internal context is BOUND to the route it was minted for, and the register
+# compares it against `request.url.path` — which never carries a query string. Minting it
+# with one (…/cpcs-checklists?lending_id=…) produced a path mismatch and a 403 on every
+# orchestrator read that filters, silently: the caller discarded the problem and used its
+# empty default. That is why a CP/CS screen re-opened on version 1 after v1 was approved,
+# and handed the user a 409 for a checklist they had just filled in.
+def _token_path(path: str) -> str:
+    """The path claim for a signed internal context — route only, never the query."""
+    return path.split("?", 1)[0]
+
+
 def _plane_of(spec: dict, url: str) -> str:
     """'orchestrator' or 'register' — which service answers this action's url.
 
@@ -1130,7 +1141,7 @@ def create_app() -> FastAPI:
                 tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
                 roles=list(caller.roles), effective_views=caller.effective_views,
                 effective_operations=caller.effective_operations, decision="FULL",
-                method=method, path=path)
+                method=method, path=_token_path(path))
         else:
             headers["X-User-Email"] = who
             if caller.user_id:
@@ -1632,7 +1643,7 @@ def create_app() -> FastAPI:
                 report_ids=list(caller.report_ids), report_emails=list(caller.report_emails),
                 effective_views=caller.effective_views,
                 effective_operations=caller.effective_operations, decision="FULL",
-                method="GET", path=path)
+                method="GET", path=_token_path(path))
         else:
             headers["X-User-Email"] = who
             if caller is not None and caller.roles:
@@ -2065,7 +2076,7 @@ def create_app() -> FastAPI:
                 user_id=checker.user_id or approved_by, roles=list(checker.roles),
                 effective_views=checker.effective_views,
                 effective_operations=checker.effective_operations, decision="FULL",
-                method="POST", path=path)
+                method="POST", path=_token_path(path))
         else:
             headers["X-User-Email"] = approved_by
             if checker.user_id:
@@ -2103,7 +2114,7 @@ def create_app() -> FastAPI:
                 tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
                 roles=list(caller.roles), effective_views=caller.effective_views,
                 effective_operations=caller.effective_operations, decision="FULL",
-                method="GET", path=path)
+                method="GET", path=_token_path(path))
         else:
             headers["X-User-Email"] = who
             if caller.user_id:
@@ -2137,7 +2148,7 @@ def create_app() -> FastAPI:
                 tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
                 roles=list(caller.roles), effective_views=caller.effective_views,
                 effective_operations=caller.effective_operations, decision="FULL",
-                method="POST", path=path)
+                method="POST", path=_token_path(path))
         else:
             headers["X-User-Email"] = who
             if caller.user_id:
@@ -3068,12 +3079,20 @@ def create_app() -> FastAPI:
         # gives it rather than letting them guess.
         next_version = 1
         if subject_type == "Lending":
-            existing, _ = await _register_get_as(
+            existing, ver_problem = await _register_get_as(
                 request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
                 who, caller)
-            rows = existing.get("items") if isinstance(existing, dict) else existing
-            versions = [int(r.get("checklist_version") or 0) for r in (rows or [])]
-            next_version = (max(versions) + 1) if versions else 1
+            if ver_problem is not None:
+                # Do not quietly fall back to 1. Defaulting on a FAILED read is how this
+                # hid: the screen opened on a version that already existed and refused the
+                # user's work at submit. Say the number is unknown instead.
+                log.warning("cpcs_next_version_unavailable",
+                            extra={"lending": subject_id})
+                next_version = 0
+            else:
+                rows = existing.get("items") if isinstance(existing, dict) else existing
+                versions = [int(r.get("checklist_version") or 0) for r in (rows or [])]
+                next_version = (max(versions) + 1) if versions else 1
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
@@ -3109,7 +3128,7 @@ def create_app() -> FastAPI:
                         "governance evidence must cite the run that produced it. Run the "
                         "structuring workflow first.")
             form = spec["form"]
-            if spec["key"] == "cpcs.prepare":
+            if spec["key"] == "cpcs.prepare" and next_version:
                 form = [{**f, "default": next_version} if f["name"] == "checklist_version"
                         else f for f in form]
             actions.append({

@@ -502,3 +502,39 @@ def test_an_evidence_gated_action_is_refused_by_name_not_by_silence():
         for spec in actions:
             for kind in (spec.get("evidence") or ()):
                 assert kind in _EVIDENCE_LABEL, f"{spec['key']} waits on unlabelled {kind}"
+
+
+def test_a_signed_context_is_bound_to_the_route_not_the_query():
+    """The register compares the token's path against request.url.path — which never
+    carries a query string.
+
+    Minting it with one 403'd every filtered read the orchestrator makes, silently: the
+    caller discarded the problem and used its empty default. That is why the CP/CS screen
+    re-opened on version 1 after v1 had been approved, then refused the user's work with a
+    409 for a checklist that already existed — and why an evidence gate would have read as
+    "still waiting" with the evidence sitting on file.
+    """
+    from app.api import _token_path
+
+    assert _token_path("/v1/internal/cpcs-checklists?lending_id=abc&limit=50") == (
+        "/v1/internal/cpcs-checklists")
+    assert _token_path("/v1/evidence?subject_type=Lending&subject_id=abc") == "/v1/evidence"
+    # A path with no query is unchanged — the case that always worked, and must keep to.
+    assert _token_path("/v1/internal/decisions/wf-1") == "/v1/internal/decisions/wf-1"
+    assert _token_path("") == ""
+    # Only the FIRST '?' splits: a query value containing one must not truncate the route.
+    assert _token_path("/v1/x?a=1?2") == "/v1/x"
+
+
+def test_no_signed_read_is_minted_with_a_query_string():
+    """Every mint site goes through the helper — a new one that forgets would fail the
+    same way, silently, months later."""
+    import inspect
+    import re
+
+    from app import api as api_mod
+
+    src = inspect.getsource(api_mod)
+    bare = re.findall(r"path=path\b(?!\s*\))", src) + re.findall(r"path=path\)", src)
+    assert not bare, (
+        "mint the internal context with _token_path(path) — a raw path may carry a query")
