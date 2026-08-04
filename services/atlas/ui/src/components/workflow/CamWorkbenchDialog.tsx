@@ -56,6 +56,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [promptDoc, setPromptDoc] = useState('');
   const [typedBrief, setTypedBrief] = useState('');
   const [uploading, setUploading] = useState(false);
+  // The documents stay folded out of the way until the analyst wants them.
+  const [docsOpen, setDocsOpen] = useState(false);
   // "Show me what the engine will read" — the extracted text of any pickable document,
   // in place. Copyable, so the analyst can also work with it outside the workbench.
   const [preview, setPreview] = useState<{ title: string; text: string; note?: string } | null>(null);
@@ -290,83 +292,143 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           );
         })()}
 
-        {/* ---- analyst: an open draft to rework and finalise ------------------------- */}
-        {working && (
+        {/* ---- analyst: the calm workbench ------------------------------------------- */}
+        {/* The DRAFT behaves like a Word document: a card you OPEN, edit, save & close —
+            and open again whenever needed. Everything else stays folded until wanted. */}
+        {working && editing && (
           <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.6 }}>
-              <Typography sx={{ fontSize: 12.5, color: tokens.muted, flex: 1 }}>
-                v{working.report_version} · {working.status === 'Returned'
-                  ? <>returned by the committee{working.decision_note ? <> — “{working.decision_note}”</> : null}; rework it below</>
-                  : 'draft in progress'} · engine {working.engine || '—'}
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.8 }}>
+              <Typography sx={{ fontSize: 13.5, fontWeight: 600, flex: 1 }}>
+                📄 CAM draft — v{working.report_version}
               </Typography>
-              {!editing && defaults.example && (
+              <Button size="small" variant="contained" disabled={!!busy || !draftText.trim()}
+                onClick={() => void saveEdit()} sx={{ mr: 1 }}>
+                {busy === 'save' ? 'Saving…' : 'Save & close'}
+              </Button>
+              <Button size="small" variant="outlined" disabled={!!busy}
+                onClick={() => setEditing(false)}>Close without saving</Button>
+            </Box>
+            <TextField fullWidth multiline minRows={18} maxRows={26} value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              sx={{ '& textarea': { fontSize: 12.8, lineHeight: 1.55 } }} />
+          </Box>
+        )}
+        {working && !editing && (
+          <Box>
+            {/* The draft, as a document card. */}
+            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.2,
+              display: 'flex', alignItems: 'center', gap: 1.2 }}>
+              <Typography sx={{ fontSize: 22 }}>📄</Typography>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography sx={{ fontSize: 13.5, fontWeight: 600 }}>
+                  CAM draft — v{working.report_version}
+                </Typography>
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                  {working.draft_md
+                    ? `${working.draft_md.length.toLocaleString()} characters · ${working.engine || '—'}`
+                    : 'empty — generate, ask, or start from the example'}
+                  {working.status === 'Returned' && (
+                    <> · returned by the committee{working.decision_note ? ` — “${working.decision_note}”` : ''}</>
+                  )}
+                </Typography>
+              </Box>
+              <Button size="small" variant="contained" disabled={!!busy}
+                onClick={() => { setDraftText(working.draft_md || ''); setEditing(true); }}>
+                Open
+              </Button>
+              {defaults.example && (
                 <Button size="small" disabled={!!busy} onClick={() => void loadExample()}
-                  title="Overwrites the current draft with the example CAM's text — then edit and fill it in"
+                  title="Replaces the draft with the example CAM's text — then Open and fill it in"
                   sx={{ textTransform: 'none', fontSize: 12 }}>
                   {busy === 'example' ? 'Loading…' : 'Start from the example'}
                 </Button>
               )}
-              {!editing && !!working.draft_md && (
-                <Button size="small" disabled={!!busy}
-                  onClick={() => { setDraftText(working.draft_md || ''); setEditing(true); }}
-                  sx={{ textTransform: 'none', fontSize: 12 }}>Edit the text</Button>
-              )}
             </Box>
-            {editing ? (
-              <>
-                <TextField fullWidth multiline minRows={10} maxRows={18} value={draftText}
-                  onChange={(e) => setDraftText(e.target.value)}
-                  sx={{ '& textarea': { fontSize: 12.5 } }} />
-                <Box sx={{ display: 'flex', gap: 1, mt: 0.8 }}>
-                  <Button size="small" variant="contained" disabled={!!busy || !draftText.trim()}
-                    onClick={() => void saveEdit()}>
-                    {busy === 'save' ? 'Saving…' : 'Save edits'}
-                  </Button>
-                  <Button size="small" variant="outlined" disabled={!!busy}
-                    onClick={() => setEditing(false)}>Cancel</Button>
-                </Box>
-              </>
-            ) : (
-              <Box component="pre" sx={{
-                whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2,
-                border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 300, overflow: 'auto',
-              }}>{working.draft_md || 'No draft text yet — generate below.'}</Box>
+
+            {/* The conversation — the centre of the screen. */}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+              <TextField fullWidth size="small" multiline minRows={2}
+                label="Ask the engine / instruct a rework — paste anything"
+                value={instruction} onChange={(e) => setInstruction(e.target.value)} />
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
+                  disabled={!instruction.trim() || !!busy} onClick={() => void refine()}
+                  sx={{ whiteSpace: 'nowrap' }}>
+                  {busy === 'refine' ? 'Reworking…' : 'Rework draft'}
+                </Button>
+                <Button variant="outlined" size="small"
+                  disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
+                  title="The answer comes back below — your draft stays untouched"
+                  sx={{ whiteSpace: 'nowrap' }}>
+                  {busy === 'ask' ? 'Asking…' : 'Ask only'}
+                </Button>
+              </Box>
+            </Box>
+            {defaults.prompt && (
+              <Button size="small" disabled={!!busy} sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.2 }}
+                onClick={() => void camService.docText(defaults.prompt!.id)
+                  .then((t) => setInstruction(t.text || ''))
+                  .catch((e: any) => setErr(e?.message || String(e)))}>
+                Insert the master prompt
+              </Button>
             )}
-            {/* One screen for everything: the documents stay pickable WHILE drafting —
-                tick, view/copy, or summarise; ticked ones ride with the next turn. */}
-            {sources.length > 0 && (
-              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.4 }}>
-                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, flex: 1 }}>
-                    Documents — tick to send with your next Rework/Ask · view to read/copy
+            {answer && (
+              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
+                    Answer — copy what is useful into the draft
                   </Typography>
-                  <Button size="small" disabled={!sel.size || !!busy}
-                    onClick={() => void ask(SUMMARY_BRIEF)}
-                    sx={{ textTransform: 'none', fontSize: 11.5, minWidth: 0 }}>
-                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
-                  </Button>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => void navigator.clipboard?.writeText(answer)}>Copy</Button>
+                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                    onClick={() => setAnswer('')}>Close</Button>
                 </Box>
-                <Box sx={{ maxHeight: 130, overflow: 'auto' }}>
-                  {sources.map((d) => (
-                    <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
-                      borderTop: `1px solid ${tokens.line}` }}>
-                      <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
-                      <Typography sx={{ fontSize: 12, flex: 1 }}>{d.title}</Typography>
-                      <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
-                        {[d.section, d.doc_type].filter(Boolean).join(' · ')}
-                      </Typography>
-                      <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
-                        sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
-                    </Box>
-                  ))}
+                <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
+                  fontFamily: 'inherit', maxHeight: 220, overflow: 'auto', m: 0 }}>{answer}</Box>
+              </Box>
+            )}
+
+            {/* Documents — folded until wanted. */}
+            {sources.length > 0 && (
+              <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+                <Box onClick={() => setDocsOpen((v) => !v)}
+                  sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.6, cursor: 'pointer',
+                    '&:hover': { bgcolor: '#FAFBFC' } }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
+                    {docsOpen ? '▾' : '▸'} Documents ({sources.length})
+                    {sel.size > 0 && ` — ${sel.size} will ride with the next Rework/Ask`}
+                  </Typography>
+                  {docsOpen && (
+                    <Button size="small" disabled={!sel.size || !!busy}
+                      onClick={(e) => { e.stopPropagation(); void ask(SUMMARY_BRIEF); }}
+                      sx={{ textTransform: 'none', fontSize: 11.5, minWidth: 0 }}>
+                      {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
+                    </Button>
+                  )}
                 </Box>
+                {docsOpen && (
+                  <Box sx={{ maxHeight: 150, overflow: 'auto' }}>
+                    {sources.map((d) => (
+                      <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
+                        borderTop: `1px solid ${tokens.line}` }}>
+                        <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
+                        <Typography sx={{ fontSize: 12, flex: 1 }}>{d.title}</Typography>
+                        <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
+                          {[d.section, d.doc_type].filter(Boolean).join(' · ')}
+                        </Typography>
+                        <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
+                          sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
               </Box>
             )}
             {preview && (
               <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
-                    What the engine reads — {preview.title}
+                    {preview.title}
                   </Typography>
                   <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
                     onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
@@ -384,48 +446,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 )}
               </Box>
             )}
-            <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'flex-start' }}>
-              <TextField fullWidth size="small" multiline minRows={2}
-                label="Instruction / question — paste anything (doc extracts, figures, prompts)"
-                value={instruction} onChange={(e) => setInstruction(e.target.value)} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
-                <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                  disabled={!instruction.trim() || !!busy} onClick={() => void refine()}
-                  sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'refine' ? 'Reworking…' : 'Rework draft'}
-                </Button>
-                <Button variant="outlined" size="small"
-                  disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
-                  title="The answer comes back below — your draft stays untouched"
-                  sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'ask' ? 'Asking…' : 'Ask only'}
-                </Button>
-              </Box>
-            </Box>
-            {defaults.prompt && (
-              <Button size="small" disabled={!!busy} sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.4 }}
-                title="Loads the EVAM master prompt into the box — then Rework draft applies it to everything the engine has seen"
-                onClick={() => void camService.docText(defaults.prompt!.id)
-                  .then((t) => setInstruction(t.text || ''))
-                  .catch((e: any) => setErr(e?.message || String(e)))}>
-                Insert the master prompt into the box
-              </Button>
-            )}
-            {answer && (
-              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
-                    Engine answer — copy what is useful into your draft
-                  </Typography>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => void navigator.clipboard?.writeText(answer)}>Copy</Button>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => setAnswer('')}>Close</Button>
-                </Box>
-                <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
-                  fontFamily: 'inherit', maxHeight: 220, overflow: 'auto', m: 0 }}>{answer}</Box>
-              </Box>
-            )}
+
             <Divider sx={{ my: 1.4 }} />
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField size="small" sx={{ flex: 1 }} label="Filed title"
