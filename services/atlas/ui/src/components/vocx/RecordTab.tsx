@@ -88,8 +88,14 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         transcription, structure and filing.
       </Typography>
 
-      {/* The mic. The ring tracks the live input level, so a dead microphone is visible
-          before the user has spoken for three minutes into nothing. */}
+      {/* The mic. Recording is MOTION, not a colour swap: the button keeps the
+          surface's own green the whole time, and the state is carried by animation —
+          an expanding cyan ripple for as long as the take runs, the level ring tracking
+          the live input (so a dead microphone is visible before the user has spoken for
+          three minutes into nothing), and the icon itself breathing. An alarm colour on
+          the fill made a normal, wanted state look like something going wrong.
+          Reduced-motion users get a static cyan ring instead — with the animation gone,
+          colour is the one channel left to say the mic is open. */}
       <Box sx={{ position: 'relative', width: 200, height: 200, mx: 'auto', mb: 2 }}>
         <Box aria-hidden sx={{
           position: 'absolute', inset: 0, borderRadius: '50%',
@@ -97,6 +103,21 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           transform: `scale(${1 + (recording ? rec.level * 0.28 : 0)})`,
           transition: 'transform 90ms linear, border-color 200ms',
         }} />
+        {recording && (
+          <Box aria-hidden sx={{
+            position: 'absolute', inset: 26, borderRadius: '50%',
+            '@keyframes vocxRipple': {
+              '0%': { boxShadow: `0 0 0 0 ${vx.liveSoft}` },
+              '70%': { boxShadow: '0 0 0 26px rgba(34,211,238,0)' },
+              '100%': { boxShadow: '0 0 0 0 rgba(34,211,238,0)' },
+            },
+            animation: 'vocxRipple 1.6s ease-out infinite',
+            '@media (prefers-reduced-motion: reduce)': {
+              animation: 'none',
+              boxShadow: `0 0 0 5px ${vx.liveSoft}`,
+            },
+          }} />
+        )}
         <Box
           component="button"
           type="button"
@@ -107,12 +128,19 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           sx={{
             position: 'absolute', inset: 26, borderRadius: '50%', border: 0,
             cursor: busy || !rm ? 'not-allowed' : 'pointer',
-            bgcolor: recording ? vx.live : vx.grn,
+            bgcolor: vx.grn,
             color: vx.onGrn,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: busy || !rm ? 0.5 : 1,
-            transition: 'background-color 200ms',
             '&:focus-visible': { outline: `3px solid ${vx.grn}`, outlineOffset: 3 },
+            '@keyframes vocxBreathe': {
+              '0%, 100%': { transform: 'scale(1)' },
+              '50%': { transform: 'scale(1.08)' },
+            },
+            '& > svg': recording ? {
+              animation: 'vocxBreathe 1.6s ease-in-out infinite',
+              '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+            } : {},
           }}
         >
           {recording ? <StopIcon sx={{ fontSize: 64 }} /> : <MicIcon sx={{ fontSize: 68 }} />}
