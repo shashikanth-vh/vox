@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Box, Button, Chip, CircularProgress, Typography } from '@mui/material';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Box, Button, Chip, CircularProgress, IconButton, InputBase, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { vocxService, type VocxPreview, type VocxReportRow } from '../../services/vocxService';
 import { currentRm } from './rm';
 import ReportCard from './ReportCard';
@@ -45,6 +48,14 @@ export default function ReportsTab({ epoch, active = true }:
   const [open, setOpen] = useState<VocxPreview | null>(null);
   const [opening, setOpening] = useState('');
   const [flash, setFlash] = useState('');
+  const [q, setQ] = useState('');
+  const [searching, setSearching] = useState(false);
+  // Deleting a draft is two clicks on the same trash icon — an inline arm-then-confirm,
+  // because a browser confirm() looks alien inside the panel and a full dialog is heavy
+  // for a draft that was never filed. The armed state disarms itself after a moment.
+  const [armed, setArmed] = useState('');
+  const [deleting, setDeleting] = useState('');
+  const disarm = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // No `if (!rm) return` guard. Whose reports these are is decided by VocX from the
   // verified identity the edge forwards, not by this value — so skipping the call when
@@ -72,6 +83,22 @@ export default function ReportsTab({ epoch, active = true }:
     setOpen(r.data);
   };
 
+  const removeDraft = async (row: VocxReportRow) => {
+    if (armed !== row.capture_id) {
+      setArmed(row.capture_id);
+      if (disarm.current) clearTimeout(disarm.current);
+      disarm.current = setTimeout(() => setArmed(''), 3000);
+      return;
+    }
+    if (disarm.current) clearTimeout(disarm.current);
+    setArmed(''); setDeleting(row.capture_id);
+    const r = await vocxService.remove(rm, row.capture_id);
+    setDeleting('');
+    if (!r.ok) { setErr(r.error); return; }
+    setFlash('Draft deleted.');
+    void load();
+  };
+
   if (open) {
     return (
       <Box>
@@ -91,6 +118,10 @@ export default function ReportsTab({ epoch, active = true }:
   }
 
   const pending = rows.filter(isPending).length;
+  const needle = q.trim().toLowerCase();
+  const visible = !needle ? rows : rows.filter((r) =>
+    [r.company, r.summary, r.entity_code, r.capture_id, r.status]
+      .some((f) => (f || '').toLowerCase().includes(needle)));
 
   return (
     <Box sx={{ p: 1.2 }}>
@@ -99,12 +130,29 @@ export default function ReportsTab({ epoch, active = true }:
       {err && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }}
         onClose={() => setErr('')}>{err}</Alert>}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.8 }}>
-        <Typography sx={{ fontSize: 11.5, color: vx.mut, flex: 1 }}>
-          {pending > 0
-            ? `${pending} waiting to be approved`
-            : rows.length ? 'All captures filed' : ''}
-        </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.8, gap: 0.4 }}>
+        {searching ? (
+          <InputBase
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { setQ(''); setSearching(false); } }}
+            placeholder="Search company, summary, code…"
+            sx={{ flex: 1, fontSize: 12, color: vx.ink, px: 1, py: 0.2,
+              bgcolor: vx.card, border: `1px solid ${vx.line}`, borderRadius: '8px' }}
+          />
+        ) : (
+          <Typography sx={{ fontSize: 11.5, color: vx.mut, flex: 1 }}>
+            {pending > 0
+              ? `${pending} waiting to be approved`
+              : rows.length ? 'All captures filed' : ''}
+          </Typography>
+        )}
+        <IconButton size="small" aria-label={searching ? 'Close search' : 'Search reports'}
+          onClick={() => { if (searching) setQ(''); setSearching(!searching); }}
+          sx={{ color: searching ? vx.grn : vx.mut, p: 0.4 }}>
+          {searching ? <CloseIcon sx={{ fontSize: 16 }} /> : <SearchIcon sx={{ fontSize: 16 }} />}
+        </IconButton>
         <Button size="small" onClick={() => void load()} disabled={loading}
           sx={{ textTransform: 'none', fontSize: 11.5, color: vx.grn }}>Refresh</Button>
       </Box>
@@ -121,7 +169,13 @@ export default function ReportsTab({ epoch, active = true }:
         </Typography>
       )}
 
-      {rows.map((r) => {
+      {!loading && rows.length > 0 && !visible.length && (
+        <Typography sx={{ fontSize: 12.5, color: vx.mut, py: 3, textAlign: 'center' }}>
+          No reports match “{q.trim()}”.
+        </Typography>
+      )}
+
+      {visible.map((r) => {
         const status = String(r.status || 'draft').toLowerCase();
         const tone = TONE[status] || TONE.draft;
         return (
@@ -158,6 +212,25 @@ export default function ReportsTab({ epoch, active = true }:
                 {[r.entity_code, when(r.updated_at)].filter(Boolean).join(' · ')}
               </Typography>
             </Box>
+            {/* Unfiled captures can be thrown away from the list; a COMMITTED report is
+                already in the register and lives by the register's rules, not a trash
+                icon here. First click arms (icon turns red), second click deletes. */}
+            {isPending(r) && (
+              <IconButton
+                size="small"
+                aria-label={armed === r.capture_id ? 'Click again to delete' : 'Delete draft'}
+                title={armed === r.capture_id ? 'Click again to delete' : 'Delete draft'}
+                disabled={deleting === r.capture_id}
+                onClick={(e) => { e.stopPropagation(); void removeDraft(r); }}
+                sx={{ p: 0.4, flexShrink: 0, alignSelf: 'center',
+                  color: armed === r.capture_id ? '#F26D6D' : 'rgba(232,238,242,.45)',
+                  '&:hover': { color: '#F26D6D' } }}
+              >
+                {deleting === r.capture_id
+                  ? <CircularProgress size={14} sx={{ color: '#F26D6D' }} />
+                  : <DeleteOutlineIcon sx={{ fontSize: 17 }} />}
+              </IconButton>
+            )}
           </Box>
         );
       })}
