@@ -14,10 +14,15 @@ export default function AddProductDialog({ code, onClose, onDone }: { code: stri
   const [err, setErr] = useState('');
   if (!code) return null;
 
-  const add = () => {
+  const add = async () => {
     const n = Number(amt);
     if (!amt.trim() || !(n > 0)) { setErr('Amount is required (₹ Cr, greater than 0).'); return; }
-    dealsService.addProduct(code, product, n, user.full); onDone(); onClose();
+    // Awaited: the product line is a REGISTER row now, and a refusal (permissions, an
+    // unknown company) must land in this dialog — not vanish into console.warn while
+    // the grid shows a row that exists nowhere.
+    const r = await dealsService.addProduct(code, product, n, user.full);
+    if (!r.ok) { setErr(r.error || 'The register refused the product line.'); return; }
+    onDone(); onClose();
   };
 
   return (

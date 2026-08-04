@@ -129,13 +129,23 @@ export const lendingService = {
     }
     return { ok: true };
   },
+  // UI field → the LendingUpdate wire name: {amt: 5} is not a register field, so the
+  // old body 422ed even when the id was right. isRegisterId guards the rows a local
+  // optimistic insert minted before its register row existed.
   update(id: string, key: keyof LendingRow, value: any, by: string) {
     const r = this.find(id); if (!r) return;
-    remote('patch', '/lending/' + id, { [key]: value });
+    const wire: Record<string, string> = {
+      amt: 'amount_cr', rm: 'rm', an: 'analyst', pendingWith: 'pending_with',
+      sanc: 'sanction_date', remarks: 'remarks',
+      proposedAmt: 'proposed_disbursement_amount', proposedDate: 'proposed_disbursement_date',
+    };
+    if (isRegisterId(id) && wire[key as string]) {
+      remote('patch', '/lending/' + id, { [wire[key as string]]: value === '' ? null : value });
+    }
     (r as any)[key] = value; writeAudit(by, 'Lending updated', r.code, String(key));
   },
   remove(id: string, by: string) {
-    remote('del', '/lending/' + id);
+    if (isRegisterId(id)) remote('del', '/lending/' + id);
     const i = db().lending.findIndex((r: LendingRow) => r.id === id);
     if (i > -1) { const [x] = db().lending.splice(i, 1); writeAudit(by, 'Lending deleted', x.code, x.id); }
   },

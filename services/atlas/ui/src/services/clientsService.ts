@@ -92,8 +92,21 @@ export const clientsService = {
     writeAudit(by, 'Client created', code, name);
     return { ok: true, code };
   },
+  // UI field → the EntityUpdate wire name. `/clients/{code}` never existed on the
+  // register (a client IS an entity, addressed by UUID), so every client edit and
+  // delete 404ed silently for as long as remote() has been fire-and-forget — the
+  // same defect Add-employee had, in its next hiding place.
   update(code: string, patch: Partial<Client>, by: string) {
-    remote('patch', '/clients/' + code, patch);
+    const row: any = db().clients[code] || {};
+    const wire: Record<string, string> = {
+      name: 'legal_name', sector: 'sector', lens: 'lens', state: 'state',
+      toi: 'toi', about: 'about', lifecycle: 'lifecycle',
+    };
+    const body: Record<string, any> = {};
+    Object.entries(patch).forEach(([k, v]) => { if (wire[k]) body[wire[k]] = v; });
+    if (row.entityId && Object.keys(body).length) {
+      remote('patch', '/entities/' + row.entityId, body);
+    }
     Object.assign(db().clients[code], patch);
     writeAudit(by, 'Client updated', code, Object.keys(patch).join(','));
   },
@@ -106,7 +119,8 @@ export const clientsService = {
   remove(code: string, by: string): { ok: boolean; error?: string } {
     if (this.inUse(code)) return { ok: false, error: 'Remove this client’s deal & product rows first' };
     const name = db().clients[code]?.name || code;
-    remote('del', '/clients/' + code);
+    const eid = (db().clients[code] as any)?.entityId;
+    if (eid) remote('del', '/entities/' + eid);
     delete db().clients[code];
     writeAudit(by, 'Deleted', code, `Client row — ${name}`);
     return { ok: true };

@@ -279,21 +279,27 @@ workflow's `lender-update`.
 * **Notifications** (`GET /v1/notifications`) — no inbox, no bell.
 * **Evidence** (`POST /v1/evidence`) — no UI, though `Sanctioned` is gated on it.
 
-### Known UI/register mismatches
+### UI/register mismatches — FIXED
 
-Writes that currently go to routes the register does not expose, and so fail silently
-while the screen updates:
+This section used to list writes that went to routes the register never exposed (a
+leftover of the localStorage prototype), failing silently while the screen updated.
+All of them are now wired to the real routes, addressed by the register's UUIDs, with
+UI field names mapped to the wire schema:
 
-| Control | Sends | Should be |
-| --- | --- | --- |
-| Client drawer edits / delete | `/v1/clients/{code}` | `/v1/entities/{id}` |
-| Employee edits / delete | `/v1/employees/{name}` | `/v1/people/{id}` |
-| `Add product` on a deal | `/v1/deals/{code}/products` | `POST /v1/lending` \| `/syndication` \| `/asset-monetisation` |
-| Deal field edits | `/v1/deals/{code}` | `/v1/deals/{id}` (UUID, not group code) |
+| Control | Now sends |
+| --- | --- |
+| Client drawer edits / delete | `PATCH`/`DELETE /v1/entities/{id}` |
+| Employee add / edits / delete | `POST /v1/people` (part of provisioning, with Access) · `PATCH`/`DELETE /v1/people/{id}` |
+| `Add product` on a deal | `POST /v1/lending` \| `/syndication` \| `/asset-monetisation` (+ the deal flag), awaited |
+| Deal field edits / delete | `PATCH`/`DELETE /v1/deals/{id}` |
+| Lending / Asset-Mon field edits | `PATCH /v1/lending/{id}` / `/v1/asset-monetisation/{id}` (wire field names) |
 
-`Add employee` provisions an **Access** user but does **not** create the register `people`
-row that `rm`/`analyst` validate against — add people through `POST /v1/people` until this
-is wired.
+`Add employee` now creates BOTH halves of a person — the Access sign-in identity and the
+register `people` row the BDRM/RM/Analyst dropdowns, conversions and VocX resolve
+against — idempotently, so a retry after a partial failure completes the missing half.
+
+Inline field edits remain fire-and-forget (`remote()`, logged on failure); creations and
+deletions that gate other flows are awaited and surface the register's refusal.
 
 ### Stage-change requests are local only
 

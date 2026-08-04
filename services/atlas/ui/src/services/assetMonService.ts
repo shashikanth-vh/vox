@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll } from '../api/http';
+import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -108,14 +108,22 @@ export const assetMonService = {
   },
   byCode(code: string): AmRow[] { return db().am.filter((r: AmRow) => r.code === code); },
   find(id: string): AmRow | undefined { return db().am.find((r: AmRow) => r.id === id); },
+  // UI field → the AssetMonUpdate wire name — same defect, same cure as lending.
   update(id: string, key: keyof AmRow, value: any, by: string) {
     const r = this.find(id); if (!r) return;
-    remote('patch', AM_PATH + '/' + id, { [key]: value });
+    const wire: Record<string, string> = {
+      state: 'state', val: 'indicative_value_cr', mw: 'size_mw', nature: 'nature',
+      dtype: 'deal_type', inv: 'investor', itype: 'investor_type', status: 'status',
+      teaser: 'teaser_date', notes: 'notes',
+    };
+    if (isRegisterId(id) && wire[key as string]) {
+      remote('patch', AM_PATH + '/' + id, { [wire[key as string]]: value === '' ? null : value });
+    }
     const old = (r as any)[key]; (r as any)[key] = value;
     writeAudit(by, key === 'status' ? 'Asset Mon status' : 'Asset Mon updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
   },
   remove(id: string, by: string) {
-    remote('del', AM_PATH + '/' + id);
+    if (isRegisterId(id)) remote('del', AM_PATH + '/' + id);
     const i = db().am.findIndex((r: AmRow) => r.id === id);
     if (i > -1) { const [x] = db().am.splice(i, 1); writeAudit(by, 'Asset Mon deleted', x.code, x.id); }
   },

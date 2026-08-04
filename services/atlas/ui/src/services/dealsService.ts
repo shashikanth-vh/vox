@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
+import { api, errText, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API } from '../api/http';
 import { fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -59,37 +59,99 @@ export const dealsService = {
     );
   },
   find(code: string): Deal | undefined { return db().deals.find((d: Deal) => d.code === code); },
+  // UI field → the DealUpdate wire name. The old write PATCHed /deals/{groupCode}
+  // with UI field names — the register addresses deals by UUID and forbids unknown
+  // fields, so every inline deal edit died silently. `apiId` is the register's id,
+  // carried on every hydrated row.
   update(code: string, key: keyof Deal, value: any, by: string) {
     const d = this.find(code); if (!d) return;
-    remote('patch', '/deals/' + code, { [key]: value });
+    const wire: Record<string, string> = {
+      rm: 'rm', an: 'analyst', temp: 'temperature', source: 'source',
+      sourceDetail: 'source_detail', remarks: 'remarks',
+    };
+    if ((d as any).apiId && wire[key as string]) {
+      remote('patch', '/deals/' + (d as any).apiId, { [wire[key as string]]: value || null });
+    }
     (d as any)[key] = value; writeAudit(by, 'Deal updated', code, String(key));
   },
-  addProduct(code: string, product: 'Lending' | 'Platform Deals' | 'Asset Monetisation', amt: number, by: string) {
-    remote('post', '/deals/' + code + '/products', { product, amt });
+  /**
+   * Add a product line — as a REGISTER fact first, then the local mirror.
+   *
+   * The old write POSTed /deals/{code}/products, a route that has never existed on the
+   * register: the tracker row lived only in the browser, so it vanished on reload, no
+   * other user ever saw it, and its edits PATCHed a minted local id the register could
+   * only 422. Now the deal (created here if the company has none), the deal's product
+   * flag, and the tracker row are all register writes, awaited, and the local insert
+   * carries the register's OWN uuid so every later edit on the row lands.
+   */
+  async addProduct(code: string, product: 'Lending' | 'Platform Deals' | 'Asset Monetisation', amt: number, by: string): Promise<{ ok: boolean; error?: string }> {
     let d = this.find(code);
+    const now = today();
+    let apiId: string | undefined = (d as any)?.apiId;
+    let entityId: string | undefined = (d as any)?.entityId || (clientsService.get(code) as any)?.entityId;
+    let lineId = '';
+    if (USE_REAL_API) {
+      if (!entityId) {
+        return { ok: false, error: `${code} is not a register company yet — open it under Clients first, then add the product line.` };
+      }
+      try {
+        if (!apiId) {
+          const created = await api.post<any>('/deals', {
+            entity_id: entityId, stage: 'In Pipeline', source: 'RM',
+            source_detail: 'Added from the Deals register', rm: d?.rm || null, analyst: d?.an || null,
+          });
+          apiId = created?.id;
+        }
+        const flag = product === 'Lending' ? 'is_lending' : product === 'Platform Deals' ? 'is_syndication' : 'is_asset_mon';
+        await api.patch<any>('/deals/' + apiId, { [flag]: true });
+        if (product === 'Lending') {
+          const row = await api.post<any>('/lending', {
+            entity_id: entityId, deal_id: apiId, amount_cr: amt || null,
+            stage: 'Data Awaited', rm: d?.rm || null, analyst: d?.an || null,
+          });
+          lineId = row?.id || '';
+        } else if (product === 'Platform Deals') {
+          const row = await api.post<any>('/syndication', {
+            entity_id: entityId, deal_id: apiId, amount_cr: amt || null,
+            status: 'Deal Sourced', priority: 'Medium', rm: d?.rm || null, analyst: d?.an || null,
+          });
+          lineId = row?.id || '';
+        } else {
+          const row = await api.post<any>('/asset-monetisation', {
+            entity_id: entityId, deal_id: apiId, indicative_value_cr: amt || null,
+            state: clientsService.get(code).state || null, nature: 'Seller', status: 'Teaser Prepared',
+          });
+          lineId = row?.id || '';
+        }
+      } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data) || e?.message || 'The register refused the product line.' };
+      }
+    }
     if (!d) {
-      d = { code, rm: '', an: '', lend: false, syn: false, am: false, temp: '', source: '', sourceDetail: '', createdAt: today(), remarks: '' } as Deal;
+      d = { code, rm: '', an: '', lend: false, syn: false, am: false, temp: '', source: '', sourceDetail: '', createdAt: now, remarks: '', apiId, entityId } as any as Deal;
       db().deals.unshift(d); writeAudit(by, 'Deal created', code, 'via Add product');
     }
-    const now = today();
+    (d as any).apiId = apiId; (d as any).entityId = entityId;
     if (product === 'Lending') {
       d.lend = true;
-      db().lending.unshift({ id: 'L' + Date.now(), code, amt, rm: d.rm, an: d.an, stage: 'Data Awaited', updated: now, sanc: null, pendingWith: '', h: [{ stage: 'Data Awaited', t: now, by }], createdAt: now, remarks: '' });
+      db().lending.unshift({ id: lineId || 'L' + Date.now(), code, amt, rm: d.rm, an: d.an, stage: 'Data Awaited', updated: now, sanc: null, pendingWith: '', h: [{ stage: 'Data Awaited', t: now, by }], createdAt: now, remarks: '' });
     }
     if (product === 'Platform Deals') {
       d.syn = true;
-      db().syn.unshift({ id: 'S' + Date.now(), code, toi: '', rm: d.rm, an: d.an, lc: '', pri: 'Medium', status: 'Deal Sourced', amt, synType: '', mstat3: '', fac: '', tenor: '', im: 'Work not started', pot: '', sancL: '', ipL: '', exist: '', price: '', pendingWith: '', lenders: [], h: [{ status: 'Deal Sourced', t: now, by }], createdAt: now, remarks: '' });
+      db().syn.unshift({ id: lineId || 'S' + Date.now(), apiId: lineId || undefined, code, toi: '', rm: d.rm, an: d.an, lc: '', pri: 'Medium', status: 'Deal Sourced', amt, synType: '', mstat3: '', fac: '', tenor: '', im: 'Work not started', pot: '', sancL: '', ipL: '', exist: '', price: '', pendingWith: '', lenders: [], h: [{ status: 'Deal Sourced', t: now, by }], createdAt: now, remarks: '' });
     }
     if (product === 'Asset Monetisation') {
       d.am = true;
-      db().am.unshift({ id: 'A' + Date.now(), code, state: clientsService.get(code).state, val: amt, mw: 0, nature: 'Seller', dtype: '', inv: '', itype: '', status: 'Teaser Prepared', teaser: null, createdAt: now, notes: '' });
+      db().am.unshift({ id: lineId || 'A' + Date.now(), code, state: clientsService.get(code).state, val: amt, mw: 0, nature: 'Seller', dtype: '', inv: '', itype: '', status: 'Teaser Prepared', teaser: null, createdAt: now, notes: '' });
     }
     writeAudit(by, 'Product added', code, `${product} ₹${amt} Cr`);
+    return { ok: true };
   },
   // Delete a deal row (Admin only — gated at the page). Removes the deal record; the
   // product-line registers (Lending / Syn / AM) keep their own rows.
   remove(code: string, by: string) {
-    remote('del', '/deals/' + code);
+    const d = this.find(code);
+    if ((d as any)?.apiId) remote('del', '/deals/' + (d as any).apiId);
     const i = db().deals.findIndex((d: Deal) => d.code === code);
     if (i > -1) { const [x] = db().deals.splice(i, 1); writeAudit(by, 'Deal deleted', code, x.code); }
   },
