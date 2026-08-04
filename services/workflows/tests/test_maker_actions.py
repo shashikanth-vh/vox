@@ -574,3 +574,33 @@ def test_getting_to_ready_for_disbursement_is_a_step_with_the_figures_it_needs()
     asked = {f["name"] for f in spec["form"] if f.get("required")}
     assert asked == set(MANDATORY_FOR_STAGE["Lending"]["Ready for Disbursement"]), (
         "the form must collect exactly what the register demands for that stage")
+
+
+def test_the_handover_sequence_is_enforced_and_not_merely_described():
+    """prepare -> approve -> submit -> Advaya's outcome.
+
+    Those steps read as a sequence and their reasons SAID so, while nothing enforced it:
+    a user could open "Record an Advaya confirmation" against a package that had only been
+    approved, fill the form in, and be told by the register that it had not been submitted.
+    A panel that offers a step it knows will be refused is worse than one that hides it —
+    it costs the user the whole form first.
+
+    The plane reads the package's state and gates on it, naming the state the package IS
+    in as well as the one it needs to be in.
+    """
+    from app.api import _PACKAGE_REASON
+
+    submit = _action("handover.submit")
+    attest = _action("advaya.attest")
+    assert submit["package"] == "Approved"
+    assert attest["package"] == "Submitted"
+
+    # Both reasons say what to do next, not merely what is wrong.
+    for state in ("Approved", "Submitted"):
+        assert state in _PACKAGE_REASON
+        words = _PACKAGE_REASON[state].lower()
+        assert "submit" in words or "approve" in words, state
+
+    # Preparing is NOT package-gated: it is idempotent for the maker and is how a package
+    # comes to exist in the first place.
+    assert "package" not in _action("handover.prepare")

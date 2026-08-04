@@ -268,6 +268,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
         },
         {
             "key": "handover.submit",
+            # Only an APPROVED package may be submitted.
+            "package": "Approved",
             "label": "Submit the handover to Advaya",
             "method": "POST",
             "url": "/v1/internal/handover-packages/{subject_id}/submit",
@@ -278,6 +280,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
         },
         {
             "key": "advaya.attest",
+            # And Advaya's answer only means anything once it has been sent one.
+            "package": "Submitted",
             "label": "Record an Advaya confirmation",
             "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
             "roles": {"Credit Head", "Management", "Admin"},
@@ -407,6 +411,14 @@ _RETURNED_STATES = {"ReturnedForInformation", "Returned", "ReturnedToMaker"}
 
 
 # Evidence kinds in the words a credit manager uses, for the "still waiting on …" reason.
+# Why a handover step is not yet available — phrased as the thing to do next.
+_PACKAGE_REASON: dict[str, str] = {
+    "Approved": "The package must be approved by a different checker before it can be "
+                "submitted.",
+    "Submitted": "Advaya's outcome applies to a SUBMITTED package — prepare it, have a "
+                 "checker approve it, then submit it.",
+}
+
 _EVIDENCE_LABEL: dict[str, str] = {
     "cp_cs_completion": "an approved CP/CS checklist",
     "executed_agreement": "the executed agreement",
@@ -3079,6 +3091,18 @@ def create_app() -> FastAPI:
                                                            "Executed facility agreement"),
                                           "sha256": str(row_ev["sha256"])})
 
+        # The handover package's state. Three actions claim to be sequenced — prepare,
+        # approve, submit, then Advaya's outcome — and the reasons SAID so while nothing
+        # enforced it, so a user could open "Record an Advaya confirmation" on a package
+        # that had not been submitted and be refused after filling the form in. The plane
+        # knows the state; it gates on it.
+        package_status = ""
+        if subject_type == "Lending":
+            pkg, pkg_problem = await _register_get_as(
+                request, f"/v1/lending/{subject_id}/handover-package", who, caller)
+            if pkg_problem is None:
+                package_status = str(pkg.get("status") or "")
+
         # The citation a governance evidence must carry.
         #
         # Not the run's own id: a deal's structuring workflow covers every facility on that
@@ -3137,6 +3161,13 @@ def create_app() -> FastAPI:
             # — the register refuses invented values, and rightly. An action that needs it
             # and has no run to cite is disabled with that reason, instead of failing at
             # submit after the user has filled the form in.
+            wanted_pkg = spec.get("package")
+            if wanted_pkg and enabled and package_status != wanted_pkg:
+                enabled, reason = False, (
+                    _PACKAGE_REASON.get(wanted_pkg, f"Available once the handover package "
+                                                    f"is {wanted_pkg!r}.")
+                    + (f" It is currently {package_status!r}."
+                       if package_status else " No package has been prepared yet."))
             needed = [k for k in (spec.get("evidence") or ()) if k not in on_file]
             if needed and enabled:
                 enabled, reason = False, (
