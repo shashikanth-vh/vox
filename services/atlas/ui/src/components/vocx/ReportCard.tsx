@@ -18,6 +18,7 @@ import { currentRm } from './rm';
 import { check, rulesFor, type Completeness } from './completeness';
 import ApproveDialog from './ApproveDialog';
 import LogToPicker, { type LogTo } from './LogToPicker';
+import ClientPicker, { type ClientChoice } from './ClientPicker';
 import { tokens } from '../../theme';
 
 /**
@@ -80,6 +81,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
   const [status, setStatus] = useState(String(initialStatus || 'draft').toLowerCase());
   const [caps, setCaps] = useState<VocxCapabilities | null>(null);
   const [logTo, setLogTo] = useState<LogTo | null>(null);
+  const [client, setClient] = useState<ClientChoice | null>(null);
   const [audioUrl, setAudioUrl] = useState('');
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
   const [busy, setBusy] = useState('');
@@ -92,7 +94,10 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
 
   const committed = status === 'committed';
   const match = ext.entity_match || {};
-  const entityId: string | undefined = match.entity_id || match.id || undefined;
+  // The user's own pick wins over the resolver's guess — the rows to log against are
+  // the ones belonging to whichever company this capture will actually be filed under.
+  const entityId: string | undefined =
+    client?.entityId || (client ? undefined : (match.entity_id || match.id || undefined));
 
   useEffect(() => {
     void vocxService.capabilities().then((r) => { if (r.ok) setCaps(r.data); });
@@ -159,6 +164,11 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       edits: { date: NM().date || null, time: NM().time || null,
                mode: NM().mode || null, temp: rep.deal_temp || null },
       ...(logTo ? { log_to: logTo } : {}),
+      // Which company. '__new__' tells VocX to create it; a code links the existing row.
+      // Absent, the resolver's own match stands.
+      ...(client?.code === '__new__'
+        ? { new_lead: true, company: client.name }
+        : client?.code ? { chosen_code: client.code } : {}),
     });
     setBusy(''); setAskApprove(false);
     if (!r.ok) { setErr(r.error); return; }
@@ -252,7 +262,11 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       </Box>
 
       {!committed && (
-        <LogToPicker entityId={entityId} value={logTo} onChange={setLogTo} />
+        <>
+          <ClientPicker match={match} value={client}
+            onChange={(c) => { setClient(c); setLogTo(null); }} />
+          <LogToPicker entityId={entityId} value={logTo} onChange={setLogTo} />
+        </>
       )}
 
       {/* Actions */}
