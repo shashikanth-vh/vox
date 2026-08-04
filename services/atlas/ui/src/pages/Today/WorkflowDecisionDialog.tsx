@@ -5,8 +5,9 @@ import { FieldGrid, TextFld } from '../../components/common/Field';
 import { useAuth } from '../../auth/AuthContext';
 import { getSession } from '../../auth/session';
 import {
-  workflowService, isCommitteeDecision, committeeRef, sanctionRef, kindLabel, since,
-  noteRequired, type PendingWorkflow, type DecisionAction,
+  workflowService, approvalContext, isCommitteeDecision, committeeRef, sanctionRef,
+  kindLabel, since, noteRequired,
+  type ApprovalContext, type PendingWorkflow, type DecisionAction,
 } from '../../services/workflowService';
 import { tokens } from '../../theme';
 
@@ -59,6 +60,7 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<any>(null);
+  const [ctx, setCtx] = useState<ApprovalContext | null>(null);
 
   const committee = !!w && isCommitteeDecision(w);
   const approve = action === 'approve';
@@ -75,6 +77,10 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
     // stale row. A failed read is not fatal — the list's stage still shows.
     let alive = true;
     workflowService.status(w).then((s) => { if (alive) setLive(s); });
+    // And WHAT is being decided, in business words — the ids alone ask the approver to
+    // decide blind. Best-effort: null keeps the id-only card working.
+    setCtx(null);
+    void approvalContext(w).then((c) => { if (alive) setCtx(c); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wid, action, committee]);
@@ -105,6 +111,22 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
         <IconButton onClick={onClose} disabled={busy} sx={{ position: 'absolute', right: 8, top: 8 }}><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
       <DialogContent dividers>
+        {ctx && (
+          <Box sx={{ mb: 1.4 }}>
+            <Typography sx={{ fontSize: 13.4, fontWeight: 600, mb: 0.8 }}>{ctx.headline}</Typography>
+            {ctx.facts.length > 0 && (
+              <FieldGrid>
+                {ctx.facts.map(([label, value]) => <Fact key={label} label={label} value={value} />)}
+              </FieldGrid>
+            )}
+            {ctx.preview && (
+              <Box component="pre" sx={{
+                whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2, mt: 1,
+                border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 260, overflow: 'auto',
+              }}>{ctx.preview}</Box>
+            )}
+          </Box>
+        )}
         <FieldGrid>
           <Fact label="Requested by" value={w.requestedBy} />
           <Fact label="Status" value={status} />

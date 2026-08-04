@@ -1125,3 +1125,28 @@ async def test_playback_is_served_with_the_clips_own_type(stub_register, monkeyp
         assert got.status_code == 200, got.text
         assert got.headers["content-type"].startswith("audio/webm"), got.headers
         assert got.content == webm
+
+
+def test_a_known_companys_capture_logs_on_its_active_lead():
+    """First capture: entity + lead created, note on the lead. Second capture matches
+    the ENTITY (it exists now) — and used to log on the company timeline, so the RM
+    watching the lead's log saw nothing appended. One live lead → the note goes there;
+    several (ambiguous) or none (converted) → the company timeline."""
+    RegisterWriter = register_writer.RegisterWriter
+
+    class _Store:
+        clients = {"ACME": {"_register_entity_id": "e-1"}}
+        leads = [{"id": "lead-1", "_register_entity_id": "e-1", "status": "Active"}]
+
+    w = RegisterWriter.__new__(RegisterWriter)
+    w.store = _Store()
+    w._minted = {}
+    assert w._subject_of({"refId": "ACME", "refType": "Deal"}) == ("Lead", "lead-1")
+
+    # A second live lead makes the routing ambiguous — company timeline, not a guess.
+    _Store.leads.append({"id": "lead-2", "_register_entity_id": "e-1", "status": "Active"})
+    assert w._subject_of({"refId": "ACME", "refType": "Deal"}) == ("Entity", "e-1")
+
+    # No live lead at all (converted book): company timeline, as before.
+    _Store.leads = []
+    assert w._subject_of({"refId": "ACME", "refType": "Deal"}) == ("Entity", "e-1")

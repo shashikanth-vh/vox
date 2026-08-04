@@ -252,6 +252,17 @@ class RegisterWriter:
         entity_id = client.get("_register_entity_id")
         if not entity_id:
             raise RuntimeError(f"cannot resolve entity for client code {ref_id!r}")
+        # PRE-conversion, the company's working record is its ACTIVE lead. The first
+        # capture creates entity + lead and logs on the lead; the second capture then
+        # matches the ENTITY (it exists now) and used to log on the company timeline —
+        # so the RM, watching the lead's log, saw nothing appended. One live lead on
+        # the company → the note goes there; several (or none) → the company timeline.
+        live = [ld for ld in (getattr(self.store, "leads", None) or [])
+                if str(ld.get("_register_entity_id") or "") == str(entity_id)
+                and str(ld.get("status") or "").strip().lower() == "active"
+                and ld.get("id")]
+        if len(live) == 1:
+            return "Lead", str(live[0]["id"])
         return "Entity", entity_id
 
     def write_aliases(self, code: str, aliases: list[str]) -> dict[str, Any]:

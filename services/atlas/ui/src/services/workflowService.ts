@@ -1,4 +1,4 @@
-import { errText, USE_REAL_API } from '../api/http';
+import { api, errText, USE_REAL_API } from '../api/http';
 import { orchestrator } from '../api/orchestratorClient';
 import { ORCHESTRATOR_URL } from '../api/axiosClient';
 import { runSuffix } from './entitiesService';
@@ -135,6 +135,108 @@ export function actionsFor(w: PendingWorkflow): DecisionAction[] {
 /** A note is REQUIRED to return or reject — a refusal must say why, permanently. */
 export function noteRequired(action: DecisionAction): boolean {
   return action !== 'approve';
+}
+
+/** What the approver is actually deciding — in business words, read from the subject. */
+export interface ApprovalContext {
+  headline: string;
+  facts: [string, string][];
+  /** Long-form content to verify (a CAM draft, a checklist) — rendered scrollable. */
+  preview?: string;
+}
+
+const rows = (x: any): any[] => (Array.isArray(x) ? x : (x?.items ?? []));
+
+/**
+ * An approval card that shows only ids asks the approver to decide blind — they had to
+ * open the register themselves to learn what the request even was. This reads the
+ * SUBJECT (and, for register-queue kinds, the artefact awaiting the check) and answers
+ * "what am I approving?" in the words the business uses. Best-effort: a failed read
+ * returns null and the dialog still works — ids are the fallback, not the headline.
+ */
+export async function approvalContext(w: PendingWorkflow): Promise<ApprovalContext | null> {
+  const clean = (facts: [string, any][]): [string, string][] =>
+    facts.filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '')
+      .map(([l, v]) => [l, String(v)]);
+  try {
+    if (w.kind === 'lead-conversion') {
+      const lead = await api.get<any>(`/leads/${w.subjectId}`);
+      return {
+        headline: `Convert ${lead.company || 'this lead'} into a client, deal and lending line.`,
+        facts: clean([['Company', lead.company], ['RM', lead.rm], ['Sector', lead.sector],
+          ['Temperature', lead.temperature], ['Source', lead.source],
+          ['Next action', lead.next_action], ['Notes', lead.notes]]),
+      };
+    }
+    if (w.kind === 'deal-structuring') {
+      const deal = await api.get<any>(`/deals/${w.subjectId}`);
+      const ent = deal?.entity_id
+        ? await api.get<any>(`/entities/${deal.entity_id}`).catch(() => null) : null;
+      return {
+        headline: `Credit committee decision on ${ent?.display_name || ent?.legal_name || 'this deal'}.`,
+        facts: clean([['Company', ent?.legal_name], ['Product', deal.product_type],
+          ['Amount ₹ Cr', deal.amount_cr], ['RM', deal.rm], ['Analyst', deal.analyst],
+          ['Stage', deal.stage]]),
+      };
+    }
+    if (['cpcs-checklist', 'cam-report', 'advaya-handover'].includes(w.kind)) {
+      const lending = await api.get<any>(`/lending/${w.subjectId}`).catch(() => null);
+      const ent = lending?.entity_id
+        ? await api.get<any>(`/entities/${lending.entity_id}`).catch(() => null) : null;
+      const base: [string, any][] = [['Company', ent?.legal_name],
+        ['Stage', lending?.stage], ['Amount ₹ Cr', lending?.amount_cr]];
+      if (w.kind === 'cpcs-checklist') {
+        const all = rows(await api.get<any>('/internal/cpcs-checklists',
+          { lending_id: w.subjectId }).catch(() => []));
+        const row = all.filter((r: any) => r.status === 'Completed').pop();
+        const items: any[] = row?.items || [];
+        const done = items.filter((i: any) => i.status === 'Completed').length;
+        return {
+          headline: `CP/CS checklist v${row?.checklist_version ?? w.checklistVersion ?? '?'} — every condition and its evidence, awaiting your check.`,
+          facts: clean([...base, ['Prepared by', row?.prepared_by || w.requestedBy],
+            ['Conditions', items.length ? `${done}/${items.length} completed` : undefined]]),
+          preview: items.map((i: any) =>
+            `${i.condition_type || 'CP'} · ${i.label || i.key} — ${i.status}`
+            + (i.reason ? ` (${i.reason})` : '')
+            + (i.evidence_ref ? `  [${i.evidence_ref}]` : '')).join('\n') || undefined,
+        };
+      }
+      if (w.kind === 'cam-report') {
+        const all = rows(await api.get<any>('/internal/cam-reports',
+          { lending_id: w.subjectId }).catch(() => []));
+        const row = all.filter((r: any) => r.status === 'Submitted').pop();
+        return {
+          headline: `CAM v${row?.report_version ?? '?'} submitted for the committee — the draft is below.`,
+          facts: clean([...base, ['Prepared by', row?.prepared_by || w.requestedBy],
+            ['Drafting engine', row?.engine]]),
+          preview: row?.draft_md || undefined,
+        };
+      }
+      const pkg = await api.get<any>(`/lending/${w.subjectId}/handover-package`).catch(() => null);
+      return {
+        headline: 'Advaya handover package — the documents and recipient, awaiting your check.',
+        facts: clean([...base, ['Recipient', pkg?.recipient],
+          ['Delivery', pkg?.delivery_method],
+          ['Documents', (pkg?.documents || []).length || undefined],
+          ['Prepared by', pkg?.prepared_by || w.requestedBy]]),
+      };
+    }
+    if (w.kind === 'syndication' || w.kind === 'asset-monetisation') {
+      const path = w.kind === 'syndication' ? 'syndication' : 'asset-monetisation';
+      const row = await api.get<any>(`/${path}/${w.subjectId}`).catch(() => null);
+      const ent = row?.entity_id
+        ? await api.get<any>(`/entities/${row.entity_id}`).catch(() => null) : null;
+      return row && {
+        headline: `${kindLabel(w.kind)} decision on ${ent?.legal_name || 'this mandate'}.`,
+        facts: clean([['Company', ent?.legal_name], ['Status', row.status],
+          ['RM', row.rm], ['Analyst', row.analyst]]),
+      };
+    }
+    return null;
+  } catch (e) {
+    console.warn('[workflows] approval context unavailable for %s:', w.kind, e);
+    return null;
+  }
 }
 
 export const workflowService = {
