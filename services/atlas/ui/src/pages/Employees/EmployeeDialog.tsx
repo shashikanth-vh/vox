@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Switch, Box, Alert, IconButton, CircularProgress } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { FieldGrid, TextFld, SelectFld, MultiSelectFld } from '../../components/common/Field';
 import { employeesService } from '../../services/employeesService';
-import { referenceService } from '../../services/referenceService';
 import { useAuth } from '../../auth/AuthContext';
 import type { Employee } from './employee.types';
 
@@ -44,6 +43,26 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
   }, [emp, mode]);
   const set = (k: keyof Employee, v: any) => setF((p) => ({ ...p, [k]: v }));
   const open = mode === 'add' ? true : !!emp;
+
+  // Reports-to offers the WHOLE active roster, not the RM/Analyst ref buckets: those
+  // buckets exclude Management/Admin by design, so a Head reporting to Management found
+  // an empty dropdown. Self is excluded (nobody reports to themselves) and the value an
+  // old record already holds stays selectable even if that person has since gone.
+  const [roster, setRoster] = useState<string[]>(() => employeesService.rosterNames());
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void employeesService.hydrateRoster()
+      .then(() => { if (!cancelled) setRoster(employeesService.rosterNames()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [open]);
+  const reportOptions = useMemo(() => {
+    const self = new Set([f.name, f.full].map((n) => (n || '').trim().toLowerCase()).filter(Boolean));
+    const names = roster.filter((n) => !self.has(n.trim().toLowerCase()));
+    const held = (f.reportsTo || '').trim();
+    return held && !names.includes(held) ? [held, ...names] : names;
+  }, [roster, f.name, f.full, f.reportsTo]);
   // Role stacking: the Role field holds a comma-separated list. Reports-to is mandatory
   // only when NONE of the held roles is a Head-tier role.
   const roleList = (f.role || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -92,7 +111,7 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
           <TextFld label="Email" required value={f.email} onChange={(v) => set('email', v)} placeholder="name@evamfinance.com" />
           <TextFld label="Phone" value={f.phone} onChange={(v) => set('phone', v)} />
           <MultiSelectFld label="Role" required value={roleList} onChange={(arr) => set('role', arr.join(', '))} options={ROLES} />
-          <SelectFld label="Reports to" required={!anyHead} value={f.reportsTo} onChange={(v) => set('reportsTo', v)} options={referenceService.getRefSync('RM').concat(referenceService.getRefSync('Analyst'))} blank />
+          <SelectFld label="Reports to" required={!anyHead} value={f.reportsTo} onChange={(v) => set('reportsTo', v)} options={reportOptions} blank />
           <TextFld label="Geography covered" value={f.geography} onChange={(v) => set('geography', v)} placeholder="e.g. Karnataka, Tamil Nadu" />
           <TextFld label="Sector specialisation" value={f.sectors} onChange={(v) => set('sectors', v)} placeholder="e.g. Solar, EV" />
           <TextFld label="Started on" type="date" value={f.startedOn} onChange={(v) => set('startedOn', v)} />

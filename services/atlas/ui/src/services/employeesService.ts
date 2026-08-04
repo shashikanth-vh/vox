@@ -140,6 +140,28 @@ async function syncFromAccess(): Promise<void> {
   }
 }
 
+/**
+ * Every ACTIVE person on the roster, as picker strings — for "Reports to" and any other
+ * field that may name ANYONE, not just an RM/Analyst bucket. The role-bucketed ref lists
+ * deliberately exclude Management/Admin (nobody assigns a deal to the CEO), which made
+ * them wrong for the reporting line: a Head reporting to Management found the dropdown
+ * empty. Short handle unless two people share it — then the full name, same rule the
+ * Register's own pickers use.
+ */
+function rosterNames(): string[] {
+  const people = (db().people as Employee[]).filter((p) => !p.inactive);
+  const dupes = new Map<string, number>();
+  people.forEach((p) => {
+    const h = (p.name || '').trim().toLowerCase();
+    if (h) dupes.set(h, (dupes.get(h) || 0) + 1);
+  });
+  return people
+    .map((p) => ((dupes.get((p.name || '').trim().toLowerCase()) || 0) > 1
+      ? (p.full || p.name) : (p.name || p.full)))
+    .filter((n): n is string => !!n)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** Is this (Access-sourced) employee on the register roster? Matched by e-mail first —
  *  the join key — then by either name, for rows created before e-mails were kept. */
 function onRoster(e: Employee): boolean {
@@ -169,6 +191,7 @@ async function handover(from: Employee, to: Employee): Promise<Record<string, nu
 export const employeesService = {
   bookRollup,
   hydrateRoster,
+  rosterNames,
   syncFromAccess,
   onRoster,
   handover,

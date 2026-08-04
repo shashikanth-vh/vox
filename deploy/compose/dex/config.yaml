@@ -45,3 +45,42 @@ staticPasswords:
     hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
     username: e2e-checker
     userID: e2e-checker-uid
+  # Demo team — created in the app via Masters ▸ Employees; these entries only give them
+  # a way to SIGN IN (Dex is the dev IdP; in production this is the real IdP's job).
+  # Password for all: "prism".
+  - email: divya.rao@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: divya
+    userID: divya-uid
+  - email: rohit.sharma@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: rohit
+    userID: rohit-uid
+  - email: priya.nair@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: priya
+    userID: priya-uid
+  - email: arun.menon@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: arun
+    userID: arun-uid
+  - email: sneha.iyer@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: sneha
+    userID: sneha-uid
+  - email: karthik.reddy@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: karthik
+    userID: karthik-uid
+  - email: meera.joshi@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: meera
+    userID: meera-uid
+  - email: vikram.shetty@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: vikram
+    userID: vikram-uid
+  - email: ananya.kulkarni@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: ananya
+    userID: ananya-uid
