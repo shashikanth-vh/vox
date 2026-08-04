@@ -77,8 +77,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     } catch (e: any) { setErr(e?.message || String(e)); }
   };
   const [instruction, setInstruction] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [draftText, setDraftText] = useState('');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
@@ -131,13 +129,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const working = live && (live.status === 'Draft' || live.status === 'Returned') ? live : undefined;
   const submitted = live && live.status === 'Submitted' ? live : undefined;
 
-  // Everything pickable, in BOTH states: the company's file plus the deployment's
-  // example CAM (a format reference the engine may be shown).
-  const sources: EntityDoc[] = [
-    ...docs,
-    ...(defaults.example ? [{ id: defaults.example.id, title: defaults.example.title,
-      section: 'Template', doc_type: 'cam_example', content_type: '', status: '' }] : []),
-  ];
+  // Everything pickable, in BOTH states: the company's own file. (The example CAM is a
+  // DOWNLOAD now — a Word template to fill — not a row competing with real documents.)
+  const sources: EntityDoc[] = docs;
+
+  // Entering a working version (straight after "Summarise first", or reopening the
+  // dialog): its draft — usually the summary — IS the conversation's starting content.
+  useEffect(() => {
+    if (working && !instruction.trim()) setInstruction(working.draft_md || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [working?.id]);
 
   const run = async (what: string, fn: () => Promise<string>) => {
     setErr(''); setInfo(''); setBusy(what);
@@ -169,45 +170,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       + (skipped ? ` ${skipped} document(s) skipped — see the transcript.` : '');
   });
 
-  // The ASK lane's latest answer — shown beside the draft, never written into it.
-  const [answer, setAnswer] = useState('');
-
-  // Ticked documents ride along with the NEXT Rework/Ask, then untick themselves.
-  const refine = () => run('refine', async () => {
-    await camService.refine(subjectId, instruction.trim(), true, [...sel]);
-    setInstruction(''); setSel(new Set());
-    return 'Draft reworked.';
-  });
-
+  // ONE conversation surface: whatever is in the box goes to Claude, and the answer
+  // comes back INTO the box — editable, so the analyst appends the next question (or
+  // pastes document text) and sends again. Ticked documents ride along, then untick.
   const ask = (text?: string) => run('ask', async () => {
     const out = await camService.refine(subjectId, (text || instruction).trim(), false, [...sel]);
-    setAnswer(out.draft_md || '');
-    if (!text) setInstruction('');
+    setInstruction(out.draft_md || '');
     setSel(new Set());
     const skipped = (out.documents || []).filter((d: any) => !d.included);
-    return 'Answer below — your draft is untouched; copy in what is useful.'
+    return "Claude's answer is in the box — edit it, or add your next question under it and ask again."
       + (skipped.length ? ` ${skipped.length} document(s) could not be read.` : '');
-  });
-
-  const loadExample = () => run('example', async () => {
-    if (!working || !defaults.example) throw new Error('No example template on record.');
-    const tpl = await camService.docText(defaults.example.id);
-    if (!tpl.text?.trim()) throw new Error(tpl.reason || 'The example has no readable text.');
-    await camService.saveDraft(working.id, tpl.text);
-    return 'The example CAM is now your working draft — edit it and fill in the facts.';
-  });
-
-  const saveEdit = () => run('save', async () => {
-    if (!working) throw new Error('No open draft to save.');
-    await camService.saveDraft(working.id, draftText);
-    setEditing(false);
-    return 'Your edits are saved — this is now the current draft.';
-  });
-
-  const finalise = () => run('finalise', async () => {
-    const out = await camService.finalise(subjectId, title.trim() || undefined);
-    onDone(`CAM filed to the Data Register (document ${out.document_id}) and submitted to the committee.`);
-    return 'Submitted to the committee.';
   });
 
   // ---- the Word lane: download the template, fill it OUTSIDE, upload the result ----
@@ -223,6 +195,14 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     const out = await documentsService.download(
       asEntry(defaults.example.id, `${defaults.example.title}.docx`) as any);
     if (!out.ok) setErr(out.error || 'The template download failed.');
+  };
+
+  const downloadPrompt = async () => {
+    if (!defaults.prompt) return;
+    setErr('');
+    const out = await documentsService.download(
+      asEntry(defaults.prompt.id, `${defaults.prompt.title}.docx`) as any);
+    if (!out.ok) setErr(out.error || 'The prompt download failed.');
   };
 
   // The completed CAM (a filled .docx, usually) is filed on the line and THAT document
@@ -339,86 +319,51 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
         })()}
 
         {/* ---- analyst: the calm workbench ------------------------------------------- */}
-        {/* The DRAFT behaves like a Word document: a card you OPEN, edit, save & close —
-            and open again whenever needed. Everything else stays folded until wanted. */}
-        {working && editing && (
+        {/* The CAM itself lives in WORD: download the template + the prompt document,
+            fill the template there, and upload the finished file — that document goes to
+            the committee. The box below is the conversation with Claude: prompts go down,
+            answers come back into the SAME box to edit and build on. */}
+        {working && (
           <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.8 }}>
-              <Typography sx={{ fontSize: 13.5, fontWeight: 600, flex: 1 }}>
-                📄 CAM draft — v{working.report_version}
-              </Typography>
-              <Button size="small" variant="contained" disabled={!!busy || !draftText.trim()}
-                onClick={() => void saveEdit()} sx={{ mr: 1 }}>
-                {busy === 'save' ? 'Saving…' : 'Save & close'}
-              </Button>
-              <Button size="small" variant="outlined" disabled={!!busy}
-                onClick={() => setEditing(false)}>Close without saving</Button>
-            </Box>
-            <TextField fullWidth multiline minRows={18} maxRows={26} value={draftText}
-              onChange={(e) => setDraftText(e.target.value)}
-              sx={{ '& textarea': { fontSize: 12.8, lineHeight: 1.55 } }} />
-          </Box>
-        )}
-        {working && !editing && (
-          <Box>
-            {/* The draft, as a document card. */}
-            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.2,
-              display: 'flex', alignItems: 'center', gap: 1.2 }}>
-              <Typography sx={{ fontSize: 22 }}>📄</Typography>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13.5, fontWeight: 600 }}>
-                  CAM draft — v{working.report_version}
-                </Typography>
-                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                  {working.draft_md
-                    ? `${working.draft_md.length.toLocaleString()} characters · ${working.engine || '—'}`
-                    : 'empty — generate, ask, or start from the example'}
-                  {working.status === 'Returned' && (
-                    <> · returned by the committee{working.decision_note ? ` — “${working.decision_note}”` : ''}</>
-                  )}
-                </Typography>
-              </Box>
-              <Button size="small" variant="contained" disabled={!!busy}
-                onClick={() => { setDraftText(working.draft_md || ''); setEditing(true); }}>
-                Open
-              </Button>
+            <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
               {defaults.example && (
-                <Button size="small" disabled={!!busy} onClick={() => void loadExample()}
-                  title="Replaces the draft with the example CAM's text — then Open and fill it in"
-                  sx={{ textTransform: 'none', fontSize: 12 }}>
-                  {busy === 'example' ? 'Loading…' : 'Start from the example'}
-                </Button>
+                <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
+                  onClick={() => void downloadTemplate()}>Download CAM template</Button>
               )}
-            </Box>
-            {defaults.example && (
-              <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: -0.6, mb: 1.2, ml: 0.4 }}>
-                Prefer Word?{' '}
-                <Box component="span" onClick={() => void downloadTemplate()}
-                  sx={{ color: 'primary.main', cursor: 'pointer', textDecoration: 'underline' }}>
-                  Download the CAM template
-                </Box>
-                {' '}— fill it in Word while you ask below, then upload the completed CAM at
-                the bottom; that file goes to the committee.
+              {defaults.prompt && (
+                <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
+                  onClick={() => void downloadPrompt()}>Download EVAM CAM prompt</Button>
+              )}
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                Fill the template in Word while you work with Claude below.
               </Typography>
+            </Box>
+            {working.status === 'Returned' && (
+              <Alert severity="warning" sx={{ py: 0, fontSize: 12, mb: 1 }}>
+                Returned by the committee{working.decision_note ? ` — “${working.decision_note}”` : ''}.
+                Amend the CAM and upload it again.
+              </Alert>
             )}
 
-            {/* The conversation — the centre of the screen. */}
+            {/* The conversation — one box, both directions. */}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-              <TextField fullWidth size="small" multiline minRows={2}
-                label="Ask the engine / instruct a rework — paste anything"
-                value={instruction} onChange={(e) => setInstruction(e.target.value)} />
+              <TextField fullWidth size="small" multiline minRows={8} maxRows={18}
+                label="Work with Claude — the answer appears here; edit it or add your next question"
+                value={instruction} onChange={(e) => setInstruction(e.target.value)}
+                sx={{ '& textarea': { fontSize: 12.6, lineHeight: 1.5 } }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
                 <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                  disabled={!instruction.trim() || !!busy} onClick={() => void refine()}
-                  sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'refine' ? 'Reworking…' : 'Rework draft'}
-                </Button>
-                <Button variant="outlined" size="small"
                   disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
-                  title="The answer comes back below — your draft stays untouched"
+                  title="Sends everything in the box; the reply replaces it"
                   sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'ask' ? 'Asking…' : 'Ask only'}
+                  {busy === 'ask' ? 'Asking…' : 'Ask Claude'}
                 </Button>
+                <Button variant="outlined" size="small" disabled={!instruction || !!busy}
+                  onClick={() => void navigator.clipboard?.writeText(instruction)}
+                  sx={{ whiteSpace: 'nowrap' }}>Copy</Button>
+                <Button variant="outlined" size="small" disabled={!instruction || !!busy}
+                  onClick={() => setInstruction('')}
+                  sx={{ whiteSpace: 'nowrap' }}>Clear</Button>
               </Box>
             </Box>
             {defaults.prompt && (
@@ -429,21 +374,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 Insert the master prompt
               </Button>
             )}
-            {answer && (
-              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
-                    Answer — copy what is useful into the draft
-                  </Typography>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => void navigator.clipboard?.writeText(answer)}>Copy</Button>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => setAnswer('')}>Close</Button>
-                </Box>
-                <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
-                  fontFamily: 'inherit', maxHeight: 220, overflow: 'auto', m: 0 }}>{answer}</Box>
-              </Box>
-            )}
 
             {/* Documents — folded until wanted. */}
             {sources.length > 0 && (
@@ -453,7 +383,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     '&:hover': { bgcolor: '#FAFBFC' } }}>
                   <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
                     {docsOpen ? '▾' : '▸'} Documents ({sources.length})
-                    {sel.size > 0 && ` — ${sel.size} will ride with the next Rework/Ask`}
+                    {sel.size > 0 && ` — ${sel.size} will ride with the next Ask/Summarise`}
                   </Typography>
                   <Button size="small" variant="outlined" disabled={!sel.size || !!busy}
                     onClick={(e) => {
@@ -509,19 +439,15 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
             <Divider sx={{ my: 1.4 }} />
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField size="small" sx={{ flex: 1 }} label="Filed title"
+              <TextField size="small" sx={{ flex: 1 }} label="Filed title (optional)"
                 placeholder={`CAM v${working.report_version}`}
                 value={title} onChange={(e) => setTitle(e.target.value)} />
-              <Button component="label" variant="outlined" size="small" disabled={!!busy}
-                title="Filled the Word template outside? Upload it — that document goes to the committee"
+              <Button component="label" variant="contained" size="small" disabled={!!busy}
+                title="The uploaded file is filed on the line and submitted to the credit committee"
                 sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM…'}
+                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM & send to committee'}
                 <input hidden type="file" accept=".docx,.pdf,.md,.txt"
                   onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </Button>
-              <Button variant="contained" size="small" disabled={!working.draft_md || !!busy}
-                onClick={() => void finalise()}>
-                {busy === 'finalise' ? 'Filing…' : 'File & submit to committee'}
               </Button>
             </Box>
           </Box>
@@ -544,8 +470,12 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   completed CAM — that file goes straight to the committee.
                 </Typography>
                 {defaults.example && (
-                  <Button size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
-                    onClick={() => void downloadTemplate()}>Download the CAM template</Button>
+                  <Button variant="outlined" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+                    onClick={() => void downloadTemplate()}>Download CAM template</Button>
+                )}
+                {defaults.prompt && (
+                  <Button variant="outlined" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
+                    onClick={() => void downloadPrompt()}>Download EVAM CAM prompt</Button>
                 )}
                 <Button component="label" variant="outlined" size="small" disabled={!!busy}
                   sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
