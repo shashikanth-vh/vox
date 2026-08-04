@@ -36,10 +36,11 @@ function MicButton({ pending, open, big, recording }:
       sx={{ '& .MuiBadge-badge': {
         bgcolor: '#F0B43C', color: '#2A1B00', fontWeight: 800, fontSize: 10, pointerEvents: 'none' } }}
     >
+      {/* Decorative only — the REAL button is the parent. A role="button" here made
+          the drag guard read the mic face as an interactive control and yield to it,
+          which froze the FAB: pressing a floating button always starts on its face. */}
       <Box
         component="span"
-        role="button"
-        tabIndex={-1}
         aria-hidden
         sx={{
           width: d, height: d, borderRadius: '50%',
