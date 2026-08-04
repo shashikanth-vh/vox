@@ -194,6 +194,8 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # 'Sanctioned' with nothing on screen explaining why.
             "constant": {"subject_type": "Lending", "evidence_kind": "executed_agreement"},
             "prefill": {"subject_id": "id"},
+            # Governance evidence has to name the run it came from; the plane fills it.
+            "provenance": True,
             # The digest is MANDATORY: the register treats an executed agreement as
             # governance evidence, and governance evidence must be tamper-evident. But a
             # flat form can only ASK for a SHA-256, and typing one is not something a
@@ -2959,10 +2961,18 @@ def create_app() -> FastAPI:
         run_key = str(row.get(id_field) or "")
         workflow_id = f"{prefix}-{_tenant_slug(tenant)}-{run_key}" if run_key else ""
         run_state, run_info = "none", None
+        # Provenance for governance evidence: the run that PRODUCED the thing being
+        # attested. Captured whatever the run's status, because the run that sanctioned a
+        # facility has normally finished by the time its executed agreement is filed —
+        # reading it only while RUNNING left the executed-agreement action with no
+        # workflow_id to cite, and the register refuses evidence that cannot name one.
+        run_prov: dict[str, str] = {}
         if workflow_id:
             with contextlib.suppress(RPCError, TemporalError, AttributeError):
                 handle = request.app.state.temporal.get_workflow_handle(workflow_id)
                 desc = await handle.describe()
+                if getattr(desc, "run_id", None):
+                    run_prov = {"workflow_id": workflow_id, "run_id": str(desc.run_id)}
                 if desc.status == WorkflowExecutionStatus.RUNNING:
                     run_state = "live"
                     business = ""
@@ -3002,6 +3012,19 @@ def create_app() -> FastAPI:
             for key in _IDENTITY_FIELDS:
                 if key in _IDENTITY_FOR.get(spec["key"], ()):
                     body[key] = who
+            # WHICH RUN produced it. Governance evidence must cite the run behind it, and
+            # that is a fact about the platform rather than something to ask a person for
+            # — the register refuses invented values, and rightly. An action that needs it
+            # and has no run to cite is disabled with that reason, instead of failing at
+            # submit after the user has filled the form in.
+            if spec.get("provenance"):
+                if run_prov:
+                    body.update(run_prov)
+                elif enabled:
+                    enabled, reason = False, (
+                        "No workflow run has been recorded against this line yet, and "
+                        "governance evidence must cite the run that produced it. Run the "
+                        "structuring workflow first.")
             form = spec["form"]
             if spec["key"] == "cpcs.prepare":
                 form = [{**f, "default": next_version} if f["name"] == "checklist_version"

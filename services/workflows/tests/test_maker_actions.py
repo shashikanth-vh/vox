@@ -247,7 +247,9 @@ def test_every_action_matches_its_endpoints_schema():
             sent = ({f["name"] for f in spec["form"]}
                     | set(spec.get("prefill") or {})
                     | set(spec.get("constant") or {})
-                    | set(_IDENTITY_FOR.get(spec["key"], ())))
+                    | set(_IDENTITY_FOR.get(spec["key"], ()))
+                    # Filled by the plane at request time from the subject's own run.
+                    | ({"workflow_id", "run_id"} if spec.get("provenance") else set()))
             extra = sent - accepted
             assert not extra, f"{spec['key']} ({subject}) sends unknown field(s): {sorted(extra)}"
 
@@ -412,3 +414,25 @@ def test_the_actions_response_carries_the_plane():
     src = inspect.getsource(api_mod)
     assert '"plane": _plane_of(spec, url)' in src, (
         "the serialised action must carry its plane")
+
+
+def test_governance_evidence_cites_the_run_that_produced_it():
+    """The register refuses `executed_agreement` that cannot name its workflow run.
+
+    Reported live as a 422 — "'executed_agreement' must cite its workflow_id and run_id" —
+    after the user had picked the document and filled the form in. That rule is right:
+    evidence naming no run is evidence nobody can trace. But WHICH run is a fact about the
+    platform, not a question to put to a credit manager, so the plane fills it. The action
+    declares that it needs it; a line with no run to cite is disabled with that reason
+    rather than failing at submit.
+    """
+    spec = next(s for s in _MAKER_ACTIONS["Lending"]
+                if s["key"] == "evidence.executed-agreement")
+    assert spec.get("provenance") is True
+    # And it is NOT asked of the user — no form field, no constant.
+    names = {f["name"] for f in spec["form"]} | set(spec.get("constant") or {})
+    assert "workflow_id" not in names and "run_id" not in names
+
+    # The register's own rule, restated: governance evidence needs a digest too, and the
+    # digest IS the user's to supply (they hold the signed file).
+    assert any(f["name"] == "sha256" and f.get("required") for f in spec["form"])
