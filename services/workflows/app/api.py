@@ -228,12 +228,34 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "form": [],
         },
         {
+            "key": "lending.ready-for-disbursement",
+            "label": "Move to Ready for Disbursement",
+            "method": "PATCH", "url": "/v1/lending/{subject_id}",
+            "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed"},
+            "stage_reason": "The line moves here from 'CP/CS Completed', once the drawdown "
+                            "it proposes is recorded.",
+            # The register requires BOTH proposed figures to enter this stage, and carries
+            # them into the Advaya handover package. They are the maker's to state — this
+            # is what PRISM proposes, not a confirmation that money moved — so unlike the
+            # CP/CS move they are asked for rather than derived.
+            "constant": {"stage": "Ready for Disbursement"},
+            "form": [_f("proposed_disbursement_amount", "Proposed drawdown \u20b9 Cr",
+                        "number", required=True),
+                     _f("proposed_disbursement_date", "Proposed drawdown date", "date",
+                        required=True,
+                        help_text="What PRISM proposes. The ACTUAL disbursement is "
+                                  "recorded later, from Advaya's own confirmation.")],
+        },
+        {
             "key": "handover.prepare",
             # The package must cite the executed agreement's digest; the plane supplies it.
             "needs_evidence_refs": True,
             "label": "Prepare the Advaya handover package",
             "method": "POST", "url": "/v1/workflows/advaya-handover",
-            "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            # EXACTLY 'Ready for Disbursement': the register refuses a handover from any
+            # other stage, so offering it at 'CP/CS Completed' only produced a 409 after
+            # the maker had named a recipient and picked the documents.
+            "roles": _CREDIT_MAKERS, "stages": {"Ready for Disbursement"},
             "stage_reason": "Available once the CP/CS checklist has been approved.",
             # The package names a SET of executed documents, picked against what is
             # actually on the company's file.
@@ -250,7 +272,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "method": "POST",
             "url": "/v1/internal/handover-packages/{subject_id}/submit",
             "roles": {"Credit Head", "Management", "Admin"},
-            "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            "stages": {"Ready for Disbursement"},
             "stage_reason": "Available once the handover package has been approved.",
             "form": [],
         },
@@ -259,7 +281,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "label": "Record an Advaya confirmation",
             "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
             "roles": {"Credit Head", "Management", "Admin"},
-            "stages": {"Ready for Disbursement", "CP/CS Completed"},
+            "stages": {"Ready for Disbursement"},
             "stage_reason": "Available once the handover has been submitted to Advaya.",
             # ORDER MATTERS and the register enforces it: a disbursement tranche may only
             # be recorded once Advaya has ACCEPTED the handover, so recording one first is
@@ -362,6 +384,7 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     # A plain stage write: the register attributes it to the verified caller from
     # the forwarded identity, so there is no identity FIELD to fill.
     "lending.cpcs-complete": (),
+    "lending.ready-for-disbursement": (),
     "syndication.start": ("requested_by",),
     "syndication.lender-update": ("by",),
     "syndication.allocate": ("by",),

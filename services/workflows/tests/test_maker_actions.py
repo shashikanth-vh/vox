@@ -35,9 +35,16 @@ def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
                                   run_state="none")
     assert not ok
     assert reason == "Available once the handover package has been approved."
-    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="CP/CS Completed",
+    # 'Ready for Disbursement', not 'CP/CS Completed'. This assertion used to encode the
+    # catalogue's own belief rather than the register's rule, so it agreed with the bug:
+    # a handover offered a stage early, refused with a 409 after the maker had named a
+    # recipient and picked the documents.
+    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="Ready for Disbursement",
                              run_state="none")
     assert ok
+    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="CP/CS Completed",
+                             run_state="none")
+    assert not ok
 
     # And a step whose own screen does not exist yet says exactly that, rather than
     # pretending to be one stage away.
@@ -538,3 +545,32 @@ def test_no_signed_read_is_minted_with_a_query_string():
     bare = re.findall(r"path=path\b(?!\s*\))", src) + re.findall(r"path=path\)", src)
     assert not bare, (
         "mint the internal context with _token_path(path) — a raw path may carry a query")
+
+
+def test_the_handover_lane_is_gated_where_the_register_gates_it():
+    """A handover may be prepared ONLY from 'Ready for Disbursement' — the register
+    refuses every other stage outright. The catalogue offered the whole lane from
+    'CP/CS Completed' too, which is one stage early: the dialog opened, the maker filled
+    it in, and the register answered 409.
+    """
+    for key in ("handover.prepare", "handover.submit", "advaya.attest"):
+        spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == key)
+        assert spec["stages"] == {"Ready for Disbursement"}, key
+
+
+def test_getting_to_ready_for_disbursement_is_a_step_with_the_figures_it_needs():
+    """That stage has MANDATORY FIELDS, not evidence: the register will not enter it
+    without the proposed drawdown, and carries both into the handover package.
+
+    They are the maker's to state — this is what PRISM PROPOSES, never a claim that money
+    moved — so unlike the CP/CS move they are asked for rather than derived.
+    """
+    from evam_backend_core.policy import MANDATORY_FOR_STAGE
+
+    spec = next(s for s in _MAKER_ACTIONS["Lending"]
+                if s["key"] == "lending.ready-for-disbursement")
+    assert spec["constant"]["stage"] == "Ready for Disbursement"
+    assert spec["stages"] == {"CP/CS Completed"}
+    asked = {f["name"] for f in spec["form"] if f.get("required")}
+    assert asked == set(MANDATORY_FOR_STAGE["Lending"]["Ready for Disbursement"]), (
+        "the form must collect exactly what the register demands for that stage")
