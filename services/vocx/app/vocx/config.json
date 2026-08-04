@@ -527,7 +527,7 @@
     },
     {
       "key": "key_intel",
-      "label": "Key intel",
+      "label": "Key intell",
       "required": true,
       "kind": "list"
     },

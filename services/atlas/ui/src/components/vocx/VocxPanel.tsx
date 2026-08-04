@@ -78,7 +78,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
       ref={paperRef}
       elevation={12}
       role="region"
-      aria-label="VocX field intel capture"
+      aria-label="VocX field intell capture"
       sx={{
         position: 'fixed',
         ...placement,
@@ -111,7 +111,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
             VOCX
           </Typography>
           <Typography sx={{ fontSize: 9.5, color: vx.mut, letterSpacing: '.18em' }}>
-            EVAM · FIELD INTEL
+            EVAM · FIELD INTELL
           </Typography>
         </Box>
         {recording && (

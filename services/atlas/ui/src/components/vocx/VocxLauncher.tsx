@@ -74,16 +74,16 @@ export function VocxNavButton() {
   return (
     <Tooltip title={recording
       ? 'VocX is recording — stop or minimise from the panel'
-      : (pending ? `VocX — ${pending} awaiting approval` : 'VocX field intel')}>
+      : (pending ? `VocX — ${pending} awaiting approval` : 'VocX field intell')}>
       <Box
         component="button"
         type="button"
         onClick={toggle}
         aria-label={recording
-          ? 'VocX field intel — recording in progress'
+          ? 'VocX field intell — recording in progress'
           : (pending
-            ? `VocX field intel — ${pending} capture(s) awaiting approval`
-            : 'VocX field intel')}
+            ? `VocX field intell — ${pending} capture(s) awaiting approval`
+            : 'VocX field intell')}
         aria-expanded={open}
         sx={{
           background: 'none', border: 0, p: 0, cursor: 'pointer', display: 'inline-flex',
@@ -129,10 +129,10 @@ export function VocxFab() {
       onDoubleClick={drag.reset}
       title={recording ? 'Recording — open VocX to stop' : 'Drag to move · double-tap to reset'}
       aria-label={recording
-        ? 'VocX field intel — recording in progress. Drag to move.'
+        ? 'VocX field intell — recording in progress. Drag to move.'
         : (pending
-          ? `VocX field intel — ${pending} capture(s) awaiting approval. Drag to move.`
-          : 'VocX field intel. Drag to move.')}
+          ? `VocX field intell — ${pending} capture(s) awaiting approval. Drag to move.`
+          : 'VocX field intell. Drag to move.')}
       aria-expanded={open}
       sx={{
         position: 'fixed', left: drag.pos.x, top: drag.pos.y, zIndex: 1260,

@@ -172,7 +172,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'center', mt: 2.2,
                    flexWrap: 'wrap', px: 1 }}>
           {[
-            ['Capture', `raw intel in EN, HI or Hinglish — up to ${MAX_SECONDS / 60} minutes`],
+            ['Capture', `raw intell in EN, HI or Hinglish — up to ${MAX_SECONDS / 60} minutes`],
             ['Structure', 'PRISM maps the client, key insights and actions'],
             ['Execute', 'file, sync and close — on your approval'],
           ].map(([title, sub]) => (

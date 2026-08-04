@@ -320,7 +320,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       </Box>
 
       <Box sx={card}>
-        <BulletList title="Key intel" rows={listOf('key_intel')} disabled={committed}
+        <BulletList title="Key intell" rows={listOf('key_intel')} disabled={committed}
           anchor={(el) => { focusRef.current.key_intel = el; }}
           onChange={redraw} addLabel="Add bullet" />
         <Box sx={{ mt: 2 }}>
