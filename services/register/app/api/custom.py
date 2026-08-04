@@ -463,8 +463,9 @@ async def resolve_person_name(
     from app.core.people import find_people
 
     found = await find_people(ctx.session, ctx.tenant_id, name)
-    rows = [{"name": p.name, "full_name": p.full_name, "email": p.email,
-             "role": p.role, "inactive": bool(p.inactive)} for p in found]
+    rows = [{"id": str(p.id), "name": p.name, "full_name": p.full_name,
+             "email": p.email, "role": p.role, "inactive": bool(p.inactive)}
+            for p in found]
     return {"query": name,
             "resolved": rows[0] if len(rows) == 1 else None,
             "candidates": rows}

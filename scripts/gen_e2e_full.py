@@ -412,58 +412,30 @@ F.append(("01 · Users, roles & people  (Access via the gateway)", [
         "/v1/resolve?email={{rmEmail}}", headers=_ADMIN,
         tests=[OK, "pm.test('leads view is SCOPED for a BDRM', () => "
                    "pm.expect(pm.response.json().views.leads).to.eql('SCOPED'));"]),
-    # The roster half of each persona — an UPSERT, not a bare create. Three fields are
-    # load-bearing and the ORIGINAL collection seeded them wrong (role "RM"/"Analyst"
-    # match no dropdown bucket; no e-mail, so nothing binds the roster row to the
-    # sign-in, to VocX, or to /v1/people/resolve; no short handle). full_name is UNIQUE
-    # per tenant, so on a deployment that already ran the old collection a plain POST
-    # 409s and would LEAVE THE BAD ROW IN PLACE — hence create-if-missing, then resolve
-    # the id and PATCH the row to known-good values. Idempotent either way.
-    req("POST /v1/people — Priya (create if missing)", "POST", REG, "/v1/people",
-        body={'name': 'Priya', 'full_name': 'E2E Priya Nair', 'role': 'BDRM, Syn RM, AM RM', 'email': '{{rmEmail}}', 'inactive': False},
-        tests=[OK_OR_EXISTS]),
-    req("GET /v1/people — resolve Priya's roster row", "GET", REG,
-        "/v1/people?q=E2E Priya Nair&limit=5",
-        tests=[OK, "const rows = (pm.response.json().items || pm.response.json());",
-               "const hit = rows.find(r => r.full_name === 'E2E Priya Nair');",
-               "pm.test('Priya roster row exists', () => pm.expect(hit).to.be.an('object'));",
-               "if (hit) pm.environment.set('rmPersonId', hit.id);"]),
-    req("PATCH /v1/people — Priya to known-good (role/e-mail/handle)", "PATCH", REG,
-        "/v1/people/{{rmPersonId}}",
-        body={'name': 'Priya', 'full_name': 'E2E Priya Nair', 'role': 'BDRM, Syn RM, AM RM', 'email': '{{rmEmail}}', 'inactive': False},
-        tests=[OK],
-        desc="The upsert half: a row created by an OLDER collection carries a role no "
-             "dropdown bucket matches and no e-mail — this repairs it in place."),
-    req("POST /v1/people — Arun (create if missing)", "POST", REG, "/v1/people",
-        body={'name': 'Arun', 'full_name': 'E2E Arun Menon', 'role': 'Deal Analyst, Credit Head', 'email': '{{makerEmail}}', 'inactive': False},
-        tests=[OK_OR_EXISTS]),
-    req("GET /v1/people — resolve Arun's roster row", "GET", REG,
-        "/v1/people?q=E2E Arun Menon&limit=5",
-        tests=[OK, "const rows = (pm.response.json().items || pm.response.json());",
-               "const hit = rows.find(r => r.full_name === 'E2E Arun Menon');",
-               "pm.test('Arun roster row exists', () => pm.expect(hit).to.be.an('object'));",
-               "if (hit) pm.environment.set('analystPersonId', hit.id);"]),
-    req("PATCH /v1/people — Arun to known-good (role/e-mail/handle)", "PATCH", REG,
-        "/v1/people/{{analystPersonId}}",
-        body={'name': 'Arun', 'full_name': 'E2E Arun Menon', 'role': 'Deal Analyst, Credit Head', 'email': '{{makerEmail}}', 'inactive': False},
-        tests=[OK],
-        desc="The upsert half: a row created by an OLDER collection carries a role no "
-             "dropdown bucket matches and no e-mail — this repairs it in place."),
-    req("POST /v1/people — Divya (create if missing)", "POST", REG, "/v1/people",
-        body={'name': 'Divya', 'full_name': 'E2E Divya Rao', 'role': 'Management', 'email': '{{checkerEmail}}', 'inactive': False},
-        tests=[OK_OR_EXISTS]),
-    req("GET /v1/people — resolve Divya's roster row", "GET", REG,
-        "/v1/people?q=E2E Divya Rao&limit=5",
-        tests=[OK, "const rows = (pm.response.json().items || pm.response.json());",
-               "const hit = rows.find(r => r.full_name === 'E2E Divya Rao');",
-               "pm.test('Divya roster row exists', () => pm.expect(hit).to.be.an('object'));",
-               "if (hit) pm.environment.set('checkerPersonId', hit.id);"]),
-    req("PATCH /v1/people — Divya to known-good (role/e-mail/handle)", "PATCH", REG,
-        "/v1/people/{{checkerPersonId}}",
-        body={'name': 'Divya', 'full_name': 'E2E Divya Rao', 'role': 'Management', 'email': '{{checkerEmail}}', 'inactive': False},
-        tests=[OK],
-        desc="The upsert half: a row created by an OLDER collection carries a role no "
-             "dropdown bucket matches and no e-mail — this repairs it in place."),
+    # The roster half of every persona comes from ONE call: the register reconciles
+    # its people table FROM Access (create missing, refresh roles/names/active, touch
+    # nothing roster-only, delete nothing). This replaced per-person POST /v1/people
+    # bodies — Access is the single place users are configured, exactly as production
+    # does it through Masters ▸ Employees, and the roster follows.
+    req("POST /v1/internal/people/sync-access — roster follows Access", "POST", REG,
+        "/v1/internal/people/sync-access", headers=_ADMIN, body={},
+        tests=[OK,
+               "const out = pm.response.json();",
+               "pm.test('every Access user has a roster row', () => "
+               "pm.expect(out.roster_total).to.be.at.least(3));",
+               "console.log('roster sync:', JSON.stringify(out));"],
+        desc="Requires REGISTER_ACCESS_URL (set in compose). 503 = Access unreachable; "
+             "nothing was touched."),
+    req("GET /v1/people/resolve — the RM resolves by e-mail", "GET", REG,
+        "/v1/people/resolve?name={{rmEmail}}",
+        tests=[OK, "pm.test('Priya is on the roster', () => "
+                   "pm.expect(pm.response.json().resolved).to.be.an('object'));",
+               "pm.environment.set('rmPersonId', pm.response.json().resolved.id);"]),
+    req("GET /v1/people/resolve — the analyst resolves by e-mail", "GET", REG,
+        "/v1/people/resolve?name={{makerEmail}}",
+        tests=[OK, "pm.test('Arun is on the roster', () => "
+                   "pm.expect(pm.response.json().resolved).to.be.an('object'));",
+               "pm.environment.set('analystPersonId', pm.response.json().resolved.id);"]),
 ]))
 
 F.append(("02 · Client (Entity) — the company master row", [

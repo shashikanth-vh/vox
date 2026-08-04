@@ -1257,7 +1257,7 @@
           ]
         },
         {
-          "name": "POST /v1/people \u2014 Priya (create if missing)",
+          "name": "POST /v1/internal/people/sync-access \u2014 roster follows Access",
           "request": {
             "method": "POST",
             "header": [
@@ -1287,18 +1287,21 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/people",
+              "raw": "{{baseUrl}}/v1/internal/people/sync-access",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "people"
+                "internal",
+                "people",
+                "sync-access"
               ]
             },
+            "description": "Requires REGISTER_ACCESS_URL (set in compose). 503 = Access unreachable; nothing was touched.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"inactive\": false\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1312,14 +1315,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+                  "const out = pm.response.json();",
+                  "pm.test('every Access user has a roster row', () => pm.expect(out.roster_total).to.be.at.least(3));",
+                  "console.log('roster sync:', JSON.stringify(out));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "GET /v1/people \u2014 resolve Priya's roster row",
+          "name": "GET /v1/people/resolve \u2014 the RM resolves by e-mail",
           "request": {
             "method": "GET",
             "header": [
@@ -1345,22 +1351,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/people?q=E2E Priya Nair&limit=5",
+              "raw": "{{baseUrl}}/v1/people/resolve?name={{rmEmail}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "people"
+                "people",
+                "resolve"
               ],
               "query": [
                 {
-                  "key": "q",
-                  "value": "E2E Priya Nair"
-                },
-                {
-                  "key": "limit",
-                  "value": "5"
+                  "key": "name",
+                  "value": "{{rmEmail}}"
                 }
               ]
             }
@@ -1372,143 +1375,15 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "const rows = (pm.response.json().items || pm.response.json());",
-                  "const hit = rows.find(r => r.full_name === 'E2E Priya Nair');",
-                  "pm.test('Priya roster row exists', () => pm.expect(hit).to.be.an('object'));",
-                  "if (hit) pm.environment.set('rmPersonId', hit.id);"
+                  "pm.test('Priya is on the roster', () => pm.expect(pm.response.json().resolved).to.be.an('object'));",
+                  "pm.environment.set('rmPersonId', pm.response.json().resolved.id);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "PATCH /v1/people \u2014 Priya to known-good (role/e-mail/handle)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people/{{rmPersonId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people",
-                "{{rmPersonId}}"
-              ]
-            },
-            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Priya\",\n  \"full_name\": \"E2E Priya Nair\",\n  \"role\": \"BDRM, Syn RM, AM RM\",\n  \"email\": \"{{rmEmail}}\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/people \u2014 Arun (create if missing)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/people \u2014 resolve Arun's roster row",
+          "name": "GET /v1/people/resolve \u2014 the analyst resolves by e-mail",
           "request": {
             "method": "GET",
             "header": [
@@ -1534,22 +1409,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/people?q=E2E Arun Menon&limit=5",
+              "raw": "{{baseUrl}}/v1/people/resolve?name={{makerEmail}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "people"
+                "people",
+                "resolve"
               ],
               "query": [
                 {
-                  "key": "q",
-                  "value": "E2E Arun Menon"
-                },
-                {
-                  "key": "limit",
-                  "value": "5"
+                  "key": "name",
+                  "value": "{{makerEmail}}"
                 }
               ]
             }
@@ -1561,263 +1433,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "const rows = (pm.response.json().items || pm.response.json());",
-                  "const hit = rows.find(r => r.full_name === 'E2E Arun Menon');",
-                  "pm.test('Arun roster row exists', () => pm.expect(hit).to.be.an('object'));",
-                  "if (hit) pm.environment.set('analystPersonId', hit.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PATCH /v1/people \u2014 Arun to known-good (role/e-mail/handle)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people/{{analystPersonId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people",
-                "{{analystPersonId}}"
-              ]
-            },
-            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Arun\",\n  \"full_name\": \"E2E Arun Menon\",\n  \"role\": \"Deal Analyst, Credit Head\",\n  \"email\": \"{{makerEmail}}\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/people \u2014 Divya (create if missing)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Divya\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"role\": \"Management\",\n  \"email\": \"{{checkerEmail}}\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/people \u2014 resolve Divya's roster row",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people?q=E2E Divya Rao&limit=5",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people"
-              ],
-              "query": [
-                {
-                  "key": "q",
-                  "value": "E2E Divya Rao"
-                },
-                {
-                  "key": "limit",
-                  "value": "5"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
-                  "const rows = (pm.response.json().items || pm.response.json());",
-                  "const hit = rows.find(r => r.full_name === 'E2E Divya Rao');",
-                  "pm.test('Divya roster row exists', () => pm.expect(hit).to.be.an('object'));",
-                  "if (hit) pm.environment.set('checkerPersonId', hit.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PATCH /v1/people \u2014 Divya to known-good (role/e-mail/handle)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "e2e-runner"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{adminToken}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-User-Roles",
-                "value": "Admin"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/people/{{checkerPersonId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "people",
-                "{{checkerPersonId}}"
-              ]
-            },
-            "description": "The upsert half: a row created by an OLDER collection carries a role no dropdown bucket matches and no e-mail \u2014 this repairs it in place.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Divya\",\n  \"full_name\": \"E2E Divya Rao\",\n  \"role\": \"Management\",\n  \"email\": \"{{checkerEmail}}\",\n  \"inactive\": false\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+                  "pm.test('Arun is on the roster', () => pm.expect(pm.response.json().resolved).to.be.an('object'));",
+                  "pm.environment.set('analystPersonId', pm.response.json().resolved.id);"
                 ]
               }
             }
