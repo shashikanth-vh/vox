@@ -136,6 +136,45 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, `${path} the CAM`)); }
   },
 
+  /**
+   * Save a HAND-EDITED draft: the analyst may polish the text directly between engine
+   * turns. Recorded as a workbench turn (the transcript stays the audit answer to
+   * "why does the CAM say this?") whose draft becomes the current version.
+   */
+  async saveDraft(reportId: string, draftMd: string): Promise<void> {
+    try {
+      await api.post(`/internal/cam-reports/${reportId}/turns`, {
+        role: 'user', content: '[manual edit] The analyst edited the draft directly.',
+        draft_md: draftMd,
+      });
+    } catch (e) { throw new Error(msg(e, 'save the edited draft')); }
+  },
+
+  /** The tenant's default template of one kind (cam_prompt, cam_example, …) — null
+   *  when the deployment ships none and nobody uploaded one. */
+  async template(docType: string): Promise<{ id: string; title: string } | null> {
+    try {
+      return await api.get<any>(`/templates/${docType}`);
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      console.warn('[cam] template read failed:', docType, e);
+      return null;
+    }
+  },
+
+  /** Put a prompt (or any workbench input) on the lending line's file. */
+  async uploadDoc(lendingId: string, file: File, docType: string): Promise<{ id: string }> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('section', 'CAM');
+    form.append('title', file.name.replace(/\.[^.]+$/, ''));
+    form.append('doc_type', docType);
+    form.append('status', 'On File');
+    try {
+      return await api.post<any>(`/lending/${lendingId}/documents/upload`, form);
+    } catch (e) { throw new Error(msg(e, 'upload that document')); }
+  },
+
   /** The sanctioned terms for a line — null when none have been entered yet. */
   async terms(lendingId: string): Promise<SanctionTermsOut | null> {
     try {

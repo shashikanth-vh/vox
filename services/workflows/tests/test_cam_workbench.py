@@ -124,9 +124,10 @@ async def test_generate_refine_finalise_with_the_stub_engine(monkeypatch):
     body = gen.json()
     # The stub engine drafted; the version is open on the register with its transcript.
     assert "CAM" in body["draft_md"] and body["engine"] == "stub:offline"
-    # No silent omission: the PDF that could not be read as text is NAMED, with why.
+    # No silent omission: the fake PDF that could not be read as text is NAMED, with why
+    # (a real PDF now extracts through pypdf; this stub body is not a parseable PDF).
     assert [s["doc_id"] for s in body["skipped"]] == ["pdf-1"]
-    assert "binary" in body["skipped"][0]["reason"]
+    assert "pdf" in body["skipped"][0]["reason"].lower()
     assert [i["doc_id"] for i in body["included"]] == ["fin-1"]
     assert [t["role"] for t in stub.turns] == ["user", "assistant"]
 
@@ -164,6 +165,33 @@ async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypat
     r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
                     json={"instruction": "anything"})
     assert r.status_code == 404, r.text
+
+
+def test_docx_and_unreadable_formats_extract_or_say_why():
+    """A .docx (a zip holding word/document.xml) extracts with the stdlib — even when
+    the content-type label is wrong — and formats with no extractor name themselves."""
+    import io
+    import zipfile
+
+    from app.cam import extract_text
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml",
+                   "<w:document><w:body><w:p><w:r><w:t>Assess the borrower "
+                   "&amp; the collateral.</w:t></w:r></w:p></w:body></w:document>")
+    docx = buf.getvalue()
+
+    text, reason = extract_text(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx)
+    assert reason is None and "Assess the borrower & the collateral." in text
+
+    # Mislabelled but sniffed: the bytes say what they are.
+    text2, reason2 = extract_text("application/octet-stream", docx)
+    assert reason2 is None and "Assess the borrower" in text2
+
+    _, why = extract_text("image/png", b"\x89PNG....")
+    assert why and "no extractor" in why
 
 
 async def test_committee_triad_maps_verbs_to_register_decisions(monkeypatch):

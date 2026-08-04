@@ -29,40 +29,62 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.documents import Document
 
-_TEMPLATE = Path(__file__).parent / "templates" / "sanction_letter_default.docx"
+_DIR = Path(__file__).parent / "templates"
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# doc_type -> (file, section, title, notes). Same resolution rule for all of them:
+# case-specific upload wins, tenant default otherwise; replacing a default is an
+# UPLOAD of a newer document of the same doc_type, never a deploy.
+_DEFAULTS: tuple[tuple[str, str, str, str, str], ...] = (
+    ("sanction_template", "sanction_letter_default.docx", "Sanction",
+     "Sanction Letter — EVAM default template",
+     "Shipped default. Replace by uploading a newer sanction_template — resolution "
+     "picks the newest; a case-specific upload on the lending line overrides it."),
+    ("cam_prompt", "cam_prompt_default.docx", "CAM",
+     "CAM master prompt — EVAM default (v2)",
+     "The credit team's drafting brief for the CAM workbench. The workbench offers it "
+     "whenever no case-specific prompt is uploaded; replace by uploading a newer "
+     "cam_prompt."),
+    ("cam_example", "cam_example_default.docx", "CAM",
+     "CAM example — Pinnacle Lithium Power (format reference)",
+     "A finished CAM the engine can be shown as a format reference alongside the "
+     "source documents."),
+)
 
 
 async def seed_sanction_template(session: AsyncSession, tenant_id: uuid.UUID) -> int:
-    """Insert the shipped default sanction template if this exact file is not already
-    on record. Returns 1 when inserted, 0 when already present (or no file shipped)."""
-    if not _TEMPLATE.exists():
-        return 0
-    payload = _TEMPLATE.read_bytes()
-    checksum = hashlib.sha256(payload).hexdigest()
-    existing = (await session.execute(select(Document.id).where(
-        Document.tenant_id == tenant_id,
-        Document.subject_type == "Template",
-        Document.doc_type == "sanction_template",
-        Document.checksum == checksum,
-        Document.deleted_at.is_(None)).limit(1))).scalar_one_or_none()
-    if existing is not None:
-        return 0
-    session.add(Document(
-        tenant_id=tenant_id,
-        subject_type="Template", subject_id=tenant_id,
-        section="Sanction", doc_type="sanction_template",
-        title="Sanction Letter — EVAM default template",
-        status="On File", storage_backend="inline",
-        content_type=_DOCX, size_bytes=len(payload), checksum=checksum,
-        original_filename="sanction_letter_default.docx",
-        inline_content=payload, uploaded_by="bootstrap",
-        uploaded_at=datetime.now(UTC),
-        notes="Shipped default. Replace by uploading a newer sanction_template — "
-              "resolution picks the newest; a case-specific upload on the lending "
-              "line overrides it.",
-        created_by="bootstrap"))
-    # This sessionmaker does not autoflush — flush now, so a second call inside the
-    # same bootstrap run sees the row and stays idempotent.
-    await session.flush()
-    return 1
+    """Insert every shipped default template that is not already on record (by
+    checksum). Returns how many rows were inserted; 0 = everything already present."""
+    inserted = 0
+    for doc_type, filename, section, title, notes in _DEFAULTS:
+        path = _DIR / filename
+        if not path.exists():
+            continue
+        payload = path.read_bytes()
+        checksum = hashlib.sha256(payload).hexdigest()
+        existing = (await session.execute(select(Document.id).where(
+            Document.tenant_id == tenant_id,
+            Document.subject_type == "Template",
+            Document.doc_type == doc_type,
+            Document.checksum == checksum,
+            Document.deleted_at.is_(None)).limit(1))).scalar_one_or_none()
+        if existing is not None:
+            continue
+        session.add(Document(
+            tenant_id=tenant_id,
+            subject_type="Template", subject_id=tenant_id,
+            section=section, doc_type=doc_type,
+            title=title,
+            status="On File", storage_backend="inline",
+            content_type=_DOCX, size_bytes=len(payload), checksum=checksum,
+            original_filename=filename,
+            inline_content=payload, uploaded_by="bootstrap",
+            uploaded_at=datetime.now(UTC),
+            notes=notes,
+            created_by="bootstrap"))
+        inserted += 1
+    if inserted:
+        # This sessionmaker does not autoflush — flush now, so a second call inside
+        # the same bootstrap run sees the rows and stays idempotent.
+        await session.flush()
+    return inserted

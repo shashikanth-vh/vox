@@ -192,7 +192,9 @@ async def test_the_default_sanction_template_seeds_once_and_only_once(client: As
     sm = get_sessionmaker()
     async with sm() as session:
         tenant_id = await ensure_tenant(session, "EVAM", "Evam Finance")
-        assert await seed_sanction_template(session, tenant_id) == 1
+        # Three shipped defaults: the sanction letter, the CAM master prompt, and the
+        # example CAM the workbench offers as a format reference.
+        assert await seed_sanction_template(session, tenant_id) == 3
         assert await seed_sanction_template(session, tenant_id) == 0   # idempotent
         await session.commit()
         row = (await session.execute(select(Document).where(
@@ -203,6 +205,33 @@ async def test_the_default_sanction_template_seeds_once_and_only_once(client: As
     assert row is not None
     assert row.inline_content and len(row.inline_content) == tpl.stat().st_size
     assert row.content_type.endswith("wordprocessingml.document")
+
+
+async def test_the_default_templates_resolve_by_doc_type(client: AsyncClient):
+    """/v1/templates/{doc_type} answers what 'use the default' means — the newest
+    tenant Template of that kind; an unknown kind is a 404 that says what to do."""
+    from app.db.session import get_sessionmaker
+    from app.seed.loader import ensure_tenant
+    from app.seed.sanction_template import seed_sanction_template
+
+    sm = get_sessionmaker()
+    async with sm() as session:
+        tenant_id = await ensure_tenant(session, "EVAM", "Evam Finance")
+        await seed_sanction_template(session, tenant_id)
+        await session.commit()
+
+    got = await client.get("/v1/templates/cam_prompt")
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body["id"] and body["doc_type"] == "cam_prompt"
+    assert "CAM" in (body["title"] or "")
+    # And the bytes are readable through the ordinary content route (the workbench
+    # reads the prompt exactly this way).
+    content = await client.get(f"/v1/documents/{body['id']}/content")
+    assert content.status_code == 200
+    assert content.content[:2] == b"PK"          # a .docx is a zip
+
+    assert (await client.get("/v1/templates/never-shipped")).status_code == 404
 
 
 async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatch):

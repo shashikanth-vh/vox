@@ -22,6 +22,7 @@ dependencies = [
     "pydantic-settings==2.7.0",   # app.config
     "pyjwt[crypto]==2.10.1",      # evam_backend_core.oidc token verification
     "python-json-logger==3.2.1",  # structured logs
+    "pypdf==5.1.0",               # CAM workbench: text extraction from PDF documents
 ]
 
 [project.optional-dependencies]

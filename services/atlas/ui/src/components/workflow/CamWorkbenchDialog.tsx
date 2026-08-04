@@ -46,9 +46,14 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
   const [reports, setReports] = useState<CamReport[]>([]);
   const [docs, setDocs] = useState<EntityDoc[]>([]);
+  const [defaults, setDefaults] = useState<{ prompt?: { id: string; title: string };
+    example?: { id: string; title: string } }>({});
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [promptDoc, setPromptDoc] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [instruction, setInstruction] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draftText, setDraftText] = useState('');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
@@ -59,13 +64,32 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const load = async () => {
     setLoading(true);
     try {
-      const [r, d] = await Promise.all([
+      const [r, d, tp, te] = await Promise.all([
         camService.list(subjectId),
         entityId ? camService.entityDocs(entityId) : Promise.resolve([]),
+        camService.template('cam_prompt'),
+        camService.template('cam_example'),
       ]);
       setReports(r); setDocs(d);
+      setDefaults({ prompt: tp || undefined, example: te || undefined });
+      // The deployment's default prompt is the working assumption — the analyst can
+      // still pick a case-specific upload, but "no prompt chosen" should not be the
+      // resting state when the credit team shipped one.
+      setPromptDoc((p) => p || tp?.id || '');
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLoading(false);
+  };
+
+  const uploadPrompt = async (file: File | null) => {
+    if (!file) return;
+    setErr(''); setUploading(true);
+    try {
+      const doc = await camService.uploadDoc(subjectId, file, 'CAM Prompt');
+      setInfo(`Prompt "${file.name}" filed on this line.`);
+      await load();
+      setPromptDoc(String(doc.id));
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setUploading(false);
   };
 
   useEffect(() => {
@@ -106,6 +130,13 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     await camService.refine(subjectId, instruction.trim());
     setInstruction('');
     return 'Draft reworked.';
+  });
+
+  const saveEdit = () => run('save', async () => {
+    if (!working) throw new Error('No open draft to save.');
+    await camService.saveDraft(working.id, draftText);
+    setEditing(false);
+    return 'Your edits are saved — this is now the current draft.';
   });
 
   const finalise = () => run('finalise', async () => {
@@ -189,15 +220,38 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
         {/* ---- analyst: an open draft to rework and finalise ------------------------- */}
         {working && (
           <Box>
-            <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.6 }}>
-              v{working.report_version} · {working.status === 'Returned'
-                ? <>returned by the committee{working.decision_note ? <> — “{working.decision_note}”</> : null}; rework it below</>
-                : 'draft in progress'} · engine {working.engine || '—'}
-            </Typography>
-            <Box component="pre" sx={{
-              whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2,
-              border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 300, overflow: 'auto',
-            }}>{working.draft_md || 'No draft text yet — generate below.'}</Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.6 }}>
+              <Typography sx={{ fontSize: 12.5, color: tokens.muted, flex: 1 }}>
+                v{working.report_version} · {working.status === 'Returned'
+                  ? <>returned by the committee{working.decision_note ? <> — “{working.decision_note}”</> : null}; rework it below</>
+                  : 'draft in progress'} · engine {working.engine || '—'}
+              </Typography>
+              {!editing && !!working.draft_md && (
+                <Button size="small" disabled={!!busy}
+                  onClick={() => { setDraftText(working.draft_md || ''); setEditing(true); }}
+                  sx={{ textTransform: 'none', fontSize: 12 }}>Edit the text</Button>
+              )}
+            </Box>
+            {editing ? (
+              <>
+                <TextField fullWidth multiline minRows={10} maxRows={18} value={draftText}
+                  onChange={(e) => setDraftText(e.target.value)}
+                  sx={{ '& textarea': { fontSize: 12.5 } }} />
+                <Box sx={{ display: 'flex', gap: 1, mt: 0.8 }}>
+                  <Button size="small" variant="contained" disabled={!!busy || !draftText.trim()}
+                    onClick={() => void saveEdit()}>
+                    {busy === 'save' ? 'Saving…' : 'Save edits'}
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={!!busy}
+                    onClick={() => setEditing(false)}>Cancel</Button>
+                </Box>
+              </>
+            ) : (
+              <Box component="pre" sx={{
+                whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2,
+                border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 300, overflow: 'auto',
+              }}>{working.draft_md || 'No draft text yet — generate below.'}</Box>
+            )}
             <Box sx={{ display: 'flex', gap: 1, mt: 1, alignItems: 'flex-start' }}>
               <TextField fullWidth size="small" multiline minRows={1}
                 label="Rework instruction — what should change?"
@@ -222,24 +276,32 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
         )}
 
         {/* ---- no live version: pick documents and generate -------------------------- */}
-        {!live && !loading && (
-          <Box>
-            <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
-              Pick the source documents and the credit team's <b>prompt document</b> — the
-              engine drafts only from what you select, and says which documents it could
-              not read.
-            </Typography>
-            {!docs.length && (
-              <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-                Nothing on the company's file yet — upload the source documents and a
-                prompt document in the Data Register first.
-              </Alert>
-            )}
-            {docs.length > 0 && (
-              <>
+        {!live && !loading && (() => {
+          // Sources: the company's file, plus the deployment's example CAM (a format
+          // reference the engine may be shown). The prompt: the credit team's default
+          // ships with the deployment; a case-specific upload overrides it.
+          const sources: EntityDoc[] = [
+            ...docs,
+            ...(defaults.example ? [{ id: defaults.example.id, title: defaults.example.title,
+              section: 'Template', doc_type: 'cam_example', content_type: '', status: '' }] : []),
+          ];
+          return (
+            <Box>
+              <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
+                Pick the source documents and the credit team's <b>prompt document</b> — the
+                engine drafts only from what you select, and says which documents it could
+                not read. PDF and Word documents are read as text.
+              </Typography>
+              {!docs.length && (
+                <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
+                  Nothing on the company's file yet — upload the source documents in the
+                  Data Register first.
+                </Alert>
+              )}
+              {sources.length > 0 && (
                 <Box sx={{ maxHeight: 220, overflow: 'auto', border: `1px solid ${tokens.line}`,
                   borderRadius: 1, mb: 1 }}>
-                  {docs.map((d) => (
+                  {sources.map((d) => (
                     <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
                       borderBottom: `1px solid ${tokens.line}` }}>
                       <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
@@ -250,22 +312,35 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     </Box>
                   ))}
                 </Box>
+              )}
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
                 <TextField select fullWidth size="small" label="Prompt document (the drafting brief)"
-                  value={promptDoc} onChange={(e) => setPromptDoc(e.target.value)} sx={{ mb: 1 }}>
+                  value={promptDoc} onChange={(e) => setPromptDoc(e.target.value)}>
+                  {defaults.prompt && (
+                    <MenuItem value={defaults.prompt.id} sx={{ fontSize: 13 }}>
+                      Default — {defaults.prompt.title}
+                    </MenuItem>
+                  )}
                   {docs.map((d) => (
                     <MenuItem key={d.id} value={d.id} sx={{ fontSize: 13 }}>{d.title}</MenuItem>
                   ))}
                 </TextField>
-                <Button variant="contained" size="small"
-                  startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                  disabled={!sel.size || !promptDoc || !!busy}
-                  onClick={() => void generate()}>
-                  {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
+                <Button component="label" variant="outlined" size="small" disabled={uploading}
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none', flexShrink: 0 }}>
+                  {uploading ? 'Uploading…' : 'Upload prompt…'}
+                  <input hidden type="file" accept=".docx,.pdf,.md,.txt,.csv"
+                    onChange={(e) => { void uploadPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
                 </Button>
-              </>
-            )}
-          </Box>
-        )}
+              </Box>
+              <Button variant="contained" size="small"
+                startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
+                disabled={!sel.size || !promptDoc || !!busy}
+                onClick={() => void generate()}>
+                {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
+              </Button>
+            </Box>
+          );
+        })()}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={!!busy}>Close</Button>

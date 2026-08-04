@@ -464,6 +464,30 @@ async def list_cam_reports(
     return [_cam_out(r) for r in rows]
 
 
+@router.get("/v1/templates/{doc_type}", tags=["Reference"],
+            summary="The tenant's default template document of one kind")
+async def get_template(doc_type: str,
+                       ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Newest tenant-level Template document of this doc_type (sanction_template,
+    cam_prompt, cam_example, …) — what 'use the default' resolves to. The bytes are
+    read through the ordinary /v1/documents/{id}/content route."""
+    from app.models.documents import Document
+
+    row = (await ctx.session.execute(select(Document).where(
+        Document.tenant_id == ctx.tenant_id,
+        Document.subject_type == "Template",
+        Document.doc_type == doc_type,
+        Document.deleted_at.is_(None))
+        .order_by(Document.uploaded_at.desc().nulls_last(), Document.created_at.desc())
+        .limit(1))).scalars().first()
+    if row is None:
+        raise NotFoundError(f"No default {doc_type!r} template is on record — upload "
+                            "one, or ship it with the deployment's bootstrap.")
+    return {"id": str(row.id), "doc_type": row.doc_type, "title": row.title,
+            "content_type": row.content_type, "size_bytes": row.size_bytes,
+            "checksum": row.checksum}
+
+
 @router.get("/v1/internal/cam-reports/{report_id}", tags=["Internal"],
             summary="One CAM version, with its workbench transcript")
 async def get_cam_report(report_id: str,

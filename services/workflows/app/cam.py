@@ -13,11 +13,12 @@ CAM version records which engine drafted it. Today: Anthropic (Haiku by default)
 deterministic stub when no key is configured — dev and CI run the whole lifecycle
 without a vendor account. Adding a provider is one class + a config value.
 
-**Documents.** Text-like documents (markdown, txt, csv, json, html) are read whole, per-
-doc bounded; binary formats (PDF/DOCX) are SKIPPED AND SAID SO — the response names what
-went in and what did not, because a CAM that silently omits a document it claims to
-cover is worse than one that refuses. Extending extraction to PDFs is an isolated
-change inside ``_doc_text``.
+**Documents.** Text-like documents (markdown, txt, csv, json, html) are read whole;
+DOCX is unzipped and stripped of markup (stdlib); PDF goes through pypdf. All per-doc
+bounded. A format that still cannot be read — or a scan with no text layer — is
+SKIPPED AND SAID SO: the response names what went in and what did not, because a CAM
+that silently omits a document it claims to cover is worse than one that refuses.
+Extraction lives in ``extract_text``; adding a format is one branch there.
 """
 
 from __future__ import annotations
@@ -28,6 +29,47 @@ from fastapi import Request
 from pydantic import BaseModel, ConfigDict, Field
 
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/csv")
+_DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def extract_text(ctype: str, blob: bytes) -> tuple[str, str | None]:
+    """(text, unreadable-reason). Text types decode; DOCX is unzipped and stripped of
+    markup (stdlib only — a .docx is a zip holding word/document.xml); PDF goes through
+    pypdf. Anything else — or an extraction that yields nothing — returns the REASON,
+    because a CAM that silently omits a document it claims to cover is worse than one
+    that refuses."""
+    ctype = (ctype or "").lower()
+    if any(ctype.startswith(t) for t in _TEXT_TYPES):
+        return blob.decode("utf-8", "ignore"), None
+    if ctype.startswith(_DOCX_TYPE) or (blob[:2] == b"PK" and b"word/" in blob[:4096]):
+        import html
+        import io
+        import re
+        import zipfile
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", "ignore")
+        except (zipfile.BadZipFile, KeyError, OSError) as exc:
+            return "", f"could not read the .docx ({exc})"
+        xml = xml.replace("<w:tab/>", "\t").replace("<w:br/>", "\n")
+        text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"</w:p>", "\n", xml)))
+        if text.strip():
+            return text, None
+        return "", "the .docx contains no extractable text"
+    if ctype.startswith("application/pdf") or blob[:5] == b"%PDF-":
+        import io
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            return "", "PDF extraction needs pypdf, which is not installed in this image"
+        try:
+            text = "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(blob)).pages)
+        except Exception as exc:  # noqa: BLE001 — malformed PDFs raise all sorts
+            return "", f"could not read the PDF ({exc})"
+        if text.strip():
+            return text, None
+        return "", "the PDF has no extractable text (a scan needs OCR, which is not wired)"
+    return "", f"binary content ({ctype or 'unknown type'}) — no extractor for this format"
 _SYSTEM = (
     "You are drafting a Credit Assessment Memo (CAM) for a climate-finance lender. "
     "Work ONLY from the supplied documents and the analyst's prompt document; where a "
@@ -167,11 +209,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return "", "not found on the register"
         if r.status_code >= 300:
             return "", f"register refused the read (HTTP {r.status_code})"
-        ctype = (r.headers.get("content-type") or "").lower()
-        if not any(ctype.startswith(t) for t in _TEXT_TYPES):
-            return "", f"binary content ({ctype or 'unknown type'}) — text extraction " \
-                       f"for this format is not wired yet"
-        text = r.text
+        text, reason = extract_text(r.headers.get("content-type") or "", r.content)
+        if reason is not None:
+            return "", reason
         if len(text) > max_doc_chars:
             return text[:max_doc_chars], f"truncated to {max_doc_chars} characters"
         return text, None
