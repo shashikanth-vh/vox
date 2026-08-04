@@ -82,12 +82,12 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           onClose={() => setErr('')}>{err || rec.error}</Alert>
       )}
 
-      <Typography sx={{ fontSize: 34, fontWeight: 700, mb: 0.6, mt: 1, letterSpacing: '-.01em' }}>
+      <Typography sx={{ fontSize: 34, fontWeight: 700, mb: 0.4, mt: 1, letterSpacing: '-.01em' }}>
         Tap. Speak. Done.
       </Typography>
-      <Typography sx={{ fontSize: 15, color: vx.mut, mb: 2.4, maxWidth: 400, mx: 'auto' }}>
-        Speak your field intel — a client meeting, a site visit, market colour.
-        Up to {MAX_SECONDS / 60} minutes, in any language: EN, HI, Hinglish.
+      <Typography sx={{ fontSize: 15.5, color: vx.grn2, fontWeight: 600, mb: 2.4,
+                        maxWidth: 400, mx: 'auto' }}>
+        Don't just take notes. Record it.
       </Typography>
 
       {/* The mic. Recording is MOTION, not a colour swap: the button keeps the
@@ -172,22 +172,27 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'center', mt: 2.2,
                    flexWrap: 'wrap', px: 1 }}>
           {[
-            ['1', 'PRISM listens', 'transcribed in English, whatever you spoke'],
-            ['2', 'Structures the intel', 'client matched · key intel · next steps'],
-            ['3', 'Files on your approval', 'register interaction · lead · calendar'],
-          ].map(([n, title, sub]) => (
-            <Box key={n} sx={{ flex: '1 1 118px', maxWidth: 148, textAlign: 'left',
-                               bgcolor: vx.card, border: `1px solid ${vx.line}`,
-                               borderRadius: '12px', p: 1.1 }}>
-              <Typography sx={{ fontSize: 10, fontWeight: 800, color: vx.grn,
-                                letterSpacing: '.14em', mb: 0.3 }}>STEP {n}</Typography>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: vx.ink,
+            ['Capture', `raw intel in EN, HI or Hinglish — up to ${MAX_SECONDS / 60} minutes`],
+            ['Structure', 'PRISM maps the client, key insights and actions'],
+            ['Execute', 'file, sync and close — on your approval'],
+          ].map(([title, sub]) => (
+            <Box key={title} sx={{ flex: '1 1 118px', maxWidth: 148, textAlign: 'left',
+                                   bgcolor: vx.card, border: `1px solid ${vx.line}`,
+                                   borderRadius: '12px', p: 1.1 }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: vx.grn,
                                 lineHeight: 1.25 }}>{title}</Typography>
-              <Typography sx={{ fontSize: 10.5, color: vx.mut, mt: 0.3,
-                                lineHeight: 1.35 }}>{sub}</Typography>
+              <Typography sx={{ fontSize: 10.5, color: vx.mut, mt: 0.4,
+                                lineHeight: 1.4 }}>{sub}</Typography>
             </Box>
           ))}
         </Box>
+      )}
+
+      {!recording && !busy && (
+        <Typography sx={{ fontSize: 11, color: vx.mut, letterSpacing: '.08em', mt: 1.6,
+                          textTransform: 'uppercase' }}>
+          Zero friction · Maximum momentum
+        </Typography>
       )}
 
       {!recording && (
