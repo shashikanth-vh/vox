@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Box, Paper, Typography, Button, Collapse } from '@mui/material';
+import { Alert, Box, Paper, Typography, Button, Collapse } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
@@ -9,6 +9,7 @@ import { useSearch } from '../../context/SearchContext';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
 import WorkflowDecisionDialog from './WorkflowDecisionDialog';
+import CovenantResultDialog from './CovenantResultDialog';
 import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
 import { workflowService, kindLabel, since, pendingKey, actionsFor,
@@ -87,6 +88,8 @@ export default function TodayPage() {
   // Temporal's queue, separate from the local stage-change requests above — it is polled
   // because the plane releases runs on its own (a decision timeout, another approver).
   const [wfDecide, setWfDecide] = useState<{ w: PendingWorkflow; action: DecisionAction } | null>(null);
+  const [covRecord, setCovRecord] = useState<PendingWorkflow | null>(null);
+  const [covFlash, setCovFlash] = useState('');
   const { data: wfPending = [], refetch: refetchWf } = useQuery({
     queryKey: ['workflows', 'pending'],
     queryFn: () => workflowService.pending(),
@@ -203,13 +206,24 @@ export default function TodayPage() {
         </Section>
       )}
 
+      {covFlash && (
+        <Alert severity={covFlash.includes('BREACHED') ? 'warning' : 'success'}
+          sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setCovFlash('')}>{covFlash}</Alert>
+      )}
       {wfReminders.length > 0 && (
         <Section title="Chase & monitor" count={wfReminders.length} defaultOpen>
           {wfReminders.map((w, i) => (
-            <ChLine key={pendingKey(w) + i}>
+            <ChLine key={pendingKey(w) + (w.monitoringId || i)}>
               <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#FFF3E0', color: '#9A6A00', whiteSpace: 'nowrap' }}>{REMINDER_KINDS[w.kind]}</Box>
               <Box component="b" sx={{ color: tokens.ink }}>{w.stage}</Box>
               {hint(w.requestedBy ? `owner ${w.requestedBy}` : 'standing reminder — clears when the work lands')}
+              <Box sx={{ flex: 1 }} />
+              {/* The call happened, the documents arrived — close THIS period here. */}
+              {w.kind === 'covenant-due' && w.monitoringId && (
+                <Button size="small" variant="outlined" onClick={() => setCovRecord(w)} sx={{ minWidth: 0 }}>
+                  Record received
+                </Button>
+              )}
             </ChLine>
           ))}
         </Section>
@@ -261,6 +275,8 @@ export default function TodayPage() {
       )}
 
       <WorkflowDecisionDialog w={wfDecide?.w ?? null} action={wfDecide?.action ?? 'approve'} onClose={() => setWfDecide(null)} onDone={wfDone} />
+      <CovenantResultDialog w={covRecord} onClose={() => setCovRecord(null)}
+        onDone={(m) => { setCovFlash(m); wfDone(); }} />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
     </Box>

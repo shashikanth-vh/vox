@@ -3539,13 +3539,23 @@ def create_app() -> FastAPI:
         # lines) and Today shows them until the work lands. No verbs: there is nothing
         # to approve here, only documents to chase and compliance to record.
         _REMINDER_KINDS = {"cs-followup", "covenant-due"}
-        _REMINDER_ROLES = {"Deal Analyst", "Credit Head", "Management", "Admin"}
+        # The RM (BDRM) or the analyst CALLS the borrower and collects the documents;
+        # the reminder must reach both, plus the credit line that owns the covenant.
+        _REMINDER_ROLES = {"BDRM", "Deal Analyst", "Credit Head", "Management", "Admin"}
         if (kind is None or kind in _REMINDER_KINDS) and (
                 caller_roles is None or caller_roles & _REMINDER_ROLES):
+            reg_headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+            base_url = settings.register_base_url.rstrip("/")
             try:
+                # The poll IS the cron: mint any covenant observations newly due (the
+                # sweep is idempotent — replaying is a no-op) so each open PERIOD gets
+                # its own reminder, closeable by recording the received document.
+                with contextlib.suppress(httpx.HTTPError):
+                    await request.app.state.http.post(
+                        f"{base_url}/v1/internal/covenants/run-sweep",
+                        json={"horizon_days": 35}, headers=reg_headers)
                 fu = await request.app.state.http.get(
-                    f"{settings.register_base_url.rstrip('/')}/v1/internal/follow-ups",
-                    headers={"X-API-Key": settings.register_api_key, "X-Tenant": tenant})
+                    f"{base_url}/v1/internal/follow-ups", headers=reg_headers)
                 for row in (fu.json().get("items", []) if fu.status_code == 200 else []):
                     if kind is not None and row.get("kind") != kind:
                         continue
@@ -3558,13 +3568,19 @@ def create_app() -> FastAPI:
                         stage_txt = (f"Covenant '{row.get('name')}' "
                                      + ("OVERDUE since " if row.get("overdue") else "due ")
                                      + str(row.get("due_on") or "")
-                                     + (f" · {company}" if company else ""))
+                                     + (f" · {company}" if company else "")
+                                     + " — call the borrower for the documents")
                     pending.append({
                         "kind": row["kind"],
                         "subject_id": row.get("lending_id") or row.get("entity_id") or "",
                         "workflow_id": None, "status": "Reminder", "stage": stage_txt,
                         "requested_by": row.get("prepared_by") or "",
-                        "started_at": row.get("created_at") or row.get("due_on") or ""})
+                        "started_at": row.get("created_at") or row.get("due_on") or "",
+                        # What the client needs to CLOSE the cycle in place.
+                        **({"monitoring_id": row["monitoring_id"]}
+                           if row.get("monitoring_id") else {}),
+                        **({"metric": row["metric"]} if row.get("metric") else {}),
+                        **({"covenant_name": row["name"]} if row.get("name") else {})})
             except (httpx.HTTPError, AttributeError, ValueError):
                 pass   # reminders are additive; the decision queue still serves
 

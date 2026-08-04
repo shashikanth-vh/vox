@@ -29,12 +29,14 @@ from app.core.security import RequestContext, get_context
 from app.models import Entity, LendingTracker
 from app.models.covenants import Covenant
 from app.models.cpcs import CpcsChecklist
+from app.models.prism import MonitoringReporting
 
 router = api_router()
 
 _DONE = ("Completed", "Waived")
 _FREQ_MONTHS = {"monthly": 1, "quarterly": 3, "half-yearly": 6, "half yearly": 6,
-                "semi-annual": 6, "annually": 12, "annual": 12, "yearly": 12}
+                "semi-annual": 6, "semiannual": 6, "annually": 12, "annual": 12,
+                "yearly": 12}
 
 
 def _add_months(d: date, months: int) -> date:
@@ -105,11 +107,28 @@ async def list_follow_ups(
         })
 
     # ---- covenant cycles due on DISBURSED lines --------------------------------------
+    # The DOCUMENT chase, mostly: reporting covenants owe the borrower's financials
+    # every cycle (monthly for the usual reporting pack) until the loan closes. The
+    # sweep mints one OBSERVATION row per period; each open observation is a reminder
+    # the analyst retires by RECORDING the received document's result — which is what
+    # advances the nag to the next month instead of letting it ring forever.
     covenants = (await ctx.session.execute(select(Covenant).where(
         Covenant.tenant_id == ctx.tenant_id,
         Covenant.is_active.is_(True),
         Covenant.deleted_at.is_(None)))).scalars().all()
     horizon = today + timedelta(days=window_days)
+
+    obs_rows = (await ctx.session.execute(select(MonitoringReporting).where(
+        MonitoringReporting.tenant_id == ctx.tenant_id,
+        MonitoringReporting.record_type == "Covenant",
+        MonitoringReporting.status.in_(("Pending", "Overdue")),
+        MonitoringReporting.deleted_at.is_(None)))).scalars().all()
+    obs_by_covenant: dict[str, list[MonitoringReporting]] = {}
+    for m in obs_rows:
+        cov_id = str((m.details or {}).get("covenant_id") or "")
+        if cov_id:
+            obs_by_covenant.setdefault(cov_id, []).append(m)
+
     for cov in covenants:
         line = lending_by_id.get(str(cov.lending_id)) if cov.lending_id else None
         # Monitoring starts when money moves; a line not yet disbursed has nothing due,
@@ -117,17 +136,32 @@ async def list_follow_ups(
         # its cycle belongs to whatever mandate carries it.
         if line is None or str(getattr(line, "stage", "") or "") != "Disbursed":
             continue
-        due = current_due(cov.first_due_on, cov.frequency, today)
-        grace_until = due + timedelta(days=int(cov.grace_days or 0))
-        if due > horizon:
-            continue
-        items.append({
-            "kind": "covenant-due", "covenant_id": str(cov.id),
-            "lending_id": str(cov.lending_id), "entity_id": str(cov.entity_id),
-            "name": cov.name, "covenant_type": cov.covenant_type,
-            "frequency": cov.frequency, "due_on": due.isoformat(),
-            "overdue": grace_until < today, "severity": cov.breach_severity,
-        })
+        base = {"kind": "covenant-due", "covenant_id": str(cov.id),
+                "lending_id": str(cov.lending_id), "entity_id": str(cov.entity_id),
+                "name": cov.name, "covenant_type": cov.covenant_type,
+                "metric": cov.metric, "frequency": cov.frequency,
+                "severity": cov.breach_severity}
+        open_obs = sorted(obs_by_covenant.get(str(cov.id)) or [],
+                          key=lambda m: (m.due_date or today))
+        if open_obs:
+            # One reminder per OPEN period — recording the result is what closes it.
+            for m in open_obs:
+                if m.due_date is not None and m.due_date > horizon:
+                    continue
+                grace_until = ((m.due_date or today)
+                               + timedelta(days=int(cov.grace_days or 0)))
+                items.append({**base, "monitoring_id": str(m.id), "period": m.period,
+                              "due_on": (m.due_date or today).isoformat(),
+                              "overdue": m.status == "Overdue" or grace_until < today})
+        else:
+            # No observation minted yet (sweep not run) — fall back to the computed
+            # current cycle so the reminder never depends on a cron having fired.
+            due = current_due(cov.first_due_on, cov.frequency, today)
+            if due > horizon:
+                continue
+            grace_until = due + timedelta(days=int(cov.grace_days or 0))
+            items.append({**base, "due_on": due.isoformat(),
+                          "overdue": grace_until < today})
         entity_ids.add(cov.entity_id)
 
     # ---- company names, so a reminder reads as a company and not a UUID --------------

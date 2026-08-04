@@ -35,6 +35,11 @@ export interface PendingWorkflow {
   rejectUrl?: string;
   controlUrl?: string;     // run-control (return / resubmit / cancel) on a parked run
   checklistVersion?: number;
+  // Reminder rows (cs-followup / covenant-due): what the client needs to CLOSE the
+  // cycle in place — the observation to record against, and whether a figure is owed.
+  monitoringId?: string;
+  metric?: string;
+  covenantName?: string;
 }
 
 /** A stable key for a queue item — register rows carry no workflow id. */
@@ -73,6 +78,9 @@ function toPending(r: any): PendingWorkflow {
     rejectUrl: r?.reject_url || undefined,
     controlUrl: r?.control_url || undefined,
     checklistVersion: r?.checklist_version ?? undefined,
+    monitoringId: r?.monitoring_id || undefined,
+    metric: r?.metric || undefined,
+    covenantName: r?.covenant_name || undefined,
   };
 }
 

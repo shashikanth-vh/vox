@@ -26,9 +26,11 @@ interface CovRow {
   threshold: string; frequency: string; first_due_on: string; breach_severity: string;
 }
 
+// Monthly by default: most covenants here are REPORTING obligations — the borrower's
+// monthly financial pack — and the reminder cadence follows this frequency.
 const blankCov = (): CovRow => ({
-  name: '', covenant_type: 'Financial', metric: '', operator: '>=', threshold: '',
-  frequency: 'Quarterly', first_due_on: '', breach_severity: 'Amber',
+  name: '', covenant_type: 'Reporting', metric: '', operator: '>=', threshold: '',
+  frequency: 'Monthly', first_due_on: '', breach_severity: 'Amber',
 });
 
 /** "Board resolution for borrowing" -> a stable checklist key. */
@@ -265,7 +267,8 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
                 </TextField>
                 <TextField size="small" label="Threshold" type="number" value={c.threshold} onChange={(e) => covSet(i, 'threshold', e.target.value)} />
                 <TextField size="small" select label="Frequency" value={c.frequency} onChange={(e) => covSet(i, 'frequency', e.target.value)}>
-                  {['Monthly', 'Quarterly', 'Half-yearly', 'Annually'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+                  {/* The register's cycle vocabulary — the sweep steps periods by these. */}
+                  {['Monthly', 'Quarterly', 'SemiAnnual', 'Annual'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
                 </TextField>
                 <TextField size="small" label="First due" type="date" InputLabelProps={{ shrink: true }} value={c.first_due_on} onChange={(e) => covSet(i, 'first_due_on', e.target.value)} />
                 <TextField size="small" select label="Severity" value={c.breach_severity} onChange={(e) => covSet(i, 'breach_severity', e.target.value)}>

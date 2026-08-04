@@ -254,6 +254,32 @@ async def test_follow_ups_raise_cs_chases_and_covenant_cycles(client: AsyncClien
     cov = next(i for i in mine if i["kind"] == "covenant-due")
     assert cov["name"] == "DSCR >= 1.2" and cov["overdue"] is True
     assert cov["company"] == "Followup Energy"
+    assert "monitoring_id" not in cov          # computed fallback — no observation yet
+
+    # Once the sweep mints the period's OBSERVATION, the reminder binds to it —
+    # recording the received documents against that id is what closes the cycle.
+    from sqlalchemy import select
+
+    from app.models.prism import MonitoringReporting
+    async with sm() as session:
+        cov_row = (await session.execute(select(Covenant).where(
+            Covenant.tenant_id == tenant_id,
+            Covenant.name == "DSCR >= 1.2"))).scalars().first()
+        session.add(MonitoringReporting(
+            tenant_id=tenant_id, entity_id=uuid.UUID(ent["id"]),
+            record_type="Covenant", covenant_name=cov_row.name,
+            due_date=date.today() - timedelta(days=10),
+            period=(date.today() - timedelta(days=10)).isoformat(),
+            status="Pending", target_value=1.2,
+            details={"covenant_id": str(cov_row.id), "metric": "dscr",
+                     "operator": ">=", "grace_days": 0},
+            created_by="test"))
+        await session.commit()
+    again = (await client.get("/v1/internal/follow-ups")).json()
+    bound = [i for i in again["items"]
+             if i["kind"] == "covenant-due" and i.get("lending_id") == lend["id"]]
+    assert len(bound) == 1 and bound[0].get("monitoring_id")
+    assert bound[0]["metric"] == "dscr"
 
 
 async def test_a_company_carrying_live_rows_cannot_be_deleted(client: AsyncClient):
