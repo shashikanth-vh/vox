@@ -253,3 +253,46 @@ async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatc
     # Idempotent: a second run changes nothing.
     again = (await client.post("/v1/internal/people/sync-access", headers=ADMIN)).json()
     assert again["created"] == [] and again["updated"] == []
+
+
+async def test_a_leavers_book_hands_over_whole(client: AsyncClient):
+    """Every row the leaver owns — by EITHER of their names — moves to the successor in
+    one call, with counts; their active assignments end and mirror to the successor."""
+    ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin",
+             "X-User-Id": "8c5a2c1e-0000-4000-8000-00000000000a"}
+    for body in ({"name": "Priya", "full_name": "E2E Priya Nair", "role": "BDRM",
+                  "email": "e2e.rm@evamfinance.com"},
+                 {"name": "Kiran", "full_name": "E2E Kiran Shah", "role": "BDRM",
+                  "email": "kiran@evamfinance.com"}):
+        assert (await client.post("/v1/people", json=body,
+                                  headers=ADMIN)).status_code == 201
+
+    ent = (await client.post("/v1/entities", json={
+        "code": f"HB-{uuid.uuid4().hex[:6]}", "legal_name": "Handover Book Co"})).json()
+    # One row under the HANDLE, one under the FULL NAME — both must move.
+    lead1 = (await client.post("/v1/leads", json={
+        "company": "Handover Book Co", "entity_id": ent["id"], "rm": "Priya"})).json()
+    lead2 = (await client.post("/v1/leads", json={
+        "company": "Handover Book Co", "entity_id": ent["id"],
+        "rm": "E2E Priya Nair"})).json()
+    lend = (await client.post("/v1/lending", json={
+        "entity_id": ent["id"], "rm": "Priya", "analyst": "Priya"})).json()
+
+    r = await client.post("/v1/internal/people/handover", json={
+        "from_person": "e2e.rm@evamfinance.com", "to_person": "Kiran"}, headers=ADMIN)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["moved"]["leads"] == 2
+    assert out["moved"]["lending"] == 2          # rm + analyst on the one line
+    assert out["to"] == "E2E Kiran Shah"
+
+    for lid in (lead1["id"], lead2["id"]):
+        got = (await client.get(f"/v1/leads/{lid}", headers=ADMIN)).json()
+        assert got["rm"] == "Kiran", got
+    assert (await client.get(f"/v1/lending/{lend['id']}",
+                             headers=ADMIN)).json()["rm"] == "Kiran"
+
+    # Guard rails: no self-handover, no inactive successor, ambiguity refused upstream.
+    self_h = await client.post("/v1/internal/people/handover", json={
+        "from_person": "Kiran", "to_person": "kiran@evamfinance.com"}, headers=ADMIN)
+    assert self_h.status_code == 422

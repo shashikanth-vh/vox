@@ -7925,69 +7925,6 @@
         "title": "HandoffIn",
         "type": "object"
       },
-      "HandoverIn": {
-        "additionalProperties": false,
-        "description": "The MAKER's draft. Identities are NOT accepted here \u2014 the maker is the authenticated caller;\nthe package reference/digest are GENERATED server-side.",
-        "properties": {
-          "cpcs_checklist_version": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpcs Checklist Version"
-          },
-          "delivery_method": {
-            "maxLength": 60,
-            "minLength": 1,
-            "title": "Delivery Method",
-            "type": "string"
-          },
-          "executed_document_refs": {
-            "items": {
-              "$ref": "#/components/schemas/DocumentRef"
-            },
-            "minItems": 1,
-            "title": "Executed Document Refs",
-            "type": "array"
-          },
-          "lending_id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Lending Id",
-            "type": "string"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "recipient": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Recipient",
-            "type": "string"
-          }
-        },
-        "required": [
-          "lending_id",
-          "executed_document_refs",
-          "delivery_method",
-          "recipient"
-        ],
-        "title": "HandoverIn",
-        "type": "object"
-      },
       "HandoverReturnIn": {
         "additionalProperties": false,
         "properties": {
@@ -14855,6 +14792,69 @@
         "title": "CloseIn",
         "type": "object"
       },
+      "app__api__handover__HandoverIn": {
+        "additionalProperties": false,
+        "description": "The MAKER's draft. Identities are NOT accepted here \u2014 the maker is the authenticated caller;\nthe package reference/digest are GENERATED server-side.",
+        "properties": {
+          "cpcs_checklist_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpcs Checklist Version"
+          },
+          "delivery_method": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Delivery Method",
+            "type": "string"
+          },
+          "executed_document_refs": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentRef"
+            },
+            "minItems": 1,
+            "title": "Executed Document Refs",
+            "type": "array"
+          },
+          "lending_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lending Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recipient": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Recipient",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lending_id",
+          "executed_document_refs",
+          "delivery_method",
+          "recipient"
+        ],
+        "title": "HandoverIn",
+        "type": "object"
+      },
       "app__api__notifications__DeliveryUpdateIn": {
         "additionalProperties": false,
         "properties": {
@@ -14909,6 +14909,65 @@
           "reason"
         ],
         "title": "RedriveIn",
+        "type": "object"
+      },
+      "app__api__people_sync__HandoverIn": {
+        "additionalProperties": false,
+        "properties": {
+          "from_person": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "From Person",
+            "type": "string"
+          },
+          "from_user_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From User Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "to_person": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "To Person",
+            "type": "string"
+          },
+          "to_user_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To User Id"
+          }
+        },
+        "required": [
+          "from_person",
+          "to_person"
+        ],
+        "title": "HandoverIn",
         "type": "object"
       },
       "app__api__reconciliation__AssignIn": {
@@ -52511,7 +52570,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HandoverIn"
+                "$ref": "#/components/schemas/app__api__handover__HandoverIn"
               }
             }
           },
@@ -55173,6 +55232,243 @@
           }
         },
         "summary": "Recover a dead-lettered delivery back to pending (Admin, audited)",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/v1/internal/people/handover": {
+      "post": {
+        "description": "Everything the leaver owns, moved in ONE transaction, with counts returned so the\nadmin sees exactly what changed hands. `rm`/`analyst` columns are matched against\nEVERY name the leaver goes by (handle, full name) case-insensitively \u2014 the register\nhas always accepted either spelling on write, so a handover must catch both.",
+        "operationId": "handover_book_v1_internal_people_handover_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Actor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Actor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Email",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-On-Behalf-Of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-On-Behalf-Of"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Gateway-Auth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Gateway-Auth"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Authz-Decision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Authz-Decision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Report-Ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Report-Ids"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Reports",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Reports"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Context"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__people_sync__HandoverIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Handover Book V1 Internal People Handover Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reassign a person's whole book (rm/analyst columns + assignments)",
         "tags": [
           "Internal"
         ]

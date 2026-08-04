@@ -150,11 +150,28 @@ function onRoster(e: Employee): boolean {
     || (p.full || '').trim().toLowerCase() === (e.full || '').trim().toLowerCase());
 }
 
+/**
+ * A leaver's whole book — every lead/deal/tracker naming them (by either of their
+ * names) plus their active line assignments — moves to the successor in ONE register
+ * call, which answers with counts. Called from the delete dialog before the person is
+ * removed, so nothing they owned is ever left orphaned.
+ */
+async function handover(from: Employee, to: Employee): Promise<Record<string, number>> {
+  const out = await api.post<any>('/internal/people/handover', {
+    from_person: from.email || from.full || from.name,
+    to_person: to.email || to.full || to.name,
+    from_user_id: (from as any).accessId || undefined,
+    to_user_id: (to as any).accessId || undefined,
+  });
+  return { ...(out?.moved || {}), assignments: out?.assignments_moved || 0 };
+}
+
 export const employeesService = {
   bookRollup,
   hydrateRoster,
   syncFromAccess,
   onRoster,
+  handover,
   // Employees ARE Access users — the same records the sign-in flow resolves against — so
   // the grid reads GET /access/v1/users rather than the Register's /employees route.
   // Access answers with a bare array (no {rows,total}), so paging/sorting/column filters

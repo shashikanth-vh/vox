@@ -32,7 +32,8 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import Depends
-from sqlalchemy import func, select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select, update
 
 from app.core.config import get_settings
 from app.core.errors import ServiceUnavailableError
@@ -162,3 +163,103 @@ async def sync_people_from_access(ctx: RequestContext = Depends(get_context)) ->
         Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None)))).scalar_one()
     return {"created": created, "updated": updated, "unchanged": unchanged,
             "skipped": skipped, "roster_total": int(total)}
+
+
+# --------------------------------------------------------------------------- #
+# Handover — a leaver's whole book moves to a successor, atomically
+# --------------------------------------------------------------------------- #
+class HandoverIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Who is leaving and who takes over — any name the roster resolves (handle, full
+    # name, e-mail, local part). Ambiguity is refused, never guessed.
+    from_person: str = Field(min_length=1, max_length=200)
+    to_person: str = Field(min_length=1, max_length=200)
+    # Access user ids, when the caller knows them: the leaver's ACTIVE line assignments
+    # are ended, and mirrored onto the successor so scoped visibility follows the book.
+    from_user_id: str | None = Field(default=None, max_length=64)
+    to_user_id: str | None = Field(default=None, max_length=64)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/v1/internal/people/handover", tags=["Internal"],
+             summary="Reassign a person's whole book (rm/analyst columns + assignments)")
+async def handover_book(payload: HandoverIn,
+                        ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Everything the leaver owns, moved in ONE transaction, with counts returned so the
+    admin sees exactly what changed hands. `rm`/`analyst` columns are matched against
+    EVERY name the leaver goes by (handle, full name) case-insensitively — the register
+    has always accepted either spelling on write, so a handover must catch both."""
+    from app.authz.engine import enforce_operation
+    from app.core.errors import ValidationAppError
+    from app.core.people import require_person
+    from app.models import AssetMonetisation, Deal, Lead, LendingTracker, SyndicationTracker
+    from app.models.users import LineAssignment
+
+    enforce_operation(ctx.user, "edit_employee")
+    leaver = await require_person(ctx.session, ctx.tenant_id, payload.from_person,
+                                  label="leaver")
+    successor = await require_person(ctx.session, ctx.tenant_id, payload.to_person,
+                                     label="successor")
+    if leaver.id == successor.id:
+        raise ValidationAppError("The successor must be a different person than the leaver.")
+    if successor.inactive:
+        raise ValidationAppError(
+            f"{successor.full_name or successor.name} is inactive — a book cannot be "
+            "handed to someone who is not working.")
+
+    old_names = {n.strip().lower() for n in (leaver.name, leaver.full_name) if n}
+    new_name = (successor.name or successor.full_name or "").strip()
+
+    moved: dict[str, int] = {}
+    for label, model, fields in (
+            ("leads", Lead, ("rm",)),
+            ("deals", Deal, ("rm", "analyst")),
+            ("lending", LendingTracker, ("rm", "analyst")),
+            ("syndication", SyndicationTracker, ("rm", "analyst")),
+            ("asset_monetisation", AssetMonetisation, ("rm", "analyst"))):
+        count = 0
+        for field in fields:
+            col = getattr(model, field)
+            res = await ctx.session.execute(
+                update(model)
+                .where(model.tenant_id == ctx.tenant_id,
+                       model.deleted_at.is_(None),
+                       func.lower(func.trim(col)).in_(old_names))
+                .values({field: new_name, "updated_by": ctx.actor}))
+            count += res.rowcount or 0
+        moved[label] = count
+
+    # Line assignments follow the book when the Access ids are known: the leaver's
+    # active assignments END (never deleted — they are history) and the successor gets
+    # mirrors, so scoped visibility moves with the records.
+    assignments_moved = 0
+    if payload.from_user_id:
+        rows = (await ctx.session.execute(select(LineAssignment).where(
+            LineAssignment.tenant_id == ctx.tenant_id,
+            LineAssignment.user_id == payload.from_user_id,
+            LineAssignment.ended_at.is_(None),
+            LineAssignment.deleted_at.is_(None)))).scalars().all()
+        for a in rows:
+            a.ended_at = func.now()
+            a.updated_by = ctx.actor
+            if payload.to_user_id:
+                ctx.session.add(LineAssignment(
+                    tenant_id=ctx.tenant_id, user_id=payload.to_user_id,
+                    subject_type=a.subject_type, subject_id=a.subject_id,
+                    assignment_role=a.assignment_role, assigned_by=ctx.actor,
+                    note=f"Handover from {leaver.full_name or leaver.name}"
+                         + (f": {payload.note}" if payload.note else ""),
+                    created_by=ctx.actor, updated_by=ctx.actor))
+            assignments_moved += 1
+
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="people.handover",
+        resource_type="people", resource_id=str(leaver.id),
+        request_id=request_id_ctx.get(),
+        changes={"from": leaver.full_name or leaver.name,
+                 "to": successor.full_name or successor.name,
+                 **moved, "assignments": assignments_moved,
+                 "note": payload.note}))
+    return {"from": leaver.full_name or leaver.name,
+            "to": successor.full_name or successor.name,
+            "moved": moved, "assignments_moved": assignments_moved}

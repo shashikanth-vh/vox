@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Chip, Box, Typography, ToggleButtonGroup, ToggleButton, Stack } from '@mui/material';
+import { Button, Chip, Box, Typography, ToggleButtonGroup, ToggleButton, Stack, Dialog as MuiDialog, DialogTitle as MuiDialogTitle, DialogContent as MuiDialogContent, DialogActions as MuiDialogActions, TextField, MenuItem } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import GridViewIcon from '@mui/icons-material/GridView';
@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
-import ConfirmDialog from '../../components/common/ConfirmDialog';
 import EmployeeDialog from './EmployeeDialog';
 import EmployeeCards from './EmployeeCards';
 import { employeesService } from '../../services/employeesService';
@@ -135,16 +134,81 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
       )}
 
       {dialog && <EmployeeDialog mode={dialog.mode} emp={dialog.emp} onClose={() => setDialog(null)} onDone={refresh} />}
-      <ConfirmDialog open={!!del} title="Delete employee" message={`Remove ${del?.full}?`}
-        onCancel={() => setDel(null)}
-        onConfirm={() => {
-          if (!del) return;
-          // Awaited: revoking the sign-in is the part that matters, and a refusal
-          // (identity not found in Access) must be SEEN, not swallowed by a refresh.
-          void employeesService.remove(del.name, user.full)
-            .catch((e) => alert(e?.message || 'Could not remove this employee.'))
-            .finally(() => { setDel(null); refresh(); });
-        }} />
+      {del && <DeleteEmployeeDialog emp={del} by={user.full}
+        onClose={() => setDel(null)} onDone={() => { setDel(null); refresh(); }} />}
     </>
+  );
+}
+
+
+/**
+ * Delete = revoke + retire + HAND OVER. A leaver's book (every lead/deal/tracker naming
+ * them, plus their active assignments) must belong to someone the moment they go — an
+ * orphaned book is work nobody is doing and nobody can see. The successor choice is
+ * explicit: either a colleague (the register moves everything atomically and reports
+ * counts) or a deliberate "leave the records as they are" for the person who owned
+ * nothing.
+ */
+function DeleteEmployeeDialog({ emp, by, onClose, onDone }: {
+  emp: Employee; by: string; onClose: () => void; onDone: () => void;
+}) {
+  const [candidates, setCandidates] = useState<Employee[]>([]);
+  const [successor, setSuccessor] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    void employeesService.list({ pageIndex: 0, pageSize: 1000, globalFilter: '', sorting: [], columnFilters: [] })
+      .then((res) => setCandidates((res.rows as Employee[]).filter(
+        (e) => e.name !== emp.name && !e.inactive)));
+  }, [emp.name]);
+
+  const go = async () => {
+    setBusy(true); setErr('');
+    try {
+      if (successor) {
+        const to = candidates.find((c) => c.name === successor);
+        if (to) {
+          const moved = await employeesService.handover(emp, to);
+          const parts = Object.entries(moved).filter(([, n]) => n > 0)
+            .map(([k, n]) => `${k}: ${n}`).join(', ');
+          if (parts) console.info(`[handover] ${emp.full} → ${to.full}: ${parts}`);
+        }
+      }
+      await employeesService.remove(emp.name, by);
+      onDone();
+    } catch (e: any) {
+      setErr(e?.message || 'Could not remove this employee.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <MuiDialog open onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth>
+      <MuiDialogTitle sx={{ fontSize: 16 }}>Delete {emp.full || emp.name}</MuiDialogTitle>
+      <MuiDialogContent>
+        <Typography sx={{ fontSize: 13, mb: 1.5 }}>
+          Their sign-in is revoked immediately and they leave every list. Everything they
+          own — leads, deals, product lines, assignments — should belong to someone:
+        </Typography>
+        <TextField select fullWidth size="small" label="Hand the book over to"
+          value={successor} onChange={(e) => setSuccessor(e.target.value)}
+          helperText={successor ? 'Every record naming them moves to this person.'
+            : 'Or leave the records as they are (only right if they owned nothing).'}>
+          <MenuItem value="">— no handover —</MenuItem>
+          {candidates.map((c) => (
+            <MenuItem key={c.name} value={c.name}>{c.full || c.name} ({c.role})</MenuItem>
+          ))}
+        </TextField>
+        {err && <Typography sx={{ fontSize: 12, color: 'error.main', mt: 1 }}>{err}</Typography>}
+      </MuiDialogContent>
+      <MuiDialogActions>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="contained" color="error" onClick={() => void go()} disabled={busy}>
+          {successor ? 'Hand over & delete' : 'Delete'}
+        </Button>
+      </MuiDialogActions>
+    </MuiDialog>
   );
 }

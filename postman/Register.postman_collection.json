@@ -9425,6 +9425,61 @@
           }
         },
         {
+          "name": "POST /v1/internal/people/handover",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/people/handover",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "people",
+                "handover"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from_person\": \"sample from_person\",\n  \"from_user_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"to_person\": \"sample to_person\",\n  \"to_user_id\": \"{{id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/internal/people/sync-access",
           "request": {
             "method": "POST",

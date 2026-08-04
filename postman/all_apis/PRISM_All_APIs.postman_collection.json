@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (244 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (245 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -8433,6 +8433,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"reason\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/people/handover \u2014 Reassign a person's whole book (rm/analyst columns + assignments)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/people/handover",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "people",
+                    "handover"
+                  ]
+                },
+                "description": "Everything the leaver owns, moved in ONE transaction, with counts returned so the\nadmin sees exactly what changed hands. `rm`/`analyst` columns are matched against\nEVERY name the leaver goes by (handle, full name) case-insensitively \u2014 the register\nhas always accepted either spelling on write, so a handover must catch both.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"from_person\": \"sample\",\n  \"to_person\": \"sample\",\n  \"from_user_id\": \"sample\",\n  \"to_user_id\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
