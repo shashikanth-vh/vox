@@ -61,20 +61,19 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
     if (!roleList.length) { setErr('At least one role is required.'); return; }
     if (!anyHead && !f.reportsTo?.trim()) { setErr('Reports-to is required for IC roles.'); return; }
     setErr('');
-    // Add provisions the identity in Access and can be rejected there (duplicate email,
-    // unknown role), so the dialog stays open and shows why. Edit is still local.
-    if (mode === 'add') {
-      setBusy(true);
-      try {
-        await employeesService.create(f, user.full);
-      } catch (e: any) {
-        setErr(e?.message || 'Could not create this user.');
-        return;
-      } finally {
-        setBusy(false);
-      }
-    } else {
-      employeesService.update(f.name, f, user.full);
+    // BOTH paths provision/edit the person's two halves (Access identity + register
+    // roster) and either half can refuse (duplicate e-mail, unknown role, a
+    // deactivation that cannot reach the sign-in) — so both are awaited and the
+    // dialog stays open showing why.
+    setBusy(true);
+    try {
+      if (mode === 'add') await employeesService.create(f, user.full);
+      else await employeesService.update(f.name, f, user.full);
+    } catch (e: any) {
+      setErr(e?.message || 'Could not save this user.');
+      return;
+    } finally {
+      setBusy(false);
     }
     onDone(); onClose();
   };

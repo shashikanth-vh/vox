@@ -202,12 +202,47 @@ export const employeesService = {
     const hit = rows.find((r) => (r.email || '').toLowerCase() === id.toLowerCase());
     return hit ? fromAccessUser(hit) : null;
   },
-  update(name: string, patch: Partial<Employee>, by: string) {
+  /**
+   * Edit BOTH halves, awaited — in production this screen is the only way people are
+   * managed, so an edit here must be the whole truth. The roster patch carries the
+   * business fields; the ACCESS patch carries identity and permissions — and above all
+   * the Active toggle: deactivating a leaver must revoke their SIGN-IN, not just tidy
+   * a directory row. (Edits used to reach the roster only, which left a "deactivated"
+   * person still able to log in.)
+   */
+  async update(name: string, patch: Partial<Employee>, by: string): Promise<void> {
     const p = this.find(name); if (!p) return;
-    // The roster row lives at /v1/people/{id}. (The old '/employees/' + name path does
-    // not exist on the Register, so every edit 404ed silently for as long as this was
-    // fire-and-forget.)
-    if (p.registerId) remote('patch', '/people/' + p.registerId, toPersonBody(patch));
+    if (USE_REAL_API) {
+      if (p.registerId) {
+        await api.patch('/people/' + p.registerId, toPersonBody(patch))
+          .catch((e) => { throw new Error('The roster refused the edit: '
+            + ((e?.response?.data && errText(e.response.data)) || e?.message || e)); });
+      }
+      // Resolve the Access identity by id or e-mail; identity-relevant fields only.
+      const accessPatch: Record<string, any> = {};
+      if (patch.role !== undefined) {
+        accessPatch.roles = String(patch.role).split(',').map((r) => r.trim()).filter(Boolean);
+      }
+      if (patch.full !== undefined) accessPatch.full_name = patch.full;
+      if (patch.name !== undefined) accessPatch.short_name = patch.name;
+      if (patch.phone !== undefined) accessPatch.phone = patch.phone;
+      if (patch.inactive !== undefined) accessPatch.is_active = !patch.inactive;
+      if (Object.keys(accessPatch).length) {
+        let id = (p as any).accessId as string | undefined;
+        const mail = (p.email || patch.email || '').trim().toLowerCase();
+        if (!id && mail) {
+          const hits = await accessService.findUsers(mail).catch(() => []);
+          id = hits.find((u) => (u.email || '').toLowerCase() === mail)?.id;
+        }
+        if (id) {
+          await accessService.updateUser(id, accessPatch);
+        } else if (accessPatch.is_active === false) {
+          // Refusing to pretend: a deactivation that cannot reach the sign-in is not done.
+          throw new Error('Could not find this person\'s sign-in identity in Access — '
+            + 'their access was NOT revoked. Check their e-mail and try again.');
+        }
+      }
+    }
     Object.assign(p, patch); writeAudit(by, 'Employee updated', name, Object.keys(patch).join(','));
   },
   // Adding an employee is a PROVISIONING act with TWO halves, both awaited:
