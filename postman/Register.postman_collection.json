@@ -7703,6 +7703,11 @@
                   "key": "lending_id",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }

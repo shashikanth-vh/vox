@@ -94,6 +94,14 @@ class _RegisterStub:
         if "/documents/upload" in u:
             return httpx.Response(201, json={"id": "doc-cam-1", "checksum": "c" * 64},
                                   request=httpx.Request("POST", u))
+        if "/decide" in u:
+            rid = u.split("/cam-reports/")[1].split("/")[0]
+            if rid not in self.reports:
+                return httpx.Response(404, request=httpx.Request("POST", u))
+            self.reports[rid]["status"] = body["decision"]
+            self.reports[rid]["decision_note"] = body.get("note")
+            return httpx.Response(200, json=self.reports[rid],
+                                  request=httpx.Request("POST", u))
         return httpx.Response(404, request=httpx.Request("POST", u))
 
 
@@ -156,3 +164,42 @@ async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypat
     r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
                     json={"instruction": "anything"})
     assert r.status_code == 404, r.text
+
+
+async def test_committee_triad_maps_verbs_to_register_decisions(monkeypatch):
+    """/approve → Approved, /return → Returned (note through), and no committee
+    authority means 403 before the register is ever asked."""
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+
+    gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
+        "source_doc_ids": ["fin-1"], "prompt_doc_id": "prompt-1"})
+    rid = gen.json()["report_id"]
+    await _call(app, "POST", f"/v1/cam/{LENDING}/finalise", json={})
+
+    async def call_as(path, json, roles):  # noqa: ANN001
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://orch") as c:
+            return await c.post(path, json=json, headers={
+                "X-API-Key": "k", "X-Tenant": "EVAM",
+                "X-User-Email": "divya@evamfinance.com", "X-User-Roles": roles})
+
+    # An RM has no committee authority: refused up front, register untouched.
+    denied = await call_as(f"/v1/workflows/cam-reports/{rid}/return",
+                           {"returned_by": "x", "note": "tighten"}, "BDRM")
+    assert denied.status_code == 403, denied.text
+    assert stub.reports[rid]["status"] == "Submitted"
+
+    ret = await call_as(f"/v1/workflows/cam-reports/{rid}/return",
+                        {"returned_by": "x", "note": "tighten the security section"},
+                        "Management")
+    assert ret.status_code == 200, ret.text
+    assert stub.reports[rid]["status"] == "Returned"
+    assert stub.reports[rid]["decision_note"] == "tighten the security section"
+
+    stub.reports[rid]["status"] = "Submitted"     # as if resubmitted
+    ok = await call_as(f"/v1/workflows/cam-reports/{rid}/approve",
+                       {"approved_by": "x", "note": "carried"}, "Credit Head")
+    assert ok.status_code == 200, ok.text
+    assert stub.reports[rid]["status"] == "Approved"

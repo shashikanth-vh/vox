@@ -234,6 +234,34 @@
         "title": "BuyerUpdateIn",
         "type": "object"
       },
+      "CamApproveIn": {
+        "additionalProperties": false,
+        "description": "Committee approval of a CAM. Unlike the CP/CS approve, a note is welcome \u2014 the\ncommittee often approves WITH observations, and they belong on the record.",
+        "properties": {
+          "approved_by": {
+            "maxLength": 200,
+            "title": "Approved By",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "approved_by"
+        ],
+        "title": "CamApproveIn",
+        "type": "object"
+      },
       "CheckerRejectIn": {
         "additionalProperties": false,
         "description": "The checker's TERMINAL refusal (CP/CS checklist or handover package). The decider\nis the AUTHENTICATED caller; ``rejected_by`` is only a dev fallback. Note mandatory \u2014\na terminal refusal must say why, permanently.",
@@ -2914,6 +2942,210 @@
           }
         },
         "summary": "Start an asset-monetisation workflow (teaser \u2192 offers \u2192 closure)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/cam-reports/{report_id}/approve": {
+      "post": {
+        "operationId": "approve_cam_report_v1_workflows_cam_reports__report_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CamApproveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Approve Cam Report V1 Workflows Cam Reports  Report Id  Approve Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "COMMITTEE approves the CAM (different person, senior authority)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/cam-reports/{report_id}/reject": {
+      "post": {
+        "operationId": "reject_cam_report_v1_workflows_cam_reports__report_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckerRejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Reject Cam Report V1 Workflows Cam Reports  Report Id  Reject Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "COMMITTEE rejects the CAM (terminal for this version)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/cam-reports/{report_id}/return": {
+      "post": {
+        "operationId": "return_cam_report_v1_workflows_cam_reports__report_id__return_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckerReturnIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Return Cam Report V1 Workflows Cam Reports  Report Id  Return Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "COMMITTEE returns the CAM to its analyst (amend and resubmit)",
         "tags": [
           "Workflows"
         ]

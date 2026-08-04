@@ -374,7 +374,8 @@ def test_every_screen_the_catalogue_names_is_one_the_client_implements():
     behind it silently falls through to the generic form — which for the executed
     agreement meant asking a credit manager to type a SHA-256 by hand, a question with
     no answer inside the product. Keep the two lists in step."""
-    implemented = {"cpcs-checklist", "handover-package", "executed-agreement"}
+    implemented = {"cpcs-checklist", "handover-package", "executed-agreement",
+                   "cam-workbench", "sanction-terms"}
     named = {spec["screen"] for actions in _MAKER_ACTIONS.values()
              for spec in actions if spec.get("screen")}
     assert named <= implemented, f"no client screen for {sorted(named - implemented)}"

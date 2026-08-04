@@ -104,6 +104,13 @@ async def test_cam_lifecycle_is_maker_checker_with_an_amend_loop(client: AsyncCl
     assert (await client.post(f"/v1/internal/cam-reports/{rid}/submit", json={},
                               headers=ANALYST)).status_code == 200
 
+    # The committee QUEUE reads the same rows by status; an unfiltered dump is refused.
+    queue = await client.get("/v1/internal/cam-reports",
+                             params={"status": "Submitted"}, headers=HEAD)
+    assert queue.status_code == 200 and rid in {r["id"] for r in queue.json()}
+    assert (await client.get("/v1/internal/cam-reports",
+                             headers=HEAD)).status_code == 422
+
     # An analyst holds no deciding authority at all (RBAC, before four-eyes).
     own = await client.post(f"/v1/internal/cam-reports/{rid}/decide",
                             json={"decision": "Approved"}, headers=ANALYST)

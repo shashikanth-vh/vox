@@ -133,6 +133,22 @@ _IDENTITY_FIELDS = ("requested_by", "by")
 _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
     "Lending": (
         {
+            "key": "cam.workbench",
+            "label": "CAM workbench",
+            "method": "POST", "url": "/v1/cam/{subject_id}/generate",
+            "roles": _CREDIT_MAKERS,
+            # The CAM is drafted, reworked and decided BEFORE the committee sanctions —
+            # its approved version is what the committee reads.
+            "stages": {"Data Awaited", "Diligence", "Note Circulated"},
+            "stage_reason": "The CAM is prepared before the committee decision — this "
+                            "facility is already past that point.",
+            # Selecting source documents + a prompt doc and reworking a draft is a
+            # conversation, not a flat form — the client renders its own screen.
+            "screen": "cam-workbench",
+            "prefill": {"deal_id": "deal_id"},
+            "form": [],
+        },
+        {
             "key": "deal-structuring.start",
             "label": "Send to credit committee",
             "method": "POST", "url": "/v1/workflows/deal-structurings",
@@ -165,6 +181,18 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "run_reason": "Available once this run has been returned to you.",
             "constant": {"action": "resubmit"},
             "form": [_f("note", "What you changed", "textarea", required=True)],
+        },
+        {
+            "key": "sanction.terms",
+            "label": "Enter sanction terms",
+            "method": "POST", "url": "/v1/internal/sanction-terms",
+            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
+            "stage_reason": "Available once the committee has sanctioned this facility.",
+            # Amount, rate, tenor, EMI — plus the CP/CS item lists and the covenant
+            # register the terms SEED. Lists of structured rows need their own screen.
+            "screen": "sanction-terms",
+            "prefill": {"lending_id": "id", "deal_id": "deal_id"},
+            "form": [],
         },
         {
             "key": "cpcs.prepare",
@@ -377,6 +405,10 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
 # Which identity key each endpoint declares — `requested_by` on a run START, `by` on a
 # signal, neither on the two register routes. Filled from the verified caller.
 _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
+    # Screen-driven steps: the workbench and the terms screen speak to endpoints that
+    # attribute to the verified caller themselves — no identity field to fill.
+    "cam.workbench": (),
+    "sanction.terms": (),
     "deal-structuring.start": ("requested_by",),
     "deal-structuring.revise-credit-note": ("by",),
     "run.resubmit": ("by",),
@@ -506,6 +538,8 @@ _APPROVER_ROLES: dict[str, set[str]] = {
     "handover": {"Credit Head", "Management", "Admin"},
     # Approving a CP/CS checklist (the checker) — senior credit authority.
     "cpcs": {"Credit Head", "Management", "Admin"},
+    # Deciding a CAM (the committee's working copy) — the same seniority.
+    "cam": {"Credit Head", "Management", "Admin"},
     # The syndication desk's sanction call on a mandate.
     "synd": {"Syn Head", "Management", "Admin"},
     # The AM desk's closure call on an asset-monetisation mandate.
@@ -891,6 +925,15 @@ class CpcsChecklistIn(BaseModel):
 class CpcsApproveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     approved_by: str = Field(max_length=200)
+
+
+class CamApproveIn(BaseModel):
+    """Committee approval of a CAM. Unlike the CP/CS approve, a note is welcome — the
+    committee often approves WITH observations, and they belong on the record."""
+
+    model_config = ConfigDict(extra="forbid")
+    approved_by: str = Field(max_length=200)
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class CheckerRejectIn(BaseModel):
@@ -2442,6 +2485,60 @@ def create_app() -> FastAPI:
             request, f"/v1/internal/cpcs-checklists/{checklist_id}/return", returned_by,
             checker, {"note": payload.note})
 
+    # ------------------------------------------------------------------ #
+    # CAM decisions — the committee's triad on a SUBMITTED CAM, through the
+    # same door as the CP/CS checker verbs (a UI never needs the register's
+    # internal lane). The register enforces four-eyes and records who decided.
+    # ------------------------------------------------------------------ #
+    async def _decide_cam(request: Request, report_id: str, decision: str,
+                          decider: str, note: str | None) -> Any:
+        who, err = await _verified_email(request, decider)
+        if err is not None:
+            return err
+        checker, verified = _caller_context(request, who)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound committee identity is required.")
+        if not await _authorised_for("cam", request, who, checker.tenant):
+            return _problem(403, "Forbidden",
+                            "Deciding a CAM requires Credit Head / Management / Admin "
+                            "authority.")
+        body: dict[str, Any] = {"decision": decision}
+        if note:
+            body["note"] = note
+        return await _register_post_as(
+            request, f"/v1/internal/cam-reports/{report_id}/decide", who, checker, body)
+
+    @app.post("/v1/workflows/cam-reports/{report_id}/approve", tags=["Workflows"],
+              summary="COMMITTEE approves the CAM (different person, senior authority)")
+    async def approve_cam_report(report_id: str, payload: CamApproveIn, request: Request,
+                                 x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                 ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        return await _decide_cam(request, report_id, "Approved",
+                                 payload.approved_by, payload.note)
+
+    @app.post("/v1/workflows/cam-reports/{report_id}/reject", tags=["Workflows"],
+              summary="COMMITTEE rejects the CAM (terminal for this version)")
+    async def reject_cam_report(report_id: str, payload: CheckerRejectIn, request: Request,
+                                x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        return await _decide_cam(request, report_id, "Rejected",
+                                 payload.rejected_by, payload.note)
+
+    @app.post("/v1/workflows/cam-reports/{report_id}/return", tags=["Workflows"],
+              summary="COMMITTEE returns the CAM to its analyst (amend and resubmit)")
+    async def return_cam_report(report_id: str, payload: CheckerReturnIn, request: Request,
+                                x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                                ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        return await _decide_cam(request, report_id, "Returned",
+                                 payload.returned_by, payload.note)
+
     @app.post("/v1/workflows/{workflow_id}/committee-decision", tags=["Workflows"],
               summary="Record the Credit Committee decision (durable) and signal the workflow")
     async def committee_decision(workflow_id: str, payload: CommitteeDecisionIn, request: Request,
@@ -3022,6 +3119,8 @@ def create_app() -> FastAPI:
     _PENDING_REGISTER_QUEUES: dict[str, tuple[str, str]] = {
         "cpcs-checklist": ("/v1/internal/cpcs-checklists?status=Completed", "cpcs"),
         "advaya-handover": ("/v1/internal/handover-packages?status=Prepared", "handover"),
+        # A SUBMITTED CAM is with the committee — same durable-row queue pattern.
+        "cam-report": ("/v1/internal/cam-reports?status=Submitted", "cam"),
     }
 
     @app.get("/v1/workflows/actions", tags=["Workflows"],
@@ -3395,6 +3494,10 @@ def create_app() -> FastAPI:
                     base = f"/v1/workflows/cpcs-checklists/{row.get('id')}"
                     extra = {"checklist_id": row.get("id"),
                              "checklist_version": row.get("checklist_version")}
+                elif k == "cam-report":
+                    base = f"/v1/workflows/cam-reports/{row.get('id')}"
+                    extra = {"report_id": row.get("id"),
+                             "checklist_version": row.get("report_version")}
                 else:
                     base = f"/v1/workflows/advaya-handover/{lending_id}"
                     extra = {"package_id": row.get("id")}

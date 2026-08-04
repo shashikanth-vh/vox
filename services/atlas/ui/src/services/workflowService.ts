@@ -172,7 +172,8 @@ export const workflowService = {
     // Pick the URL + body for this action.
     let url: string | undefined;
     let body: Record<string, any>;
-    const checkerQueue = w.kind === 'cpcs-checklist' || w.kind === 'advaya-handover';
+    const checkerQueue = w.kind === 'cpcs-checklist' || w.kind === 'advaya-handover'
+      || w.kind === 'cam-report';
     if (action === 'return') {
       url = w.returnUrl || w.controlUrl;
       body = checkerQueue

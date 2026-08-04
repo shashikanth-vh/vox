@@ -47077,17 +47077,41 @@
     },
     "/v1/internal/cam-reports": {
       "get": {
+        "description": "Two callers, one route: the workbench reads a LINE's history (?lending_id=), and\nthe committee queue reads every SUBMITTED report tenant-wide (?status=Submitted).\nAt least one filter is required \u2014 an unfiltered dump of every CAM is not a query\nanyone means to make.",
         "operationId": "list_cam_reports_v1_internal_cam_reports_get",
         "parameters": [
           {
             "in": "query",
             "name": "lending_id",
-            "required": true,
+            "required": false,
             "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "Lending Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lending Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
             }
           },
           {
@@ -47309,7 +47333,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "CAM version history for a lending line",
+        "summary": "CAM reports \u2014 a line's version history, or a status queue",
         "tags": [
           "Internal"
         ]

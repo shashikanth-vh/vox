@@ -287,6 +287,7 @@ def _cam_out(row: CamReport, turns: list[CamTurn] | None = None) -> dict[str, An
         "document_id": row.document_id,
         "prepared_by": row.prepared_by, "decided_by": row.decided_by,
         "decision_note": row.decision_note, "note": row.note,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
     if turns is not None:
@@ -441,13 +442,25 @@ async def decide_cam_report(report_id: str, payload: CamDecideIn,
 
 
 @router.get("/v1/internal/cam-reports", tags=["Internal"],
-            summary="CAM version history for a lending line")
-async def list_cam_reports(lending_id: str = Query(min_length=1, max_length=64),
-                           ctx: RequestContext = Depends(get_context)) -> list[dict[str, Any]]:
-    rows = (await ctx.session.execute(select(CamReport).where(
-        CamReport.tenant_id == ctx.tenant_id,
-        CamReport.lending_id == lending_id,
-        CamReport.deleted_at.is_(None)).order_by(CamReport.report_version))).scalars().all()
+            summary="CAM reports — a line's version history, or a status queue")
+async def list_cam_reports(
+        lending_id: str | None = Query(default=None, max_length=64),
+        status: str | None = Query(default=None, max_length=20),
+        ctx: RequestContext = Depends(get_context)) -> list[dict[str, Any]]:
+    """Two callers, one route: the workbench reads a LINE's history (?lending_id=), and
+    the committee queue reads every SUBMITTED report tenant-wide (?status=Submitted).
+    At least one filter is required — an unfiltered dump of every CAM is not a query
+    anyone means to make."""
+    if not lending_id and not status:
+        raise ValidationAppError(
+            "Filter by lending_id (a line's history) or status (a queue) — or both.")
+    conds = [CamReport.tenant_id == ctx.tenant_id, CamReport.deleted_at.is_(None)]
+    if lending_id:
+        conds.append(CamReport.lending_id == lending_id)
+    if status:
+        conds.append(CamReport.status == status)
+    rows = (await ctx.session.execute(select(CamReport).where(*conds)
+            .order_by(CamReport.lending_id, CamReport.report_version))).scalars().all()
     return [_cam_out(r) for r in rows]
 
 

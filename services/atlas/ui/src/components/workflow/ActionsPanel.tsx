@@ -4,6 +4,8 @@ import ActionFormDialog from './ActionFormDialog';
 import CpcsChecklistDialog from './CpcsChecklistDialog';
 import HandoverPackageDialog from './HandoverPackageDialog';
 import ExecutedAgreementDialog from './ExecutedAgreementDialog';
+import CamWorkbenchDialog from './CamWorkbenchDialog';
+import SanctionTermsDialog from './SanctionTermsDialog';
 import { workflowActionsService, type SubjectActions, type SubjectType, type WorkflowAction }
   from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -74,6 +76,11 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <ExecutedAgreementDialog action={open?.screen === 'executed-agreement' ? open : null}
         code={code || ''} entityId={entityId}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <CamWorkbenchDialog action={open?.screen === 'cam-workbench' ? open : null}
+        subjectId={subjectId} entityId={entityId}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <SanctionTermsDialog action={open?.screen === 'sanction-terms' ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
     </>
   );

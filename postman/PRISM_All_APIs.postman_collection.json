@@ -6921,7 +6921,7 @@
               }
             },
             {
-              "name": "GET /v1/internal/cam-reports \u2014 CAM version history for a lending line",
+              "name": "GET /v1/internal/cam-reports \u2014 CAM reports \u2014 a line's version history, or a status queue",
               "request": {
                 "method": "GET",
                 "header": [
@@ -6956,10 +6956,16 @@
                     {
                       "key": "lending_id",
                       "value": "sample",
-                      "disabled": false
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
                     }
                   ]
-                }
+                },
+                "description": "Two callers, one route: the workbench reads a LINE's history (?lending_id=), and\nthe committee queue reads every SUBMITTED report tenant-wide (?status=Submitted).\nAt least one filter is required \u2014 an unfiltered dump of every CAM is not a query\nanyone means to make."
               }
             },
             {
@@ -12125,7 +12131,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (46 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (49 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
@@ -12864,6 +12870,159 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"asset_mon_id\": \"sample\",\n  \"deal_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"teaser_reference\": \"sample\",\n  \"teaser_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"decision_timeout_hours\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/cam-reports/{report_id}/approve \u2014 COMMITTEE approves the CAM (different person, senior authority)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/cam-reports/{{report_id}}/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "approve"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"approved_by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/cam-reports/{report_id}/reject \u2014 COMMITTEE rejects the CAM (terminal for this version)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/cam-reports/{{report_id}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "reject"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rejected_by\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/cam-reports/{report_id}/return \u2014 COMMITTEE returns the CAM to its analyst (amend and resubmit)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/cam-reports/{{report_id}}/return",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "return"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"returned_by\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
