@@ -1,38 +1,107 @@
-import { useEffect, useState } from 'react';
-import {
-  Alert, Box, Button, Chip, Table, TableBody, TableCell, TableHead, TableRow,
-  TextField, Typography,
-} from '@mui/material';
+import { useMemo, useState } from 'react';
+import { Alert, Box, Button, Chip, TextField, Typography } from '@mui/material';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { MRT_ColumnDef } from 'material-react-table';
+import CommonTable from '../../../components/table/CommonTable';
+import { CodeText } from '../../../components/common/Pills';
+import { applyQuery } from '../../../api/queryEngine';
 import { tokens } from '../../../theme';
 import { fmt } from '../../../utils/format';
 import { lmsService, type TrancheItem } from '../../../services/lmsService';
 import { useAuth } from '../../../auth/AuthContext';
 import { can } from '../../../auth/rbac';
 import type { LendingRow } from '../lending.types';
-import AccountDialog from './AccountDialog';
+import AccountDrawer from './AccountDrawer';
 
 /**
- * The serviced book: one row per lending line in the disbursed family, plus the
- * BOOKING QUEUE on top — every human-recorded tranche waiting for the LMS Authorizer.
- * Approval opens/grows the loan account in the register's own transaction; rejection
- * returns the recording with the reason. Four-eyes is the register's rule, not ours.
+ * The serviced BOOK, LOS-style: the same house table (filters, sort, exports, sticky
+ * Actions), one row per LOAN ACCOUNT. Clicking a row opens the account drawer — the
+ * post-disbursement life of the loan, tracked till closure. On top sits the BOOKING
+ * QUEUE: every human-recorded tranche waiting for the LMS Authorizer; approval opens
+ * or grows the account in the register's own transaction.
  */
+
+interface AcctRow extends Record<string, any> {
+  id: string;            // lending id — the drawer's key
+  accountNo: string;     // "#1"
+  code: string;
+  _name: string;
+  facility: string;
+  principal?: number;    // cumulative booked principal (₹ Cr)
+  balance?: number;      // running statement balance (₹ Cr)
+  rate: string;
+  status: string;
+  overdue: string;
+  closedOn: string;
+  an?: string;
+  _row: LendingRow;      // the lending row the drawer needs
+}
+
+// Row tint follows the classification: stressed assets warn (SMA left border), the
+// NPA classes go red, a closed account grays out — same v12 states LOS uses for stages.
+const statusRowSx = (status: string) => {
+  if (status === 'SMA') return { boxShadow: `inset 3px 0 0 ${tokens.warn}` };
+  if (['Sub-Standard', 'Doubtful', 'Loss'].includes(status)) {
+    return { backgroundColor: `${tokens.badBg} !important`, color: '#7C4A3E !important' };
+  }
+  if (status === 'Closed') return { backgroundColor: '#F2F4F5 !important', color: '#5F6E76 !important' };
+  return {};
+};
+
 export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
   const { user } = useAuth();
   const authorize = can(user.roles, 'lmsAuthorize');
+  const qc = useQueryClient();
   const [open, setOpen] = useState<LendingRow | null>(null);
-  const [queue, setQueue] = useState<TrancheItem[]>([]);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState('');
   const [rejecting, setRejecting] = useState<{ id: string; note: string } | null>(null);
 
-  const byLending = new Map(rows.map((r) => [r.id, r]));
-  const loadQueue = async () => {
-    try { setQueue(await lmsService.pendingBookings()); }
-    catch { setQueue([]); }  // a role without the LMS verbs simply sees no queue
+  const byLending = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+
+  // The BOOK: one register read per serviced line (404 = not on the book yet).
+  const rowKey = rows.map((r) => r.id).join(',');
+  const bookQuery = useQuery({
+    queryKey: ['lms-accounts-book', rowKey],
+    queryFn: async () => {
+      const results = await Promise.all(rows.map(async (r) => {
+        const acct = await lmsService.account(r.id).catch(() => null);
+        return { r, acct };
+      }));
+      const out: AcctRow[] = [];
+      for (const { r, acct } of results) {
+        if (!acct) continue;
+        const a = acct.account;
+        const last = acct.entries[acct.entries.length - 1];
+        out.push({
+          id: r.id, accountNo: `#${a.account_no}`, code: r.code || '',
+          _name: r._name || a.borrower || '—',
+          facility: a.facility_type || '—', principal: a.amount,
+          balance: last ? last.balance : undefined,
+          rate: a.rate_pct != null ? `${a.rate_pct}%` : '—',
+          status: a.status, overdue: a.overdue_position || 'Nil',
+          closedOn: a.closed_on || '', an: r.an, _row: r,
+        });
+      }
+      return out;
+    },
+  });
+  const acctRows = bookQuery.data ?? [];
+  const noAccount = rows.length - acctRows.length;
+
+  // The queue of pending bookings (whole-book; roles without the LMS verbs see none).
+  const queueQuery = useQuery({
+    queryKey: ['lms-pending-bookings'],
+    queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
+  });
+  const queue = queueQuery.data ?? [];
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['lms-accounts-book'] });
+    void qc.invalidateQueries({ queryKey: ['lms-pending-bookings'] });
+    void qc.invalidateQueries({ queryKey: ['lending'] });
   };
-  useEffect(() => { void loadQueue(); }, []);
 
   const settle = async (t: TrancheItem, action: 'approve' | 'reject', note?: string) => {
     setErr(''); setInfo(''); setBusy(t.id);
@@ -42,10 +111,23 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
         ? `${t.tranche_ref} booked — the loan account is updated and the ledger has its row.`
         : `${t.tranche_ref} rejected — the recorder corrects and records afresh.`);
       setRejecting(null);
-      await loadQueue();
+      refresh();
     } catch (e: any) { setErr(e?.message || String(e)); }
     setBusy('');
   };
+
+  const columns = useMemo<MRT_ColumnDef<AcctRow>[]>(() => [
+    { accessorKey: 'accountNo', header: 'Account', size: 96 },
+    { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: '_name', header: 'Borrower', size: 200, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'facility', header: 'Facility', size: 120 },
+    { accessorKey: 'principal', header: 'Principal ₹ Cr', size: 110, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'balance', header: 'Balance ₹ Cr', size: 110, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'rate', header: 'Rate', size: 80 },
+    { accessorKey: 'status', header: 'Status', size: 110, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'overdue', header: 'Overdue', size: 120 },
+    { accessorKey: 'closedOn', header: 'Closed on', size: 100 },
+  ], []);
 
   return (
     <Box sx={{ mt: 1 }}>
@@ -115,47 +197,33 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
         </Box>
       )}
 
-      {/* ---- the serviced book ------------------------------------------------ */}
-      {!rows.length ? (
-        <Typography sx={{ fontSize: 12.5, color: tokens.muted, mt: 2 }}>
-          No serviced lines yet — a loan account opens when the LMS Authorizer books
-          the first disbursement tranche (LOS → Disburse records it).
+      {/* ---- the serviced book, LOS-style ------------------------------------- */}
+      <CommonTable<AcctRow>
+        queryKey={['lms-accounts', bookQuery.dataUpdatedAt ?? 0]}
+        fetcher={(q) => Promise.resolve(applyQuery(acctRows, {
+          ...q,
+          searchFields: ['accountNo', 'code', '_name', 'facility', 'status', 'overdue'],
+        }))}
+        columns={columns}
+        csvName="atlas_lms_accounts"
+        onRowClick={(r) => setOpen(r._row)}
+        onEdit={(r) => setOpen(r._row)}
+        rowSx={(r) => statusRowSx(r.status)}
+      />
+      {acctRows.length === 0 && !bookQuery.isLoading && (
+        <Typography sx={{ fontSize: 12.5, color: tokens.muted, mt: 1 }}>
+          No loan accounts on the book yet — an account opens when the LMS Authorizer
+          books the first disbursement tranche (recorded in LOS → Disburse).
         </Typography>
-      ) : (
-        <Table size="small" sx={{ '& td, & th': { fontSize: 12.5 } }}>
-          <TableHead>
-            <TableRow sx={{ '& th': { fontWeight: 600, color: tokens.muted } }}>
-              <TableCell>Group Code</TableCell>
-              <TableCell>Company</TableCell>
-              <TableCell align="right">₹ Cr</TableCell>
-              <TableCell>Stage</TableCell>
-              <TableCell>Analyst</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id} hover sx={{ cursor: 'pointer' }}
-                onClick={() => setOpen(r)}>
-                <TableCell>{r.code}</TableCell>
-                <TableCell><b>{r._name}</b></TableCell>
-                <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {fmt(r.amt)}
-                </TableCell>
-                <TableCell>{r.stage}</TableCell>
-                <TableCell>{r.an}</TableCell>
-                <TableCell align="right">
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 12 }}>
-                    Open account
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
       )}
-      <AccountDialog row={open}
-        onClose={() => { setOpen(null); void loadQueue(); }} />
+      {noAccount > 0 && acctRows.length > 0 && (
+        <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
+          {noAccount} line{noAccount > 1 ? 's' : ''} in the disbursed family {noAccount > 1 ? 'have' : 'has'} no
+          loan account yet — {noAccount > 1 ? 'they appear' : 'it appears'} here once the first tranche is booked.
+        </Typography>
+      )}
+
+      <AccountDrawer row={open} onClose={() => setOpen(null)} onChanged={refresh} />
     </Box>
   );
 }
