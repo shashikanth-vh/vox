@@ -18,7 +18,7 @@ from enum import IntEnum
 # The approved ATLAS RBAC policy version this package transcribes. Propagated into every
 # signed authorization context (claim: policy_version) and stamped on seeds and drift
 # reports, so an authorization decision can always answer "under which policy?".
-POLICY_VERSION = "3.4"
+POLICY_VERSION = "3.5"
 
 
 
@@ -32,7 +32,10 @@ class Access(IntEnum):
     APPROVE = 4  # not a data write — an approve/reject decision (operations matrix only)
 
 
-# The 10 catalogue roles (tier, vertical) — spec "Legend & Roles".
+# The catalogue roles (tier, vertical) — spec "Legend & Roles", extended with the two
+# LMS servicing roles (a maker/checker pair: the Operator posts routine ledger and
+# covenant events; the Authorizer holds the hard-to-reverse verbs — classification,
+# closure, waiver authority).
 ROLES: dict[str, dict[str, str]] = {
     "Admin":       {"tier": "Leadership", "vertical": "System"},
     "Management":  {"tier": "Leadership", "vertical": "All"},
@@ -44,8 +47,11 @@ ROLES: dict[str, dict[str, str]] = {
     "Deal Analyst": {"tier": "IC",        "vertical": "Credit"},
     "Syn RM":      {"tier": "IC",         "vertical": "Syndication"},
     "AM RM":       {"tier": "IC",         "vertical": "Asset Monetisation"},
+    "LMS Operator":   {"tier": "IC",      "vertical": "Servicing"},
+    "LMS Authorizer": {"tier": "Head",    "vertical": "Servicing"},
 }
 
 _ROLE_ORDER = ["Admin", "Management", "BD Head", "BDRM", "Credit Head", "Deal Analyst",
-               "Syn Head", "Syn RM", "AM Head", "AM RM"]
+               "Syn Head", "Syn RM", "AM Head", "AM RM",
+               "LMS Operator", "LMS Authorizer"]
 

@@ -59,7 +59,7 @@ from app.repositories.subjects import load_subject
 router = api_router()
 
 _SWEEP_SERVICES = {"svc_workflows"}
-_WAIVER_AUTHORITY = {"Credit Head", "Management", "Admin"}
+_WAIVER_AUTHORITY = {"Credit Head", "Management", "Admin", "LMS Authorizer"}
 
 _FREQUENCY_MONTHS = {"Monthly": 1, "Quarterly": 3, "SemiAnnual": 6, "Annual": 12}
 
@@ -258,6 +258,33 @@ async def list_covenants(entity_id: uuid.UUID,
     rows = list((await ctx.session.execute(
         select(Covenant).where(*conds).order_by(Covenant.name))).scalars())
     return {"items": [_serialize(r) for r in rows]}
+
+
+@router.get("/v1/covenants/observations", tags=["Covenants"],
+            summary="A company's covenant OBSERVATIONS (the periods), newest due first")
+async def list_observations(entity_id: uuid.UUID,
+                            ctx: RequestContext = Depends(get_context),
+                            lending_id: uuid.UUID | None = None,
+                            status: str | None = None,
+                            limit: int = 200) -> dict[str, Any]:
+    """The LMS covenant tab's read: every generated period for the company's covenants —
+    Pending, Compliant, Breached, Waived, Overdue — with the covenant id in details so
+    the UI can pair observation to definition. Company-read gated like the register."""
+    await _ensure_company_read(ctx, entity_id)
+    conds = [MonitoringReporting.tenant_id == ctx.tenant_id,
+             MonitoringReporting.entity_id == entity_id,
+             MonitoringReporting.record_type == "Covenant",
+             MonitoringReporting.deleted_at.is_(None)]
+    if status is not None:
+        conds.append(MonitoringReporting.status == status)
+    rows = list((await ctx.session.execute(
+        select(MonitoringReporting).where(*conds)
+        .order_by(MonitoringReporting.due_date.desc().nulls_last())
+        .limit(min(max(limit, 1), 500)))).scalars())
+    if lending_id is not None:
+        rows = [r for r in rows
+                if (r.details or {}).get("lending_id") == str(lending_id)]
+    return {"items": [_serialize_obs(r) for r in rows]}
 
 
 @router.get("/v1/covenants/{covenant_id}", tags=["Covenants"], summary="One covenant")

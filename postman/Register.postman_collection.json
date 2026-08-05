@@ -1603,6 +1603,69 @@
           }
         },
         {
+          "name": "GET /v1/covenants/observations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/covenants/observations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "covenants",
+                "observations"
+              ],
+              "query": [
+                {
+                  "key": "entity_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "lending_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "GET /v1/covenants/{{covenant_id}}",
           "request": {
             "method": "GET",

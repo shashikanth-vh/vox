@@ -55,123 +55,128 @@ from evam_backend_core.service_policy import (  # noqa: E402, F401
 
 
 def _row(cells: str) -> dict[str, Access]:
-    """Build one matrix row from 10 space-separated symbols in _ROLE_ORDER order.
+    """Build one matrix row from 12 space-separated symbols in _ROLE_ORDER order.
     Symbols: F=Full, S=Scoped, R=Read, A=Approve, -=None."""
     m = {"F": Access.FULL, "S": Access.SCOPED, "R": Access.READ, "A": Access.APPROVE,
          "-": Access.NONE}
     parts = cells.split()
-    assert len(parts) == 10, cells
+    assert len(parts) == 12, cells
     return {role: m[sym] for role, sym in zip(_ROLE_ORDER, parts, strict=True)}
 
 
 # ---- View Access sheet (column order: Admin Mgmt BDHead BDRM CreditHead DealAnalyst
 #      SynHead SynRM AMHead AMRM) --------------------------------------------------
 VIEW_ACCESS: dict[str, dict[str, Access]] = {
-    "today":              _row("F F S S S S S S S S"),
-    "dashboard":          _row("F F S S S S S S S S"),
-    "leads":              _row("F F F S - - S S S S"),
-    "deals":              _row("F F F S S S S S S S"),
-    "lending":            _row("F F F S F S R R R R"),
-    "syndication":        _row("F F F S S S F S R R"),
-    "asset_monetisation": _row("F F F S S S R R F S"),
-    "fi_master":          _row("F F F R S S F S R R"),
-    "clients":            _row("F F F S R R S S S S"),
-    "employees":          _row("F F R R R R R R R R"),
-    "audit":              _row("F - - - - - - - - -"),
-    "activity_log":       _row("F - - - - - - - - -"),
-    "tools":              _row("F R R R R R R R R R"),
+    "today":              _row("F F S S S S S S S S S S"),
+    "dashboard":          _row("F F S S S S S S S S S S"),
+    "leads":              _row("F F F S - - S S S S - -"),
+    "deals":              _row("F F F S S S S S S S - -"),
+    "lending":            _row("F F F S F S R R R R F F"),
+    "syndication":        _row("F F F S S S F S R R - -"),
+    "asset_monetisation": _row("F F F S S S R R F S - -"),
+    "fi_master":          _row("F F F R S S F S R R - -"),
+    "clients":            _row("F F F S R R S S S S R R"),
+    "employees":          _row("F F R R R R R R R R - -"),
+    "audit":              _row("F - - - - - - - - - - -"),
+    "activity_log":       _row("F - - - - - - - - - - -"),
+    "tools":              _row("F R R R R R R R R R - -"),
 }
 
 # ---- Operations sheet -------------------------------------------------------------
 OPERATIONS: dict[str, dict[str, Access]] = {
-    "sign_in":                        _row("F F F F F F F F F F"),
-    "add_lead":                       _row("F F F F - - - - - -"),
-    "edit_lead":                      _row("F F F S - - - - - -"),
-    "reassign_lead":                  _row("F F F - - - - - - -"),
-    "push_lead_to_deals":             _row("F F F S - - - - - -"),
-    "create_client":                  _row("F F F S - - - - - -"),
+    "sign_in":                        _row("F F F F F F F F F F F F"),
+    "add_lead":                       _row("F F F F - - - - - - - -"),
+    "edit_lead":                      _row("F F F S - - - - - - - -"),
+    "reassign_lead":                  _row("F F F - - - - - - - - -"),
+    "push_lead_to_deals":             _row("F F F S - - - - - - - -"),
+    "create_client":                  _row("F F F S - - - - - - - -"),
     # Editing a company profile / its client-view records (contracts, intel, monitoring).
     # Mirrors the clients-view WRITE capability: FULL/SCOPED roles write, the READ-only
     # roles (Credit Head, Deal Analyst) may NOT — so a read-only viewer cannot PATCH.
-    "edit_client":                    _row("F F F S - - S S S S"),
-    "edit_contract":                  _row("F F F S - - S S S S"),
-    "edit_intel":                     _row("F F F S - - S S S S"),
-    "edit_monitoring":                _row("F F F S - - S S S S"),
-    "edit_deal_profile":              _row("F F F S S S S S S S"),
-    "edit_deal_ownership":            _row("F F F - - - S - S -"),
-    "add_product_line":               _row("F F F S F - S - S -"),
-    "add_company_note":               _row("F F F S F S S S S S"),
-    "assign_analyst_lending":         _row("F F - - F - - - - -"),
-    "assign_analyst_syndication":     _row("F F - - F - - - - -"),
-    "assign_analyst_am":              _row("F F - - F - - - - -"),
-    "change_lending_stage":           _row("F F F - F S - - - -"),
-    "edit_lending_line":              _row("F F F S F S - - - -"),
-    "assign_syn_rm":                  _row("F F F - - - F - - -"),
-    "edit_syndication_line":          _row("F F F S F S F S - -"),
-    "add_lender_to_mandate":          _row("F F F - - - F S - -"),
-    "log_chase":                      _row("F F F - F S F S - -"),
-    "log_response":                   _row("F F F - F S F S - -"),
-    "advance_matrix_cell":            _row("F F F - F S F S - -"),
-    "assign_am_rm":                   _row("F F F - - - - - F -"),
-    "edit_am_record":                 _row("F F F S F S - - F S"),
-    "log_interaction":                _row("F F F S F S F S F S"),
-    "edit_fi_record":                 _row("F F F - - - F - - -"),
-    "edit_employee":                  _row("F F - - - - - - - -"),
-    "add_employee_assign_role":       _row("F F - - - - - - - -"),
+    "edit_client":                    _row("F F F S - - S S S S - -"),
+    "edit_contract":                  _row("F F F S - - S S S S - -"),
+    "edit_intel":                     _row("F F F S - - S S S S - -"),
+    "edit_monitoring":                _row("F F F S - - S S S S - -"),
+    "edit_deal_profile":              _row("F F F S S S S S S S - -"),
+    "edit_deal_ownership":            _row("F F F - - - S - S - - -"),
+    "add_product_line":               _row("F F F S F - S - S - - -"),
+    "add_company_note":               _row("F F F S F S S S S S - -"),
+    "assign_analyst_lending":         _row("F F - - F - - - - - - -"),
+    "assign_analyst_syndication":     _row("F F - - F - - - - - - -"),
+    "assign_analyst_am":              _row("F F - - F - - - - - - -"),
+    "change_lending_stage":           _row("F F F - F S - - - - - -"),
+    "edit_lending_line":              _row("F F F S F S - - - - - -"),
+    "assign_syn_rm":                  _row("F F F - - - F - - - - -"),
+    "edit_syndication_line":          _row("F F F S F S F S - - - -"),
+    "add_lender_to_mandate":          _row("F F F - - - F S - - - -"),
+    "log_chase":                      _row("F F F - F S F S - - - -"),
+    "log_response":                   _row("F F F - F S F S - - - -"),
+    "advance_matrix_cell":            _row("F F F - F S F S - - - -"),
+    "assign_am_rm":                   _row("F F F - - - - - F - - -"),
+    "edit_am_record":                 _row("F F F S F S - - F S - -"),
+    "log_interaction":                _row("F F F S F S F S F S - -"),
+    "edit_fi_record":                 _row("F F F - - - F - - - - -"),
+    "edit_employee":                  _row("F F - - - - - - - - - -"),
+    "add_employee_assign_role":       _row("F F - - - - - - - - - -"),
     # Directory/reference maintenance (counterparties = banks; the document checklist =
     # config). Read is broad (see the tools view); mutation is restricted here.
-    "manage_counterparty":            _row("F F - - F - F - - -"),
-    "manage_checklist":               _row("F F - - - - - - - -"),
-    "upload_remove_documents":        _row("F F F S F S S S S S"),
-    "snooze_today_item":              _row("F F F S S S S S S S"),
-    "delete_row":                     _row("F - - - - - - - - -"),
-    "request_stage_change":           _row("- - F S S S S S S S"),
-    "approve_stage_change":           _row("A A A - A - A - A -"),
+    "manage_counterparty":            _row("F F - - F - F - - - - -"),
+    "manage_checklist":               _row("F F - - - - - - - - - -"),
+    "upload_remove_documents":        _row("F F F S F S S S S S - -"),
+    "snooze_today_item":              _row("F F F S S S S S S S - -"),
+    "delete_row":                     _row("F - - - - - - - - - - -"),
+    "request_stage_change":           _row("- - F S S S S S S S - -"),
+    "approve_stage_change":           _row("A A A - A - A - A - - -"),
     # Governance-evidence attachment, gated BY KIND (see evam_backend_core.evidence). These are the
     # authorities that may file each class of governance evidence — NOT any identified caller. A
     # committee outcome / sanction letter is reserved to the credit authority (Credit Head +
     # Management + Admin) and the designated workflow service; an RM/Analyst holds NONE of these.
-    "attach_committee_evidence":      _row("F F - - F - - - - -"),
-    "attach_sanction_evidence":       _row("F F - - F - - - - -"),
+    "attach_committee_evidence":      _row("F F - - F - - - - - - -"),
+    "attach_sanction_evidence":       _row("F F - - F - - - - - - -"),
     # Executed documents — the document/OCR authority (mirrors upload_remove_documents' writers).
-    "attach_document_evidence":       _row("F F F S F S S S S S"),
+    "attach_document_evidence":       _row("F F F S F S S S S S - -"),
     # Lead qualification review — the BD authority.
-    "attach_qualification_evidence":  _row("F F F S - - - - - -"),
+    "attach_qualification_evidence":  _row("F F F S - - - - - - - -"),
     # Syndication mandate artefacts + sanction evidence (IM versions, allocation, the
     # syndication sanction record) — the syndication desk's authority, senior-gated.
     #                                        Adm Mgt BDH BDR CrH DA  SyH SyR AMH AMR
-    "attach_syndication_evidence":    _row("F F - - - - F S - -"),
+    "attach_syndication_evidence":    _row("F F - - - - F S - - - -"),
     # Asset-monetisation mandate artefacts + closure approval (teaser versions, NDA /
     # data-room records, offers, the closure decision's evidence) — the AM desk's
     # authority, senior-gated.
-    "attach_am_evidence":             _row("F F - - - - - - F S"),
+    "attach_am_evidence":             _row("F F - - - - - - F S - -"),
     # Advaya disbursement acknowledgement — recorded by the Advaya-handoff workflow service ONLY
     # under an enabled Advaya integration (default OFF; not in svc_workflows' baseline grant).
-    "attach_advaya_evidence":         _row("F F - - - - - - - -"),
+    "attach_advaya_evidence":         _row("F F - - - - - - - - - -"),
     # CP/CS checklist maker-checker: a maker prepares/completes the authoritative checklist; a
     # DIFFERENT senior credit authority approves it. Only an approved checklist can mint the
     # cp_cs_completion evidence (verified, not caller-attached).
-    "prepare_cpcs_checklist":         _row("F F - - F S - - - -"),
-    "approve_cpcs_checklist":         _row("F F - - F - - - - -"),
+    "prepare_cpcs_checklist":         _row("F F - - F S - - - - - -"),
+    "approve_cpcs_checklist":         _row("F F - - F - - - - - - -"),
     # Advaya handover maker-checker: a maker PREPARES the package; a DIFFERENT checker APPROVES it,
     # which advances the line to 'Disbursed'. Both are senior credit authority.
-    "initiate_advaya_handover":       _row("F F - - F - - - - -"),
+    "initiate_advaya_handover":       _row("F F - - F - - - - - - -"),
     # The ANALYST sends the disbursement request (the CP approval already gated the
     # money movement) — so Deal Analyst holds this alongside the credit seniors.
-    "record_handover_package":        _row("F F - - F F - - - -"),
-    "approve_advaya_handover":        _row("F F - - F - - - - -"),
-    "export_csv":                     _row("F F F F F F F F F F"),
-    "backup_restore":                 _row("F - - - - - - - - -"),
-    "run_news_scan":                  _row("F F F F F F F F F F"),
+    "record_handover_package":        _row("F F - - F F - - - - - -"),
+    "approve_advaya_handover":        _row("F F - - F - - - - - - -"),
+    "export_csv":                     _row("F F F F F F F F F F - -"),
+    "backup_restore":                 _row("F - - - - - - - - - - -"),
+    "run_news_scan":                  _row("F F F F F F F F F F - -"),
     # Increment 8 — covenant governance + early-warning surveillance.
     # Covenant DEFINITIONS (the schedule/thresholds) and covenant RESULTS are credit
     # governance: Credit Head owns them, the Deal Analyst works them scoped, Admin/Mgmt
     # oversee. RM desks neither define nor test covenants.
-    "manage_covenants":               _row("F F - - F S - - - -"),
+    "manage_covenants":               _row("F F - - F S - - - - F F"),
+    # LMS servicing (maker/checker): the OPERATOR posts routine ledger events (EMI
+    # receipts, computed interest accruals, charges); the AUTHORIZER holds the
+    # hard-to-reverse verbs — classification (Standard/SMA/NPA), provisioning, closure.
+    "record_ledger_entry":            _row("F F - - F S - - - - F F"),
+    "authorize_loan_account":         _row("F F - - F - - - - - - F"),
     # EWS cases: the credit desk owns surveillance (Credit Head FULL); every RM desk can
     # OPEN and work a case on its own book (scoped) — a field RM spotting distress must
     # never be blocked from raising the flag.
-    "manage_ews":                     _row("F F S S F S S S S S"),
+    "manage_ews":                     _row("F F S S F S S S S S - -"),
 }
 
 # ---- Ownership Model sheet --------------------------------------------------------

@@ -5,6 +5,8 @@ export interface LendingRow {
   h?: LendingHist[]; createdAt: string; remarks: string; _name?: string;
   /** The deal this line hangs off (`deal_id`), when the API supplied it. */
   dealId?: string;
+  /** The borrower entity (`entity_id`) — the LMS covenant tab reads by it. */
+  entityId?: string;
   /** Drawdown proposed on the way to Ready for Disbursement. */
   proposedAmt?: number;
   proposedDate?: string | null;

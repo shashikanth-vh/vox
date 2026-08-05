@@ -1,0 +1,122 @@
+import { api, errText } from '../api/http';
+
+/**
+ * LMS — the servicing side of Lending (post-disbursement). Thin, typed calls onto the
+ * register's loan-account and covenant APIs; no judgement lives here. Every error comes
+ * back in the words the register used.
+ */
+
+export interface LoanAccount {
+  id: string; lending_id: string; account_no: number;
+  borrower?: string; facility_type?: string; disbursed_on?: string;
+  amount?: number; rate_kind?: string; rate_pct?: number; tenor_months?: number;
+  emi_amount?: number; repayment_start?: string; day_count?: string;
+  status: string; overdue_position?: string; provisioning_amount?: number;
+  closed_on?: string; note?: string;
+}
+
+export interface LedgerEntry {
+  entry_no: number; entry_date: string; particulars: string; entry_type: string;
+  debit?: number; credit?: number; balance: number;
+}
+
+export interface Covenant {
+  id: string; entity_id: string; lending_id?: string; name: string;
+  covenant_type: string; description?: string; metric?: string; operator?: string;
+  threshold?: number; frequency: string; first_due_on?: string; grace_days: number;
+  breach_severity: string; is_active: boolean;
+}
+
+export interface Observation {
+  id: string; entity_id: string; covenant_name?: string; due_date?: string;
+  submitted_date?: string; on_time?: boolean; delay_days?: number; period?: string;
+  status: string; target_value?: number; actual_value?: number; breached?: boolean;
+  waiver_status?: string; waiver_valid_until?: string; waiver_decision_ref?: string;
+  details?: Record<string, any>;
+}
+
+function msg(e: any, what: string): string {
+  return errText(e?.response?.data) || e?.message || `Could not ${what}.`;
+}
+
+export const lmsService = {
+  /** The account + full statement ledger; null when no account opened yet. */
+  async account(lendingId: string): Promise<{ account: LoanAccount; entries: LedgerEntry[] } | null> {
+    try {
+      return await api.get<any>(`/lending/${lendingId}/loan-account`);
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      throw new Error(msg(e, 'read the loan account'));
+    }
+  },
+
+  /** The interest CALCULATOR — shows the inputs and formula; nothing is written. */
+  async interestPreview(lendingId: string, upto: string): Promise<{
+    from: string; upto: string; days: number; balance: number; rate_pct: number;
+    day_count: string; interest: number; formula: string;
+  }> {
+    try {
+      return await api.get<any>(`/lending/${lendingId}/loan-account/interest-preview`, { upto });
+    } catch (e) { throw new Error(msg(e, 'compute the interest')); }
+  },
+
+  async accrue(lendingId: string, upto: string): Promise<LedgerEntry> {
+    try {
+      return await api.post<any>(`/lending/${lendingId}/loan-account/accrue`, { upto });
+    } catch (e) { throw new Error(msg(e, 'write the interest row')); }
+  },
+
+  async addEntry(lendingId: string, input: {
+    entry_date: string; kind: 'EMI' | 'Receipt' | 'Charge' | 'Adjustment';
+    amount: number; side?: 'debit' | 'credit'; particulars?: string;
+  }): Promise<LedgerEntry> {
+    try {
+      return await api.post<any>(`/lending/${lendingId}/loan-account/entries`, input);
+    } catch (e) { throw new Error(msg(e, 'record the ledger entry')); }
+  },
+
+  /** Classification / provisioning / closure — the AUTHORIZER's verbs. */
+  async patchAccount(lendingId: string, input: Partial<{
+    status: string; overdue_position: string; provisioning_amount: number;
+    closed_on: string; note: string;
+  }>): Promise<LoanAccount> {
+    try {
+      return await api.patch<any>(`/lending/${lendingId}/loan-account`, input);
+    } catch (e) { throw new Error(msg(e, 'update the account')); }
+  },
+
+  // ---- covenants -----------------------------------------------------------
+  async covenants(entityId: string): Promise<Covenant[]> {
+    try {
+      const out = await api.get<any>('/covenants', { entity_id: entityId });
+      return out.items || [];
+    } catch (e) { throw new Error(msg(e, 'read the covenant register')); }
+  },
+
+  async observations(entityId: string, lendingId?: string): Promise<Observation[]> {
+    try {
+      const out = await api.get<any>('/covenants/observations',
+        { entity_id: entityId, ...(lendingId ? { lending_id: lendingId } : {}) });
+      return out.items || [];
+    } catch (e) { throw new Error(msg(e, 'read the covenant observations')); }
+  },
+
+  /** Submit a period's result — the register computes breach; a breach auto-opens
+   *  an EWS case in the same transaction. */
+  async submitResult(monitoringId: string, input: {
+    actual_value?: number; submitted_on?: string; note?: string;
+  }): Promise<Observation & { ews_case_id?: string }> {
+    try {
+      return await api.post<any>(`/monitoring/${monitoringId}/result`, input);
+    } catch (e) { throw new Error(msg(e, 'submit the result')); }
+  },
+
+  /** Waive a live breach — takes effect only against a recorded, time-boxed
+   *  waiver decision (the register verifies the record, never a claim). */
+  async waive(monitoringId: string, decisionRef: string, note?: string): Promise<Observation> {
+    try {
+      return await api.post<any>(`/monitoring/${monitoringId}/waive`,
+        { decision_ref: decisionRef, ...(note ? { note } : {}) });
+    } catch (e) { throw new Error(msg(e, 'apply the waiver')); }
+  },
+};

@@ -123,9 +123,19 @@ async def _line_scoped(ctx: RequestContext, lending_id: str) -> LendingTracker:
 
 
 def _maker(ctx: RequestContext) -> None:
+    """Routine ledger events — the LMS OPERATOR's verb (bridge grants keep the credit
+    desk working until a servicing team exists)."""
     from app.authz.engine import enforce_operation
 
-    enforce_operation(ctx.user, "prepare_cpcs_checklist")
+    enforce_operation(ctx.user, "record_ledger_entry")
+
+
+def _authorizer(ctx: RequestContext) -> None:
+    """The hard-to-reverse verbs — classification, provisioning, closure — are the
+    LMS AUTHORIZER's (plus senior credit): four-eyes over the account's state."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "authorize_loan_account")
 
 
 async def _append(ctx: RequestContext, acct: LoanAccount, *, entry_date: date,
@@ -364,7 +374,7 @@ class AccountPatch(BaseModel):
               summary="Update the servicing classification (status, overdue, provisioning)")
 async def patch_account(lending_id: str, payload: AccountPatch,
                         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
-    _maker(ctx)
+    _authorizer(ctx)
     await _line_scoped(ctx, lending_id)
     acct = await _account(ctx, lending_id, lock=True)
     if payload.status is not None:

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Alert, MenuItem, TextField } from '@mui/material';
+import { Alert, MenuItem, TextField, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import LmsView from './lms/LmsView';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
@@ -29,6 +30,9 @@ const stageRowSx = (stage: string) => {
 export default function LendingPage() {
   const { user } = useAuth();
   const ro = !can(user.roles, 'editLending');
+  // The NBFC split: LOS (origination — lead to disbursement) | LMS (servicing — the
+  // loan account from first disbursement to closure). One nav item, two worlds.
+  const [side, setSide] = useState<'los' | 'lms'>('los');
   const qc = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
@@ -70,6 +74,14 @@ export default function LendingPage() {
 
   return (
     <>
+      <ToggleButtonGroup exclusive size="small" value={side}
+        onChange={(_e, v) => { if (v) setSide(v); }} sx={{ mb: 1,
+          '& .MuiToggleButton-root': { textTransform: 'none', fontSize: 12.5, px: 1.6, py: 0.4 } }}>
+        <ToggleButton value="los">LOS · Origination</ToggleButton>
+        <ToggleButton value="lms">LMS · Servicing</ToggleButton>
+      </ToggleButtonGroup>
+      {side === 'lms' && <LmsView />}
+      {side === 'lms' ? null : <>
       <PageHint>Stage edits stamp the date automatically; sanction date lives in the company profile.
         Sanctioned, CP/CS Completed, Ready for Disbursement and Disbursed are reached through
         their approvals — the register refuses them here.</PageHint>
@@ -91,6 +103,7 @@ export default function LendingPage() {
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       <ConfirmDialog open={!!del} title="Delete lending row" message={`Delete ${del?._name}'s lending facility?`}
         onCancel={() => setDel(null)} onConfirm={() => { if (del) lendingService.remove(del.id, user.full); setDel(null); refresh(); }} />
+      </>}
     </>
   );
 }

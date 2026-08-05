@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (256 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (257 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -1481,6 +1481,64 @@
                     }
                   ]
                 }
+              }
+            },
+            {
+              "name": "GET /v1/covenants/observations \u2014 A company's covenant OBSERVATIONS (the periods), newest due first",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/covenants/observations",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "covenants",
+                    "observations"
+                  ],
+                  "query": [
+                    {
+                      "key": "entity_id",
+                      "value": "{{id}}",
+                      "disabled": false
+                    },
+                    {
+                      "key": "lending_id",
+                      "value": "{{id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "The LMS covenant tab's read: every generated period for the company's covenants \u2014\nPending, Compliant, Breached, Waived, Overdue \u2014 with the covenant id in details so\nthe UI can pair observation to definition. Company-read gated like the register."
               }
             },
             {

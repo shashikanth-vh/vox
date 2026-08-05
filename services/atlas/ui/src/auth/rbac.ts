@@ -12,14 +12,16 @@
 export const ROLES = [
   'Admin', 'Management', 'BD Head', 'BDRM', 'Credit Head', 'Deal Analyst',
   'Syn Head', 'Syn RM', 'AM Head', 'AM RM',
+  'LMS Operator', 'LMS Authorizer',
 ] as const;
 export type Role = typeof ROLES[number];
 
 // Vertical each role belongs to (drives scoping + dashboard slice).
-export const ROLE_VERTICAL: Record<Role, 'System' | 'All' | 'BD' | 'Credit' | 'Syndication' | 'AM'> = {
+export const ROLE_VERTICAL: Record<Role, 'System' | 'All' | 'BD' | 'Credit' | 'Syndication' | 'AM' | 'Servicing'> = {
   Admin: 'System', Management: 'All', 'BD Head': 'BD', BDRM: 'BD',
   'Credit Head': 'Credit', 'Deal Analyst': 'Credit',
   'Syn Head': 'Syndication', 'Syn RM': 'Syndication', 'AM Head': 'AM', 'AM RM': 'AM',
+  'LMS Operator': 'Servicing', 'LMS Authorizer': 'Servicing',
 };
 
 // full = read+write, no scope limit · scoped = read+write on own/assigned rows only
@@ -30,20 +32,22 @@ const F: Access = 'full', S: Access = 'scoped', R: Access = 'read', N: Access = 
 
 // Columns are ROLES, in order. Rows are app tab ids.
 // order: Admin, Management, BD Head, BDRM, Credit Head, Deal Analyst, Syn Head, Syn RM, AM Head, AM RM
+// order: … AM RM, LMS Operator, LMS Authorizer (the servicing pair live on Lending's
+// LMS tab — scoped there, read-only visitors elsewhere they need context from).
 const VIEW_ROWS: Record<string, Access[]> = {
-  today:    [F, F, S, S, S, S, S, S, S, S],
-  dash:     [F, F, S, N, S, N, S, N, S, N],
-  leads:    [F, F, F, S, N, N, N, N, N, N],
-  deals:    [F, F, F, S, S, S, S, S, S, S],
-  lend:     [F, F, R, R, F, S, R, R, R, R],
-  syn:      [F, F, R, R, R, S, F, S, R, R],
-  am:       [F, F, R, R, R, S, R, R, F, S],
-  fi:       [F, F, R, R, R, R, F, R, R, R],
-  clients:  [F, F, R, N, R, N, R, N, R, N],
-  emp:      [F, F, R, R, R, R, R, R, R, R],
-  audit:    [F, N, N, N, N, N, N, N, N, N],
-  activity: [F, N, N, N, N, N, N, N, N, N],
-  tools:    [F, R, R, R, R, R, R, R, R, R],
+  today:    [F, F, S, S, S, S, S, S, S, S, S, S],
+  dash:     [F, F, S, N, S, N, S, N, S, N, N, N],
+  leads:    [F, F, F, S, N, N, N, N, N, N, N, N],
+  deals:    [F, F, F, S, S, S, S, S, S, S, R, R],
+  lend:     [F, F, R, R, F, S, R, R, R, R, F, F],
+  syn:      [F, F, R, R, R, S, F, S, R, R, N, N],
+  am:       [F, F, R, R, R, S, R, R, F, S, N, N],
+  fi:       [F, F, R, R, R, R, F, R, R, R, N, N],
+  clients:  [F, F, R, N, R, N, R, N, R, N, R, R],
+  emp:      [F, F, R, R, R, R, R, R, R, R, R, R],
+  audit:    [F, N, N, N, N, N, N, N, N, N, N, N],
+  activity: [F, N, N, N, N, N, N, N, N, N, N, N],
+  tools:    [F, R, R, R, R, R, R, R, R, R, R, R],
 };
 
 export const VIEW_ACCESS: Record<string, Record<Role, Access>> = Object.fromEntries(
@@ -66,8 +70,8 @@ const asRoles = (r: RoleInput): Role[] => (r == null ? [] : Array.isArray(r) ? r
 // Privilege ranking — used to pick the single "primary" role for labels/defaults.
 export const ROLE_RANK: Record<Role, number> = {
   Admin: 100, Management: 90,
-  'BD Head': 70, 'Credit Head': 70, 'Syn Head': 70, 'AM Head': 70,
-  BDRM: 40, 'Deal Analyst': 40, 'Syn RM': 40, 'AM RM': 40,
+  'BD Head': 70, 'Credit Head': 70, 'Syn Head': 70, 'AM Head': 70, 'LMS Authorizer': 70,
+  BDRM: 40, 'Deal Analyst': 40, 'Syn RM': 40, 'AM RM': 40, 'LMS Operator': 40,
 };
 export function primaryRole(roles: Role[]): Role {
   return [...roles].sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0] || 'BDRM';
@@ -119,7 +123,8 @@ export type Op =
   | 'editAM' | 'addNote' | 'logInteraction'
   | 'editFI' | 'editEmployee' | 'addEmployee' | 'uploadDocs' | 'snoozeToday'
   | 'deleteRow' | 'requestStageChange' | 'approveRequest'
-  | 'exportCsv' | 'backupRestore' | 'newsScan';
+  | 'exportCsv' | 'backupRestore' | 'newsScan'
+  | 'lmsOperate' | 'lmsAuthorize';
 
 const ALL: Role[] = [...ROLES];
 
@@ -156,6 +161,8 @@ const OPS: Record<Op, Role[]> = {
   exportCsv:          ALL,
   backupRestore:      ['Admin'],
   newsScan:           ALL,
+  lmsOperate:         ['Admin', 'Management', 'Credit Head', 'Deal Analyst', 'LMS Operator', 'LMS Authorizer'],
+  lmsAuthorize:       ['Admin', 'Management', 'Credit Head', 'LMS Authorizer'],
 };
 
 /**

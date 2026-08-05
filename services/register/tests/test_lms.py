@@ -132,3 +132,48 @@ async def test_the_committee_decision_reads_back_on_the_line(client):
     body = r.json()
     assert body["decision"] == "Approved"
     assert body["decided_by"] == "ch@evamfinance.com"
+
+
+async def test_lms_roles_split_the_maker_from_the_checker(client, monkeypatch):
+    """The servicing pair (RBAC v3.5): the LMS OPERATOR posts routine ledger events
+    but cannot classify; the LMS AUTHORIZER holds classification/closure. The LMS
+    covenant tab's observations read answers under either role."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "service_api_keys", {"trn-key": "svc_workflows"})
+    lid = await _accepted_line(client, monkeypatch)
+    t = await client.post("/v1/internal/sanction-terms", json={
+        "lending_id": lid, "amount_cr": 2.0, "rate_kind": "Fixed", "rate_pct": 12.0,
+        "day_count": "365"}, headers=ADMIN)
+    assert t.status_code == 201, t.text
+    r = await client.post(f"/v1/internal/lending/{lid}/tranches",
+                          json={"tranche_ref": "T1", "amount": 2.0,
+                                "disbursed_on": "2026-04-01"}, headers=SVC)
+    assert r.status_code == 201, r.text
+
+    OPERATOR = {**ADMIN, "X-User-Email": "ops@evamfinance.com",
+                "X-User-Roles": "LMS Operator"}
+    AUTHORIZER = {**ADMIN, "X-User-Email": "authz@evamfinance.com",
+                  "X-User-Roles": "LMS Authorizer"}
+
+    # The operator's verb: a routine receipt posts.
+    ok = await client.post(f"/v1/lending/{lid}/loan-account/entries",
+                           json={"entry_date": "2026-04-10", "kind": "Receipt",
+                                 "amount": 0.1}, headers=OPERATOR)
+    assert ok.status_code == 201, ok.text
+
+    # The hard-to-reverse verb is NOT the operator's — four-eyes over account state.
+    no = await client.patch(f"/v1/lending/{lid}/loan-account",
+                            json={"status": "SMA"}, headers=OPERATOR)
+    assert no.status_code == 403, no.text
+    yes = await client.patch(f"/v1/lending/{lid}/loan-account",
+                             json={"status": "SMA"}, headers=AUTHORIZER)
+    assert yes.status_code == 200, yes.text
+
+    # The LMS covenant tab's read: the company's observations list (none generated
+    # yet — the sweep makes them as periods fall due).
+    eid = (await client.get(f"/v1/lending/{lid}")).json()["entity_id"]
+    obs = await client.get("/v1/covenants/observations",
+                           params={"entity_id": eid}, headers=OPERATOR)
+    assert obs.status_code == 200, obs.text
+    assert obs.json()["items"] == []
