@@ -196,15 +196,31 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
         },
         {
             "key": "cpcs.prepare",
-            "label": "Prepare CP/CS checklist",
+            "label": "Prepare CP checklist",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
             "stage_reason": "Available once the committee has sanctioned this facility.",
             # The checklist is a LIST of conditions, each with its own evidence — a flat
             # form cannot express it honestly, so it waits for its own screen rather than
-            # shipping a JSON box that looks like a feature.
-            # A checklist is a LIST of conditions with evidence — the client renders its
-            # own screen for this rather than the generic form.
+            # shipping a JSON box that looks like a feature. This step works the CP half
+            # (the pre-disbursement conditions, read from the sanction letter); its
+            # approval releases disbursement, carrying any conditions NOT met.
+            "screen": "cpcs-checklist",
+            "prefill": {"lending_id": "id"},
+            "form": [_f("checklist_version", "Version", "number", default=1),
+                     _NOTE],
+        },
+        {
+            # The CS half is its OWN step: it starts once disbursement is in motion and
+            # a new version is filed each time documents arrive, until nothing is open —
+            # the chase reminders on Today run off the latest APPROVED version.
+            "key": "cpcs.update-cs",
+            "label": "Update CS checklist",
+            "method": "POST", "url": "/v1/workflows/cpcs-checklists",
+            "roles": _CREDIT_MAKERS,
+            "stages": {"CP/CS Completed", "Ready for Disbursement", "Disbursed"},
+            "stage_reason": "Conditions subsequent are worked once the CP checklist is "
+                            "approved and disbursement is in motion.",
             "screen": "cpcs-checklist",
             "prefill": {"lending_id": "id"},
             "form": [_f("checklist_version", "Version", "number", default=1),
@@ -413,6 +429,7 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "deal-structuring.revise-credit-note": ("by",),
     "run.resubmit": ("by",),
     "cpcs.prepare": ("requested_by",),
+    "cpcs.update-cs": ("requested_by",),
     "evidence.executed-agreement": (),
     "handover.prepare": ("requested_by",),
     "handover.submit": (),
@@ -3393,7 +3410,7 @@ def create_app() -> FastAPI:
                         "governance evidence must cite the run that produced it. Run the "
                         "structuring workflow first.")
             form = spec["form"]
-            if spec["key"] == "cpcs.prepare" and next_version:
+            if spec["key"] in ("cpcs.prepare", "cpcs.update-cs") and next_version:
                 form = [{**f, "default": next_version} if f["name"] == "checklist_version"
                         else f for f in form]
             actions.append({

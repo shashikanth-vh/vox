@@ -41,8 +41,8 @@ const STARTER: Omit<CpcsItem, 'status' | 'evidence_ref' | 'reason' | 'expiry_dat
   { key: 'end-use', label: 'End-use certificate', condition_type: 'CS', required: true },
 ];
 
-const blank = (n: number): CpcsItem => ({
-  key: `condition-${n}`, label: '', condition_type: 'CP', required: true,
+const blank = (n: number, t: 'CP' | 'CS' = 'CP'): CpcsItem => ({
+  key: `condition-${n}`, label: '', condition_type: t, required: true,
   status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
 });
 
@@ -59,7 +59,13 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   onDone: (message: string) => void;
 }) {
   const open = !!action;
+  // TWO steps share this screen: "Prepare CP checklist" works the pre-disbursement
+  // conditions; "Update CS checklist" starts once disbursement is in motion and records
+  // documents as they arrive. The OTHER half's items ride along unchanged (hidden), so
+  // the register always holds the complete picture in one versioned artefact.
+  const phase: 'CP' | 'CS' = action?.key === 'cpcs.update-cs' ? 'CS' : 'CP';
   const [items, setItems] = useState<CpcsItem[]>([]);
+  const [carried, setCarried] = useState<CpcsItem[]>([]);
   // The maker owns the version: v1 first time, raised when re-preparing after a checker
   // returned the previous one. The register keys the checklist on (lending, version), so
   // re-sending v1 after a return is a conflict — the field is here to be seen, not hidden.
@@ -70,8 +76,11 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
 
   useEffect(() => {
     if (!open) return;
-    setItems(STARTER.map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '',
-                                   expiry_date: '' })));
+    setCarried([]);
+    setItems(phase === 'CP'
+      ? STARTER.filter((s) => s.condition_type === 'CP')
+        .map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '', expiry_date: '' }))
+      : []);
     // The plane knows which version comes next — a checklist is keyed on (lending,
     // version), so opening on 1 every time hands the user a 409 after they have filled
     // the whole form in.
@@ -102,7 +111,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           ];
         }
         if (alive && seeded.length) {
-          setItems(seeded.map((s: any): CpcsItem => ({
+          const all = seeded.map((s: any): CpcsItem => ({
             key: String(s.key || ''), label: String(s.label || s.key || ''),
             condition_type: s.condition_type === 'CS' ? 'CS' : 'CP',
             required: s.required !== false,
@@ -110,16 +119,19 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
             evidence_ref: String(s.evidence_ref || ''),
             reason: String(s.reason || ''),
             expiry_date: String(s.expiry_date || ''),
-          })));
+          }));
+          // This phase's items are edited; the other half rides along untouched.
+          setItems(all.filter((x) => x.condition_type === phase));
+          setCarried(all.filter((x) => x.condition_type !== phase));
         }
-      } catch { /* the STARTER trio stays */ }
+      } catch { /* the phase's starter stays */ }
     })();
     return () => { alive = false; };
-  }, [open, action]);
+  }, [open, action]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (i: number, patch: Partial<CpcsItem>) =>
     setItems((rows) => rows.map((r, n) => (n === i ? { ...r, ...patch } : r)));
-  const add = () => setItems((rows) => [...rows, blank(rows.length + 1)]);
+  const add = () => setItems((rows) => [...rows, blank(rows.length + 1, phase)]);
   const drop = (i: number) => setItems((rows) => rows.filter((_, n) => n !== i));
 
   const submit = async () => {
@@ -162,7 +174,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     const values: Record<string, any> = {
         checklist_version: version,
         ...(note.trim() ? { note: note.trim() } : {}),
-        items: named.map((r) => ({
+        items: [...named, ...carried].map((r) => ({
           key: (r.key.trim() || r.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 80),
           label: r.label.trim(),
           condition_type: r.condition_type,
@@ -178,7 +190,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     const r = await workflowActionsService.run({ ...action, form: [] }, values);
     setBusy(false);
     if (!r.ok) { setErr(r.error || 'The workflow plane refused the checklist.'); return; }
-    onDone(`CP/CS checklist v${version} sent for checking.`);
+    onDone(`${phase === 'CP' ? 'CP checklist' : 'CS update'} v${version} sent for checking.`);
     onClose();
   };
 
@@ -187,19 +199,30 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ fontSize: 16 }}>
-        Prepare CP/CS checklist
+        {phase === 'CP' ? 'Prepare CP checklist' : 'Update CS checklist'}
         <TextField size="small" type="number" label="Version" value={version}
           onChange={(e) => setVersion(Math.max(1, Number(e.target.value) || 1))}
           sx={{ ml: 1.5, width: 104 }} inputProps={{ min: 1 }} />
       </DialogTitle>
       <DialogContent dividers>
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>
-          Conditions precedent (CP) must be satisfied before disbursement; conditions
-          subsequent (CS) may follow it. A different checker approves this — you cannot
-          approve your own checklist. Raise the <b>version</b> when re-preparing after a
-          checker returned the previous one. Every <b>required CP</b> must be Completed,
-          Waived or Deferred as CS before this can be sent — a required CP left Pending is
-          refused.
+          {phase === 'CP' ? (
+            <>Conditions PRECEDENT — read from the sanction letter — must be worked before
+            disbursement. Chase the customer, mark each Completed / Waived / Deferred as
+            CS, and send for checking: a different checker approves (never the preparer),
+            and the approval releases disbursement <b>carrying whatever is not met</b> to
+            Advaya. A required CP left Pending is refused. Raise the <b>version</b> when
+            re-preparing after a return.</>
+          ) : (
+            <>Conditions SUBSEQUENT — read from the sanction letter — are collected while
+            disbursement runs. Each time documents arrive, mark them Completed and send
+            this updated version for checking; the chase reminders on Today keep running
+            for whatever is still open, until nothing is left.</>
+          )}
+          {carried.length > 0 && (
+            <> The {phase === 'CP' ? 'CS' : 'CP'} half ({carried.length} item{carried.length === 1 ? '' : 's'})
+            rides along unchanged.</>
+          )}
         </Typography>
         {err && <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
           onClose={() => setErr('')}>{err}</Alert>}
