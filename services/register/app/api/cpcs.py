@@ -37,7 +37,7 @@ _WAIVER_AUTHORITY = {"Credit Head", "Management", "Admin"}
 class ChecklistItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str = Field(min_length=1, max_length=80)
-    label: str | None = Field(default=None, max_length=300)
+    label: str | None = Field(default=None, max_length=1000)
     # CP = condition precedent (must be met before disbursement); CS = condition subsequent (an
     # obligation after). A CP may be 'Deferred as CS' with an expiry, converting it to an obligation.
     condition_type: str = Field(pattern="^(CP|CS)$")

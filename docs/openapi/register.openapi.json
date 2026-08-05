@@ -2446,7 +2446,7 @@
           "label": {
             "anyOf": [
               {
-                "maxLength": 300,
+                "maxLength": 1000,
                 "type": "string"
               },
               {
@@ -12867,7 +12867,7 @@
           "label": {
             "anyOf": [
               {
-                "maxLength": 300,
+                "maxLength": 1000,
                 "type": "string"
               },
               {

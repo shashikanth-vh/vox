@@ -917,7 +917,7 @@ class AdvayaHandoverIn(BaseModel):
 class CpcsItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str = Field(min_length=1, max_length=80)
-    label: str | None = Field(default=None, max_length=300)
+    label: str | None = Field(default=None, max_length=1000)
     condition_type: str = Field(pattern="^(CP|CS)$")
     required: bool = True
     status: str = Field(default="Pending", pattern="^(Pending|Completed|Waived|Deferred as CS)$")

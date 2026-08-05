@@ -76,7 +76,7 @@ async def _lending_or_404(ctx: RequestContext, lending_id: str):  # noqa: ANN202
 class SeedItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str = Field(min_length=1, max_length=80)
-    label: str | None = Field(default=None, max_length=300)
+    label: str | None = Field(default=None, max_length=1000)
     required: bool = True
     note: str | None = None
 
