@@ -14,7 +14,10 @@ import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
 import { workflowService, kindLabel, since, pendingKey, actionsFor,
   type PendingWorkflow, type DecisionAction } from '../../services/workflowService';
+import { lmsService, type TrancheItem } from '../../services/lmsService';
 import { clientsService } from '../../services/clientsService';
+import { fmt } from '../../utils/format';
+import { TextField } from '@mui/material';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import type { AttnRow, ContactRow, DueRow } from './compute';
 import { tokens } from '../../theme';
@@ -97,6 +100,38 @@ export default function TodayPage() {
     refetchInterval: 60000,
     staleTime: 30000,
   });
+  // BOOKING APPROVALS — the LMS gate's queue, straight from the register: every
+  // human-recorded tranche waiting for LMS Management. Approval opens/grows the loan
+  // account in the register's own transaction; this is the servicing checker's inbox,
+  // so it lands on Today, not only on the LMS page.
+  const canBook = can(user.roles, 'lmsAuthorize');
+  const [bookBusy, setBookBusy] = useState('');
+  const [bookErr, setBookErr] = useState('');
+  const [bookFlash, setBookFlash] = useState('');
+  const [bookReject, setBookReject] = useState<{ id: string; note: string } | null>(null);
+  const { data: bookings = [], refetch: refetchBookings } = useQuery({
+    queryKey: ['lms-pending-bookings', 'today'],
+    queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
+    enabled: canBook,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const overdueOf = (t: TrancheItem) =>
+    (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < todayISO).length;
+  const settleBooking = async (t: TrancheItem, action: 'approve' | 'reject', note?: string) => {
+    setBookErr(''); setBookFlash(''); setBookBusy(t.id);
+    try {
+      await lmsService.book(t.lending_id, t.id, action, note);
+      setBookFlash(action === 'approve'
+        ? `${t.tranche_ref} booked — the loan account is updated (LMS · Servicing has the statement).`
+        : `${t.tranche_ref} rejected — the recorder corrects and records afresh.`);
+      setBookReject(null);
+      await refetchBookings(); refresh();
+    } catch (e: any) { setBookErr(e?.message || String(e)); }
+    setBookBusy('');
+  };
+
   // Approvers act on any run that exposes a decision URL; everyone else only sees the
   // runs they raised, sitting with an approver — the same split as the requests above.
   const canDecideWf = can(user.roles, 'approveRequest');
@@ -159,7 +194,7 @@ export default function TodayPage() {
   );
 
   const empty = !data.due.length && !data.contactRed.length && !data.contactAmber.length && !data.stageRed.length && !data.stageAmber.length
-    && !wfActionable.length && !wfMine.length && !wfReminders.length;
+    && !wfActionable.length && !wfMine.length && !wfReminders.length && !bookings.length;
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto' }}>
@@ -169,6 +204,49 @@ export default function TodayPage() {
         </Typography>
         <ExportBar onCsv={exportCsv} />
       </Box>
+
+      {bookErr && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookErr('')}>{bookErr}</Alert>}
+      {bookFlash && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookFlash('')}>{bookFlash}</Alert>}
+      {canBook && bookings.length > 0 && (
+        <Section title="Booking approvals — LMS" count={bookings.length} defaultOpen>
+          {bookings.map((t) => (
+            <ChLine key={t.id}>
+              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#FFF3CD', color: '#7A5C00', whiteSpace: 'nowrap' }}>BOOKING</Box>
+              <Box component="b" sx={{ color: tokens.ink }}>{t.borrower || t.lending_id.slice(0, 8)}</Box>
+              {hint(`₹ ${fmt(t.amount)} Cr · ${t.tranche_ref}${t.disbursed_on ? ' · ' + t.disbursed_on : ''} · by ${t.recorded_by || '—'}`)}
+              {(t.conditions_open?.length ?? 0) > 0 && hint(`${t.conditions_open!.length} condition${t.conditions_open!.length > 1 ? 's' : ''} open`)}
+              {overdueOf(t) > 0 && (
+                <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#fde2e6', color: '#b0223a', whiteSpace: 'nowrap' }}>
+                  {overdueOf(t)} OVERDUE
+                </Box>
+              )}
+              <Box sx={{ flex: 1 }} />
+              {bookReject?.id === t.id ? (
+                <>
+                  <TextField size="small" label="Rejection reason" autoFocus value={bookReject.note}
+                    onChange={(e) => setBookReject({ id: t.id, note: e.target.value })}
+                    sx={{ minWidth: 200 }} />
+                  <Button size="small" color="error" variant="contained"
+                    disabled={!!bookBusy || !bookReject.note.trim()}
+                    onClick={() => void settleBooking(t, 'reject', bookReject.note.trim())} sx={{ minWidth: 0 }}>
+                    {bookBusy === t.id ? '…' : 'Confirm'}
+                  </Button>
+                  <Button size="small" onClick={() => setBookReject(null)} sx={{ minWidth: 0 }}>Cancel</Button>
+                </>
+              ) : (
+                <>
+                  <Button size="small" variant="contained" disabled={!!bookBusy}
+                    onClick={() => void settleBooking(t, 'approve')} sx={{ minWidth: 0 }}>
+                    {bookBusy === t.id ? 'Booking…' : 'Approve & book'}
+                  </Button>
+                  <Button size="small" color="error" disabled={!!bookBusy}
+                    onClick={() => setBookReject({ id: t.id, note: '' })} sx={{ minWidth: 0 }}>Reject</Button>
+                </>
+              )}
+            </ChLine>
+          ))}
+        </Section>
+      )}
 
       {(wfActionable.length > 0 || wfMine.length > 0) && (
         <Section title="Workflow approvals" count={wfActionable.length + wfMine.length} defaultOpen>

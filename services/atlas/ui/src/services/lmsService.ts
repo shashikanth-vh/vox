@@ -31,7 +31,7 @@ export interface TrancheItem {
   conditions_open?: { key: string; label: string; condition_type: string;
     status: string; expiry_date?: string }[];
   // pending-queue extras
-  stage?: string; entity_id?: string;
+  stage?: string; entity_id?: string; borrower?: string | null;
 }
 
 export interface TrancheSchedule {

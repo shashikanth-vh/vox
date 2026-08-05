@@ -35,12 +35,12 @@ class LoanAccount(RegisterBase):
     facility_type: Mapped[str | None] = mapped_column(String(80))
     disbursed_on: Mapped[date | None] = mapped_column(Date)
     # The account's principal — cumulative confirmed disbursements (grows per tranche).
-    amount: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    amount: Mapped[float | None] = mapped_column(Numeric(20, 7))
     rate_kind: Mapped[str] = mapped_column(String(10), nullable=False, default="Fixed",
                                            server_default="Fixed")
     rate_pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
     tenor_months: Mapped[int | None] = mapped_column(Integer)
-    emi_amount: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    emi_amount: Mapped[float | None] = mapped_column(Numeric(20, 7))
     repayment_start: Mapped[date | None] = mapped_column(Date)
     day_count: Mapped[str] = mapped_column(String(8), nullable=False, default="365",
                                            server_default="365")
@@ -50,7 +50,7 @@ class LoanAccount(RegisterBase):
                                         server_default="Standard")
     overdue_position: Mapped[str] = mapped_column(String(120), nullable=False,
                                                   default="Nil", server_default="Nil")
-    provisioning_amount: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    provisioning_amount: Mapped[float | None] = mapped_column(Numeric(20, 7))
     closed_on: Mapped[date | None] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(Text)
 
@@ -66,9 +66,9 @@ class LoanLedgerEntry(RegisterBase):
     particulars: Mapped[str] = mapped_column(String(300), nullable=False)
     # Disbursement | Interest | EMI | Receipt | Charge | Adjustment
     entry_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    debit: Mapped[float | None] = mapped_column(Numeric(16, 2))
-    credit: Mapped[float | None] = mapped_column(Numeric(16, 2))
-    balance: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
+    debit: Mapped[float | None] = mapped_column(Numeric(20, 7))
+    credit: Mapped[float | None] = mapped_column(Numeric(20, 7))
+    balance: Mapped[float] = mapped_column(Numeric(20, 7), nullable=False)
 
 
 class LoanAccountCondition(RegisterBase):

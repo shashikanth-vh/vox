@@ -3709,8 +3709,11 @@ def create_app() -> FastAPI:
         # to approve here, only documents to chase and compliance to record.
         _REMINDER_KINDS = {"cs-followup", "covenant-due"}
         # The RM (BDRM) or the analyst CALLS the borrower and collects the documents;
-        # the reminder must reach both, plus the credit line that owns the covenant.
-        _REMINDER_ROLES = {"BDRM", "Deal Analyst", "Credit Head", "Management", "Admin"}
+        # the reminder must reach both, plus the credit line that owns the covenant —
+        # and the SERVICING desk: post-handover the LMS Operator runs the monthly
+        # chase (call, collect, record) and LMS Management oversees it, until closure.
+        _REMINDER_ROLES = {"BDRM", "Deal Analyst", "Credit Head", "Management", "Admin",
+                           "LMS Operator", "LMS Management"}
         if (kind is None or kind in _REMINDER_KINDS) and (
                 caller_roles is None or caller_roles & _REMINDER_ROLES):
             reg_headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}

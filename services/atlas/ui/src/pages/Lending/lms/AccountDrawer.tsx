@@ -6,6 +6,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import { DrawerSection } from '../../../components/common/Field';
 import { CodeText } from '../../../components/common/Pills';
+import DataRegisterDialog from '../../Deals/DataRegisterDialog';
+import CovenantComplianceDialog from './CovenantComplianceDialog';
 import {
   lmsService, type AccountCondition, type LedgerEntry, type LoanAccount,
   type Observation, type TrancheSchedule,
@@ -30,6 +32,11 @@ import type { LendingRow } from '../lending.types';
 
 const inr = (v?: number | null) =>
   v == null ? '—' : v.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+
+// The desk's Excel keeps the statement in ABSOLUTE RUPEES (₹57,535 interest rows,
+// ₹4,47,608 EMIs) — amounts are stored in ₹ Cr, so ×1e7 renders the real figure.
+const rs = (vCr?: number | null) =>
+  vCr == null ? '—' : Math.round(vCr * 1e7).toLocaleString('en-IN');
 
 const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
   Standard: { bg: '#E5F5EC', fg: '#175E3B' },
@@ -70,10 +77,8 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   const [obs, setObs] = useState<Observation[]>([]);
   const [condReg, setCondReg] = useState<{ items: AccountCondition[]; open: number } | null>(null);
   const [receiving, setReceiving] = useState<{ key: string; evidence: string } | null>(null);
-  // Covenant verbs, inline per observation: record the period's result, or waive a
-  // breach against a recorded decision.
-  const [obsAct, setObsAct] = useState<{ id: string; kind: 'result' | 'waive';
-    actual: string; when: string; ref: string; note: string } | null>(null);
+  const [dataRegOpen, setDataRegOpen] = useState(false);
+  const [covOpen, setCovOpen] = useState(false);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
@@ -103,9 +108,10 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
   useEffect(() => {
     if (!open) return;
-    setErr(''); setInfo(''); setBusy(''); setPreview(null); setAccrueTo('');
-    setTouched(false);
-    setEntry({ entry_date: '', kind: 'EMI', amount: '', particulars: '' });
+    const today = new Date().toISOString().slice(0, 10);
+    setErr(''); setInfo(''); setBusy(''); setPreview(null); setAccrueTo(today);
+    setTouched(false); setDataRegOpen(false); setCovOpen(false);
+    setEntry({ entry_date: today, kind: 'EMI', amount: '', particulars: '' });
     setCls({ status: '', overdue_position: '', provisioning_amount: '', closed_on: '', note: '' });
     setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
     void load();
@@ -124,27 +130,46 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
     if (!row || !accrueTo) throw new Error('Pick the date to accrue to.');
     const p = await lmsService.interestPreview(row.id, accrueTo);
     setPreview(p);
-    return `Computed: ₹ ${inr(p.interest)} (${p.formula}). Review, then Post interest.`;
+    return `Computed: ₹ ${rs(p.interest)} for ${p.days} days. Review, then Post interest.`;
   });
 
   const doAccrue = () => run('accrue', async () => {
     if (!row || !preview) throw new Error('Preview first — the figure must be checkable.');
     const e = await lmsService.accrue(row.id, accrueTo);
-    setPreview(null); setAccrueTo('');
-    return `Interest row posted — balance ₹ ${inr(e.balance)}.`;
+    setPreview(null); setAccrueTo(new Date().toISOString().slice(0, 10));
+    return `Interest row posted — balance ₹ ${rs(e.balance)}.`;
   });
 
   const doEntry = () => run('entry', async () => {
     if (!row) throw new Error('No line.');
     if (!entry.entry_date || !entry.amount) throw new Error('Date and amount are needed.');
+    // The desk types RUPEES (like their Excel); the register stores ₹ Cr.
     const e = await lmsService.addEntry(row.id, {
       entry_date: entry.entry_date, kind: entry.kind as any,
-      amount: Number(entry.amount),
+      amount: Number(entry.amount) / 1e7,
       ...(entry.particulars ? { particulars: entry.particulars } : {}),
     });
-    setEntry({ entry_date: '', kind: 'EMI', amount: '', particulars: '' });
-    return `${e.particulars} recorded — balance ₹ ${inr(e.balance)}.`;
+    setEntry({ entry_date: new Date().toISOString().slice(0, 10), kind: 'EMI',
+      amount: '', particulars: '' });
+    return `${e.particulars} recorded — balance ₹ ${rs(e.balance)}.`;
   });
+
+  const exportStatement = () => {
+    const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const lines = [
+      ['Date', 'Particulars', 'Debit', 'Credit', 'Balance'].map(q).join(','),
+      ...entries.map((e) => [
+        e.entry_date, e.particulars,
+        e.debit != null ? String(Math.round(e.debit * 1e7)) : '',
+        e.credit != null ? String(Math.round(e.credit * 1e7)) : '',
+        String(Math.round(e.balance * 1e7)),
+      ].map(q).join(',')),
+    ];
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.download = `statement_${row?.code || 'account'}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 
   const doClassify = () => run('classify', async () => {
     if (!row) throw new Error('No line.');
@@ -188,6 +213,12 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
         </Typography>
         {row?.code && <CodeText code={row.code} />}
         {acct && <StatusChip label={acct.status} />}
+        {row?.code && (
+          <Button size="small" variant="outlined" onClick={() => setDataRegOpen(true)}
+            sx={{ textTransform: 'none', fontSize: 11.5, py: 0.2 }}>
+            📁 Data register
+          </Button>
+        )}
         <IconButton onClick={close}><CloseIcon fontSize="small" /></IconButton>
       </Box>
 
@@ -206,10 +237,10 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           <DrawerSection title="Facility">
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px 14px' }}>
               {[['Borrower', acct.borrower], ['Facility', acct.facility_type],
-                ['Disbursed on', acct.disbursed_on], ['Principal ₹ Cr', inr(acct.amount)],
+                ['Disbursed on', acct.disbursed_on], ['Principal ₹', rs(acct.amount)],
                 ['Rate', acct.rate_pct != null ? `${acct.rate_pct}% ${acct.rate_kind || ''}` : '—'],
                 ['Tenure', acct.tenor_months ? `${acct.tenor_months} months` : '—'],
-                ['EMI ₹ Cr', inr(acct.emi_amount)], ['Day count', acct.day_count],
+                ['EMI ₹', rs(acct.emi_amount)], ['Day count', acct.day_count],
               ].map(([k, v]) => (
                 <Box key={String(k)}>
                   <Typography sx={{ fontSize: 10.4, color: tokens.muted, fontWeight: 700,
@@ -367,27 +398,33 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           );
         })()}
 
-        {/* ---- ② The statement — computed interest, receipts, charges -------------- */}
+        {/* ---- ② The statement — the Excel's ledger, in real rupees ---------------- */}
         {acct && (
-          <DrawerSection title="Statement ledger">
-            <Box sx={{ maxHeight: 240, overflow: 'auto', border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+          <DrawerSection title="Statement ledger (₹)"
+            action={
+              <Button size="small" onClick={exportStatement}
+                sx={{ textTransform: 'none', fontSize: 11 }}>⬇ CSV</Button>
+            }>
+            <Box sx={{ maxHeight: 300, overflow: 'auto', border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
               <Table size="small" stickyHeader sx={{ '& td, & th': { fontSize: 12 } }}>
                 <TableHead>
                   <TableRow sx={{ '& th': { fontWeight: 600 } }}>
                     <TableCell>Date</TableCell><TableCell>Particulars</TableCell>
-                    <TableCell align="right">Debit</TableCell>
-                    <TableCell align="right">Credit</TableCell>
-                    <TableCell align="right">Balance</TableCell>
+                    <TableCell align="right">Debit ₹</TableCell>
+                    <TableCell align="right">Credit ₹</TableCell>
+                    <TableCell align="right">Balance ₹</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {entries.map((e) => (
                     <TableRow key={e.entry_no}>
-                      <TableCell>{e.entry_date}</TableCell>
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>{e.entry_date}</TableCell>
                       <TableCell>{e.particulars}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{e.debit != null ? inr(e.debit) : ''}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{e.credit != null ? inr(e.credit) : ''}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}><b>{inr(e.balance)}</b></TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums',
+                        color: '#7C4A3E' }}>{e.debit != null ? rs(e.debit) : ''}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums',
+                        color: '#175E3B' }}>{e.credit != null ? rs(e.credit) : ''}</TableCell>
+                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}><b>{rs(e.balance)}</b></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -396,6 +433,8 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
             {!closed && operate && (
               <>
+                {/* Interest first — the desk's month-end ritual: compute (checkable),
+                    then post. The date defaults to today, one click each. */}
                 <Typography sx={{ fontSize: 12.5, fontWeight: 600, mt: 1.2, mb: 0.6 }}>
                   Interest — computed, never hand-keyed
                 </Typography>
@@ -410,7 +449,8 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                   {preview && (
                     <>
                       <Typography sx={{ fontSize: 12 }}>
-                        ₹ <b>{inr(preview.interest)}</b> — {preview.formula}
+                        ₹ <b>{rs(preview.interest)}</b> — ₹{rs(preview.balance)} ×{' '}
+                        {preview.rate_pct}% × {preview.days}/{preview.day_count}
                       </Typography>
                       <Button size="small" variant="contained" disabled={!!busy}
                         onClick={doAccrue} sx={{ textTransform: 'none' }}>
@@ -420,18 +460,32 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                   )}
                 </Box>
 
+                {/* One row, like typing into the Excel: date (today), kind, ₹ amount —
+                    EMI prefills from the sanction terms with one click. */}
                 <Typography sx={{ fontSize: 12.5, fontWeight: 600, mt: 1.2, mb: 0.6 }}>
-                  Record entry
+                  Record entry (₹)
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <TextField size="small" type="date" label="Date" InputLabelProps={{ shrink: true }}
                     value={entry.entry_date} onChange={(e) => setEntry({ ...entry, entry_date: e.target.value })} sx={{ width: 150 }} />
                   <TextField size="small" select label="Kind" value={entry.kind}
-                    onChange={(e) => setEntry({ ...entry, kind: e.target.value })} sx={{ width: 120 }}>
+                    onChange={(e) => {
+                      const kind = e.target.value;
+                      setEntry({ ...entry, kind,
+                        amount: kind === 'EMI' && acct.emi_amount
+                          ? String(Math.round(acct.emi_amount * 1e7)) : entry.amount });
+                    }} sx={{ width: 120 }}>
                     {['EMI', 'Receipt', 'Charge', 'Adjustment'].map((k) => <MenuItem key={k} value={k}>{k}</MenuItem>)}
                   </TextField>
                   <TextField size="small" type="number" label="Amount ₹" value={entry.amount}
-                    onChange={(e) => setEntry({ ...entry, amount: e.target.value })} sx={{ width: 120 }} />
+                    onChange={(e) => setEntry({ ...entry, amount: e.target.value })} sx={{ width: 150 }} />
+                  {entry.kind === 'EMI' && acct.emi_amount != null && (
+                    <Button size="small" onClick={() => setEntry({ ...entry,
+                      amount: String(Math.round(acct.emi_amount! * 1e7)) })}
+                      sx={{ textTransform: 'none', fontSize: 11 }}>
+                      EMI ₹ {rs(acct.emi_amount)}
+                    </Button>
+                  )}
                   <TextField size="small" label="Particulars (optional)" value={entry.particulars}
                     onChange={(e) => setEntry({ ...entry, particulars: e.target.value })} sx={{ flex: 1, minWidth: 140 }} />
                   <Button size="small" variant="contained" disabled={!!busy}
@@ -449,107 +503,38 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           </DrawerSection>
         )}
 
-        {/* ---- ③ Covenant compliance — the chase lives ON the loan ----------------- */}
+        {/* ---- ③ Covenant compliance — summary here, the full ledger in its dialog -- */}
         {(acct || obs.length > 0) && (
-          <DrawerSection title="Covenant compliance">
+          <DrawerSection title="Covenant compliance"
+            action={
+              <Button size="small" variant="outlined" onClick={() => setCovOpen(true)}
+                sx={{ textTransform: 'none', fontSize: 11 }}>
+                Open compliance…
+              </Button>
+            }>
             {obs.length === 0 ? (
               <Typography sx={{ fontSize: 12, color: tokens.muted }}>
-                No covenant observations on this line yet — the sweep raises them as
-                periods fall due.
+                No covenant observations yet — the sweep raises each period as it falls
+                due, and a standing reminder sits on the operator's Today until the
+                result is recorded.
               </Typography>
             ) : (
-              <>
-                <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap', mb: 0.8 }}>
-                  {Object.entries(obs.reduce<Record<string, number>>((m, o) => {
-                    m[o.status] = (m[o.status] || 0) + 1; return m;
-                  }, {})).map(([s, n]) => {
-                    const t = OBS_TONE[s] || OBS_TONE.Pending;
-                    return (
-                      <Typography key={s} sx={{ fontSize: 11, fontWeight: 700, px: 0.8,
-                        py: 0.2, borderRadius: 1, bgcolor: t.bg, color: t.fg }}>
-                        {s} · {n}
-                      </Typography>
-                    );
-                  })}
-                </Box>
-                {obs.map((o) => (
-                  <Box key={o.id} sx={{ py: 0.3, borderBottom: `1px dashed ${tokens.line}`,
-                    '&:last-of-type': { borderBottom: 'none' } }}>
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <Typography sx={{ fontSize: 12.3, flex: 1 }}>{o.covenant_name || '—'}</Typography>
-                      <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{o.due_date || ''}</Typography>
-                      {(() => { const t = OBS_TONE[o.status] || OBS_TONE.Pending;
-                        return <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
-                          borderRadius: 1, bgcolor: t.bg, color: t.fg }}>{o.status}</Typography>; })()}
-                      {!closed && operate && ['Pending', 'Overdue'].includes(o.status)
-                        && obsAct?.id !== o.id && (
-                        <Button size="small" variant="outlined" disabled={!!busy}
-                          onClick={() => setObsAct({ id: o.id, kind: 'result', actual: '',
-                            when: new Date().toISOString().slice(0, 10), ref: '', note: '' })}
-                          sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
-                          Record result…
-                        </Button>
-                      )}
-                      {!closed && authorize && o.status === 'Breached' && obsAct?.id !== o.id && (
-                        <Button size="small" variant="outlined" color="warning" disabled={!!busy}
-                          onClick={() => setObsAct({ id: o.id, kind: 'waive', actual: '',
-                            when: '', ref: '', note: '' })}
-                          sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
-                          Waive…
-                        </Button>
-                      )}
-                    </Box>
-                    {obsAct?.id === o.id && obsAct.kind === 'result' && (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
-                        <TextField size="small" type="number" label="Actual value (if financial)"
-                          value={obsAct.actual} sx={{ width: 180 }}
-                          onChange={(e) => setObsAct({ ...obsAct, actual: e.target.value })} />
-                        <TextField size="small" type="date" label="Submitted on"
-                          InputLabelProps={{ shrink: true }} value={obsAct.when} sx={{ width: 150 }}
-                          onChange={(e) => setObsAct({ ...obsAct, when: e.target.value })} />
-                        <Button size="small" variant="contained" disabled={!!busy}
-                          onClick={() => run('obs', async () => {
-                            const r = await lmsService.submitResult(o.id, {
-                              ...(obsAct.actual ? { actual_value: Number(obsAct.actual) } : {}),
-                              ...(obsAct.when ? { submitted_on: obsAct.when } : {}),
-                            });
-                            setObsAct(null);
-                            return r.breached
-                              ? `${o.covenant_name}: BREACHED — an EWS case opened with the result.`
-                              : `${o.covenant_name}: recorded — ${r.status}.`;
-                          })}
-                          sx={{ textTransform: 'none', fontSize: 11.5 }}>
-                          {busy === 'obs' ? 'Recording…' : 'Submit'}
-                        </Button>
-                        <Button size="small" onClick={() => setObsAct(null)}
-                          sx={{ textTransform: 'none', fontSize: 11.5 }}>Cancel</Button>
-                      </Box>
-                    )}
-                    {obsAct?.id === o.id && obsAct.kind === 'waive' && (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
-                        <TextField size="small" label="Waiver decision ref (required)" autoFocus
-                          value={obsAct.ref} sx={{ flex: 1, minWidth: 180 }}
-                          onChange={(e) => setObsAct({ ...obsAct, ref: e.target.value })} />
-                        <TextField size="small" label="Note" value={obsAct.note} sx={{ flex: 1, minWidth: 140 }}
-                          onChange={(e) => setObsAct({ ...obsAct, note: e.target.value })} />
-                        <Button size="small" variant="contained" color="warning"
-                          disabled={!!busy || !obsAct.ref.trim()}
-                          onClick={() => run('obs', async () => {
-                            await lmsService.waive(o.id, obsAct.ref.trim(),
-                              obsAct.note.trim() || undefined);
-                            setObsAct(null);
-                            return `${o.covenant_name}: waived against the recorded decision.`;
-                          })}
-                          sx={{ textTransform: 'none', fontSize: 11.5 }}>
-                          {busy === 'obs' ? 'Waiving…' : 'Confirm waiver'}
-                        </Button>
-                        <Button size="small" onClick={() => setObsAct(null)}
-                          sx={{ textTransform: 'none', fontSize: 11.5 }}>Cancel</Button>
-                      </Box>
-                    )}
-                  </Box>
-                ))}
-              </>
+              <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {Object.entries(obs.reduce<Record<string, number>>((m, o) => {
+                  m[o.status] = (m[o.status] || 0) + 1; return m;
+                }, {})).map(([st, n]) => {
+                  const t = OBS_TONE[st] || OBS_TONE.Pending;
+                  return (
+                    <Typography key={st} sx={{ fontSize: 11, fontWeight: 700, px: 0.8,
+                      py: 0.2, borderRadius: 1, bgcolor: t.bg, color: t.fg }}>
+                      {st} · {n}
+                    </Typography>
+                  );
+                })}
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted, ml: 0.5 }}>
+                  monthly chase reminds on Today until closure
+                </Typography>
+              </Box>
             )}
           </DrawerSection>
         )}
@@ -590,6 +575,14 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           </Alert>
         )}
       </Box>
+
+      {row?.code && (
+        <DataRegisterDialog code={row.code} open={dataRegOpen}
+          onClose={() => setDataRegOpen(false)} />
+      )}
+      <CovenantComplianceDialog row={row} open={covOpen}
+        onClose={() => setCovOpen(false)}
+        onChanged={() => { setTouched(true); void load(); }} />
     </Drawer>
   );
 }

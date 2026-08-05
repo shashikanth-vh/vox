@@ -21,8 +21,9 @@ pytestmark = pytest.mark.asyncio
 def test_the_interest_formula_is_exact():
     from app.api.lms import interest_amount
 
-    # 8.0 Cr at 15% for 7 days on a 365 base: 8 × 0.15 × 7/365.
-    assert interest_amount(8.0, 15.0, 7, "365") == 0.02
+    # 8.0 Cr at 15% for 7 days on a 365 base: 8 × 0.15 × 7/365 — at RUPEE
+    # precision (7 decimals of a crore = ₹1), the way the desk's Excel keeps it.
+    assert interest_amount(8.0, 15.0, 7, "365") == 0.0230137
     # A 360-day base divides differently — the classic banker's month.
     assert interest_amount(100000.0, 12.0, 30, "360") == 1000.0
 
@@ -84,7 +85,7 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
                           params={"upto": "2026-03-31"}, headers=ADMIN)
     assert pv.status_code == 200, pv.text
     p = pv.json()
-    assert p["days"] == 7 and p["balance"] == 8.0 and p["interest"] == 0.02
+    assert p["days"] == 7 and p["balance"] == 8.0 and p["interest"] == 0.0230137
     assert "×" in p["formula"] or "x" in p["formula"].lower()
     assert len((await client.get(f"/v1/lending/{lid}/loan-account",
                                  headers=ADMIN)).json()["entries"]) == 2
@@ -93,7 +94,7 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
     ac = await client.post(f"/v1/lending/{lid}/loan-account/accrue",
                            json={"upto": "2026-03-31"}, headers=ADMIN)
     assert ac.status_code == 201, ac.text
-    assert ac.json()["debit"] == 0.02 and ac.json()["balance"] == 8.02
+    assert ac.json()["debit"] == 0.0230137 and ac.json()["balance"] == 8.0230137
     dup = await client.post(f"/v1/lending/{lid}/loan-account/accrue",
                             json={"upto": "2026-03-31"}, headers=ADMIN)
     assert dup.status_code == 422
@@ -103,7 +104,7 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
                             json={"entry_date": "2026-04-05", "kind": "EMI",
                                   "amount": 0.5}, headers=ADMIN)
     assert emi.status_code == 201, emi.text
-    assert emi.json()["credit"] == 0.5 and emi.json()["balance"] == 7.52
+    assert emi.json()["credit"] == 0.5 and emi.json()["balance"] == 7.5230137
     assert emi.json()["particulars"] == "EMI Paid"
 
     # Classification is the servicing team's call; closure freezes the ledger.

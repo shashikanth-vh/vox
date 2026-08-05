@@ -444,16 +444,26 @@ async def pending_bookings(ctx: RequestContext = Depends(get_context)) -> dict[s
         DisbursementTranche.deleted_at.is_(None))
         .order_by(DisbursementTranche.created_at))).scalars())
     lines: dict[str, LendingTracker] = {}
+    names: dict[str, str] = {}
     if rows:
         ids = [uuid.UUID(r.lending_id) for r in rows]
         for ln in (await ctx.session.execute(select(LendingTracker).where(
                 LendingTracker.tenant_id == ctx.tenant_id,
                 LendingTracker.id.in_(ids)))).scalars():
             lines[str(ln.id)] = ln
+        from app.models.registry import Entity
+        ent_ids = {ln.entity_id for ln in lines.values() if ln.entity_id}
+        if ent_ids:
+            for e in (await ctx.session.execute(select(Entity).where(
+                    Entity.tenant_id == ctx.tenant_id,
+                    Entity.id.in_(ent_ids)))).scalars():
+                names[str(e.id)] = e.legal_name or e.display_name or ""
     items = []
     for r in rows:
         ln = lines.get(r.lending_id)
+        eid = str(ln.entity_id) if ln and ln.entity_id else None
         items.append({**_serialize(r),
                       "stage": ln.stage if ln else None,
-                      "entity_id": str(ln.entity_id) if ln and ln.entity_id else None})
+                      "entity_id": eid,
+                      "borrower": names.get(eid or "", None)})
     return {"items": items, "count": len(items)}

@@ -37,7 +37,7 @@ class SanctionTerms(RegisterBase):
     rate_pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
     spread_pct: Mapped[float | None] = mapped_column(Numeric(7, 4))
     tenor_months: Mapped[int | None] = mapped_column(Integer)
-    emi_amount: Mapped[float | None] = mapped_column(Numeric(16, 2))
+    emi_amount: Mapped[float | None] = mapped_column(Numeric(20, 7))
     repayment_start: Mapped[date | None] = mapped_column(Date)
     day_count: Mapped[str] = mapped_column(String(8), nullable=False, default="365",
                                            server_default="365")     # 365 | 360

@@ -77,8 +77,11 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
         out.push({
           id: r.id, accountNo: `#${a.account_no}`, code: r.code || '',
           _name: r._name || a.borrower || '—',
-          facility: a.facility_type || '—', principal: a.amount,
-          balance: last ? last.balance : undefined,
+          facility: a.facility_type || '—',
+          disbursedOn: a.disbursed_on || '',
+          limit: r.amt,                              // the sanctioned facility (₹ Cr)
+          principal: a.amount,                       // cumulative disbursed (₹ Cr)
+          balance: last ? last.balance : undefined,  // current outstanding (₹ Cr)
           rate: a.rate_pct != null ? `${a.rate_pct}%` : '—',
           status: a.status, overdue: a.overdue_position || 'Nil',
           closedOn: a.closed_on || '', an: r.an, _row: r,
@@ -121,16 +124,22 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
     setBusy('');
   };
 
+  // The columns mirror the desk's SUMMARY sheet — Account No | Borrower | Date of
+  // Disbursement | Limit | Cumulative Disbursement | Current Outstanding | ROI |
+  // Facility — one uniform layout for every facility type; the per-loan variations
+  // (EMI vs bullet vs per-tranche due dates) live in the drawer, not in extra columns.
   const columns = useMemo<MRT_ColumnDef<AcctRow>[]>(() => [
-    { accessorKey: 'accountNo', header: 'Account', size: 96 },
-    { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
-    { accessorKey: '_name', header: 'Borrower', size: 200, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
-    { accessorKey: 'facility', header: 'Facility', size: 120 },
-    { accessorKey: 'principal', header: 'Principal ₹ Cr', size: 110, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
-    { accessorKey: 'balance', header: 'Balance ₹ Cr', size: 110, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
-    { accessorKey: 'rate', header: 'Rate', size: 80 },
-    { accessorKey: 'status', header: 'Status', size: 110, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
-    { accessorKey: 'overdue', header: 'Overdue', size: 120 },
+    { accessorKey: 'accountNo', header: 'Account', size: 92 },
+    { accessorKey: '_name', header: 'Borrower', size: 190, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'code', header: 'Group Code', size: 116, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: 'disbursedOn', header: 'Disbursed on', size: 110 },
+    { accessorKey: 'limit', header: 'Limit ₹ Cr', size: 96, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'principal', header: 'Disbursed ₹ Cr', size: 110, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'balance', header: 'Outstanding ₹ Cr', size: 120, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'rate', header: 'ROI', size: 72 },
+    { accessorKey: 'facility', header: 'Facility', size: 118 },
+    { accessorKey: 'status', header: 'Status', size: 104, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'overdue', header: 'Overdue', size: 110 },
     { accessorKey: 'closedOn', header: 'Closed on', size: 100 },
   ], []);
 

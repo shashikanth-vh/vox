@@ -48,10 +48,16 @@ def _round2(x: float) -> float:
     return float(f"{x:.2f}")
 
 
+def _round_rupee(x: float) -> float:
+    """Amounts are ₹ Cr; seven decimals of a crore is exactly one rupee — the ledger's
+    real unit (the desk's Excel writes ₹57,535, not 0.01 Cr)."""
+    return float(f"{x:.7f}")
+
+
 def interest_amount(balance: float, rate_pct: float, days: int, day_count: str) -> float:
-    """The one interest formula: balance × rate% × days ÷ day-count."""
+    """The one interest formula: balance × rate% × days ÷ day-count, at rupee precision."""
     base = 360 if str(day_count).strip() == "360" else 365
-    return _round2(balance * (rate_pct / 100.0) * (days / base))
+    return _round_rupee(balance * (rate_pct / 100.0) * (days / base))
 
 
 def _acct_out(row: LoanAccount) -> dict[str, Any]:
@@ -143,7 +149,7 @@ async def _append(ctx: RequestContext, acct: LoanAccount, *, entry_date: date,
                   credit: float | None = None) -> LoanLedgerEntry:
     rows = await _entries(ctx, acct.id)
     last_balance = float(rows[-1].balance) if rows else 0.0
-    balance = _round2(last_balance + (debit or 0.0) - (credit or 0.0))
+    balance = _round_rupee(last_balance + (debit or 0.0) - (credit or 0.0))
     entry = LoanLedgerEntry(
         tenant_id=ctx.tenant_id, account_id=acct.id, entry_no=len(rows) + 1,
         entry_date=entry_date, particulars=particulars, entry_type=entry_type,
@@ -269,7 +275,7 @@ async def open_or_grow_account(ctx: RequestContext, line: LendingTracker,
                      "amount": amount, "tranche_ref": tranche_ref,
                      "conditions_handed_over": handed}))
         return acct
-    acct.amount = _round2(float(acct.amount or 0.0) + amount)
+    acct.amount = _round_rupee(float(acct.amount or 0.0) + amount)
     acct.updated_by = ctx.actor
     await _append(ctx, acct, entry_date=when,
                   particulars=f"Loan Disbursement (T{tranche_no})",
