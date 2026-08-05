@@ -189,6 +189,9 @@ class RefineIn(BaseModel):
 class ExtractTermsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     doc_id: str = Field(min_length=1, max_length=64)
+    # The committee's credit note — extra context so the numeric terms (amount, rate,
+    # tenor, EMI, …) come out of what was actually approved, not only the letter.
+    credit_note: str | None = Field(default=None, max_length=20_000)
 
 
 class FinaliseIn(BaseModel):
@@ -361,21 +364,34 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         text, reason = extract_text(ctype, blob or b"")
         content: Any
         instruction = (
-            "Read the sanction letter above and extract THREE lists exactly as the "
-            "letter states them. Respond with ONLY a JSON object, no prose, shaped:\n"
+            "Read the sanction letter above (and the credit note, when given) and "
+            "extract the sanction exactly as stated. Respond with ONLY a JSON object, "
+            "no prose, shaped:\n"
             '{"cp_items": ["<each Condition Precedent, one short line>"],\n'
             ' "cs_items": [{"label": "<Condition Subsequent>", "timeline": "<as stated>"}],\n'
             ' "covenants": [{"name": "<reporting covenant>", '
             '"frequency": "Monthly|Quarterly|SemiAnnual|Annual", '
-            '"timeline": "<as stated>"}]}\n'
+            '"timeline": "<as stated>"}],\n'
+            ' "terms": {"amount_cr": <number, in ₹ crore>, '
+            '"rate_kind": "Fixed|Floating", "rate_pct": <number>, '
+            '"spread_pct": <number or null>, "tenor_months": <integer>, '
+            '"emi_amount": <number or null>, "repayment_start": "YYYY-MM-DD or null", '
+            '"day_count": "365|360", "penal_rate_pct": <number or null>, '
+            '"moratorium_months": <integer or null>, '
+            '"schedule_kind": "EMI|Bullet|Custom"}}\n'
             "Frequency: infer from the stated timeline (monthly→Monthly, quarter→"
             "Quarterly, half-year→SemiAnnual, annual→Annual); default Monthly. "
-            "Do not invent conditions that are not in the letter.")
+            "In terms, use null for anything the documents do not state. Do not invent "
+            "conditions or figures that are not in the documents.")
+        extra = (f"\n\n===== CREDIT NOTE (committee approval) =====\n"
+                 f"{payload.credit_note[:20_000]}" if payload.credit_note else "")
         if text.strip():
-            content = f"===== SANCTION LETTER =====\n{text[:max_doc_chars]}\n\n{instruction}"
+            content = (f"===== SANCTION LETTER =====\n{text[:max_doc_chars]}"
+                       f"{extra}\n\n{instruction}")
         elif (reason == _SCANNED_PDF and engine.supports_documents and blob
               and len(blob) <= _PDF_ATTACH_MAX_BYTES):
-            content = [_pdf_block(blob), {"type": "text", "text": instruction}]
+            content = [_pdf_block(blob), {"type": "text", "text": extra + "\n\n" + instruction
+                                          if extra else instruction}]
         else:
             return problem(422, "Validation failed",
                            f"The letter could not be read{f' ({reason})' if reason else ''} "
@@ -412,12 +428,41 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                         "frequency": f if f in freq_ok else "Monthly",
                         **({"timeline": str(x.get("timeline")).strip()}
                            if x.get("timeline") else {})})
-        if not (cp or cs or cov):
+        # The NUMERIC terms — validated field by field, null for anything unstated.
+        raw_terms = data.get("terms") if isinstance(data.get("terms"), dict) else {}
+        terms: dict[str, Any] = {}
+
+        def _num(key: str, lo: float, hi: float) -> None:
+            v = raw_terms.get(key)
+            if isinstance(v, (int, float)) and lo <= float(v) <= hi:
+                terms[key] = float(v)
+
+        _num("amount_cr", 0.0001, 1_000_000)
+        _num("rate_pct", 0, 100)
+        _num("spread_pct", 0, 100)
+        _num("emi_amount", 0.0000001, 10**12)
+        _num("penal_rate_pct", 0, 100)
+        for key, hi in (("tenor_months", 600), ("moratorium_months", 120)):
+            v = raw_terms.get(key)
+            if isinstance(v, (int, float)) and 0 <= int(v) <= hi:
+                terms[key] = int(v)
+        for key, allowed in (("rate_kind", {"Fixed", "Floating"}),
+                             ("day_count", {"365", "360"}),
+                             ("schedule_kind", {"EMI", "Bullet", "Custom"})):
+            v = str(raw_terms.get(key) or "").strip()
+            if v in allowed:
+                terms[key] = v
+        rs = str(raw_terms.get("repayment_start") or "").strip()
+        if _re.fullmatch(r"\d{4}-\d{2}-\d{2}", rs):
+            terms["repayment_start"] = rs
+
+        if not (cp or cs or cov or terms):
             return problem(422, "Extraction failed",
                            "The engine did not return usable lists from this letter — "
                            "enter the conditions by hand (the offline stub engine "
                            "cannot parse documents).")
-        return {"engine": engine.name, "cp_items": cp, "cs_items": cs, "covenants": cov}
+        return {"engine": engine.name, "cp_items": cp, "cs_items": cs, "covenants": cov,
+                "terms": terms}
 
     @app.post("/v1/cam/{lending_id}/generate", status_code=201, tags=["CAM"],
               summary="Draft a CAM from selected documents + the prompt doc")

@@ -3447,6 +3447,7 @@ def create_app() -> FastAPI:
         next_version = 1
         latest_checklist_status = ""
         latest_checklist_items: list = []
+        cam_ready = True
         if subject_type == "Lending":
             existing, ver_problem = await _register_get_as(
                 request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
@@ -3466,6 +3467,14 @@ def create_app() -> FastAPI:
                     latest = max(rows, key=lambda r: int(r.get("checklist_version") or 0))
                     latest_checklist_status = str(latest.get("status") or "")
                     latest_checklist_items = list(latest.get("items") or [])
+            # The committee reads the CAM — so "Send to credit committee" waits for one.
+            # Fail-open on an unreadable answer (the gate informs, it must not wedge).
+            cams, cam_err = await _register_get_as(
+                request, f"/v1/internal/cam-reports?lending_id={subject_id}", who, caller)
+            if cam_err is None and isinstance(cams, list):
+                cam_ready = any(r.get("draft_md") or r.get("document_id") for r in cams)
+            else:
+                cam_ready = True
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
@@ -3482,6 +3491,11 @@ def create_app() -> FastAPI:
                           "approval first."
                           if latest_checklist_status else
                           "Prepare and get the CP checklist approved first.")
+            # The committee decides ON the CAM: no CAM on the line, nothing to send.
+            if spec["key"] == "deal-structuring.start" and enabled and not cam_ready:
+                enabled = False
+                reason = ("Prepare the CAM first (CAM workbench) — the committee "
+                          "reads it with the request.")
             url = spec["url"].format(workflow_id=workflow_id, subject_id=subject_id)
             body = dict(spec.get("constant") or {})
             for field, source in (spec.get("prefill") or {}).items():
@@ -3499,10 +3513,16 @@ def create_app() -> FastAPI:
             # and has no run to cite is disabled with that reason, instead of failing at
             # submit after the user has filled the form in.
             wanted_pkg = spec.get("package")
-            if wanted_pkg and enabled and package_status != wanted_pkg:
+            # A tuple means ANY of these states — "Disbursement Update" must stay
+            # available after the partner ACCEPTS (each disbursed phase is one more
+            # update), not only while the request is freshly sent.
+            wanted_set = ((wanted_pkg,) if isinstance(wanted_pkg, str)
+                          else tuple(wanted_pkg or ()))
+            if wanted_set and enabled and package_status not in wanted_set:
+                first = wanted_set[0]
                 enabled, reason = False, (
-                    _PACKAGE_REASON.get(wanted_pkg, f"Available once the handover package "
-                                                    f"is {wanted_pkg!r}.")
+                    _PACKAGE_REASON.get(first, f"Available once the handover package "
+                                               f"is {first!r}.")
                     + (f" It is currently {package_status!r}."
                        if package_status else " No package has been prepared yet."))
             needed = [k for k in (spec.get("evidence") or ()) if k not in on_file]

@@ -1070,6 +1070,18 @@
       "ExtractTermsIn": {
         "additionalProperties": false,
         "properties": {
+          "credit_note": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Note"
+          },
           "doc_id": {
             "maxLength": 64,
             "minLength": 1,

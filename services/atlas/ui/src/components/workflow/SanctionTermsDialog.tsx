@@ -37,10 +37,6 @@ const blankCov = (): CovRow => ({
 const slug = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) || 'item';
 
-/** One condition per line — the register gets {key,label} items. */
-const toItems = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean)
-  .map((label) => ({ key: slug(label), label, required: true }));
-
 export default function SanctionTermsDialog({ action, onClose, onDone }: {
   action: WorkflowAction | null;
   onClose: () => void;
@@ -79,44 +75,55 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setLetterBusy('');
   };
 
+  // The engine reads the FIGURES out of the letter + the committee's credit note —
+  // amount, rate, tenor, EMI, day count, … — and fills the form. Covenants ride along
+  // (their chase starts at disbursement). The analyst reviews, then saves & seeds.
+  // CP/CS live in their own screens now, which read the letter themselves.
+  const fillFromLetter = async (letterDoc: EntityDoc | null, noteText?: string) => {
+    if (!letterDoc) return;
+    setErr(''); setLetterBusy('parse');
+    try {
+      const out = await camService.extractTerms(letterDoc.id, noteText);
+      const t = out.terms || {};
+      setF((p) => {
+        const next = { ...p };
+        for (const [k, v] of Object.entries(t)) {
+          if (v !== null && v !== undefined && !p[k]) next[k] = String(v);
+        }
+        return next;
+      });
+      if (out.covenants.length) {
+        setCovs(out.covenants.map((c) => ({
+          ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
+          frequency: c.frequency,
+        })));
+      }
+      const filled = Object.keys(t).length;
+      setInfo(`Filled from the letter${noteText ? ' + credit note' : ''}: `
+        + `${filled} term field(s), ${out.covenants.length} covenant(s). `
+        + 'Review, then Save terms & seed.');
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setLetterBusy('');
+  };
+
   const uploadLetter = async (file: File | null) => {
     if (!file || !lendingId) return;
     setErr(''); setLetterBusy('upload');
     try {
       await camService.uploadDoc(lendingId, file, 'sanction_letter', 'Sanction');
-      setInfo(`Sanction letter "${file.name}" filed on this line.`);
+      setInfo(`Sanction letter "${file.name}" filed — reading the terms out of it…`);
       await loadLetter(lendingId);
-    } catch (e: any) { setErr(e?.message || String(e)); }
-    setLetterBusy('');
-  };
-
-  // The letter already LISTS the CPs, the CSs (with timelines) and the reporting
-  // covenants — the engine reads them out and pre-fills the form. The analyst reviews,
-  // sets the first-due dates, and only then saves & seeds.
-  const readLetter = async () => {
-    if (!letter) return;
-    setErr(''); setLetterBusy('parse');
-    try {
-      const out = await camService.extractTerms(letter.id);
-      setCpRows(out.cp_items);
-      setCsRows(out.cs_items
-        .map((c) => c.label + (c.timeline ? ` (${c.timeline})` : '')));
-      setCovs(out.covenants.map((c) => ({
-        ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
-        frequency: c.frequency,
-      })));
-      setInfo(`Read from the letter: ${out.cp_items.length} CP, ${out.cs_items.length} CS, `
-        + `${out.covenants.length} covenant(s). Review below — covenant due dates may stay `
-        + 'empty; they start one cycle after the first disbursement.');
+      const docs = await camService.lendingDocs(lendingId);
+      const fresh = docs.filter((d) => d.doc_type === 'sanction_letter').pop() || null;
+      setLetterBusy('');
+      // The upload IS the trigger: the terms fill themselves from what was just filed.
+      await fillFromLetter(fresh, decision?.note || undefined);
+      return;
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLetterBusy('');
   };
 
   const [f, setF] = useState<Record<string, string>>({});
-  // Each condition is its OWN row (like the covenants) — the letter has many, and a
-  // single textarea made ten conditions read as one blob.
-  const [cpRows, setCpRows] = useState<string[]>([]);
-  const [csRows, setCsRows] = useState<string[]>([]);
   const [covs, setCovs] = useState<CovRow[]>([]);
   // One date for every covenant at once — individual rows can still override after.
   const [allDue, setAllDue] = useState('');
@@ -126,7 +133,7 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     if (!open || !lendingId) return;
     setErr(''); setInfo(''); setBusy(false);
     setF({ rate_kind: 'Fixed', day_count: '365', schedule_kind: 'EMI' });
-    setCpRows([]); setCsRows([]); setCovs([]); setAllDue(''); setLetter(null);
+    setCovs([]); setAllDue(''); setLetter(null);
     setLoading(true);
     camService.terms(lendingId)
       .then(setExisting)
@@ -171,7 +178,8 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         day_count: f.day_count || '365', penal_rate_pct: num('penal_rate_pct'),
         moratorium_months: num('moratorium_months') ?? 0,
         schedule_kind: f.schedule_kind || 'EMI',
-        cp_items: toItems(cpRows.join('\n')), cs_items: toItems(csRows.join('\n')),
+        // CP/CS are worked in their own screens, which read the letter directly.
+        cp_items: [], cs_items: [],
         covenants: covenants.map((c) => ({
           name: c.name.trim(), covenant_type: c.covenant_type,
           ...(c.metric ? { metric: c.metric } : {}),
@@ -237,9 +245,10 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
             </Button>
             {letter && !existing && (
               <Button size="small" variant="contained" disabled={!!letterBusy}
-                onClick={() => void readLetter()} sx={{ textTransform: 'none' }}
-                title="The engine reads the letter's CP / CS / covenant sections and pre-fills the lists below — you review and save">
-                {letterBusy === 'parse' ? 'Reading the letter…' : 'Read CP / CS / covenants from the letter'}
+                onClick={() => void fillFromLetter(letter, decision?.note || undefined)}
+                sx={{ textTransform: 'none' }}
+                title="The engine reads the amount, rate, tenor, EMI … out of the letter and the credit note, and fills the fields below — you review and save">
+                {letterBusy === 'parse' ? 'Reading…' : 'Fill terms from the letter'}
               </Button>
             )}
           </Box>
@@ -294,41 +303,6 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               </TextField>
               <TextField size="small" label="Penal rate %" type="number" value={f.penal_rate_pct || ''} onChange={(e) => set('penal_rate_pct', e.target.value)} />
               <TextField size="small" label="Moratorium (months)" type="number" value={f.moratorium_months || ''} onChange={(e) => set('moratorium_months', e.target.value)} />
-            </Box>
-
-            <Divider sx={{ my: 1.4 }} />
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.4 }}>
-              {([['Conditions PRECEDENT', cpRows, setCpRows],
-                 ['Conditions SUBSEQUENT', csRows, setCsRows]] as const)
-                .map(([label, rows, setRows]) => (
-                <Box key={label}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
-                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
-                      {label} ({rows.filter((r) => r.trim()).length})
-                    </Typography>
-                    <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />}
-                      onClick={() => setRows((p: string[]) => [...p, ''])}
-                      sx={{ textTransform: 'none', fontSize: 12 }}>Add</Button>
-                  </Box>
-                  {rows.length === 0 && (
-                    <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                      None yet — Add, or read them from the letter above.
-                    </Typography>
-                  )}
-                  {rows.map((r, i) => (
-                    <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5, alignItems: 'center' }}>
-                      <TextField size="small" fullWidth multiline maxRows={3} value={r}
-                        placeholder="Condition"
-                        onChange={(e) => setRows((p: string[]) =>
-                          p.map((x, j) => (j === i ? e.target.value : x)))} />
-                      <IconButton size="small"
-                        onClick={() => setRows((p: string[]) => p.filter((_x, j) => j !== i))}>
-                        <DeleteOutlineIcon sx={{ fontSize: 17 }} />
-                      </IconButton>
-                    </Box>
-                  ))}
-                </Box>
-              ))}
             </Box>
 
             <Divider sx={{ my: 1.4 }} />

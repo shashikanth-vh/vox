@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (253 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (255 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -6789,6 +6789,90 @@
           "name": "Internal",
           "item": [
             {
+              "name": "POST /v1/internal/advaya-handoffs \u2014 Record an Advaya handoff outcome (single-winner)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "advaya-handoffs"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"handoff_key\": \"sample\",\n  \"lending_id\": \"sample\",\n  \"payload_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"status\": \"REPLACE-to-match-^(Accepted|Rejected)\",\n  \"acknowledgement_id\": \"sample\",\n  \"workflow_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/internal/advaya-handoffs/{handoff_key} \u2014 Read a recorded Advaya handoff outcome",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs/{{handoff_key}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "advaya-handoffs",
+                    "{{handoff_key}}"
+                  ]
+                }
+              }
+            },
+            {
               "name": "POST /v1/internal/cam-reports \u2014 Open a CAM version (Draft \u2014 the workbench writes into it)",
               "request": {
                 "method": "POST",
@@ -12582,7 +12666,7 @@
                 "description": "The signed sanction letter already lists the Conditions Precedent, the\nConditions Subsequent (with timelines) and the Reporting Covenants \u2014 nobody\nshould re-type them into the terms form. The engine reads the letter and hands\nback the three lists as data; the analyst reviews and saves. Everything stays\ncheckable: the response names the engine, and the analyst edits before seeding.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"doc_id\": \"sample\"\n}",
+                  "raw": "{\n  \"doc_id\": \"sample\",\n  \"credit_note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

@@ -101,7 +101,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"doc_id\": \"{{id}}\"\n}",
+              "raw": "{\n  \"credit_note\": \"sample credit_note\",\n  \"doc_id\": \"{{id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

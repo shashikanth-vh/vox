@@ -370,12 +370,20 @@ async def test_the_sanction_letter_yields_cp_cs_and_covenants_as_data(monkeypatc
 
         async def generate(self, http, system, turns):  # noqa: ANN001
             assert "JSON only" in system
+            # The credit note travels with the letter when the caller supplies it.
+            content = turns[0]["content"]
+            assert "CREDIT NOTE" in str(content)
             return ('{"cp_items": ["Security created", "Escrow account opened"], '
                     '"cs_items": [{"label": "End-use certificate", '
                     '"timeline": "30 days from first disbursement"}], '
                     '"covenants": [{"name": "Monthly stock statement", '
                     '"frequency": "Monthly"}, {"name": "Debtor ageing", '
-                    '"frequency": "every quarter"}]}')
+                    '"frequency": "every quarter"}], '
+                    '"terms": {"amount_cr": 1.0, "rate_kind": "Fixed", '
+                    '"rate_pct": 15.0, "tenor_months": 54, "emi_amount": 447608, '
+                    '"day_count": "365", "schedule_kind": "EMI", '
+                    '"spread_pct": null, "repayment_start": "2026-05-07", '
+                    '"penal_rate_pct": 240.0, "moratorium_months": null}}')
 
     monkeypatch.setattr(cam_mod, "build_engine", lambda _s: _JsonEngine())
     app = _app(monkeypatch)
@@ -383,13 +391,23 @@ async def test_the_sanction_letter_yields_cp_cs_and_covenants_as_data(monkeypatc
     stub.docs["letter-1"] = ("text/markdown", "# Sanction letter\nCP: security. CS: …")
     app.state.http = stub
 
-    r = await _call(app, "POST", "/v1/cam/extract-terms", json={"doc_id": "letter-1"})
+    r = await _call(app, "POST", "/v1/cam/extract-terms",
+                    json={"doc_id": "letter-1",
+                          "credit_note": "Approved at 15% fixed, 54 months."})
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["cp_items"] == ["Security created", "Escrow account opened"]
     assert out["cs_items"][0]["timeline"].startswith("30 days")
     # An off-vocabulary frequency lands on the register's default, not on garbage.
     assert [c["frequency"] for c in out["covenants"]] == ["Monthly", "Monthly"]
+    # The NUMERIC terms come back validated: nulls dropped, an impossible figure
+    # (a 240% penal rate) rejected rather than passed through to the form.
+    t = out["terms"]
+    assert t["amount_cr"] == 1.0 and t["rate_pct"] == 15.0
+    assert t["tenor_months"] == 54 and t["repayment_start"] == "2026-05-07"
+    assert t["day_count"] == "365" and t["schedule_kind"] == "EMI"
+    assert "spread_pct" not in t and "moratorium_months" not in t
+    assert "penal_rate_pct" not in t
 
     # The stub engine's prose reply parses to nothing → an honest refusal.
     monkeypatch.undo()                       # drop the fake engine (and re-set below)
