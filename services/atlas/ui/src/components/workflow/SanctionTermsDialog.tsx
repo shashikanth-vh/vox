@@ -271,7 +271,7 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
             </Button>
             <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
               disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
-              {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace letter…' : 'Upload signed letter…'}
+              {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace sanction letter…' : 'Upload sanction letter…'}
               <input hidden type="file" accept=".docx,.pdf"
                 onChange={(e) => { void uploadLetter(e.target.files?.[0] || null); e.target.value = ''; }} />
             </Button>
