@@ -55,7 +55,10 @@ from app.models.trackers import LendingTracker
 router = api_router()
 
 _READY = "Ready for Disbursement"
-_REQUIRED_EVIDENCE = {"cp_cs_completion", "executed_agreement"}
+# The approved CP/CS checklist is the handover's governance floor. An executed-agreement
+# evidence MAY be on file (the digest reconciliation below still verifies it when it is),
+# but it is no longer demanded — the agreement lives among the CP conditions.
+_REQUIRED_EVIDENCE = {"cp_cs_completion"}
 
 
 class DocumentRef(BaseModel):
@@ -70,7 +73,9 @@ class HandoverIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     lending_id: str = Field(min_length=1, max_length=64)
-    executed_document_refs: list[DocumentRef] = Field(min_length=1)
+    # May be empty when no executed-agreement evidence is on file; when one IS on file,
+    # the reconciliation below still requires its digest among these refs.
+    executed_document_refs: list[DocumentRef] = Field(default_factory=list)
     cpcs_checklist_version: int | None = Field(default=None, ge=1)
     delivery_method: str = Field(min_length=1, max_length=60)
     recipient: str = Field(min_length=1, max_length=200)

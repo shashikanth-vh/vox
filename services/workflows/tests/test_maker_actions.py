@@ -381,16 +381,15 @@ def test_every_screen_the_catalogue_names_is_one_the_client_implements():
     assert named <= implemented, f"no client screen for {sorted(named - implemented)}"
 
 
-def test_the_executed_agreement_still_offers_a_flat_form_as_the_fallback():
-    """The screen is an improvement on the form, not a replacement for it: a client that
-    does not implement the screen must still be able to file the evidence, and the
-    register's requirements are unchanged either way."""
-    spec = next(s for s in _MAKER_ACTIONS["Lending"]
-                if s["key"] == "evidence.executed-agreement")
-    assert spec["screen"] == "executed-agreement"
-    names = {f["name"] for f in spec["form"]}
-    assert {"reference", "sha256"} <= names
-    assert all(f.get("required") for f in spec["form"] if f["name"] in {"reference", "sha256"})
+def test_the_executed_agreement_step_is_gone_from_the_catalogue():
+    """The desk records the agreement among the CP conditions; the separate typed-digest
+    attestation step only stalled the line, so it was removed — and the CP/CS Completed
+    gate no longer demands the executed_agreement evidence."""
+    assert not any(s["key"] == "evidence.executed-agreement"
+                   for s in _MAKER_ACTIONS["Lending"])
+    from evam_backend_core.policy import EVIDENCE_FOR_STAGE
+
+    assert EVIDENCE_FOR_STAGE["Lending"]["CP/CS Completed"] == ["cp_cs_completion"]
 
 
 def test_every_action_declares_which_service_answers_it():
@@ -414,9 +413,9 @@ def test_every_action_declares_which_service_answers_it():
             else:
                 assert plane == "register", spec["key"]
 
-    # The three that bit: register routes that are NOT under /v1/workflows.
+    # The two that bit: register routes that are NOT under /v1/workflows.
     by_key = {s["key"]: s for acts in _MAKER_ACTIONS.values() for s in acts}
-    for key in ("evidence.executed-agreement", "handover.submit", "advaya.attest"):
+    for key in ("handover.submit", "advaya.attest"):
         assert _plane_of(by_key[key], by_key[key]["url"]) == "register", key
 
 
@@ -432,26 +431,14 @@ def test_the_actions_response_carries_the_plane():
         "the serialised action must carry its plane")
 
 
-def test_governance_evidence_cites_the_run_that_produced_it():
-    """The register refuses `executed_agreement` that cannot name its workflow run.
-
-    Reported live as a 422 — "'executed_agreement' must cite its workflow_id and run_id" —
-    after the user had picked the document and filled the form in. That rule is right:
-    evidence naming no run is evidence nobody can trace. But WHICH run is a fact about the
-    platform, not a question to put to a credit manager, so the plane fills it. The action
-    declares that it needs it; a line with no run to cite is disabled with that reason
-    rather than failing at submit.
-    """
-    spec = next(s for s in _MAKER_ACTIONS["Lending"]
-                if s["key"] == "evidence.executed-agreement")
-    assert spec.get("provenance") is True
-    # And it is NOT asked of the user — no form field, no constant.
-    names = {f["name"] for f in spec["form"]} | set(spec.get("constant") or {})
-    assert "workflow_id" not in names and "run_id" not in names
-
-    # The register's own rule, restated: governance evidence needs a digest too, and the
-    # digest IS the user's to supply (they hold the signed file).
-    assert any(f["name"] == "sha256" and f.get("required") for f in spec["form"])
+def test_no_remaining_action_asks_the_user_for_run_provenance():
+    """Evidence provenance (workflow_id / run_id) is a fact about the platform, never a
+    question for a credit manager. With the executed-agreement step removed, assert the
+    invariant across the WHOLE catalogue rather than on that one action."""
+    for actions in _MAKER_ACTIONS.values():
+        for spec in actions:
+            names = {f["name"] for f in spec["form"]} | set(spec.get("constant") or {})
+            assert "workflow_id" not in names and "run_id" not in names, spec["key"]
 
 
 def test_a_lending_citation_names_the_per_line_decision():
@@ -490,7 +477,7 @@ def test_the_stage_move_is_offered_and_names_what_it_is_waiting_for():
     spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == "lending.cpcs-complete")
     assert spec["constant"]["stage"] == "CP/CS Completed"
     assert spec["stages"] == {"Sanctioned"}          # it moves the line ON from Sanctioned
-    assert tuple(spec["evidence"]) == ("cp_cs_completion", "executed_agreement")
+    assert tuple(spec["evidence"]) == ("cp_cs_completion",)
     # The two evidence kinds the register's own policy requires for that stage.
     from evam_backend_core.policy import EVIDENCE_FOR_STAGE
     assert set(spec["evidence"]) == set(EVIDENCE_FOR_STAGE["Lending"]["CP/CS Completed"]), (

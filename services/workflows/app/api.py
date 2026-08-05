@@ -196,7 +196,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
         },
         {
             "key": "cpcs.prepare",
-            "label": "Prepare CP checklist",
+            "label": "Conditions Precedent",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
             "stage_reason": "Available once the committee has sanctioned this facility.",
@@ -215,7 +215,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # a new version is filed each time documents arrive, until nothing is open —
             # the chase reminders on Today run off the latest APPROVED version.
             "key": "cpcs.update-cs",
-            "label": "Update CS checklist",
+            "label": "Conditions Subsequent",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS,
             # Gated on the CP checklist being APPROVED (checked below with live data),
@@ -230,47 +230,16 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _NOTE],
         },
         {
-            "key": "evidence.executed-agreement",
-            "label": "Record the executed agreement",
-            "method": "POST", "url": "/v1/evidence",
-            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
-            "stage_reason": "Filed once the facility is sanctioned and the agreement signed.",
-            # 'CP/CS Completed' needs TWO evidences: cp_cs_completion, which the checklist
-            # approval mints by itself, and this one — the signed facility agreement, which
-            # only a human can attest. Without it an approved checklist leaves the line on
-            # 'Sanctioned' with nothing on screen explaining why.
-            "constant": {"subject_type": "Lending", "evidence_kind": "executed_agreement"},
-            "prefill": {"subject_id": "id"},
-            # Governance evidence has to name the run it came from; the plane fills it.
-            "provenance": True,
-            # The digest is MANDATORY: the register treats an executed agreement as
-            # governance evidence, and governance evidence must be tamper-evident. But a
-            # flat form can only ASK for a SHA-256, and typing one is not something a
-            # credit manager can do — so this gets its own screen, which reads the digest
-            # off the document already on the register or hashes the signed file in the
-            # browser. The form below stays as the fallback for a client with no screen.
-            "screen": "executed-agreement",
-            "form": [_f("reference", "Agreement reference", required=True,
-                        placeholder="Facility agreement / execution reference"),
-                     _f("sha256", "Document digest (SHA-256)", required=True,
-                        help_text="The signed agreement's SHA-256 — this is what makes the "
-                                  "evidence tamper-evident, so the register requires it."),
-                     _NOTE],
-        },
-        {
+            # A FALLBACK only: the CP approval auto-moves the stage itself. This stays
+            # for the rare case where that auto-move failed (register unreachable at the
+            # moment of approval) — the evidence gate still guards it.
             "key": "lending.cpcs-complete",
             "label": "Move to CP/CS Completed",
             "method": "PATCH", "url": "/v1/lending/{subject_id}",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
-            "stage_reason": "The line moves here from 'Sanctioned', once both governance "
-                            "evidences are on file.",
-            # The register gates this stage on TWO evidences and nothing else — no field
-            # lock, no role lock on the stage itself. So the step is a plain write, and the
-            # only interesting question is whether the evidence is there. Before this
-            # existed the evidence would land, the stage would not move, and nothing on
-            # screen said which of the two was missing: the user was left to discover a
-            # dropdown. `evidence` names what the plane must confirm before offering it.
-            "evidence": ("cp_cs_completion", "executed_agreement"),
+            "stage_reason": "The line moves here automatically when the CP checklist is "
+                            "approved.",
+            "evidence": ("cp_cs_completion",),
             "constant": {"stage": "CP/CS Completed"},
             "form": [],
         },
@@ -297,7 +266,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "key": "handover.prepare",
             # The package must cite the executed agreement's digest; the plane supplies it.
             "needs_evidence_refs": True,
-            "label": "Prepare the Advaya handover package",
+            "label": "Prepare disbursement request (Advaya)",
             "method": "POST", "url": "/v1/workflows/advaya-handover",
             # EXACTLY 'Ready for Disbursement': the register refuses a handover from any
             # other stage, so offering it at 'CP/CS Completed' only produced a 409 after
@@ -317,7 +286,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "key": "handover.submit",
             # Only an APPROVED package may be submitted.
             "package": "Approved",
-            "label": "Submit the handover to Advaya",
+            "label": "Send disbursement request to Advaya",
             "method": "POST",
             "url": "/v1/internal/handover-packages/{subject_id}/submit",
             "roles": {"Credit Head", "Management", "Admin"},
@@ -329,7 +298,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "key": "advaya.attest",
             # And Advaya's answer only means anything once it has been sent one.
             "package": "Submitted",
-            "label": "Record an Advaya confirmation",
+            "label": "Update disbursement status",
             "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
             "roles": {"Credit Head", "Management", "Admin"},
             "stages": {"Ready for Disbursement"},
@@ -433,7 +402,6 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "run.resubmit": ("by",),
     "cpcs.prepare": ("requested_by",),
     "cpcs.update-cs": ("requested_by",),
-    "evidence.executed-agreement": (),
     "handover.prepare": ("requested_by",),
     "handover.submit": (),
     "advaya.attest": (),
@@ -2347,6 +2315,41 @@ def create_app() -> FastAPI:
                             "Register refused the request", str(detail))
         return ORJSONResponse(status_code=200, content=rr.json())
 
+    async def _register_patch_as(request: Request, path: str, who: str,
+                                 caller: CallerContext, body: dict) -> Any:
+        """PATCH to the Register AS the verified human — same delegation as the POST
+        twin. Used for the stage auto-move a decision implies."""
+        tenant = caller.tenant or (request.headers.get("X-Tenant") or settings.register_tenant)
+        headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+        if settings.internal_signing_secret:
+            from evam_backend_core.internal_token import mint_internal_context
+            headers["X-Internal-Context"] = mint_internal_context(
+                signing_key=settings.internal_signing_secret,
+                algorithm=settings.internal_signing_algorithm,
+                ttl_seconds=max(settings.internal_token_ttl_seconds, 120),
+                tenant=tenant, email=caller.email or who, user_id=caller.user_id or who,
+                roles=list(caller.roles), effective_views=caller.effective_views,
+                effective_operations=caller.effective_operations, decision="FULL",
+                method="PATCH", path=_token_path(path))
+        else:
+            headers["X-User-Email"] = who
+            if caller.user_id:
+                headers["X-User-Id"] = caller.user_id
+            if caller.roles:
+                headers["X-User-Roles"] = ",".join(caller.roles)
+        try:
+            rr = await request.app.state.http.patch(
+                f"{settings.register_base_url.rstrip('/')}{path}", json=body, headers=headers)
+        except httpx.HTTPError as exc:
+            return _problem(502, "Upstream unavailable", f"Register unreachable: {exc}")
+        if rr.status_code >= 300:
+            ct = rr.headers.get("content-type", "")
+            detail = (rr.json().get("error", {}).get("detail")
+                      if ct.startswith("application/json") else rr.text)
+            return _problem(rr.status_code if rr.status_code < 500 else 502,
+                            "Register refused the request", str(detail))
+        return ORJSONResponse(status_code=200, content=rr.json())
+
 
     @app.post("/v1/workflows/advaya-handover/{lending_id}/reject", tags=["Workflows"],
               summary="CHECKER rejects the prepared handover (terminal for this attempt)")
@@ -2480,8 +2483,22 @@ def create_app() -> FastAPI:
                     "is.")
                 return ORJSONResponse(status_code=200, content=row)
             row["cp_cs_completion"] = orjson.loads(ev.body).get("id")
-            row["next"] = ("Record the executed agreement, then the line may move to "
-                           "'CP/CS Completed'.")
+            # The approval IS the milestone: move the line to 'CP/CS Completed' here,
+            # as the approver, instead of leaving a dropdown for someone to discover.
+            # Best-effort — a failed move leaves the fallback action and says so.
+            moved = await _register_patch_as(
+                request, f"/v1/lending/{lending_id}", approved_by, checker,
+                {"stage": "CP/CS Completed"})
+            if isinstance(moved, ORJSONResponse) and moved.status_code == 200:
+                row["stage"] = "CP/CS Completed"
+                row["next"] = ("The line is at 'CP/CS Completed' — work the Conditions "
+                               "Subsequent and prepare the disbursement request to "
+                               "Advaya (unmet CPs travel with it).")
+            else:
+                log.warning("cpcs_stage_automove_failed",
+                            extra={"checklist": checklist_id, "lending": lending_id})
+                row["next"] = ("Approved and evidenced, but the stage could not be moved "
+                               "automatically — use 'Move to CP/CS Completed'.")
         return ORJSONResponse(status_code=200, content=row)
 
 
@@ -3361,6 +3378,7 @@ def create_app() -> FastAPI:
         # gives it rather than letting them guess.
         next_version = 1
         latest_checklist_status = ""
+        latest_checklist_items: list = []
         if subject_type == "Lending":
             existing, ver_problem = await _register_get_as(
                 request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
@@ -3379,6 +3397,7 @@ def create_app() -> FastAPI:
                 if rows:
                     latest = max(rows, key=lambda r: int(r.get("checklist_version") or 0))
                     latest_checklist_status = str(latest.get("status") or "")
+                    latest_checklist_items = list(latest.get("items") or [])
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
@@ -3435,8 +3454,21 @@ def create_app() -> FastAPI:
             if spec["key"] in ("cpcs.prepare", "cpcs.update-cs") and next_version:
                 form = [{**f, "default": next_version} if f["name"] == "checklist_version"
                         else f for f in form]
+            # The two condition buttons SHOW their progress — "Conditions Precedent
+            # (4/9)" reads as a status, not a mystery step. Counts come from the latest
+            # checklist version; a completed CP is anything no longer being chased.
+            label = spec["label"]
+            if latest_checklist_items and spec["key"] in ("cpcs.prepare", "cpcs.update-cs"):
+                want = "CP" if spec["key"] == "cpcs.prepare" else "CS"
+                rel = [i for i in latest_checklist_items
+                       if str(i.get("condition_type")) == want]
+                done_states = ({"Completed", "Waived", "Deferred as CS"}
+                               if want == "CP" else {"Completed", "Waived"})
+                if rel:
+                    done = sum(1 for i in rel if str(i.get("status")) in done_states)
+                    label = f"{label} ({done}/{len(rel)})"
             actions.append({
-                "key": spec["key"], "label": spec["label"], "method": spec["method"],
+                "key": spec["key"], "label": label, "method": spec["method"],
                 "url": url, "enabled": enabled,
                 # WHICH SERVICE the url belongs to. The catalogue spans both planes —
                 # starting a workflow is the orchestrator's, filing evidence is the

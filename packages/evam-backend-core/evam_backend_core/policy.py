@@ -126,11 +126,13 @@ EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
     # the commercial funnel, and all credit governance lives on the lending line.
     "Lending": {
         "Sanctioned": ["credit_committee_approval", "sanction_letter"],
-        # A facility reaches 'CP/CS Completed' only once the things PRISM controls are on file: the
-        # conditions precedent / subsequent (proven by an APPROVED CP/CS checklist — the
-        # cp_cs_completion evidence is minted from it, not caller-attached) and the executed facility
-        # agreement. From there the terminal (current product scope) is 'Disbursed'.
-        "CP/CS Completed": ["cp_cs_completion", "executed_agreement"],
+        # A facility reaches 'CP/CS Completed' once the conditions precedent are proven —
+        # by an APPROVED CP/CS checklist, whose approval MINTS the cp_cs_completion
+        # evidence (never caller-attached). The executed-agreement attestation was
+        # dropped from this gate: the desk records the agreement among the CP items
+        # themselves, and a separate typed digest step only stalled the line. From here
+        # the terminal (current product scope) is 'Disbursed'.
+        "CP/CS Completed": ["cp_cs_completion"],
         # 'Disbursed' itself carries no evidence gate here: interactively it is reached through
         # the senior-locked maker-checker handover approval, and the dormant
         # advaya_acknowledgement kind (future Advaya integration) would add downstream
