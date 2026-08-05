@@ -33,7 +33,7 @@ from app.core.logging import request_id_ctx
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.db.base import AuditLog
-from app.models.lms import LoanAccount, LoanLedgerEntry
+from app.models.lms import LoanAccount, LoanAccountCondition, LoanLedgerEntry
 from app.models.registry import Entity
 from app.models.sanction import SanctionTerms
 from app.models.trackers import LendingTracker
@@ -153,6 +153,48 @@ async def _append(ctx: RequestContext, acct: LoanAccount, *, entry_date: date,
     return entry
 
 
+async def _handover_conditions(ctx: RequestContext, lending_id: str,
+                               acct: LoanAccount) -> int:
+    """The LOS→LMS handover of the CONDITIONS: copy the line's final checklist —
+    completed and uncompleted items alike — into the account's own register. From
+    here the servicing side owns the chase; the checklist freezes into the decision
+    record (its cs-progress lane refuses transferred lines)."""
+    from app.models.cpcs import CpcsChecklist
+
+    rows = (await ctx.session.execute(select(CpcsChecklist).where(
+        CpcsChecklist.tenant_id == ctx.tenant_id,
+        CpcsChecklist.lending_id == lending_id,
+        CpcsChecklist.deleted_at.is_(None)))).scalars().all()
+    latest = None
+    for c in rows:
+        if latest is None or (c.checklist_version or 0) > (latest.checklist_version or 0):
+            latest = c
+    if latest is None or latest.status != "Approved":
+        return 0
+    n = 0
+    for i in (latest.items or []):
+        key = str(i.get("key") or "").strip()
+        if not key:
+            continue
+        expiry = None
+        if i.get("expiry_date"):
+            try:
+                expiry = date.fromisoformat(str(i["expiry_date"])[:10])
+            except ValueError:
+                expiry = None
+        ctx.session.add(LoanAccountCondition(
+            tenant_id=ctx.tenant_id, lending_id=lending_id, account_id=acct.id,
+            key=key[:80], label=str(i.get("label") or key)[:1000],
+            condition_type=str(i.get("condition_type") or "CS")[:8],
+            required=bool(i.get("required", True)),
+            status=str(i.get("status") or "Pending")[:20],
+            reason=i.get("reason"), expiry_date=expiry,
+            evidence_ref=i.get("evidence_ref"),
+            source_version=latest.checklist_version, created_by=ctx.actor))
+        n += 1
+    return n
+
+
 # ------------------------------------------------------------------------------------ #
 # The auto-open hook — called from apply_tranche (the Advaya confirmation lane).
 # ------------------------------------------------------------------------------------ #
@@ -216,12 +258,16 @@ async def open_or_grow_account(ctx: RequestContext, line: LendingTracker,
         for cov in deferred:
             cov.first_due_on = _add_months(when, freq_step.get(cov.frequency, 1))
             cov.updated_by = ctx.actor
+        # The conditions HAND OVER with the account: the full checklist becomes the
+        # servicing side's own register, and LMS owns the chase from here.
+        handed = await _handover_conditions(ctx, lending_id, acct)
         ctx.session.add(AuditLog(
             tenant_id=ctx.tenant_id, actor=ctx.actor, action="lms.open",
             resource_type="loan_accounts", resource_id=str(acct.id),
             request_id=request_id_ctx.get(),
             changes={"lending_id": lending_id, "account_no": acct.account_no,
-                     "amount": amount, "tranche_ref": tranche_ref}))
+                     "amount": amount, "tranche_ref": tranche_ref,
+                     "conditions_handed_over": handed}))
         return acct
     acct.amount = _round2(float(acct.amount or 0.0) + amount)
     acct.updated_by = ctx.actor
@@ -399,3 +445,118 @@ async def patch_account(lending_id: str, payload: AccountPatch,
         changes={k: (v.isoformat() if isinstance(v, date) else v)
                  for k, v in payload.model_dump(exclude_unset=True).items()}))
     return _acct_out(acct)
+
+
+# ------------------------------------------------------------------------------------ #
+# The account's OWN conditions register (handed over from the checklist at opening).
+# ------------------------------------------------------------------------------------ #
+def _cond_out(c: LoanAccountCondition) -> dict[str, Any]:
+    return {"key": c.key, "label": c.label, "condition_type": c.condition_type,
+            "required": c.required, "status": c.status, "reason": c.reason,
+            "expiry_date": c.expiry_date.isoformat() if c.expiry_date else None,
+            "evidence_ref": c.evidence_ref, "source_version": c.source_version,
+            "completed_on": c.completed_on.isoformat() if c.completed_on else None,
+            "completed_by": c.completed_by, "note": c.note}
+
+
+async def _conditions(ctx: RequestContext,
+                      lending_id: str) -> list[LoanAccountCondition]:
+    return list((await ctx.session.execute(select(LoanAccountCondition).where(
+        LoanAccountCondition.tenant_id == ctx.tenant_id,
+        LoanAccountCondition.lending_id == lending_id,
+        LoanAccountCondition.deleted_at.is_(None))
+        .order_by(LoanAccountCondition.created_at,
+                  LoanAccountCondition.key))).scalars())
+
+
+@router.get("/v1/lending/{lending_id}/loan-account/conditions", tags=["Lending"],
+            summary="The account's conditions register (handed over at opening)")
+async def list_account_conditions(lending_id: str,
+                                  ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    await _line_scoped(ctx, lending_id)
+    await _account(ctx, lending_id)          # 404 until the account exists
+    rows = await _conditions(ctx, lending_id)
+    open_n = sum(1 for c in rows if c.status not in ("Completed", "Waived"))
+    return {"items": [_cond_out(c) for c in rows], "open": open_n}
+
+
+class ConditionReceiveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    evidence_ref: str | None = Field(default=None, max_length=300)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/v1/lending/{lending_id}/loan-account/conditions/{key}/receive",
+             tags=["Lending"],
+             summary="Record a condition's document as RECEIVED (LMS Operator)")
+async def receive_condition(lending_id: str, key: str, payload: ConditionReceiveIn,
+                            ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The servicing maker retires an obligation on the LMS's OWN record — no credit
+    desk round-trip, no touch on the frozen LOS checklist."""
+    _maker(ctx)
+    await _line_scoped(ctx, lending_id)
+    acct = await _account(ctx, lending_id)
+    if acct.status == "Closed" or acct.closed_on is not None:
+        raise ConflictError("This loan account is closed.")
+    row = (await ctx.session.execute(select(LoanAccountCondition).where(
+        LoanAccountCondition.tenant_id == ctx.tenant_id,
+        LoanAccountCondition.lending_id == lending_id,
+        LoanAccountCondition.key == key,
+        LoanAccountCondition.deleted_at.is_(None))
+        .with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No condition {key!r} on this account.")
+    if row.status in ("Completed", "Waived"):
+        raise ConflictError(f"Condition {key!r} is already {row.status}.")
+    row.status = "Completed"
+    row.completed_on = date.today()
+    row.completed_by = ctx.actor
+    if payload.evidence_ref is not None:
+        row.evidence_ref = payload.evidence_ref
+    if payload.note is not None:
+        row.note = payload.note
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="lms.condition.receive",
+        resource_type="loan_account_conditions", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, "key": key,
+                 **({"evidence_ref": payload.evidence_ref} if payload.evidence_ref else {})}))
+    return _cond_out(row)
+
+
+class ConditionAddIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=1000)
+    expiry_date: date | None = None
+    required: bool = True
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/v1/lending/{lending_id}/loan-account/conditions", tags=["Lending"],
+             status_code=201,
+             summary="Add a post-disbursement obligation discovered later (LMS Operator)")
+async def add_condition(lending_id: str, payload: ConditionAddIn,
+                        ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    _maker(ctx)
+    await _line_scoped(ctx, lending_id)
+    acct = await _account(ctx, lending_id)
+    if acct.status == "Closed" or acct.closed_on is not None:
+        raise ConflictError("This loan account is closed.")
+    existing = [c for c in await _conditions(ctx, lending_id) if c.key == payload.key]
+    if existing:
+        raise ConflictError(f"Condition {payload.key!r} already exists on this account.")
+    row = LoanAccountCondition(
+        tenant_id=ctx.tenant_id, lending_id=lending_id, account_id=acct.id,
+        key=payload.key, label=payload.label, condition_type="CS",
+        required=payload.required, status="Pending",
+        expiry_date=payload.expiry_date, note=payload.note, created_by=ctx.actor)
+    ctx.session.add(row)
+    await ctx.session.flush()
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="lms.condition.add",
+        resource_type="loan_account_conditions", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, "key": payload.key, "label": payload.label}))
+    return _cond_out(row)

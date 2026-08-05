@@ -90,22 +90,17 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
   const acctRows = bookQuery.data ?? [];
   const noAccount = rows.length - acctRows.length;
 
-  // The queue of pending bookings (whole-book; roles without the LMS verbs see none) —
-  // each line annotated with its OVERDUE deferred conditions, so the authorizer sees
-  // an expired CS chase before booking more money onto that line.
+  // The queue of pending bookings (whole-book; roles without the LMS verbs see none).
+  // Each recording CARRIES its conditions snapshot, so the overdue flag needs no read
+  // back into LOS — the booking is self-describing.
   const queueQuery = useQuery({
     queryKey: ['lms-pending-bookings'],
-    queryFn: async () => {
-      const items = await lmsService.pendingBookings().catch(() => [] as TrancheItem[]);
-      const ids = [...new Set(items.map((t) => t.lending_id))];
-      const overdue = await Promise.all(ids.map(async (id) => ({
-        id, n: (await lmsService.openConditions(id)).filter((c) => c.overdue).length,
-      })));
-      return { items, overdueBy: Object.fromEntries(overdue.map((o) => [o.id, o.n])) };
-    },
+    queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
   });
-  const queue = queueQuery.data?.items ?? [];
-  const overdueBy: Record<string, number> = queueQuery.data?.overdueBy ?? {};
+  const queue = queueQuery.data ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+  const overdueOf = (t: TrancheItem) =>
+    (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < today).length;
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['lms-accounts-book'] });
@@ -166,9 +161,9 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
                     {[t.tranche_ref, t.disbursed_on, `by ${t.recorded_by || '—'}`]
                       .filter(Boolean).join(' · ')}
                   </Typography>
-                  {(overdueBy[t.lending_id] ?? 0) > 0 && (
+                  {overdueOf(t) > 0 && (
                     <Chip size="small"
-                      label={`${overdueBy[t.lending_id]} condition${overdueBy[t.lending_id] > 1 ? 's' : ''} overdue`}
+                      label={`${overdueOf(t)} condition${overdueOf(t) > 1 ? 's' : ''} overdue`}
                       title="Deferred CP/CS conditions past their expiry on this line — check before booking more money."
                       sx={{ height: 20, fontSize: 11, bgcolor: '#FDE8E4', color: '#7C4A3E' }} />
                   )}
@@ -187,6 +182,14 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
                     </Box>
                   )}
                 </Box>
+                {(t.conditions_open?.length ?? 0) > 0 && (
+                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.2 }}
+                    title={t.conditions_open!.map((c) => c.label).join(' · ')}>
+                    Recorded with {t.conditions_open!.length} condition{t.conditions_open!.length > 1 ? 's' : ''} open:{' '}
+                    {t.conditions_open!.slice(0, 3).map((c) => c.label).join(', ')}
+                    {t.conditions_open!.length > 3 ? '…' : ''}
+                  </Typography>
+                )}
                 {authorize && rejecting?.id === t.id && (
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.6 }}>
                     <TextField size="small" label="Rejection reason (required)" autoFocus

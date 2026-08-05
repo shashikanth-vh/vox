@@ -32,6 +32,20 @@ async def _accepted_manual_line(client) -> str:  # noqa: ANN001
     return lid
 
 
+async def test_lms_roles_read_the_line_whole_book_but_cannot_edit_it(client):
+    """v3.6: the servicing pair's lending VIEW stops at READ. They see the whole book
+    (no assignment scoping), but the origination row itself refuses their writes —
+    their verbs are the servicing ones (ledger, bookings, covenants, classification),
+    and the LOS screen being read-only is now matched by the API."""
+    lid = await _accepted_manual_line(client)
+    for who in (OPERATOR, AUTHORIZER):
+        seen = await client.get(f"/v1/lending/{lid}", headers=who)
+        assert seen.status_code == 200, seen.text
+        edit = await client.patch(f"/v1/lending/{lid}",
+                                  json={"remarks": "servicing note"}, headers=who)
+        assert edit.status_code == 403, edit.text
+
+
 async def test_booking_gate_pending_four_eyes_approve(client):
     """Record (maker) → Pending in the queue → the recorder cannot settle it →
     the LMS Authorizer approves → account opens, stage moves, actuals land."""
@@ -126,6 +140,121 @@ async def test_booking_rejection_needs_reason_and_frees_headroom(client):
     assert by_ref["UTR-9100"]["tranche_no"] is None
     assert by_ref["UTR-9102"]["tranche_no"] == "T1"
     assert sched["total_pending"] == 5.0
+
+
+async def test_the_booking_snapshots_the_open_conditions_and_keeps_them(client):
+    """The disclosure travels with the recording: the tranche carries the line's open
+    CP/CS conditions as of that moment. The live chase then clears on the checklist —
+    the booking's snapshot does NOT: it stays what the checker saw and accepted."""
+    lid = await _accepted_manual_line(client)
+    lists = (await client.get("/v1/internal/cpcs-checklists",
+                              params={"lending_id": lid}, headers=ADMIN)).json()
+    approved = sorted([c for c in lists if c["status"] == "Approved"],
+                      key=lambda c: c["checklist_version"] or 0)[-1]
+    # A CS obligation joins the approved record, still open when the money moves.
+    add = await client.post(
+        f"/v1/internal/cpcs-checklists/{approved['id']}/cs-progress",
+        json={"items": [{"key": "cs-insurance", "label": "Insurance endorsement",
+                         "status": "Pending"}]}, headers=ADMIN)
+    assert add.status_code == 200, add.text
+
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-9300",
+                                  "amount_cr": 4.0})
+    assert dis.status_code == 201, dis.text
+    t = dis.json()["tranche"]
+    assert any(c["key"] == "cs-insurance" for c in t["conditions_open"]), t
+
+    # The document arrives — the LIVE chase clears on the checklist…
+    done = await client.post(
+        f"/v1/internal/cpcs-checklists/{approved['id']}/cs-progress",
+        json={"items": [{"key": "cs-insurance", "status": "Completed",
+                         "evidence_ref": "doc/endt-9"}]}, headers=ADMIN)
+    assert done.status_code == 200, done.text
+
+    # …but the booking still says what was open when it was recorded, and the
+    # approval carries that context into the permanent record.
+    ok = await client.post(f"/v1/lending/{lid}/tranches/{t['id']}/book",
+                           json={"action": "approve"}, headers=AUTHORIZER)
+    assert ok.status_code == 200, ok.text
+    sched = (await client.get(f"/v1/lending/{lid}/tranches", headers=ADMIN)).json()
+    mine = next(i for i in sched["items"] if i["tranche_ref"] == "UTR-9300")
+    assert any(c["key"] == "cs-insurance" for c in mine["conditions_open"])
+
+
+async def test_the_checklist_hands_over_to_lms_at_account_opening(client):
+    """The LOS→LMS handover: when the booking approval opens the account, the COMPLETE
+    checklist (completed and open items alike) becomes the account's own register.
+    The checklist freezes into a decision record; the servicing OPERATOR retires
+    obligations on the LMS copy; the follow-up feed reads the LMS copy; new
+    obligations join the account directly — no dependency back on LOS."""
+    lid = await _accepted_manual_line(client)
+    lists = (await client.get("/v1/internal/cpcs-checklists",
+                              params={"lending_id": lid}, headers=ADMIN)).json()
+    approved = sorted([c for c in lists if c["status"] == "Approved"],
+                      key=lambda c: c["checklist_version"] or 0)[-1]
+    add = await client.post(
+        f"/v1/internal/cpcs-checklists/{approved['id']}/cs-progress",
+        json={"items": [{"key": "cs-noc", "label": "NOC from existing lender",
+                         "status": "Pending"}]}, headers=ADMIN)
+    assert add.status_code == 200, add.text
+
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-9400",
+                                  "amount_cr": 3.0})
+    assert dis.status_code == 201, dis.text
+    tid = dis.json()["tranche"]["id"]
+    assert (await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
+                              json={"action": "approve"},
+                              headers=AUTHORIZER)).status_code == 200
+
+    # The account's register holds the COMPLETE handover — decided CPs included.
+    reg = await client.get(f"/v1/lending/{lid}/loan-account/conditions",
+                           headers=OPERATOR)
+    assert reg.status_code == 200, reg.text
+    body = reg.json()
+    by_key = {c["key"]: c for c in body["items"]}
+    assert by_key["cs-noc"]["status"] == "Pending"
+    assert by_key["cp1"]["status"] == "Completed"        # history travels too
+    assert body["open"] == 1
+
+    # The checklist is FROZEN now — CS progress points at the servicing book.
+    frozen = await client.post(
+        f"/v1/internal/cpcs-checklists/{approved['id']}/cs-progress",
+        json={"items": [{"key": "cs-noc", "status": "Completed"}]}, headers=ADMIN)
+    assert frozen.status_code == 409 and "servicing book" in frozen.text
+
+    # The follow-up feed reads the LMS register for this line.
+    fu = (await client.get("/v1/internal/follow-ups", headers=ADMIN)).json()
+    mine = [i for i in fu["items"]
+            if i["kind"] == "cs-followup" and i["lending_id"] == lid]
+    assert len(mine) == 1 and mine[0]["outstanding"] == ["NOC from existing lender"]
+
+    # The OPERATOR retires the obligation on the LMS's own record — once.
+    rec = await client.post(
+        f"/v1/lending/{lid}/loan-account/conditions/cs-noc/receive",
+        json={"evidence_ref": "doc/noc-1"}, headers=OPERATOR)
+    assert rec.status_code == 200 and rec.json()["status"] == "Completed"
+    assert rec.json()["completed_by"] == "ops@evamfinance.com"
+    dup = await client.post(
+        f"/v1/lending/{lid}/loan-account/conditions/cs-noc/receive",
+        json={}, headers=OPERATOR)
+    assert dup.status_code == 409
+    fu = (await client.get("/v1/internal/follow-ups", headers=ADMIN)).json()
+    assert not any(i["kind"] == "cs-followup" and i["lending_id"] == lid
+                   for i in fu["items"])
+
+    # A later obligation joins the ACCOUNT's register and the chase resumes there.
+    addc = await client.post(
+        f"/v1/lending/{lid}/loan-account/conditions",
+        json={"key": "insurance-renewal", "label": "Insurance renewal",
+              "expiry_date": "2026-09-30"}, headers=OPERATOR)
+    assert addc.status_code == 201, addc.text
+    fu = (await client.get("/v1/internal/follow-ups", headers=ADMIN)).json()
+    mine = [i for i in fu["items"]
+            if i["kind"] == "cs-followup" and i["lending_id"] == lid]
+    assert len(mine) == 1 and mine[0]["outstanding"] == ["Insurance renewal"]
+    assert mine[0].get("source") == "lms"
 
 
 async def test_later_tranches_are_recorded_in_lms_by_the_operator(client):

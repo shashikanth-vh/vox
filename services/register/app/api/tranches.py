@@ -86,6 +86,7 @@ def _serialize(row: DisbursementTranche) -> dict[str, Any]:
             "booked_by": row.booked_by,
             "booked_at": row.booked_at.isoformat() if row.booked_at else None,
             "booking_note": row.booking_note,
+            "conditions_open": row.conditions_open or [],
             "created_at": row.created_at.isoformat() if row.created_at else None}
 
 
@@ -108,6 +109,44 @@ async def _existing(ctx: RequestContext, lending_id: str) -> list[DisbursementTr
         DisbursementTranche.lending_id == lending_id,
         DisbursementTranche.deleted_at.is_(None))
         .order_by(DisbursementTranche.created_at, DisbursementTranche.id))).scalars())
+
+
+async def _open_conditions(ctx: RequestContext, lending_id: str) -> list[dict[str, Any]]:
+    """The line's outstanding CP/CS conditions — the same disclosure the disbursement
+    request makes to the partner, snapshotted onto each recorded tranche so the booking
+    permanently says what was open when it was made. Once the account opened, the LMS's
+    own conditions register is the live source; before that, the latest checklist."""
+    from app.models.cpcs import CpcsChecklist
+    from app.models.lms import LoanAccountCondition
+
+    handed = (await ctx.session.execute(select(LoanAccountCondition).where(
+        LoanAccountCondition.tenant_id == ctx.tenant_id,
+        LoanAccountCondition.lending_id == lending_id,
+        LoanAccountCondition.deleted_at.is_(None)))).scalars().all()
+    if handed:
+        return [{"key": c.key, "label": c.label, "condition_type": c.condition_type,
+                 "status": c.status,
+                 **({"expiry_date": c.expiry_date.isoformat()} if c.expiry_date else {})}
+                for c in handed if c.status not in ("Completed", "Waived")][:50]
+
+    rows = (await ctx.session.execute(select(CpcsChecklist).where(
+        CpcsChecklist.tenant_id == ctx.tenant_id,
+        CpcsChecklist.lending_id == lending_id,
+        CpcsChecklist.deleted_at.is_(None)))).scalars().all()
+    latest = None
+    for c in rows:
+        if latest is None or (c.checklist_version or 0) > (latest.checklist_version or 0):
+            latest = c
+    if latest is None or latest.status != "Approved":
+        return []
+    open_items = [i for i in (latest.items or [])
+                  if str(i.get("status") or "Pending") not in ("Completed", "Waived")]
+    return [{"key": str(i.get("key") or ""),
+             "label": str(i.get("label") or i.get("key") or "condition"),
+             "condition_type": str(i.get("condition_type") or "CS"),
+             "status": str(i.get("status") or "Pending"),
+             **({"expiry_date": str(i["expiry_date"])} if i.get("expiry_date") else {})}
+            for i in open_items[:50]]
 
 
 def _ceiling(line: LendingTracker) -> float | None:
@@ -202,6 +241,10 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
             f"line's ceiling {ceiling} (proposed disbursement / facility amount); "
             "over-disbursement is refused.")
     booking_status = "Pending" if require_booking else "Booked"
+    # The disclosure travels WITH the recording: whatever CP/CS conditions are open
+    # right now is stamped on the tranche, so the booking decision's context survives
+    # even after the conditions later complete (the live chase stays on the checklist).
+    snapshot = await _open_conditions(ctx, lending_id)
     won = (await ctx.session.execute(
         pg_insert(DisbursementTranche).values(
             tenant_id=ctx.tenant_id, lending_id=lending_id,
@@ -209,7 +252,7 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
             tranche_ref=payload.tranche_ref, amount=payload.amount,
             disbursed_on=payload.disbursed_on, advaya_reference=payload.advaya_reference,
             note=payload.note, recorded_by=ctx.actor, created_by=ctx.actor,
-            booking_status=booking_status,
+            booking_status=booking_status, conditions_open=snapshot,
             **({} if require_booking else
                {"booked_by": ctx.actor, "booked_at": func.now()}))
         .on_conflict_do_nothing(constraint="disbursement_tranches_tenant_ref")
@@ -234,6 +277,7 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
             request_id=request_id_ctx.get(),
             changes={"lending_id": lending_id, "tranche_ref": payload.tranche_ref,
                      "amount": payload.amount, "booking_status": "Pending",
+                     "conditions_open": len(snapshot),
                      **({"source": source} if source else {})}))
         return _serialize(row)
     await _settle_booked(ctx, line, row, source or "advaya-disbursement")
@@ -376,6 +420,7 @@ async def book_tranche(lending_id: uuid.UUID, tranche_id: uuid.UUID, payload: Bo
         changes={"lending_id": str(lending_id), "tranche_ref": row.tranche_ref,
                  "amount": float(row.amount), "booking_status": row.booking_status,
                  "recorded_by": row.recorded_by,
+                 "conditions_open_at_recording": len(row.conditions_open or []),
                  **({"note": payload.note} if payload.note else {})}))
     await ctx.session.refresh(row)
     return _serialize(row)

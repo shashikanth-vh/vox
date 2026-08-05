@@ -254,6 +254,19 @@ async def record_cs_progress(checklist_id: str, payload: CsProgressIn,
         raise ConflictError(
             f"CS progress is recorded on the APPROVED checklist; this one is "
             f"{row.status!r}.")
+    # Once the loan account opened, the conditions HANDED OVER to the LMS — this
+    # checklist is a frozen decision record now, and the chase (receipts, expiry,
+    # reminders) runs on the account's own register with no dependency back here.
+    from app.models.lms import LoanAccount
+    acct = (await ctx.session.execute(select(LoanAccount).where(
+        LoanAccount.tenant_id == ctx.tenant_id,
+        LoanAccount.lending_id == row.lending_id,
+        LoanAccount.deleted_at.is_(None)))).scalar_one_or_none()
+    if acct is not None:
+        raise ConflictError(
+            "This line is on the servicing book — its conditions were handed over to "
+            "the LMS at account opening. Record receipts on the loan account "
+            "(LMS · Servicing → Accounts → conditions), not on the frozen checklist.")
     items = [dict(i) for i in (row.items or [])]
     by_key = {str(i.get("key")): i for i in items}
     changed: list[str] = []

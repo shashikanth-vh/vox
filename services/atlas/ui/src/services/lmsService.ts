@@ -26,6 +26,10 @@ export interface TrancheItem {
   recorded_by?: string; booking_status: 'Pending' | 'Booked' | 'Rejected' | string;
   booked_by?: string; booked_at?: string; booking_note?: string;
   tranche_no?: string | null;
+  /** Point-in-time disclosure stamped at recording: the CP/CS conditions that were
+   *  open on the line when this tranche was recorded — frozen even after they clear. */
+  conditions_open?: { key: string; label: string; condition_type: string;
+    status: string; expiry_date?: string }[];
   // pending-queue extras
   stage?: string; entity_id?: string;
 }
@@ -36,9 +40,10 @@ export interface TrancheSchedule {
   fully_disbursed: boolean; remaining?: number | null;
 }
 
-export interface OpenCondition {
-  key: string; label: string; condition_type: string; status: string;
-  reason?: string; expiry_date?: string; overdue: boolean;
+export interface AccountCondition {
+  key: string; label: string; condition_type: string; required: boolean;
+  status: string; reason?: string; expiry_date?: string; evidence_ref?: string;
+  source_version?: number; completed_on?: string; completed_by?: string; note?: string;
 }
 
 export interface Covenant {
@@ -144,28 +149,35 @@ export const lmsService = {
     } catch (e) { throw new Error(msg(e, `${action} the booking`)); }
   },
 
-  /** The line's OUTSTANDING CP/CS conditions from its latest approved checklist —
-   *  everything not yet Completed/Waived, with deferred-item expiry flagged. The
-   *  servicing desk reads them on the account; receipts are recorded on the
-   *  checklist itself (CS progress). */
-  async openConditions(lendingId: string): Promise<OpenCondition[]> {
+  /** The account's OWN conditions register — the complete checklist handed over from
+   *  LOS at account opening (completed and open items alike), owned by servicing from
+   *  then on. Null until the account exists. */
+  async accountConditions(lendingId: string): Promise<{ items: AccountCondition[]; open: number } | null> {
     try {
-      const raw = await api.get<any>('/internal/cpcs-checklists',
-        { lending_id: lendingId });
-      const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
-      const approved = lists.filter((l) => l.status === 'Approved')
-        .sort((a, b) => (a.checklist_version || 0) - (b.checklist_version || 0)).pop();
-      const today = new Date().toISOString().slice(0, 10);
-      return ((approved?.items || []) as any[])
-        .filter((i) => !['Completed', 'Waived'].includes(String(i.status)))
-        .map((i) => ({
-          key: String(i.key), label: String(i.label || i.key),
-          condition_type: String(i.condition_type || 'CS'),
-          status: String(i.status || 'Pending'),
-          reason: i.reason, expiry_date: i.expiry_date,
-          overdue: !!i.expiry_date && String(i.expiry_date) < today,
-        }));
-    } catch { return []; }
+      return await api.get<any>(`/lending/${lendingId}/loan-account/conditions`);
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      throw new Error(msg(e, 'read the conditions register'));
+    }
+  },
+
+  /** The servicing MAKER retires an obligation on the LMS's own record. */
+  async receiveCondition(lendingId: string, key: string,
+                         input?: { evidence_ref?: string; note?: string }): Promise<AccountCondition> {
+    try {
+      return await api.post<any>(
+        `/lending/${lendingId}/loan-account/conditions/${encodeURIComponent(key)}/receive`,
+        input ?? {});
+    } catch (e) { throw new Error(msg(e, 'record the receipt')); }
+  },
+
+  /** A post-disbursement obligation discovered later joins the account's register. */
+  async addCondition(lendingId: string, input: {
+    key: string; label: string; expiry_date?: string; note?: string;
+  }): Promise<AccountCondition> {
+    try {
+      return await api.post<any>(`/lending/${lendingId}/loan-account/conditions`, input);
+    } catch (e) { throw new Error(msg(e, 'add the condition')); }
   },
 
   // ---- covenants -----------------------------------------------------------

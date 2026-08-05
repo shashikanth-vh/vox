@@ -39,7 +39,7 @@ const VIEW_ROWS: Record<string, Access[]> = {
   dash:     [F, F, S, N, S, N, S, N, S, N, N, N],
   leads:    [F, F, F, S, N, N, N, N, N, N, N, N],
   deals:    [F, F, F, S, S, S, S, S, S, S, R, R],
-  lend:     [F, F, R, R, F, S, R, R, R, R, F, F],
+  lend:     [F, F, R, R, F, S, R, R, R, R, R, R],
   syn:      [F, F, R, R, R, S, F, S, R, R, N, N],
   am:       [F, F, R, R, R, S, R, R, F, S, N, N],
   fi:       [F, F, R, R, R, R, F, R, R, R, N, N],

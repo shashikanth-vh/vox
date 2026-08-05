@@ -71,7 +71,11 @@ VIEW_ACCESS: dict[str, dict[str, Access]] = {
     "dashboard":          _row("F F S S S S S S S S S S"),
     "leads":              _row("F F F S - - S S S S - -"),
     "deals":              _row("F F F S S S S S S S - -"),
-    "lending":            _row("F F F S F S R R R R F F"),
+    # LMS pair: whole-book READ (servicing is not assignment-scoped) — but the view
+    # stops at read. Their writes are the SERVICING VERBS below (ledger, bookings,
+    # covenants, classification), never the origination row itself: v3.6 closed the
+    # gap where view-FULL let a generic line edit through outside the LOS screen.
+    "lending":            _row("F F F S F S R R R R R R"),
     "syndication":        _row("F F F S S S F S R R - -"),
     "asset_monetisation": _row("F F F S S S R R F S - -"),
     "fi_master":          _row("F F F R S S F S R R - -"),

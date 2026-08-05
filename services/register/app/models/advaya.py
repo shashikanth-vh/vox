@@ -111,3 +111,7 @@ class DisbursementTranche(RegisterBase):
     booked_by: Mapped[str | None] = mapped_column(String(120))
     booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     booking_note: Mapped[str | None] = mapped_column(Text)
+    # Point-in-time DISCLOSURE, stamped at recording: the line's outstanding CP/CS
+    # conditions the moment this tranche was recorded — what the checker saw and
+    # accepted. The live chase stays on the checklist; this stays as it was.
+    conditions_open: Mapped[list | None] = mapped_column(JSONB)

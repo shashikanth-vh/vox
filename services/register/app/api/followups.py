@@ -77,7 +77,20 @@ async def list_follow_ups(
     lending_by_id = {str(row.id): row for row in lendings}
     entity_ids = {row.entity_id for row in lendings if row.entity_id}
 
-    # ---- CS conditions still open on the LATEST, APPROVED checklist ------------------
+    # ---- CS conditions still open ----------------------------------------------------
+    # Two sources, one owner each. A line whose loan account has opened HANDED ITS
+    # CONDITIONS OVER: the LMS's own register (loan_account_conditions) is the live
+    # chase and the checklist is a frozen decision record — so the reminder reads the
+    # LMS rows. Every other line still originates: the latest APPROVED checklist rules.
+    from app.models.lms import LoanAccountCondition
+
+    cond_rows = (await ctx.session.execute(select(LoanAccountCondition).where(
+        LoanAccountCondition.tenant_id == ctx.tenant_id,
+        LoanAccountCondition.deleted_at.is_(None)))).scalars().all()
+    handed: dict[str, list[LoanAccountCondition]] = {}
+    for cr in cond_rows:
+        handed.setdefault(cr.lending_id, []).append(cr)
+
     checklists = (await ctx.session.execute(select(CpcsChecklist).where(
         CpcsChecklist.tenant_id == ctx.tenant_id,
         CpcsChecklist.deleted_at.is_(None)))).scalars().all()
@@ -87,7 +100,7 @@ async def list_follow_ups(
         if cur is None or (c.checklist_version or 0) > (cur.checklist_version or 0):
             latest[c.lending_id] = c
     for lending_id, c in latest.items():
-        if c.status != "Approved":
+        if c.status != "Approved" or lending_id in handed:
             continue
         line = lending_by_id.get(lending_id)
         if line is not None and str(getattr(line, "stage", "") or "") == "Closed":
@@ -104,6 +117,22 @@ async def list_follow_ups(
             "prepared_by": c.prepared_by,
             "entity_id": str(line.entity_id) if line is not None and line.entity_id else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    for lending_id, conds in handed.items():
+        line = lending_by_id.get(lending_id)
+        if line is not None and str(getattr(line, "stage", "") or "") == "Closed":
+            continue
+        open_conds = [cr for cr in conds if cr.status not in _DONE]
+        if not open_conds:
+            continue
+        first = min((cr.created_at for cr in open_conds if cr.created_at), default=None)
+        items.append({
+            "kind": "cs-followup", "lending_id": lending_id, "source": "lms",
+            "count": len(open_conds),
+            "outstanding": [cr.label for cr in open_conds][:20],
+            "prepared_by": None,
+            "entity_id": str(line.entity_id) if line is not None and line.entity_id else None,
+            "created_at": first.isoformat() if first else None,
         })
 
     # ---- covenant cycles due on DISBURSED lines --------------------------------------

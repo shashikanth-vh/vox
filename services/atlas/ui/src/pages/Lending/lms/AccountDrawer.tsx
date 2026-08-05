@@ -7,8 +7,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import { DrawerSection } from '../../../components/common/Field';
 import { CodeText } from '../../../components/common/Pills';
 import {
-  lmsService, type LedgerEntry, type LoanAccount, type Observation,
-  type OpenCondition, type TrancheSchedule,
+  lmsService, type AccountCondition, type LedgerEntry, type LoanAccount,
+  type Observation, type TrancheSchedule,
 } from '../../../services/lmsService';
 import { useAuth } from '../../../auth/AuthContext';
 import { can, whoCan } from '../../../auth/rbac';
@@ -68,7 +68,8 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [sched, setSched] = useState<TrancheSchedule | null>(null);
   const [obs, setObs] = useState<Observation[]>([]);
-  const [conds, setConds] = useState<OpenCondition[]>([]);
+  const [condReg, setCondReg] = useState<{ items: AccountCondition[]; open: number } | null>(null);
+  const [receiving, setReceiving] = useState<{ key: string; evidence: string } | null>(null);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
@@ -86,7 +87,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
     setErr('');
     try {
       setSched(await lmsService.tranches(row.id).catch(() => null));
-      setConds(await lmsService.openConditions(row.id));
+      setCondReg(await lmsService.accountConditions(row.id).catch(() => null));
       if (row.entityId) {
         setObs(await lmsService.observations(row.entityId, row.id).catch(() => []));
       } else setObs([]);
@@ -242,6 +243,13 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                     bgcolor: '#FDE8E4', color: '#7C4A3E' }}
                     title={t.booking_note || ''}>Rejected</Typography>
                 )}
+                {(t.conditions_open?.length ?? 0) > 0 && (
+                  <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
+                    bgcolor: '#EEF1F3', color: '#5F6E76' }}
+                    title={`Open when recorded: ${t.conditions_open!.map((c) => c.label).join(' · ')}`}>
+                    {t.conditions_open!.length} open @ record
+                  </Typography>
+                )}
               </Box>
             ))}
             {tranches.length > 0 && (
@@ -276,41 +284,84 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           </DrawerSection>
         )}
 
-        {/* ---- ②b Outstanding CP/CS conditions — the deferred chase, on the loan --- */}
-        {conds.length > 0 && (
-          <DrawerSection title={`Outstanding conditions (${conds.length})`}>
-            {conds.map((c) => (
-              <Box key={c.key} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
-                py: 0.35, borderBottom: `1px dashed ${tokens.line}`,
-                '&:last-of-type': { borderBottom: 'none' } }}>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
-                  bgcolor: c.status === 'Deferred as CS' ? '#E8EDF9' : '#EEF1F3',
-                  color: c.status === 'Deferred as CS' ? '#2A4B8D' : '#5F6E76' }}>
-                  {c.status === 'Deferred as CS' ? 'CP · deferred' : c.condition_type}
+        {/* ---- ②b The conditions register — LMS-owned since the handover ----------- */}
+        {condReg && condReg.items.length > 0 && (() => {
+          const today = new Date().toISOString().slice(0, 10);
+          const openItems = condReg.items.filter(
+            (c) => !['Completed', 'Waived'].includes(c.status));
+          const doneN = condReg.items.length - openItems.length;
+          return (
+            <DrawerSection title={`Conditions register — ${openItems.length} open`}>
+              {openItems.length === 0 && (
+                <Typography sx={{ fontSize: 12, color: tokens.muted }}>
+                  Every condition is settled — the full handover record is kept below.
                 </Typography>
-                <Typography sx={{ fontSize: 12.3, flex: 1 }} title={c.reason || ''}>
-                  {c.label}
-                </Typography>
-                {c.expiry_date && (
-                  <Typography sx={{ fontSize: 11.5,
-                    color: c.overdue ? '#7C4A3E' : tokens.muted }}>
-                    due {c.expiry_date}
-                  </Typography>
-                )}
-                {c.overdue && (
-                  <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
-                    borderRadius: 1, bgcolor: '#FDE8E4', color: '#7C4A3E' }}>
-                    Overdue
-                  </Typography>
-                )}
-              </Box>
-            ))}
-            <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
-              Receipts are recorded on the CP/CS checklist (LOS → the line's workflow
-              actions) — a recorded document retires its condition here at once.
-            </Typography>
-          </DrawerSection>
-        )}
+              )}
+              {openItems.map((c) => {
+                const overdue = !!c.expiry_date && c.expiry_date < today;
+                return (
+                  <Box key={c.key} sx={{ py: 0.35, borderBottom: `1px dashed ${tokens.line}`,
+                    '&:last-of-type': { borderBottom: 'none' } }}>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
+                        bgcolor: c.status === 'Deferred as CS' ? '#E8EDF9' : '#EEF1F3',
+                        color: c.status === 'Deferred as CS' ? '#2A4B8D' : '#5F6E76' }}>
+                        {c.status === 'Deferred as CS' ? 'CP · deferred' : c.condition_type}
+                      </Typography>
+                      <Typography sx={{ fontSize: 12.3, flex: 1 }} title={c.reason || ''}>
+                        {c.label}
+                      </Typography>
+                      {c.expiry_date && (
+                        <Typography sx={{ fontSize: 11.5,
+                          color: overdue ? '#7C4A3E' : tokens.muted }}>
+                          due {c.expiry_date}
+                        </Typography>
+                      )}
+                      {overdue && (
+                        <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
+                          borderRadius: 1, bgcolor: '#FDE8E4', color: '#7C4A3E' }}>
+                          Overdue
+                        </Typography>
+                      )}
+                      {!closed && operate && receiving?.key !== c.key && (
+                        <Button size="small" variant="outlined" disabled={!!busy}
+                          onClick={() => setReceiving({ key: c.key, evidence: '' })}
+                          sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
+                          Mark received…
+                        </Button>
+                      )}
+                    </Box>
+                    {!closed && operate && receiving?.key === c.key && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5 }}>
+                        <TextField size="small" label="Evidence reference (optional)" autoFocus
+                          value={receiving.evidence} sx={{ flex: 1 }}
+                          onChange={(e) => setReceiving({ key: c.key, evidence: e.target.value })} />
+                        <Button size="small" variant="contained" disabled={!!busy}
+                          onClick={() => run('receive', async () => {
+                            const r = await lmsService.receiveCondition(row!.id, c.key,
+                              receiving.evidence.trim()
+                                ? { evidence_ref: receiving.evidence.trim() } : undefined);
+                            setReceiving(null);
+                            return `${r.label} received — the reminder for it stops now.`;
+                          })}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>
+                          {busy === 'receive' ? 'Recording…' : 'Confirm received'}
+                        </Button>
+                        <Button size="small" onClick={() => setReceiving(null)}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>Cancel</Button>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
+                Handed over from the LOS checklist at account opening ({doneN} of{' '}
+                {condReg.items.length} settled) — the LMS owns this register; the
+                checklist stays frozen as the decision record.
+              </Typography>
+            </DrawerSection>
+          );
+        })()}
 
         {/* ---- ② The statement — computed interest, receipts, charges -------------- */}
         {acct && (

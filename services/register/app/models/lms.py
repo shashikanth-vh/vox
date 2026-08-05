@@ -69,3 +69,33 @@ class LoanLedgerEntry(RegisterBase):
     debit: Mapped[float | None] = mapped_column(Numeric(16, 2))
     credit: Mapped[float | None] = mapped_column(Numeric(16, 2))
     balance: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False)
+
+
+class LoanAccountCondition(RegisterBase):
+    """The LMS's OWN register of a loan's CP/CS conditions — handed over from the LOS
+    checklist when the account OPENS (completed and uncompleted items alike), owned by
+    servicing from then on. The LOS checklist freezes into a decision record; receipts,
+    expiry and reminders live here, with no runtime dependency on LOS."""
+
+    __tablename__ = "loan_account_conditions"
+
+    lending_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("loan_accounts.id", ondelete="CASCADE"),
+        nullable=False)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(1000), nullable=False)
+    condition_type: Mapped[str] = mapped_column(String(8), nullable=False, default="CS",
+                                                server_default="CS")
+    required: Mapped[bool] = mapped_column(nullable=False, default=True,
+                                           server_default="true")
+    # Pending | Completed | Waived | Deferred as CS (open) — carried over as handed.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="Pending",
+                                        server_default="Pending")
+    reason: Mapped[str | None] = mapped_column(Text)
+    expiry_date: Mapped[date | None] = mapped_column(Date)
+    evidence_ref: Mapped[str | None] = mapped_column(String(300))
+    source_version: Mapped[int | None] = mapped_column(Integer)  # checklist version
+    completed_on: Mapped[date | None] = mapped_column(Date)
+    completed_by: Mapped[str | None] = mapped_column(String(120))
+    note: Mapped[str | None] = mapped_column(Text)
