@@ -139,12 +139,34 @@ _TBL_BORDER = ('<w:tblBorders>'
                + '</w:tblBorders>')
 
 
-# The letterhead's table language: a NAVY band with white bold text for header
-# rows, and the label column in navy bold — matching the credit team's letter.
+# The letterhead's table language: a dark accent band with white bold text for
+# header rows, and the label column in accent bold. The accent is READ FROM THE
+# TEMPLATE (its own band fills, else its Heading1 color) so a re-branded template
+# restyles the output with no code change; this navy is only the last resort.
 _NAVY = '1F4D78'
 
 
-def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False) -> str:
+def _is_dark(hex6: str) -> bool:
+    r, g, b = (int(hex6[i:i + 2], 16) for i in (0, 2, 4))
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 150
+
+
+def _template_accent(doc_xml: str, styles_xml: str) -> str:
+    """The template's own band color: the most frequent DARK shading fill in its
+    body (its banner cells), else its Heading1 color if dark, else navy."""
+    fills = [f.upper() for f in re.findall(r'w:fill="([0-9A-Fa-f]{6})"', doc_xml)
+             if _is_dark(f)]
+    if fills:
+        return max(set(fills), key=fills.count)
+    m = re.search(r'w:styleId="Heading1".*?<w:color w:val="([0-9A-Fa-f]{6})"',
+                  styles_xml, re.S)
+    if m and _is_dark(m.group(1)):
+        return m.group(1).upper()
+    return _NAVY
+
+
+def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
+           accent: str = _NAVY) -> str:
     xml = ['<w:tbl><w:tblPr>'
            '<w:tblW w:w="0" w:type="auto"/>' + _TBL_BORDER
            + '<w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
@@ -154,14 +176,14 @@ def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False) -> 
         xml.append('<w:tr>')
         for c, cell in enumerate(cells):
             if is_head and letterhead:
-                shade = f'<w:shd w:val="clear" w:fill="{_NAVY}"/>'
+                shade = f'<w:shd w:val="clear" w:fill="{accent}"/>'
                 para = _p(cell, bold=True, color='FFFFFF')
             elif is_head:
                 shade = '<w:shd w:val="clear" w:fill="F2F2F2"/>'
                 para = _p(cell, bold=True)
             elif letterhead and c == 0:
                 shade = ''
-                para = _p(cell, bold=True, color=_NAVY)
+                para = _p(cell, bold=True, color=accent)
             else:
                 shade = ''
                 para = _p(cell)
@@ -190,7 +212,7 @@ def _is_separator(line: str) -> bool:
 
 
 def _render_body(md: str, title: str | None = None, *,
-                 letterhead: bool = False) -> str:
+                 letterhead: bool = False, accent: str = _NAVY) -> str:
     """Markdown → the <w:body> INNER XML (no sectPr) — shared by the standalone
     package and the render-into-template path. ``letterhead`` switches on the
     sanction-letter visual language: ## headings become full-width navy banner
@@ -225,7 +247,7 @@ def _render_body(md: str, title: str | None = None, *,
             if rows:
                 width = max(len(r) for r in rows)
                 body.append(_table([r + [''] * (width - len(r)) for r in rows], header,
-                                   letterhead=letterhead))
+                                   letterhead=letterhead, accent=accent))
             continue
 
         if not line.strip():
@@ -240,8 +262,8 @@ def _render_body(md: str, title: str | None = None, *,
             level = min(len(m.group(1)), 3)
             text = m.group(2).strip().strip('#').strip()
             if letterhead and level == 2:
-                # The letterhead's section bars: full-width navy band, white bold.
-                body.append(_p(text, bold=True, color='FFFFFF', fill=_NAVY))
+                # The letterhead's section bars: full-width accent band, white bold.
+                body.append(_p(text, bold=True, color='FFFFFF', fill=accent))
             else:
                 body.append(_p(text, style=f"Heading{level}"))
             i += 1
@@ -351,9 +373,13 @@ def markdown_into_template(md: str, template_blob: bytes,
     sect_xml = sect.group(0) if sect else \
         ('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
          '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>')
+    accent = _template_accent(
+        doc, parts.get('word/styles.xml', b'').decode('utf-8', 'ignore')) \
+        if letterhead else _NAVY
     new_inner = (_letterhead_prefix(inner)
                  + (_notice_p(notice) if notice else '')
-                 + _render_body(md, title, letterhead=letterhead) + sect_xml)
+                 + _render_body(md, title, letterhead=letterhead, accent=accent)
+                 + sect_xml)
     parts['word/document.xml'] = (
         doc[:m.start(2)] + new_inner + doc[m.end(2):]).encode('utf-8')
 
