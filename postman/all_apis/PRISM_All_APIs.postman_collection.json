@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (253 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (254 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -8996,6 +8996,43 @@
         {
           "name": "Lending",
           "item": [
+            {
+              "name": "GET /v1/lending/{lending_id}/committee-decision \u2014 The committee's recorded decision on this line (note included)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/committee-decision",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "committee-decision"
+                  ]
+                },
+                "description": "What the committee actually SAID when it sanctioned this facility \u2014 the decision,\nthe approver, their note, the references and any conditions. The sanction-terms\nscreen shows it so the terms are entered against the committee's own words rather\nthan from memory. Gated like every other company-composite read."
+              }
+            },
             {
               "name": "GET /v1/lending/{lending_id}/handover-package \u2014 Read a Lending line's Advaya handover package",
               "request": {

@@ -59,6 +59,9 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   const [tmpl, setTmpl] = useState<{ id: string; title: string } | null>(null);
   const [letter, setLetter] = useState<EntityDoc | null>(null);
   const [letterBusy, setLetterBusy] = useState('');
+  // What the committee SAID when it approved — the terms are entered against the
+  // committee's own words (their note, references, conditions), not from memory.
+  const [decision, setDecision] = useState<any | null>(null);
 
   const loadLetter = async (id: string) => {
     try {
@@ -131,6 +134,17 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       .finally(() => setLoading(false));
     void camService.template('sanction_template').then(setTmpl);
     void loadLetter(lendingId);
+    setDecision(null);
+    void (async () => {
+      try {
+        const { api } = await import('../../api/http');
+        const d = await api.get<any>(`/lending/${lendingId}/committee-decision`);
+        setDecision(d);
+        // The committee's note seeds the terms note — editable, never overwriting
+        // something already typed.
+        if (d?.note) setF((p) => ({ ...p, note: p.note || d.note }));
+      } catch { /* no decision recorded yet — the banner simply does not show */ }
+    })();
   }, [open, lendingId]);
 
   const save = async () => {
@@ -190,6 +204,17 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       <DialogContent dividers>
         {err && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setErr('')}>{err}</Alert>}
         {info && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setInfo('')}>{info}</Alert>}
+
+        {decision && (
+          <Alert severity="info" sx={{ mb: 1.2, py: 0.4, fontSize: 12 }}>
+            <b>Committee {String(decision.decision || '').toLowerCase()}</b> by {decision.decided_by}
+            {decision.committee_reference ? <> · {decision.committee_reference}</> : null}
+            {decision.sanction_letter_reference ? <> · {decision.sanction_letter_reference}</> : null}
+            {decision.note ? <> — “{decision.note}”</> : null}
+            {decision.conditions ? <><br />Conditions: {decision.conditions}</> : null}
+            {decision.valid_days ? <> · valid {decision.valid_days} days</> : null}
+          </Alert>
+        )}
 
         {/* ---- the sanction LETTER: template out, signed letter in ------------------- */}
         <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.4 }}>

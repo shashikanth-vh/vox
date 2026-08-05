@@ -273,6 +273,43 @@ async def record_decision(payload: DecisionIn, ctx: RequestContext = Depends(get
         f"'{payload.decision}' is refused.")
 
 
+@router.get("/v1/lending/{lending_id}/committee-decision", tags=["Lending"],
+            summary="The committee's recorded decision on this line (note included)")
+async def lending_committee_decision(lending_id: str,
+                                     ctx: RequestContext = Depends(get_context)):
+    """What the committee actually SAID when it sanctioned this facility — the decision,
+    the approver, their note, the references and any conditions. The sanction-terms
+    screen shows it so the terms are entered against the committee's own words rather
+    than from memory. Gated like every other company-composite read."""
+    import uuid as _uuid_mod
+
+    from app.api.custom import _ensure_company_read
+    from app.models.trackers import LendingTracker
+
+    try:
+        lid = _uuid_mod.UUID(lending_id)
+    except (ValueError, AttributeError):
+        raise ValidationAppError("lending_id must be a valid id.") from None
+    line = (await ctx.session.execute(select(LendingTracker).where(
+        LendingTracker.tenant_id == ctx.tenant_id, LendingTracker.id == lid,
+        LendingTracker.deleted_at.is_(None)))).scalar_one_or_none()
+    if line is None:
+        raise NotFoundError(f"No Lending line {lending_id!r}.")
+    await _ensure_company_read(ctx, line.entity_id)
+    row = (await ctx.session.execute(select(WorkflowDecision).where(
+        WorkflowDecision.tenant_id == ctx.tenant_id,
+        WorkflowDecision.subject_type == "Lending",
+        WorkflowDecision.subject_id == lending_id)
+        .order_by(WorkflowDecision.created_at.desc()))).scalars().first()
+    if row is None:
+        raise NotFoundError("No committee decision is recorded for this line yet.")
+    return {"decision": row.decision, "decided_by": row.decided_by, "note": row.note,
+            "committee_reference": row.committee_reference,
+            "sanction_letter_reference": row.sanction_letter_reference,
+            "conditions": row.conditions, "valid_days": row.valid_days,
+            "created_at": row.created_at.isoformat() if row.created_at else None}
+
+
 @router.get("/v1/internal/decisions/{workflow_id}", tags=["Internal"],
             summary="Read the recorded decision for a workflow")
 async def get_decision(workflow_id: str, ctx: RequestContext = Depends(get_context)):

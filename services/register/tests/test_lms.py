@@ -118,3 +118,17 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
                                json={"entry_date": "2027-01-05", "kind": "Charge",
                                      "amount": 0.1}, headers=ADMIN)
     assert frozen.status_code == 409
+
+
+async def test_the_committee_decision_reads_back_on_the_line(client):
+    """The sanction-terms screen shows the committee's own words — the recorded
+    decision, decider and note come back through the line-scoped read."""
+    from tests.test_handover import _entity, _ready_lending
+
+    eid = await _entity(client)
+    lid = await _ready_lending(client, eid)
+    r = await client.get(f"/v1/lending/{lid}/committee-decision", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["decision"] == "Approved"
+    assert body["decided_by"] == "ch@evamfinance.com"
