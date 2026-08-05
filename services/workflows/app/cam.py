@@ -88,6 +88,20 @@ _SYSTEM = (
     "Answer in clean Markdown."
 )
 
+# The ASK lane is the analyst's open conversation — questions, pasted text, requests of
+# any shape while they fill the CAM in Word. It must answer like a capable assistant,
+# not refuse everything outside the strict drafting frame; only the no-invented-figures
+# rule carries over.
+_ASK_SYSTEM = (
+    "You are the credit desk's assistant at a climate-finance lender, working alongside "
+    "an analyst who is preparing a Credit Assessment Memo. Answer whatever they ask, "
+    "directly and helpfully — questions, summaries, rewrites, calculations, pasted "
+    "text. Use any supplied documents as the factual record: never invent figures "
+    "about the borrower; where a borrower figure is not in the documents, say 'not on "
+    "record'. General knowledge questions are fine to answer from your own knowledge. "
+    "Answer in clean Markdown."
+)
+
 
 # --------------------------------------------------------------------------- #
 # The engine seam
@@ -633,7 +647,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             await _record_turn(request, caller, who, report["id"], "user",
                                payload.instruction
                                + (f"\n[documents sent: {', '.join(sent)}]" if sent else ""))
-            reply = await engine.generate(request.app.state.http, _SYSTEM, turns)
+            reply = await engine.generate(
+                request.app.state.http,
+                _SYSTEM if payload.update_draft else _ASK_SYSTEM, turns)
             # An ASK records the exchange (the transcript stays the audit answer to
             # "where did this figure come from?") but leaves draft_md alone.
             await _record_turn(request, caller, who, report["id"], "assistant",

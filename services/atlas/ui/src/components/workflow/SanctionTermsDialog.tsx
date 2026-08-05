@@ -4,17 +4,17 @@ import {
   IconButton, TextField, Alert, MenuItem, CircularProgress, Divider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { camService, type SanctionTermsOut, type EntityDoc } from '../../services/camService';
 import { documentsService } from '../../services/documentsService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
 
 /**
- * Enter the SANCTIONED terms — once, at committee approval — and the register seeds
- * everything downstream in one transaction: the CP/CS checklist (CP + CS items) and the
- * covenant register (each covenant with its own compliance cycle).
+ * The sanction-LETTER workshop: download the letterhead template (and the approved CAM,
+ * which the letter is written from), file the signed letter, and let the engine fill the
+ * numeric terms out of it. Saving records the terms once and quietly seeds the covenant
+ * register from the letter — CP/CS live entirely in their own screens, which read the
+ * letter themselves.
  *
  * Terms are entered ONCE per line (the register enforces it); corrections go through an
  * amendment, not a second entry — so when terms already exist the dialog shows them
@@ -32,10 +32,6 @@ const blankCov = (): CovRow => ({
   name: '', covenant_type: 'Reporting', metric: '', operator: '>=', threshold: '',
   frequency: 'Monthly', first_due_on: '', breach_severity: 'Amber',
 });
-
-/** "Board resolution for borrowing" -> a stable checklist key. */
-const slug = (s: string): string =>
-  s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60) || 'item';
 
 export default function SanctionTermsDialog({ action, onClose, onDone }: {
   action: WorkflowAction | null;
@@ -72,6 +68,40 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     const r = await documentsService.download({ id: tmpl.id,
       name: 'sanction_letter_template.docx' } as any);
     if (!r.ok) setErr(r.error || 'Could not fetch the template.');
+    setLetterBusy('');
+  };
+
+  // The letter is WRITTEN FROM the approved CAM — hand the analyst the latest one
+  // right here: the filed .docx if a completed CAM is on record, else the newest
+  // drafted text as a .md file. No CAM yet → say so.
+  const downloadCam = async () => {
+    setErr(''); setLetterBusy('cam');
+    try {
+      const reports = await camService.list(lendingId);
+      const filed = [...reports].reverse().find((r) => r.document_id);
+      if (filed?.document_id) {
+        const docs = await camService.lendingDocs(lendingId);
+        const d = docs.find((x) => x.id === filed.document_id);
+        const ext = /wordprocessingml/.test(d?.content_type || '') ? '.docx'
+          : /pdf/.test(d?.content_type || '') ? '.pdf'
+            : /markdown/.test(d?.content_type || '') ? '.md' : '';
+        const out = await documentsService.download({ id: filed.document_id,
+          name: `${d?.title || 'CAM'}${ext}` } as any);
+        if (!out.ok) setErr(out.error || 'The CAM download failed.');
+      } else {
+        const drafted = [...reports].reverse().find((r) => r.draft_md);
+        if (!drafted?.draft_md) {
+          setErr('No CAM on this line yet — prepare it in the CAM workbench first.');
+        } else {
+          const url = URL.createObjectURL(new Blob([drafted.draft_md],
+            { type: 'text/markdown' }));
+          const a = document.createElement('a');
+          a.href = url; a.download = `CAM_v${drafted.report_version}.md`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }
+    } catch (e: any) { setErr(e?.message || String(e)); }
     setLetterBusy('');
   };
 
@@ -124,16 +154,16 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   };
 
   const [f, setF] = useState<Record<string, string>>({});
+  // Covenants come OUT OF THE LETTER (fillFromLetter) and are seeded silently on save —
+  // no editor here; their dates stamp themselves one cycle after the first tranche.
   const [covs, setCovs] = useState<CovRow[]>([]);
-  // One date for every covenant at once — individual rows can still override after.
-  const [allDue, setAllDue] = useState('');
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
     if (!open || !lendingId) return;
     setErr(''); setInfo(''); setBusy(false);
     setF({ rate_kind: 'Fixed', day_count: '365', schedule_kind: 'EMI' });
-    setCovs([]); setAllDue(''); setLetter(null);
+    setCovs([]); setLetter(null);
     setLoading(true);
     camService.terms(lendingId)
       .then(setExisting)
@@ -197,9 +227,6 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setBusy(false);
   };
 
-  const covSet = (i: number, k: keyof CovRow, v: string) =>
-    setCovs((p) => p.map((c, j) => (j === i ? { ...c, [k]: v } : c)));
-
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontSize: 16 }}>
@@ -232,10 +259,15 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               ? <>On file: <b>{letter.title}</b> — replace it by uploading a newer version.</>
               : 'Download the letterhead template, fill it from the committee\'s approval, and file the signed letter here.'}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button size="small" variant="outlined" disabled={!tmpl || letterBusy === 'template'}
               onClick={() => void downloadTemplate()} sx={{ textTransform: 'none' }}>
               {letterBusy === 'template' ? 'Fetching…' : tmpl ? 'Download template' : 'No template on record'}
+            </Button>
+            <Button size="small" variant="outlined" disabled={letterBusy === 'cam'}
+              onClick={() => void downloadCam()} sx={{ textTransform: 'none' }}
+              title="The latest CAM on this line — the letter is written from it">
+              {letterBusy === 'cam' ? 'Fetching…' : 'Download CAM'}
             </Button>
             <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
               disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
@@ -282,8 +314,8 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         ) : (
           <Box>
             <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 1 }}>
-              Entered once, at committee approval. Saving seeds the CP/CS checklist and the
-              covenant register in one step — those artefacts then run their own lifecycles.
+              Entered once, at committee approval — the letter fills these on upload; review
+              and save. CP/CS are worked in their own screens, which read the letter directly.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1 }}>
               <TextField size="small" label="Amount ₹ Cr" type="number" value={f.amount_cr || ''} onChange={(e) => set('amount_cr', e.target.value)} />
@@ -305,48 +337,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               <TextField size="small" label="Moratorium (months)" type="number" value={f.moratorium_months || ''} onChange={(e) => set('moratorium_months', e.target.value)} />
             </Box>
 
-            <Divider sx={{ my: 1.4 }} />
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.6, gap: 1, flexWrap: 'wrap' }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>Covenants</Typography>
-              <TextField size="small" type="date" label="Set ALL first due"
-                InputLabelProps={{ shrink: true }} value={allDue}
-                onChange={(e) => setAllDue(e.target.value)} sx={{ width: 170 }} />
-              <Button size="small" variant="outlined" disabled={!allDue || !covs.length}
-                onClick={() => setCovs((p) => p.map((c) => ({ ...c, first_due_on: allDue })))}
-                sx={{ textTransform: 'none', fontSize: 12 }}>Apply to all</Button>
-              <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />}
-                onClick={() => setCovs((p) => [...p, blankCov()])}
-                sx={{ textTransform: 'none', fontSize: 12 }}>Add covenant</Button>
-            </Box>
-            <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.6 }}>
-              First due may stay EMPTY — a covenant with no date starts automatically one
-              cycle after the first disbursement (the chase runs from there until closure).
-            </Typography>
-            {covs.map((c, i) => (
-              <Box key={i} sx={{ display: 'grid', gap: 0.6, mb: 0.8, p: 0.8,
-                border: `1px solid ${tokens.line}`, borderRadius: 1,
-                gridTemplateColumns: '2fr 1.2fr 1fr 0.7fr 0.9fr 1.1fr 1.2fr 0.9fr auto' }}>
-                <TextField size="small" label="Name" value={c.name} onChange={(e) => covSet(i, 'name', e.target.value)} />
-                <TextField size="small" select label="Type" value={c.covenant_type} onChange={(e) => covSet(i, 'covenant_type', e.target.value)}>
-                  {['Financial', 'Reporting', 'Security', 'Other'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-                </TextField>
-                <TextField size="small" label="Metric" placeholder="dscr" value={c.metric} onChange={(e) => covSet(i, 'metric', e.target.value)} />
-                <TextField size="small" select label="Op" value={c.operator} onChange={(e) => covSet(i, 'operator', e.target.value)}>
-                  {['>=', '<=', '>', '<', '='].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-                </TextField>
-                <TextField size="small" label="Threshold" type="number" value={c.threshold} onChange={(e) => covSet(i, 'threshold', e.target.value)} />
-                <TextField size="small" select label="Frequency" value={c.frequency} onChange={(e) => covSet(i, 'frequency', e.target.value)}>
-                  {/* The register's cycle vocabulary — the sweep steps periods by these. */}
-                  {['Monthly', 'Quarterly', 'SemiAnnual', 'Annual'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-                </TextField>
-                <TextField size="small" label="First due" type="date" InputLabelProps={{ shrink: true }} value={c.first_due_on} onChange={(e) => covSet(i, 'first_due_on', e.target.value)} />
-                <TextField size="small" select label="Severity" value={c.breach_severity} onChange={(e) => covSet(i, 'breach_severity', e.target.value)}>
-                  {['Amber', 'Red'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-                </TextField>
-                <IconButton size="small" onClick={() => setCovs((p) => p.filter((_x, j) => j !== i))}
-                  sx={{ alignSelf: 'center' }}><DeleteOutlineIcon sx={{ fontSize: 17 }} /></IconButton>
-              </Box>
-            ))}
+            {covs.filter((c) => c.name.trim()).length > 0 && (
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 1 }}>
+                {covs.filter((c) => c.name.trim()).length} covenant(s) read from the letter
+                will be opened on save — their reporting cycles start automatically one
+                cycle after the first disbursement.
+              </Typography>
+            )}
 
             <TextField fullWidth size="small" sx={{ mt: 1 }} label="Note (optional)"
               value={f.note || ''} onChange={(e) => set('note', e.target.value)} />
