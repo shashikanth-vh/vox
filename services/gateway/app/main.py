@@ -65,9 +65,12 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
 # Paths whose upstream legitimately takes minutes rather than seconds. A speech capture
 # is transcribed SYNCHRONOUSLY on CPU, and a three-minute clip can decode for longer than
 # that — so the shared 60s upstream timeout would abandon a recording the user has already
-# made, and report it as an upstream failure they cannot act on. The long window is scoped
-# to these prefixes on purpose: a hung register call must never get minutes to hang.
-_SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/template_fill")
+# made, and report it as an upstream failure they cannot act on. The CAM workbench is the
+# same shape: the engine reads several documents and writes a long answer synchronously.
+# The long window is scoped to these prefixes on purpose: a hung register call must never
+# get minutes to hang.
+_SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/template_fill",
+               "/orchestrator/v1/cam/")
 
 
 def _timeout_for(settings, full_path: str) -> float:  # noqa: ANN001

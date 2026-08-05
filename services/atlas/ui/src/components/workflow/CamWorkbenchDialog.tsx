@@ -174,7 +174,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     setInstruction(out.draft_md || '');
     setSel(new Set());
     const skipped = (out.documents || []).filter((d: any) => !d.included);
-    return "Claude's answer is in the box — edit it, or add your next question under it and ask again."
+    return 'The answer is in the box — edit it, or add your next question under it and ask again.'
       + (skipped.length ? ` ${skipped.length} document(s) could not be read.` : '');
   });
 
@@ -331,7 +331,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   onClick={() => void downloadPrompt()}>Download EVAM CAM prompt</Button>
               )}
               <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                Fill the template in Word while you work with Claude below.
+                Fill the template in Word while you work below.
               </Typography>
             </Box>
             {working.status === 'Returned' && (
@@ -344,7 +344,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             {/* The conversation — one box, both directions. */}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <TextField fullWidth size="small" multiline minRows={8} maxRows={18}
-                label="Work with Claude — the answer appears here; edit it or add your next question"
+                label="Ask anything — the answer appears here; edit it or add your next question"
                 value={instruction} onChange={(e) => setInstruction(e.target.value)}
                 sx={{ '& textarea': { fontSize: 12.6, lineHeight: 1.5 } }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
@@ -352,7 +352,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
                   title="Sends everything in the box; the reply replaces it"
                   sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'ask' ? 'Asking…' : 'Ask Claude'}
+                  {busy === 'ask' ? 'Asking…' : 'Ask'}
                 </Button>
                 <Button variant="outlined" size="small" disabled={!instruction || !!busy}
                   onClick={() => void navigator.clipboard?.writeText(instruction)}

@@ -100,7 +100,8 @@ export const camService = {
   async docText(docId: string): Promise<{ text: string; reason?: string;
                                           truncated?: boolean; attachable?: boolean }> {
     try {
-      return await orchestrator.get<any>('/v1/cam/doc-text', { doc_id: docId });
+      return await orchestrator.get<any>('/v1/cam/doc-text', { doc_id: docId },
+        { timeoutMs: 60_000 });
     } catch (e) { throw new Error(msg(e, 'read that document')); }
   },
 
@@ -112,7 +113,9 @@ export const camService = {
   }): Promise<{ report_id: string; draft_md: string; engine: string;
                 included: any[]; skipped: any[] }> {
     try {
-      return await orchestrator.post<any>(`/v1/cam/${lendingId}/generate`, input);
+      // Reading several documents and writing a long answer takes minutes, not seconds.
+      return await orchestrator.post<any>(`/v1/cam/${lendingId}/generate`, input,
+        { timeoutMs: 320_000 });
     } catch (e) { throw new Error(msg(e, 'draft the CAM')); }
   },
 
@@ -127,7 +130,8 @@ export const camService = {
     try {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/refine`,
         { instruction, update_draft: updateDraft,
-          ...(sourceDocIds.length ? { source_doc_ids: sourceDocIds } : {}) });
+          ...(sourceDocIds.length ? { source_doc_ids: sourceDocIds } : {}) },
+        { timeoutMs: 320_000 });
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
@@ -138,7 +142,8 @@ export const camService = {
                  documentId?: string): Promise<{ document_id: string }> {
     try {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/finalise`,
-        { ...(title ? { title } : {}), ...(documentId ? { document_id: documentId } : {}) });
+        { ...(title ? { title } : {}), ...(documentId ? { document_id: documentId } : {}) },
+        { timeoutMs: 120_000 });
     } catch (e) { throw new Error(msg(e, 'finalise the CAM')); }
   },
 

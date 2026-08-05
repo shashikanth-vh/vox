@@ -136,7 +136,7 @@ class AnthropicEngine(CamEngine):
             headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
             json={"model": self.model, "max_tokens": 8192, "system": system,
                   "messages": turns},
-            timeout=120.0)
+            timeout=240.0)
         if r.status_code >= 300:
             detail = ""
             try:
