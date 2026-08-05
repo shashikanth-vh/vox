@@ -165,9 +165,17 @@ async def create_checklist(payload: ChecklistIn,
     return _serialize(row)
 
 
+class ApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Optional — an approval may carry the checker's words; they land on the audit
+    # record (returns/rejections still REQUIRE a reason, this stays their opposite).
+    note: str | None = Field(default=None, max_length=4000)
+
+
 @router.post("/v1/internal/cpcs-checklists/{checklist_id}/approve", tags=["Internal"],
              summary="Approve the CP/CS checklist (checker; must differ from the maker)")
 async def approve_checklist(checklist_id: str,
+                            payload: ApproveIn | None = None,
                             ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     from app.authz.engine import enforce_operation
 
@@ -201,7 +209,8 @@ async def approve_checklist(checklist_id: str,
         resource_type="cp_cs_checklists", resource_id=str(row.id),
         request_id=request_id_ctx.get(),
         changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
-                 "status": "Approved"}))
+                 "status": "Approved",
+                 **({"note": payload.note} if payload and payload.note else {})}))
     return _serialize(row)
 
 

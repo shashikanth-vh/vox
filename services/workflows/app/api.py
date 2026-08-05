@@ -218,7 +218,10 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "label": "Update CS checklist",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS,
-            "stages": {"CP/CS Completed", "Ready for Disbursement", "Disbursed"},
+            # Gated on the CP checklist being APPROVED (checked below with live data),
+            # not on a stage move the analyst may not have made yet.
+            "stages": {"Sanctioned", "CP/CS Completed", "Ready for Disbursement",
+                       "Disbursed"},
             "stage_reason": "Conditions subsequent are worked once the CP checklist is "
                             "approved and disbursement is in motion.",
             "screen": "cpcs-checklist",
@@ -942,6 +945,9 @@ class CpcsChecklistIn(BaseModel):
 class CpcsApproveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     approved_by: str = Field(max_length=200)
+    # Optional: an approval may carry the checker's words — forwarded to the register's
+    # audit record. (A note used to be REFUSED here: typing one blocked the approval.)
+    note: str | None = Field(default=None, max_length=4000)
 
 
 class CamApproveIn(BaseModel):
@@ -2438,7 +2444,8 @@ def create_app() -> FastAPI:
                             "Approving a CP/CS checklist requires Credit Head / Management / Admin "
                             "authority.")
         approved = await _register_post_as(
-            request, f"/v1/internal/cpcs-checklists/{checklist_id}/approve", approved_by, checker, {})
+            request, f"/v1/internal/cpcs-checklists/{checklist_id}/approve", approved_by,
+            checker, {"note": payload.note} if payload.note else {})
         if approved.status_code >= 300:
             return approved
 
@@ -3353,6 +3360,7 @@ def create_app() -> FastAPI:
         # after they have filled the whole form in — the plane knows the answer, so it
         # gives it rather than letting them guess.
         next_version = 1
+        latest_checklist_status = ""
         if subject_type == "Lending":
             existing, ver_problem = await _register_get_as(
                 request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
@@ -3368,11 +3376,25 @@ def create_app() -> FastAPI:
                 rows = existing.get("items") if isinstance(existing, dict) else existing
                 versions = [int(r.get("checklist_version") or 0) for r in (rows or [])]
                 next_version = (max(versions) + 1) if versions else 1
+                if rows:
+                    latest = max(rows, key=lambda r: int(r.get("checklist_version") or 0))
+                    latest_checklist_status = str(latest.get("status") or "")
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
             enabled, reason = _evaluate_action(spec, roles=roles, stage=stage,
                                                run_state=run_state)
+            # The CS step opens on the CP APPROVAL itself — the live checklist state,
+            # not a stage the analyst may not have moved yet. (Latest version awaiting
+            # a checker also waits: no stacking a new version on an undecided one.)
+            if (spec["key"] == "cpcs.update-cs" and enabled
+                    and latest_checklist_status != "Approved"):
+                enabled = False
+                reason = ("Conditions subsequent open once the CP checklist is "
+                          "APPROVED — send it for checking and get the checker's "
+                          "approval first."
+                          if latest_checklist_status else
+                          "Prepare and get the CP checklist approved first.")
             url = spec["url"].format(workflow_id=workflow_id, subject_id=subject_id)
             body = dict(spec.get("constant") or {})
             for field, source in (spec.get("prefill") or {}).items():

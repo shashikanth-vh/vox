@@ -8212,6 +8212,10 @@
                 "key": "X-API-Key",
                 "value": "{{apiKey}}",
                 "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "url": {
@@ -8226,6 +8230,15 @@
                 "{{{checklistId}}}",
                 "approve"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },

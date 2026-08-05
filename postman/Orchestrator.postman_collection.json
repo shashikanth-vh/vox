@@ -1190,7 +1190,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approved_by\": \"sample approved_by\"\n}",
+              "raw": "{\n  \"approved_by\": \"sample approved_by\",\n  \"note\": \"sample note\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

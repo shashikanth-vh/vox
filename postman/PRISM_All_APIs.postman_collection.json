@@ -7360,6 +7360,10 @@
                   {
                     "key": "Authorization",
                     "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
                   }
                 ],
                 "url": {
@@ -7374,6 +7378,15 @@
                     "{{checklist_id}}",
                     "approve"
                   ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             },
@@ -13597,7 +13610,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approved_by\": \"sample\"\n}",
+                  "raw": "{\n  \"approved_by\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
