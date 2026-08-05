@@ -268,10 +268,17 @@ async def record_cs_progress(checklist_id: str, payload: CsProgressIn,
                           **({"reason": upd.note} if upd.note else {})})
             changed.append(f"+{upd.key}")
             continue
-        if str(existing.get("condition_type")) != "CS":
+        deferred = str(existing.get("status")) == "Deferred as CS"
+        if str(existing.get("condition_type")) != "CS" and not deferred:
             raise ValidationAppError(
                 f"Item {upd.key!r} is a CP — the CP half is decided by the checker and "
                 "does not change here.")
+        if deferred:
+            # 'Deferred as CS' CONVERTED the CP into a post-disbursement obligation —
+            # make that literal on first progress (provenance kept), so the item keeps
+            # behaving as a CS from here on instead of freezing back into the CP half.
+            existing["condition_type"] = "CS"
+            existing["deferred_from"] = "CP"
         existing["status"] = upd.status
         if upd.evidence_ref is not None:
             existing["evidence_ref"] = upd.evidence_ref

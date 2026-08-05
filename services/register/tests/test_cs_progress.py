@@ -72,3 +72,57 @@ async def test_cs_receipt_updates_the_approved_row_and_cp_stays_frozen(client):
     assert extra.status_code == 200, extra.text
     assert any(i["key"] == "cs3" and i["condition_type"] == "CS"
                for i in extra.json()["items"])
+
+
+async def test_a_deferred_cp_completes_its_lifecycle_through_cs_progress(client):
+    """A CP 'Deferred as CS' (senior authority, reason + expiry) is an OBLIGATION, not
+    a frozen decision: when its document finally arrives, CS progress retires it — the
+    item converts to CS (provenance kept) and the chase reminder goes quiet."""
+    eid = await _entity(client)
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": lid, "status": "Completed",
+              "items": [
+                  {"key": "cp1", "label": "Security created", "condition_type": "CP",
+                   "status": "Completed"},
+                  {"key": "cp2", "label": "Insurance policy assigned",
+                   "condition_type": "CP", "status": "Deferred as CS",
+                   "reason": "Insurer needs 30 days; disbursement approved without.",
+                   "expiry_date": "2026-09-04"}]},
+        headers=CREDIT_HEAD)
+    assert chk.status_code == 201, chk.text
+    cid = chk.json()["id"]
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/approve",
+                              headers=ADMIN)).status_code == 200
+
+    # The deferred item is still being CHASED on the approved checklist.
+    fu = (await client.get("/v1/internal/follow-ups", headers=ADMIN)).json()
+    mine = next(i for i in fu["items"]
+                if i["kind"] == "cs-followup" and i["lending_id"] == lid)
+    assert "Insurance policy assigned" in mine["outstanding"]
+
+    # The policy arrives → CS progress retires the deferred CP, in place.
+    got = await client.post(
+        f"/v1/internal/cpcs-checklists/{cid}/cs-progress",
+        json={"items": [{"key": "cp2", "status": "Completed",
+                         "evidence_ref": "doc/insurance-endt-1"}]},
+        headers=ADMIN)
+    assert got.status_code == 200, got.text
+    by_key = {i["key"]: i for i in got.json()["items"]}
+    assert by_key["cp2"]["status"] == "Completed"
+    assert by_key["cp2"]["condition_type"] == "CS"      # the conversion made literal
+    assert by_key["cp2"]["deferred_from"] == "CP"       # provenance kept
+    assert by_key["cp1"]["status"] == "Completed"       # the decided CP half untouched
+
+    # The chase for this line is over.
+    fu = (await client.get("/v1/internal/follow-ups", headers=ADMIN)).json()
+    assert not any(i["kind"] == "cs-followup" and i["lending_id"] == lid
+                   for i in fu["items"])
+
+    # A decided (non-deferred) CP still cannot be reopened through this lane.
+    cp = await client.post(f"/v1/internal/cpcs-checklists/{cid}/cs-progress",
+                           json={"items": [{"key": "cp1", "status": "Pending"}]},
+                           headers=ADMIN)
+    assert cp.status_code == 422 and "CP" in cp.text

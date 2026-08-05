@@ -8,7 +8,7 @@ import { DrawerSection } from '../../../components/common/Field';
 import { CodeText } from '../../../components/common/Pills';
 import {
   lmsService, type LedgerEntry, type LoanAccount, type Observation,
-  type TrancheSchedule,
+  type OpenCondition, type TrancheSchedule,
 } from '../../../services/lmsService';
 import { useAuth } from '../../../auth/AuthContext';
 import { can, whoCan } from '../../../auth/rbac';
@@ -68,6 +68,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [sched, setSched] = useState<TrancheSchedule | null>(null);
   const [obs, setObs] = useState<Observation[]>([]);
+  const [conds, setConds] = useState<OpenCondition[]>([]);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
@@ -85,6 +86,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
     setErr('');
     try {
       setSched(await lmsService.tranches(row.id).catch(() => null));
+      setConds(await lmsService.openConditions(row.id));
       if (row.entityId) {
         setObs(await lmsService.observations(row.entityId, row.id).catch(() => []));
       } else setObs([]);
@@ -271,6 +273,42 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                 </Box>
               </>
             )}
+          </DrawerSection>
+        )}
+
+        {/* ---- ②b Outstanding CP/CS conditions — the deferred chase, on the loan --- */}
+        {conds.length > 0 && (
+          <DrawerSection title={`Outstanding conditions (${conds.length})`}>
+            {conds.map((c) => (
+              <Box key={c.key} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
+                py: 0.35, borderBottom: `1px dashed ${tokens.line}`,
+                '&:last-of-type': { borderBottom: 'none' } }}>
+                <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
+                  bgcolor: c.status === 'Deferred as CS' ? '#E8EDF9' : '#EEF1F3',
+                  color: c.status === 'Deferred as CS' ? '#2A4B8D' : '#5F6E76' }}>
+                  {c.status === 'Deferred as CS' ? 'CP · deferred' : c.condition_type}
+                </Typography>
+                <Typography sx={{ fontSize: 12.3, flex: 1 }} title={c.reason || ''}>
+                  {c.label}
+                </Typography>
+                {c.expiry_date && (
+                  <Typography sx={{ fontSize: 11.5,
+                    color: c.overdue ? '#7C4A3E' : tokens.muted }}>
+                    due {c.expiry_date}
+                  </Typography>
+                )}
+                {c.overdue && (
+                  <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
+                    borderRadius: 1, bgcolor: '#FDE8E4', color: '#7C4A3E' }}>
+                    Overdue
+                  </Typography>
+                )}
+              </Box>
+            ))}
+            <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
+              Receipts are recorded on the CP/CS checklist (LOS → the line's workflow
+              actions) — a recorded document retires its condition here at once.
+            </Typography>
           </DrawerSection>
         )}
 

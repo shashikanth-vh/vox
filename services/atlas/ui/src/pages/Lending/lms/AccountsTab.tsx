@@ -90,12 +90,22 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
   const acctRows = bookQuery.data ?? [];
   const noAccount = rows.length - acctRows.length;
 
-  // The queue of pending bookings (whole-book; roles without the LMS verbs see none).
+  // The queue of pending bookings (whole-book; roles without the LMS verbs see none) —
+  // each line annotated with its OVERDUE deferred conditions, so the authorizer sees
+  // an expired CS chase before booking more money onto that line.
   const queueQuery = useQuery({
     queryKey: ['lms-pending-bookings'],
-    queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
+    queryFn: async () => {
+      const items = await lmsService.pendingBookings().catch(() => [] as TrancheItem[]);
+      const ids = [...new Set(items.map((t) => t.lending_id))];
+      const overdue = await Promise.all(ids.map(async (id) => ({
+        id, n: (await lmsService.openConditions(id)).filter((c) => c.overdue).length,
+      })));
+      return { items, overdueBy: Object.fromEntries(overdue.map((o) => [o.id, o.n])) };
+    },
   });
-  const queue = queueQuery.data ?? [];
+  const queue = queueQuery.data?.items ?? [];
+  const overdueBy: Record<string, number> = queueQuery.data?.overdueBy ?? {};
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['lms-accounts-book'] });
@@ -156,6 +166,12 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
                     {[t.tranche_ref, t.disbursed_on, `by ${t.recorded_by || '—'}`]
                       .filter(Boolean).join(' · ')}
                   </Typography>
+                  {(overdueBy[t.lending_id] ?? 0) > 0 && (
+                    <Chip size="small"
+                      label={`${overdueBy[t.lending_id]} condition${overdueBy[t.lending_id] > 1 ? 's' : ''} overdue`}
+                      title="Deferred CP/CS conditions past their expiry on this line — check before booking more money."
+                      sx={{ height: 20, fontSize: 11, bgcolor: '#FDE8E4', color: '#7C4A3E' }} />
+                  )}
                   {authorize && rejecting?.id !== t.id && (
                     <Box sx={{ ml: 'auto', display: 'flex', gap: 0.8 }}>
                       <Button size="small" variant="contained" disabled={!!busy}

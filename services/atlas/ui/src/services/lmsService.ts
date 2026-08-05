@@ -36,6 +36,11 @@ export interface TrancheSchedule {
   fully_disbursed: boolean; remaining?: number | null;
 }
 
+export interface OpenCondition {
+  key: string; label: string; condition_type: string; status: string;
+  reason?: string; expiry_date?: string; overdue: boolean;
+}
+
 export interface Covenant {
   id: string; entity_id: string; lending_id?: string; name: string;
   covenant_type: string; description?: string; metric?: string; operator?: string;
@@ -137,6 +142,30 @@ export const lmsService = {
       return await api.post<any>(`/lending/${lendingId}/tranches/${trancheId}/book`,
         { action, ...(note ? { note } : {}) });
     } catch (e) { throw new Error(msg(e, `${action} the booking`)); }
+  },
+
+  /** The line's OUTSTANDING CP/CS conditions from its latest approved checklist —
+   *  everything not yet Completed/Waived, with deferred-item expiry flagged. The
+   *  servicing desk reads them on the account; receipts are recorded on the
+   *  checklist itself (CS progress). */
+  async openConditions(lendingId: string): Promise<OpenCondition[]> {
+    try {
+      const raw = await api.get<any>('/internal/cpcs-checklists',
+        { lending_id: lendingId });
+      const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
+      const approved = lists.filter((l) => l.status === 'Approved')
+        .sort((a, b) => (a.checklist_version || 0) - (b.checklist_version || 0)).pop();
+      const today = new Date().toISOString().slice(0, 10);
+      return ((approved?.items || []) as any[])
+        .filter((i) => !['Completed', 'Waived'].includes(String(i.status)))
+        .map((i) => ({
+          key: String(i.key), label: String(i.label || i.key),
+          condition_type: String(i.condition_type || 'CS'),
+          status: String(i.status || 'Pending'),
+          reason: i.reason, expiry_date: i.expiry_date,
+          overdue: !!i.expiry_date && String(i.expiry_date) < today,
+        }));
+    } catch { return []; }
   },
 
   // ---- covenants -----------------------------------------------------------
