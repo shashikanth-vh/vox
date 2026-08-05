@@ -26,6 +26,8 @@ Access record without a Dex entry has roles but no way to log in. You need both.
 | `priya.nair@evamfinance.com` | Priya Nair | BDRM, Syn RM, AM RM |
 | `lakshmi.narayanan@evamfinance.com` | Lakshmi Narayanan | **LMS Operator** (servicing maker) |
 | `suresh.kumar@evamfinance.com` | Suresh Kumar | **LMS Management** (servicing checker) |
+| `rohit.sharma@evamfinance.com` | Rohit Sharma | **LMS Operator** — reports to Karthik |
+| `karthik.reddy@evamfinance.com` | Karthik Reddy | **LMS Management** |
 
 The LMS pair exists because four-eyes at the booking gate is enforced server-side:
 the person who records a disbursement tranche can never approve its booking, so the

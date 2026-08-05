@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PRISM Demo Users (Divya · Arun · Priya + LMS pair)",
-    "description": "One click instead of the Add-employee dialog five times: sign in as ADMIN, provision the demo trio AND the LMS servicing pair in Access, sync the roster, set the reporting lines. Idempotent — run it after every fresh start.\n\nUse the PRISM_Full (or PRISM_Full_Dex) environment. Sign-in passwords for all five ship in the Dex dev config: 'prism' (the LMS pair joined Dex in commit 5d4bf41 — restart dex after deploying that zip).\n\nThe LMS pair is the maker/checker at the LOS→LMS booking gate: the OPERATOR records tranches/receipts/conditions on the servicing book; the AUTHORIZER approves bookings, classifies (SMA/NPA), waives covenant breaches and closes accounts. Four-eyes is enforced server-side — the recorder can never settle their own booking, which is why the demo needs BOTH identities.",
+    "description": "One click instead of the Add-employee dialog five times: sign in as ADMIN, provision the demo trio AND the LMS servicing pair in Access, sync the roster, set the reporting lines. Idempotent — run it after every fresh start.\n\nUse the PRISM_Full (or PRISM_Full_Dex) environment. Sign-in passwords for all five ship in the Dex dev config: 'prism' (the LMS pair joined Dex in commit 5d4bf41 — restart dex after deploying that zip).\n\nThe LMS pair is the maker/checker at the LOS→LMS booking gate: the OPERATOR records tranches/receipts/conditions on the servicing book; the AUTHORIZER approves bookings, classifies (SMA/NPA), waives covenant breaches and closes accounts. Four-eyes is enforced server-side — the recorder can never settle their own booking, which is why the demo needs BOTH identities.\n\nAlso provisions Karthik Reddy (LMS Management) and Rohit Sharma (LMS Operator), with Rohit reporting to Karthik — a second servicing pair from the familiar demo team, so the four-eyes booking demo runs on known faces.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -396,6 +396,132 @@
       ]
     },
     {
+      "name": "POST /access/v1/users — Karthik (LMS Management)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{accessUrl}}/v1/users",
+          "host": [
+            "{{accessUrl}}"
+          ],
+          "path": [
+            "v1",
+            "users"
+          ]
+        },
+        "description": "Identity + roles (the RBAC half). 409 = already provisioned — fine. The servicing CHECKER: approves/rejects pending bookings (approval opens/grows the loan account and hands the checklist over), classifies SMA/NPA, sets provisioning, waives covenant breaches, closes accounts. Rohit reports to him.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"karthik.reddy@evamfinance.com\",\n  \"full_name\": \"Karthik Reddy\",\n  \"short_name\": \"Karthik\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Management\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /access/v1/users — Rohit (LMS Operator)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{accessUrl}}/v1/users",
+          "host": [
+            "{{accessUrl}}"
+          ],
+          "path": [
+            "v1",
+            "users"
+          ]
+        },
+        "description": "Identity + roles (the RBAC half). 409 = already provisioned — fine. The servicing MAKER on Karthik's team: records tranches for booking approval, posts computed interest and receipts, marks conditions received, records covenant results. Four-eyes means Karthik — never Rohit — settles what Rohit records.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"rohit.sharma@evamfinance.com\",\n  \"full_name\": \"Rohit Sharma\",\n  \"short_name\": \"Rohit\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Operator\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created or already exists', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "POST /v1/internal/people/sync-access — roster catches up",
       "request": {
         "method": "POST",
@@ -443,7 +569,7 @@
             "exec": [
               "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
               "const b = pm.response.json() || {};",
-              "pm.test('roster holds the demo team + LMS pair', () => pm.expect(b.roster_total || 0).to.be.at.least(5));"
+              "pm.test('roster holds the full demo team', () => pm.expect(b.roster_total || 0).to.be.at.least(7));"
             ]
           }
         }
@@ -676,6 +802,129 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"reports_to\": \"Divya\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /v1/people/resolve — rohit",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/resolve?name=rohit.sharma@evamfinance.com",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "resolve"
+          ],
+          "query": [
+            {
+              "key": "name",
+              "value": "rohit.sharma@evamfinance.com"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status ok', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]));",
+              "const r = (pm.response.json() || {}).resolved;",
+              "if (r && r.id) pm.environment.set('demo_rohit_personId', r.id); else pm.environment.unset('demo_rohit_personId');",
+              "pm.test('rohit is on the roster', () => pm.expect(r, 'not resolved — did the sync request fail?').to.exist);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "PATCH /v1/people — rohit reports to Karthik",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-Actor",
+            "value": "demo-users"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "X-User-Roles",
+            "value": "Admin"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/v1/people/{{demo_rohit_personId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "people",
+            "{{demo_rohit_personId}}"
+          ]
+        },
+        "description": "The reporting line drives team scope (a Head sees their reports' book). Roster-only — Access keys users by id, so the line lives here.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reports_to\": \"Karthik\"\n}",
           "options": {
             "raw": {
               "language": "json"
