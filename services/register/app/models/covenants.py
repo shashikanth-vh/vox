@@ -56,7 +56,10 @@ class Covenant(RegisterBase):
     frequency: Mapped[str] = mapped_column(
         String(12), nullable=False, default="Quarterly", server_default="Quarterly"
     )  # ref: Covenant Frequency
-    first_due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    # Nullable ON PURPOSE: a covenant entered at sanction may DEFER its schedule —
+    # the first due date is stamped one cycle after the first confirmed disbursement
+    # tranche (see app.api.lms), because that is when the obligation actually starts.
+    first_due_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     grace_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0,
                                             server_default="0")
     breach_severity: Mapped[str] = mapped_column(

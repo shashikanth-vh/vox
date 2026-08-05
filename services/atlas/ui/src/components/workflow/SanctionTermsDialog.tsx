@@ -95,30 +95,35 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setErr(''); setLetterBusy('parse');
     try {
       const out = await camService.extractTerms(letter.id);
-      setCpText(out.cp_items.join('\n'));
-      setCsText(out.cs_items
-        .map((c) => c.label + (c.timeline ? ` (${c.timeline})` : '')).join('\n'));
+      setCpRows(out.cp_items);
+      setCsRows(out.cs_items
+        .map((c) => c.label + (c.timeline ? ` (${c.timeline})` : '')));
       setCovs(out.covenants.map((c) => ({
         ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
         frequency: c.frequency,
       })));
       setInfo(`Read from the letter: ${out.cp_items.length} CP, ${out.cs_items.length} CS, `
-        + `${out.covenants.length} covenant(s). Review below and set each covenant's first due date.`);
+        + `${out.covenants.length} covenant(s). Review below — covenant due dates may stay `
+        + 'empty; they start one cycle after the first disbursement.');
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLetterBusy('');
   };
 
   const [f, setF] = useState<Record<string, string>>({});
-  const [cpText, setCpText] = useState('');
-  const [csText, setCsText] = useState('');
+  // Each condition is its OWN row (like the covenants) — the letter has many, and a
+  // single textarea made ten conditions read as one blob.
+  const [cpRows, setCpRows] = useState<string[]>([]);
+  const [csRows, setCsRows] = useState<string[]>([]);
   const [covs, setCovs] = useState<CovRow[]>([]);
+  // One date for every covenant at once — individual rows can still override after.
+  const [allDue, setAllDue] = useState('');
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
     if (!open || !lendingId) return;
     setErr(''); setInfo(''); setBusy(false);
     setF({ rate_kind: 'Fixed', day_count: '365', schedule_kind: 'EMI' });
-    setCpText(''); setCsText(''); setCovs([]); setLetter(null);
+    setCpRows([]); setCsRows([]); setCovs([]); setAllDue(''); setLetter(null);
     setLoading(true);
     camService.terms(lendingId)
       .then(setExisting)
@@ -132,8 +137,9 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setErr('');
     const num = (k: string) => (f[k]?.trim() ? Number(f[k]) : undefined);
     const covenants = covs.filter((c) => c.name.trim());
+    // No first-due date is FINE: the covenant defers, and its schedule stamps itself
+    // one cycle after the first confirmed disbursement tranche.
     for (const c of covenants) {
-      if (!c.first_due_on) { setErr(`Covenant "${c.name}": first due date is required.`); return; }
       if (c.covenant_type === 'Financial' && !(c.metric && c.operator && c.threshold.trim())) {
         setErr(`Covenant "${c.name}": a Financial covenant needs metric + operator + threshold.`);
         return;
@@ -151,12 +157,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         day_count: f.day_count || '365', penal_rate_pct: num('penal_rate_pct'),
         moratorium_months: num('moratorium_months') ?? 0,
         schedule_kind: f.schedule_kind || 'EMI',
-        cp_items: toItems(cpText), cs_items: toItems(csText),
+        cp_items: toItems(cpRows.join('\n')), cs_items: toItems(csRows.join('\n')),
         covenants: covenants.map((c) => ({
           name: c.name.trim(), covenant_type: c.covenant_type,
           ...(c.metric ? { metric: c.metric } : {}),
           ...(c.covenant_type === 'Financial' ? { operator: c.operator, threshold: Number(c.threshold) } : {}),
-          frequency: c.frequency, first_due_on: c.first_due_on,
+          frequency: c.frequency,
+          ...(c.first_due_on ? { first_due_on: c.first_due_on } : {}),
           breach_severity: c.breach_severity,
         })),
         note: f.note || undefined,
@@ -265,22 +272,57 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
             </Box>
 
             <Divider sx={{ my: 1.4 }} />
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-              <TextField size="small" multiline minRows={3} label="Conditions PRECEDENT — one per line"
-                placeholder={'Board resolution for borrowing\nSecurity created and charge filed'}
-                value={cpText} onChange={(e) => setCpText(e.target.value)} />
-              <TextField size="small" multiline minRows={3} label="Conditions SUBSEQUENT — one per line"
-                placeholder={'End-use certificate\nInsurance assignment'}
-                value={csText} onChange={(e) => setCsText(e.target.value)} />
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.4 }}>
+              {([['Conditions PRECEDENT', cpRows, setCpRows],
+                 ['Conditions SUBSEQUENT', csRows, setCsRows]] as const)
+                .map(([label, rows, setRows]) => (
+                <Box key={label}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.4 }}>
+                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
+                      {label} ({rows.filter((r) => r.trim()).length})
+                    </Typography>
+                    <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />}
+                      onClick={() => setRows((p: string[]) => [...p, ''])}
+                      sx={{ textTransform: 'none', fontSize: 12 }}>Add</Button>
+                  </Box>
+                  {rows.length === 0 && (
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                      None yet — Add, or read them from the letter above.
+                    </Typography>
+                  )}
+                  {rows.map((r, i) => (
+                    <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.5, alignItems: 'center' }}>
+                      <TextField size="small" fullWidth multiline maxRows={3} value={r}
+                        placeholder="Condition"
+                        onChange={(e) => setRows((p: string[]) =>
+                          p.map((x, j) => (j === i ? e.target.value : x)))} />
+                      <IconButton size="small"
+                        onClick={() => setRows((p: string[]) => p.filter((_x, j) => j !== i))}>
+                        <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+              ))}
             </Box>
 
             <Divider sx={{ my: 1.4 }} />
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.6 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.6, gap: 1, flexWrap: 'wrap' }}>
               <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>Covenants</Typography>
+              <TextField size="small" type="date" label="Set ALL first due"
+                InputLabelProps={{ shrink: true }} value={allDue}
+                onChange={(e) => setAllDue(e.target.value)} sx={{ width: 170 }} />
+              <Button size="small" variant="outlined" disabled={!allDue || !covs.length}
+                onClick={() => setCovs((p) => p.map((c) => ({ ...c, first_due_on: allDue })))}
+                sx={{ textTransform: 'none', fontSize: 12 }}>Apply to all</Button>
               <Button size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />}
                 onClick={() => setCovs((p) => [...p, blankCov()])}
                 sx={{ textTransform: 'none', fontSize: 12 }}>Add covenant</Button>
             </Box>
+            <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.6 }}>
+              First due may stay EMPTY — a covenant with no date starts automatically one
+              cycle after the first disbursement (the chase runs from there until closure).
+            </Typography>
             {covs.map((c, i) => (
               <Box key={i} sx={{ display: 'grid', gap: 0.6, mb: 0.8, p: 0.8,
                 border: `1px solid ${tokens.line}`, borderRadius: 1,

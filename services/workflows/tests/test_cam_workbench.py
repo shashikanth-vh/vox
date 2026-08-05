@@ -240,12 +240,18 @@ async def test_an_ask_answers_without_touching_the_working_draft(monkeypatch):
     assert [t["role"] for t in stub.turns][-2:] == ["user", "assistant"]
 
 
-async def test_refine_without_an_open_draft_is_a_404_not_a_new_version(monkeypatch):
+async def test_the_first_ask_opens_the_version_itself(monkeypatch):
+    """The workbench is a conversation from the first question: an ask on a line with no
+    open CAM opens the version row and answers — no generate-then-talk two-step."""
     app = _app(monkeypatch)
-    app.state.http = _RegisterStub()
+    stub = _RegisterStub()
+    app.state.http = stub
     r = await _call(app, "POST", f"/v1/cam/{LENDING}/refine",
-                    json={"instruction": "anything"})
-    assert r.status_code == 404, r.text
+                    json={"instruction": "Summarise the file.", "update_draft": False})
+    assert r.status_code == 200, r.text
+    assert len(stub.reports) == 1
+    row = next(iter(stub.reports.values()))
+    assert row["status"] == "Draft" and row["lending_id"] == LENDING
 
 
 async def test_scanned_pdfs_reach_an_engine_that_reads_them(monkeypatch):

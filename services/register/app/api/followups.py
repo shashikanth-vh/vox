@@ -154,6 +154,10 @@ async def list_follow_ups(
                               "due_on": (m.due_date or today).isoformat(),
                               "overdue": m.status == "Overdue" or grace_until < today})
         else:
+            # A deferred schedule (no first due yet — it stamps at first disbursement)
+            # simply does not remind.
+            if cov.first_due_on is None:
+                continue
             # No observation minted yet (sweep not run) — fall back to the computed
             # current cycle so the reminder never depends on a cron having fired.
             due = current_due(cov.first_due_on, cov.frequency, today)

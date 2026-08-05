@@ -91,7 +91,10 @@ class SeedCovenant(BaseModel):
     operator: str | None = Field(default=None, pattern="^(>=|<=|>|<|=)$")
     threshold: float | None = None
     frequency: str = Field(default="Quarterly")
-    first_due_on: date
+    # Optional ON PURPOSE: the schedule may start with the money — a covenant seeded
+    # without a date gets its first due stamped one cycle after the first confirmed
+    # disbursement tranche.
+    first_due_on: date | None = None
     grace_days: int = Field(default=0, ge=0, le=365)
     breach_severity: str = Field(default="Amber", pattern="^(Amber|Red)$")
 

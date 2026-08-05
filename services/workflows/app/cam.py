@@ -532,9 +532,18 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return err
         caller, _ = caller_context(request, who)
         report = await _open_report(request, caller, who, lending_id)
+        # First ask on this line? The version OPENS ITSELF — the workbench is a
+        # conversation from the first question, not a generate-then-talk two-step.
         if report is None:
-            return problem(404, "Not found",
-                           "This line has no CAM draft in progress — generate one first.")
+            open_path = "/v1/internal/cam-reports"
+            opened = await request.app.state.http.post(
+                f"{base}{open_path}",
+                json={"lending_id": lending_id, "engine": engine.name},
+                headers=_reg_headers(request, caller, who, "POST", open_path))
+            if opened.status_code >= 300:
+                return problem(opened.status_code if opened.status_code in (403, 404, 409)
+                               else 502, "CAM not opened", opened.text[:500])
+            report = opened.json()
         # Rebuild the conversation from the durable transcript (engines are stateless).
         path = f"/v1/internal/cam-reports/{report['id']}"
         full = await request.app.state.http.get(

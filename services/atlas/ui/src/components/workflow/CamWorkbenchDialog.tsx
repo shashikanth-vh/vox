@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, TextField, Alert, Chip, Checkbox, MenuItem, CircularProgress, Divider,
+  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -30,9 +30,6 @@ import { tokens } from '../../theme';
 
 const COMMITTEE = ['Credit Head', 'Management', 'Admin'];
 
-/** Sentinel select value: the analyst types the drafting brief instead of picking a doc. */
-const TYPED = '__typed__';
-
 const TONE: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   Draft: 'info', Submitted: 'warning', Approved: 'success',
   Returned: 'warning', Rejected: 'error',
@@ -54,9 +51,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [defaults, setDefaults] = useState<{ prompt?: { id: string; title: string };
     example?: { id: string; title: string } }>({});
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [promptDoc, setPromptDoc] = useState('');
-  const [typedBrief, setTypedBrief] = useState('');
-  const [uploading, setUploading] = useState(false);
   // The documents stay folded out of the way until the analyst wants them.
   const [docsOpen, setDocsOpen] = useState(false);
   // "Show me what the engine will read" — the extracted text of any pickable document,
@@ -95,29 +89,13 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       ]);
       setReports(r); setDocs(d);
       setDefaults({ prompt: tp || undefined, example: te || undefined });
-      // The deployment's default prompt is the working assumption — the analyst can
-      // still pick a case-specific upload, but "no prompt chosen" should not be the
-      // resting state when the credit team shipped one.
-      setPromptDoc((p) => p || tp?.id || '');
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLoading(false);
   };
 
-  const uploadPrompt = async (file: File | null) => {
-    if (!file) return;
-    setErr(''); setUploading(true);
-    try {
-      const doc = await camService.uploadDoc(subjectId, file, 'CAM Prompt');
-      setInfo(`Prompt "${file.name}" filed on this line.`);
-      await load();
-      setPromptDoc(String(doc.id));
-    } catch (e: any) { setErr(e?.message || String(e)); }
-    setUploading(false);
-  };
-
   useEffect(() => {
     if (!open) return;
-    setSel(new Set()); setPromptDoc(''); setInstruction(''); setTitle('');
+    setSel(new Set()); setInstruction(''); setTitle('');
     setNote(''); setErr(''); setInfo(''); setBusy('');
     void load();
   }, [open, subjectId]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -145,26 +123,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   };
 
   // Summary-first: the engine digests every selected document (facts, figures, gaps)
-  // as draft v1 — the analyst then applies the master prompt, asks, and hand-fills.
+  // into the box — the analyst then asks on, and hand-fills the Word template.
   const SUMMARY_BRIEF =
     'Summarise each of the supplied documents for a credit analyst: key facts, all '
     + 'figures with periods and units, parties, and NAME every gap (what a CAM would '
     + 'need that these documents do not contain). Do not draft the CAM yet.';
-
-  const generate = (promptOverride?: string) => run('generate', async () => {
-    const out = await camService.generate(subjectId, {
-      source_doc_ids: [...sel],
-      ...(promptOverride ? { prompt_text: promptOverride }
-        : promptDoc === TYPED ? { prompt_text: typedBrief.trim() }
-          : { prompt_doc_id: promptDoc }),
-      ...(action?.body?.deal_id ? { deal_id: action.body.deal_id } : {}),
-    });
-    // The reply lands in the conversation box — the one place the analyst looks.
-    setInstruction(out.draft_md || '');
-    const skipped = (out.skipped || []).length;
-    return 'The summary is in the box below — edit it or add your next question.'
-      + (skipped ? ` ${skipped} document(s) skipped — see the transcript.` : '');
-  });
 
   // ONE conversation surface: whatever is in the box goes to Claude, and the answer
   // comes back INTO the box — editable, so the analyst appends the next question (or
@@ -320,7 +283,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             fill the template there, and upload the finished file — that document goes to
             the committee. The box below is the conversation with Claude: prompts go down,
             answers come back into the SAME box to edit and build on. */}
-        {working && (
+        {!submitted && !loading && (
           <Box>
             <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
               {defaults.example && (
@@ -335,9 +298,9 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 Fill the template in Word while you work below.
               </Typography>
             </Box>
-            {working.status === 'Returned' && (
+            {working?.status === 'Returned' && (
               <Alert severity="warning" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-                Returned by the committee{working.decision_note ? ` — “${working.decision_note}”` : ''}.
+                Returned by the committee{working?.decision_note ? ` — “${working.decision_note}”` : ''}.
                 Amend the CAM and upload it again.
               </Alert>
             )}
@@ -426,10 +389,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             )}
 
             <Divider sx={{ my: 1.4 }} />
-            {!!working.document_id && (
+            {!!working?.document_id && (
               <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
                 ✓ Completed CAM on file
-                <Box component="span" onClick={() => void downloadFiled(working.document_id!)}
+                <Box component="span" onClick={() => void downloadFiled(working!.document_id!)}
                   sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
                     textDecoration: 'underline' }}>
                   Download
@@ -439,7 +402,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             )}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField size="small" sx={{ flex: 1 }} label="Filed title (optional)"
-                placeholder={`CAM v${working.report_version}`}
+                placeholder={`CAM v${working?.report_version ?? 1}`}
                 value={title} onChange={(e) => setTitle(e.target.value)} />
               <Button component="label" variant="contained" size="small" disabled={!!busy}
                 title="Files the document on this line only — the committee request is the separate 'Send to credit committee' step"
@@ -452,132 +415,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           </Box>
         )}
 
-        {/* ---- no live version: pick documents and generate -------------------------- */}
-        {!live && !loading && (() => {
-          return (
-            <Box>
-              <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
-                Pick the source documents and the credit team's <b>prompt document</b> — the
-                engine drafts only from what you select, and says which documents it could
-                not read. PDF and Word documents are read as text; a <b>scanned</b> PDF is
-                handed to the engine to read visually.
-              </Typography>
-              <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1, mb: 1,
-                display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography sx={{ fontSize: 12, color: tokens.muted, flex: 1 }}>
-                  Prefer Word? Download the CAM template, fill it in, and upload the
-                  completed CAM — it is filed on this line, ready for the
-                  "Send to credit committee" step.
-                </Typography>
-                {defaults.example && (
-                  <Button variant="outlined" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
-                    onClick={() => void downloadTemplate()}>Download CAM template</Button>
-                )}
-                {defaults.prompt && (
-                  <Button variant="outlined" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}
-                    onClick={() => void downloadPrompt()}>Download EVAM CAM prompt</Button>
-                )}
-                <Button component="label" variant="outlined" size="small" disabled={!!busy}
-                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                  {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM…'}
-                  <input hidden type="file" accept=".docx,.pdf,.md,.txt"
-                    onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
-                </Button>
-              </Box>
-              {!docs.length && (
-                <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-                  Nothing on the company's file yet — upload the source documents in the
-                  Data Register first.
-                </Alert>
-              )}
-              {sources.length > 0 && (
-                <Box sx={{ maxHeight: 220, overflow: 'auto', border: `1px solid ${tokens.line}`,
-                  borderRadius: 1, mb: 1 }}>
-                  {sources.map((d) => (
-                    <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
-                      borderBottom: `1px solid ${tokens.line}` }}>
-                      <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
-                      <Typography sx={{ fontSize: 12.5, flex: 1 }}>{d.title}</Typography>
-                      <Typography sx={{ fontSize: 11, color: tokens.muted }}>
-                        {[d.section, d.doc_type].filter(Boolean).join(' · ')}
-                      </Typography>
-                      <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
-                        sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
-                    </Box>
-                  ))}
-                </Box>
-              )}
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
-                <TextField select fullWidth size="small" label="Prompt document (the drafting brief)"
-                  value={promptDoc} onChange={(e) => setPromptDoc(e.target.value)}>
-                  {defaults.prompt && (
-                    <MenuItem value={defaults.prompt.id} sx={{ fontSize: 13 }}>
-                      Default — {defaults.prompt.title}
-                    </MenuItem>
-                  )}
-                  {docs.map((d) => (
-                    <MenuItem key={d.id} value={d.id} sx={{ fontSize: 13 }}>{d.title}</MenuItem>
-                  ))}
-                  <MenuItem value={TYPED} sx={{ fontSize: 13 }}>Type the brief by hand…</MenuItem>
-                </TextField>
-                <Button component="label" variant="outlined" size="small" disabled={uploading}
-                  sx={{ whiteSpace: 'nowrap', textTransform: 'none', flexShrink: 0 }}>
-                  {uploading ? 'Uploading…' : 'Upload prompt…'}
-                  <input hidden type="file" accept=".docx,.pdf,.md,.txt,.csv"
-                    onChange={(e) => { void uploadPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
-                </Button>
-              </Box>
-              {promptDoc === TYPED && (
-                <TextField fullWidth multiline minRows={4} sx={{ mb: 1 }}
-                  label="Drafting brief — what should the CAM cover, in your words"
-                  placeholder={'Draft a CAM for this term loan. Cover promoter background, business model, financial analysis with DSCR, security, and risks with mitigants…'}
-                  value={typedBrief} onChange={(e) => setTypedBrief(e.target.value)} />
-              )}
-              {promptDoc && promptDoc !== TYPED && (
-                <Button size="small" onClick={() => void viewDoc(promptDoc,
-                  defaults.prompt?.id === promptDoc ? defaults.prompt.title : 'Prompt document')}
-                  sx={{ textTransform: 'none', fontSize: 11.5, mb: 1 }}>
-                  View the prompt text
-                </Button>
-              )}
-              {preview && (
-                <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                    <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
-                      What the engine reads — {preview.title}
-                    </Typography>
-                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                      onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
-                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                      onClick={() => setPreview(null)}>Close</Button>
-                  </Box>
-                  {preview.note && (
-                    <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.5 }}>{preview.note}</Typography>
-                  )}
-                  {preview.text && (
-                    <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
-                      fontFamily: 'inherit', maxHeight: 200, overflow: 'auto', m: 0 }}>
-                      {preview.text}
-                    </Box>
-                  )}
-                </Box>
-              )}
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button variant="contained" size="small"
-                  startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                  disabled={!sel.size || !promptDoc || (promptDoc === TYPED && !typedBrief.trim()) || !!busy}
-                  onClick={() => void generate()}>
-                  {busy === 'generate' ? 'Drafting…' : `Draft the CAM from ${sel.size || 'the'} document(s)`}
-                </Button>
-                <Button variant="outlined" size="small" disabled={!sel.size || !!busy}
-                  title="The engine digests the documents first — facts, figures, gaps — then you apply the master prompt, ask questions, and fill the CAM"
-                  onClick={() => void generate(SUMMARY_BRIEF)}>
-                  Summarise the documents first
-                </Button>
-              </Box>
-            </Box>
-          );
-        })()}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={!!busy}>Close</Button>

@@ -12784,9 +12784,16 @@
             "title": "Description"
           },
           "first_due_on": {
-            "format": "date",
-            "title": "First Due On",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Due On"
           },
           "frequency": {
             "default": "Quarterly",
@@ -12843,8 +12850,7 @@
           }
         },
         "required": [
-          "name",
-          "first_due_on"
+          "name"
         ],
         "title": "SeedCovenant",
         "type": "object"

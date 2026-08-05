@@ -191,6 +191,21 @@ async def open_or_grow_account(ctx: RequestContext, line: LendingTracker,
         await ctx.session.flush()
         await _append(ctx, acct, entry_date=when, particulars="Loan Disbursement",
                       entry_type="Disbursement", debit=amount)
+        # DEFERRED covenants start with the money: any covenant on this line seeded
+        # without a first due date gets one — one cycle after this first disbursement —
+        # and the monthly chase begins from there.
+        from app.api.followups import _add_months
+        from app.models.covenants import Covenant
+
+        freq_step = {"Monthly": 1, "Quarterly": 3, "SemiAnnual": 6, "Annual": 12}
+        deferred = list((await ctx.session.execute(select(Covenant).where(
+            Covenant.tenant_id == ctx.tenant_id,
+            Covenant.lending_id == line.id,
+            Covenant.first_due_on.is_(None),
+            Covenant.deleted_at.is_(None)))).scalars())
+        for cov in deferred:
+            cov.first_due_on = _add_months(when, freq_step.get(cov.frequency, 1))
+            cov.updated_by = ctx.actor
         ctx.session.add(AuditLog(
             tenant_id=ctx.tenant_id, actor=ctx.actor, action="lms.open",
             resource_type="loan_accounts", resource_id=str(acct.id),

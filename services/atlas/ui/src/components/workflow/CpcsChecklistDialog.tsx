@@ -78,6 +78,43 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     const served = action?.form.find((f) => f.name === 'checklist_version')?.default;
     setVersion(Number(served) > 0 ? Number(served) : 1);
     setNote(''); setErr(''); setBusy(false);
+    // The conditions were already entered ONCE — at the sanction terms (often read
+    // straight out of the letter), which seeded checklist v1. Prefill from the latest
+    // checklist on record (a re-prepare after a return keeps its statuses), falling
+    // back to the terms' own item lists; the STARTER trio is only for a line that
+    // skipped the terms step entirely.
+    const lid = String(action?.body?.lending_id || '');
+    if (!lid) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const { api } = await import('../../api/http');
+        const raw = await api.get<any>('/internal/cpcs-checklists', { lending_id: lid })
+          .catch(() => []);
+        const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
+        let seeded: any[] = lists.length ? (lists[lists.length - 1].items || []) : [];
+        if (!seeded.length) {
+          const { camService } = await import('../../services/camService');
+          const t = await camService.terms(lid).catch(() => null);
+          seeded = [
+            ...(t?.cp_items || []).map((x: any) => ({ ...x, condition_type: 'CP' })),
+            ...(t?.cs_items || []).map((x: any) => ({ ...x, condition_type: 'CS' })),
+          ];
+        }
+        if (alive && seeded.length) {
+          setItems(seeded.map((s: any): CpcsItem => ({
+            key: String(s.key || ''), label: String(s.label || s.key || ''),
+            condition_type: s.condition_type === 'CS' ? 'CS' : 'CP',
+            required: s.required !== false,
+            status: STATUSES.includes(s.status) ? s.status : 'Pending',
+            evidence_ref: String(s.evidence_ref || ''),
+            reason: String(s.reason || ''),
+            expiry_date: String(s.expiry_date || ''),
+          })));
+        }
+      } catch { /* the STARTER trio stays */ }
+    })();
+    return () => { alive = false; };
   }, [open, action]);
 
   const set = (i: number, patch: Partial<CpcsItem>) =>

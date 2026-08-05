@@ -36,8 +36,12 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
     # The terms give the account its rate / tenor / EMI — entered once, copied here.
     t = await client.post("/v1/internal/sanction-terms", json={
         "lending_id": lid, "amount_cr": 8.0, "rate_kind": "Fixed", "rate_pct": 15.0,
-        "tenor_months": 54, "emi_amount": 0.18, "day_count": "365"}, headers=ADMIN)
+        "tenor_months": 54, "emi_amount": 0.18, "day_count": "365",
+        # A DEFERRED covenant: no first due date — its schedule starts with the money.
+        "covenants": [{"name": "Monthly stock statement", "covenant_type": "Reporting",
+                       "frequency": "Monthly"}]}, headers=ADMIN)
     assert t.status_code == 201, t.text
+    assert len(t.json()["seeded_covenant_ids"]) == 1
 
     # No tranche yet → no account (it is Advaya's confirmation that opens it).
     none = await client.get(f"/v1/lending/{lid}/loan-account", headers=ADMIN)
@@ -56,6 +60,14 @@ async def test_tranches_open_and_grow_the_account_and_the_ledger_reconciles(
     assert body["entries"] == [{
         "entry_no": 1, "entry_date": "2026-03-24", "particulars": "Loan Disbursement",
         "entry_type": "Disbursement", "debit": 5.0, "credit": None, "balance": 5.0}]
+
+    # The deferred covenant's schedule STAMPED ITSELF at the first tranche:
+    # one Monthly cycle after 2026-03-24.
+    eid = (await client.get(f"/v1/lending/{lid}")).json()["entity_id"]
+    covs = (await client.get("/v1/covenants", params={"entity_id": eid},
+                             headers=ADMIN)).json()
+    cov_rows = covs.get("items", [])
+    assert cov_rows and cov_rows[0]["first_due_on"] == "2026-04-24", cov_rows
 
     # T2 grows the principal — same account, its own ledger row.
     r2 = await client.post(f"/v1/internal/lending/{lid}/tranches",

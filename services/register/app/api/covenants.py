@@ -126,7 +126,8 @@ def _serialize(c: Covenant) -> dict[str, Any]:
             "name": c.name, "covenant_type": c.covenant_type,
             "description": c.description, "metric": c.metric, "operator": c.operator,
             "threshold": float(c.threshold) if c.threshold is not None else None,
-            "frequency": c.frequency, "first_due_on": c.first_due_on.isoformat(),
+            "frequency": c.frequency,
+            "first_due_on": c.first_due_on.isoformat() if c.first_due_on else None,
             "grace_days": c.grace_days, "breach_severity": c.breach_severity,
             "is_active": c.is_active, "version": c.version}
 
@@ -451,6 +452,8 @@ async def run_sweep(payload: SweepIn,
             Covenant.deleted_at.is_(None)))).scalars())
     generated = 0
     for cov in covenants:
+        if cov.first_due_on is None:      # deferred — stamps at first disbursement
+            continue
         for due in due_dates(cov.first_due_on, cov.frequency, horizon):
             won = (await ctx.session.execute(
                 pg_insert(MonitoringReporting).values(
