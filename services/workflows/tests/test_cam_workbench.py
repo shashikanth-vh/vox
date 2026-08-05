@@ -508,3 +508,46 @@ async def test_export_docx_requires_markdown_and_the_api_key(monkeypatch):
                                json={"markdown": "# x"},
                                headers={"X-Tenant": "EVAM"})
     assert keyless.status_code in (401, 403), keyless.text
+
+
+async def test_anthropic_engine_accumulates_streamed_deltas():
+    """The vendor engine STREAMS (long CAM updates outlive non-streaming requests):
+    text_delta events concatenate in order; stream errors surface as RuntimeError."""
+    from app.cam import AnthropicEngine
+
+    def fake_http(lines, status=200):
+        class _Resp:
+            status_code = status
+            async def aread(self):
+                return b'{"error":{"message":"bad key"}}'
+            async def aiter_lines(self):
+                for line in lines:
+                    yield line
+        class _Http:
+            def stream(self, *a, **k):
+                class _Ctx:
+                    async def __aenter__(self):
+                        return _Resp()
+                    async def __aexit__(self, *exc):
+                        return False
+                return _Ctx()
+        return _Http()
+
+    eng = AnthropicEngine("claude-haiku-4-5", "k")
+    out = await eng.generate(fake_http([
+        'data: {"type":"message_start"}',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"## Borrower\\n"}}',
+        'event: ping',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Advika Renewables."}}',
+        'data: {"type":"message_stop"}',
+    ]), "sys", [{"role": "user", "content": "hi"}])
+    assert out == "## Borrower\nAdvika Renewables."
+
+    with pytest.raises(RuntimeError, match="refused"):
+        await eng.generate(fake_http([], status=401), "sys", [{"role": "user", "content": "x"}])
+
+    with pytest.raises(RuntimeError, match="mid-answer"):
+        await eng.generate(fake_http([
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"part"}}',
+            'data: {"type":"error","error":{"message":"overloaded"}}',
+        ]), "sys", [{"role": "user", "content": "x"}])

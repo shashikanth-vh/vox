@@ -150,22 +150,45 @@ class AnthropicEngine(CamEngine):
         self.name = f"anthropic:{model}"
 
     async def generate(self, http: Any, system: str, turns: list[dict[str, Any]]) -> str:
-        r = await http.post(
-            "https://api.anthropic.com/v1/messages",
+        # STREAMED: an "update this CAM" answer can be the whole memo — tens of
+        # thousands of tokens. Non-streaming requests that long hit idle-connection
+        # timeouts; with SSE the read timeout is per-chunk, and 64000 is the model
+        # family's output ceiling, so a full CAM never truncates mid-sentence.
+        import json as _json
+
+        import httpx
+        text_parts: list[str] = []
+        async with http.stream(
+            "POST", "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
-            json={"model": self.model, "max_tokens": 8192, "system": system,
-                  "messages": turns},
-            timeout=240.0)
-        if r.status_code >= 300:
-            detail = ""
-            try:
-                detail = (r.json().get("error") or {}).get("message") or ""
-            except ValueError:
-                pass
-            raise RuntimeError(f"The drafting engine refused (HTTP {r.status_code})"
-                               + (f": {detail}" if detail else "."))
-        blocks = (r.json() or {}).get("content") or []
-        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            json={"model": self.model, "max_tokens": 64000, "system": system,
+                  "messages": turns, "stream": True},
+            timeout=httpx.Timeout(240.0, connect=15.0),
+        ) as r:
+            if r.status_code >= 300:
+                body = (await r.aread()).decode("utf-8", "ignore")
+                detail = ""
+                try:
+                    detail = ((_json.loads(body) or {}).get("error") or {}).get("message") or ""
+                except ValueError:
+                    pass
+                raise RuntimeError(f"The drafting engine refused (HTTP {r.status_code})"
+                                   + (f": {detail}" if detail else "."))
+            async for line in r.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = _json.loads(line[6:])
+                except ValueError:
+                    continue
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta") or {}
+                    if delta.get("type") == "text_delta":
+                        text_parts.append(delta.get("text", ""))
+                elif event.get("type") == "error":
+                    msg = (event.get("error") or {}).get("message") or "stream error"
+                    raise RuntimeError(f"The drafting engine failed mid-answer: {msg}")
+        text = "".join(text_parts)
         if not text.strip():
             raise RuntimeError("The drafting engine returned no text.")
         return text

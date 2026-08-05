@@ -36,7 +36,9 @@ class Settings(BaseServiceSettings):
     # without a vendor account. Per-document text is bounded before it reaches the engine.
     cam_engine: str = "anthropic:claude-haiku-4-5"
     anthropic_api_key: str = ""
-    cam_max_doc_chars: int = 60_000
+    # Sized for a REAL CAM: the reference Pinnacle CAM extracts to ~150k chars, and an
+    # "update this CAM" turn must carry the whole document, not the first 40% of it.
+    cam_max_doc_chars: int = 200_000
 
     # The Orchestrator API (python -m app.api) — the HTTP front door that starts
     # workflows / delivers signals. Empty api_keys = open (dev); set in production.
