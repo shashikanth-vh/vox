@@ -181,6 +181,14 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
         line.stage = "Disbursed"
         line.stage_history = history
     line.updated_by = ctx.actor
+    # The LMS follows the money: the FIRST confirmed tranche opens the loan account
+    # (header from the sanction terms), each further one raises its principal, and the
+    # statement gets its "Loan Disbursement" row — all from Advaya's confirmation, never
+    # from a PRISM approval.
+    from app.api.lms import open_or_grow_account
+
+    await open_or_grow_account(ctx, line, payload.amount, payload.disbursed_on,
+                               tranche_no=len(rows) + 1, tranche_ref=payload.tranche_ref)
     ctx.session.add(AuditLog(
         tenant_id=ctx.tenant_id, actor=ctx.actor, action="disbursement.tranche",
         resource_type="disbursement_tranches", resource_id=str(won),

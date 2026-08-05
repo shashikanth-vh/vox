@@ -7968,7 +7968,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"sample content\",\n  \"draft_md\": \"sample draft_md\",\n  \"role\": \"sample role\"\n}",
+              "raw": "{\n  \"content\": \"sample content\",\n  \"document_id\": \"{{id}}\",\n  \"draft_md\": \"sample draft_md\",\n  \"role\": \"sample role\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10116,6 +10116,270 @@
                 "{{{lendingId}}}",
                 "handover-package",
                 "download"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/lending/{{{lendingId}}}/loan-account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/loan-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "loan-account"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/lending/{{{lendingId}}}/loan-account",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/loan-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "loan-account"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"closed_on\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"overdue_position\": \"sample overdue_position\",\n  \"provisioning_amount\": 1.0,\n  \"status\": \"sample status\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{{{lendingId}}}/loan-account/accrue",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/loan-account/accrue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "loan-account",
+                "accrue"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"upto\": \"2026-03-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{{{lendingId}}}/loan-account/entries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/loan-account/entries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "loan-account",
+                "entries"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1.0,\n  \"entry_date\": \"2026-03-31\",\n  \"kind\": \"sample kind\",\n  \"particulars\": \"sample particulars\",\n  \"side\": \"sample side\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/lending/{{{lendingId}}}/loan-account/interest-preview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/loan-account/interest-preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "loan-account",
+                "interest-preview"
+              ],
+              "query": [
+                {
+                  "key": "upto",
+                  "value": "",
+                  "disabled": true
+                }
               ]
             }
           }

@@ -27,6 +27,7 @@ from app.api.handover import router as handover_router
 from app.api.imports import router as import_router
 from app.api.notifications import router as notifications_router
 from app.api.people_sync import router as people_sync_router
+from app.api.lms import router as lms_router
 from app.api.rbac import router as rbac_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
         # relays Advaya's offline confirmation on their own identity.
         advaya_manual_router,
         tranches_router,
+        lms_router,
         calendar_router,
         documents_lifecycle_router,
         notifications_router,

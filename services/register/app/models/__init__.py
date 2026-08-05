@@ -13,6 +13,7 @@ from app.models.decisions import WorkflowDecision, WorkflowDecisionOutbox
 from app.models.documents import Document, DocumentChecklistItem
 from app.models.evidence import GovernanceEvidence, GovernanceEvidenceStatus
 from app.models.interactions import Interaction
+from app.models.lms import LoanAccount, LoanLedgerEntry
 from app.models.notifications import Notification, NotificationDelivery
 from app.models.prism import (
     ContractAsset,
@@ -72,4 +73,6 @@ __all__ = [
     "SanctionTerms",
     "CamReport",
     "CamTurn",
+    "LoanAccount",
+    "LoanLedgerEntry",
 ]

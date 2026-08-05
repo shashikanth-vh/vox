@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (248 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (253 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -7145,7 +7145,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"role\": \"REPLACE-to-match-^(user|assistant)$\",\n  \"content\": \"sample\",\n  \"draft_md\": \"sample\"\n}",
+                  "raw": "{\n  \"role\": \"REPLACE-to-match-^(user|assistant)$\",\n  \"content\": \"sample\",\n  \"draft_md\": \"sample\",\n  \"document_id\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9065,6 +9065,235 @@
                     "{{lending_id}}",
                     "handover-package",
                     "download"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/lending/{lending_id}/loan-account \u2014 The loan account + its full statement ledger",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PATCH /v1/lending/{lending_id}/loan-account \u2014 Update the servicing classification (status, overdue, provisioning)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"sample\",\n  \"overdue_position\": \"sample\",\n  \"provisioning_amount\": 1.0,\n  \"closed_on\": \"2026-01-31\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/lending/{lending_id}/loan-account/accrue \u2014 Write the computed interest row to the ledger",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account/accrue",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account",
+                    "accrue"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"upto\": \"2026-01-31\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/lending/{lending_id}/loan-account/entries \u2014 Record a ledger entry (EMI receipt, charge, \u2026)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account/entries",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account",
+                    "entries"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entry_date\": \"2026-01-31\",\n  \"kind\": \"REPLACE-to-match-^(EMI|Receipt|Charge\",\n  \"amount\": 1.0,\n  \"side\": \"REPLACE-to-match-^(debit|credit)$\",\n  \"particulars\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /v1/lending/{lending_id}/loan-account/interest-preview \u2014 CALCULATE the interest to a date (nothing is written)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account/interest-preview",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account",
+                    "interest-preview"
+                  ],
+                  "query": [
+                    {
+                      "key": "upto",
+                      "value": "2026-01-31",
+                      "disabled": false
+                    }
                   ]
                 }
               }
@@ -12336,7 +12565,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"title\": \"sample\"\n}",
+                  "raw": "{\n  \"title\": \"sample\",\n  \"document_id\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

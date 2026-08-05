@@ -102,7 +102,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"sample title\"\n}",
+              "raw": "{\n  \"document_id\": \"{{id}}\",\n  \"title\": \"sample title\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

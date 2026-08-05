@@ -216,6 +216,11 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
             {isRegisterId(r.id) && ['Ready for Disbursement', 'Disbursed', 'Closed'].includes(r.stage) && (
               <TranchesBlock lendingId={r.id} />
             )}
+            {/* The LMS statement — the account opens itself on the first confirmed
+                tranche, so this appears exactly when there is money to account for. */}
+            {isRegisterId(r.id) && ['Disbursed', 'Closed'].includes(r.stage) && (
+              <LoanAccountBlock lendingId={r.id} />
+            )}
             <Box sx={{ mt: 1 }}><TextFld label="Remarks" value={r.remarks} disabled={roLend} onChange={(v) => updL(r.id, 'remarks', v)} multiline /></Box>
           </DrawerSection>
         ))}
@@ -308,6 +313,143 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
  * ONLY from Advaya confirmations ("Record an Advaya confirmation"), never typed into a
  * grid — the actuals belong to the party that moved the money.
  */
+/**
+ * The LOAN ACCOUNT STATEMENT — the sheet the servicing team keeps, served by the
+ * register's LMS: the account header (number, borrower, rate, tenure, EMI,
+ * classification) and the ledger (Date | Particulars | Debit | Credit | Balance).
+ * Interest is never typed: "Calculate" previews balance × rate% × days ÷ day-count
+ * with its inputs, and only then is the row posted.
+ */
+function LoanAccountBlock({ lendingId }: { lendingId: string }) {
+  const [data, setData] = useState<any | null>(null);
+  const [upto, setUpto] = useState(() => new Date().toISOString().slice(0, 10));
+  const [preview, setPreview] = useState<any | null>(null);
+  const [emiDate, setEmiDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [emiAmt, setEmiAmt] = useState('');
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    const { api } = await import('../../api/http');
+    try { setData(await api.get<any>(`/lending/${lendingId}/loan-account`)); }
+    catch { setData(null); }
+  };
+  useEffect(() => { void load(); }, [lendingId]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!data) return null;
+  const a = data.account;
+  const entries: any[] = data.entries || [];
+  const money = (v: any) => (v == null ? '' : Number(v).toLocaleString('en-IN',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+  const act = async (what: () => Promise<string>) => {
+    setErr(''); setMsg(''); setBusy(true);
+    try { setMsg(await what()); await load(); }
+    catch (e: any) {
+      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+    }
+    setBusy(false);
+  };
+
+  const calc = () => act(async () => {
+    const { api } = await import('../../api/http');
+    const p = await api.get<any>(`/lending/${lendingId}/loan-account/interest-preview`,
+      { upto });
+    setPreview(p);
+    return `Interest to ${upto}: ₹ ${money(p.interest)} (${p.formula})`;
+  });
+  const postInterest = () => act(async () => {
+    const { api } = await import('../../api/http');
+    await api.post(`/lending/${lendingId}/loan-account/accrue`, { upto });
+    setPreview(null);
+    return 'Interest posted to the ledger.';
+  });
+  const postEmi = () => act(async () => {
+    const { api } = await import('../../api/http');
+    await api.post(`/lending/${lendingId}/loan-account/entries`,
+      { entry_date: emiDate, kind: 'EMI', amount: Number(emiAmt) });
+    setEmiAmt('');
+    return 'EMI receipt recorded.';
+  });
+
+  const fact = (label: string, value: any) => (
+    <Box key={label}>
+      <Typography sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', color: tokens.muted, fontWeight: 700 }}>{label}</Typography>
+      <Typography sx={{ fontSize: 12.4 }}>{value ?? '—'}</Typography>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2 }}>
+      <Typography sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px', color: tokens.muted, fontWeight: 700, mb: 0.6 }}>
+        Loan account — statement
+      </Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 0.8, mb: 1 }}>
+        {fact('Loan account number', a.account_no)}
+        {fact('Borrower', a.borrower)}
+        {fact('Date of disbursement', a.disbursed_on)}
+        {fact('Facility type', a.facility_type)}
+        {fact('Loan amount', a.amount != null ? `₹ ${money(a.amount)}` : null)}
+        {fact('Rate of interest', a.rate_pct != null ? `${a.rate_pct}% (${a.rate_kind})` : null)}
+        {fact('Tenure', a.tenor_months != null ? `${a.tenor_months} months` : null)}
+        {fact('Repayment', a.emi_amount != null
+          ? `EMI ₹ ${money(a.emi_amount)}${a.repayment_start ? ` from ${a.repayment_start}` : ''}` : null)}
+        {fact('Overdue position', a.overdue_position)}
+        {fact('Loan status', a.status)}
+      </Box>
+      <Box sx={{ maxHeight: 200, overflow: 'auto', border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+        <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12,
+          '& th, & td': { borderBottom: `1px solid ${tokens.line}`, p: '3px 8px', textAlign: 'right' },
+          '& th:nth-of-type(-n+2), & td:nth-of-type(-n+2)': { textAlign: 'left' } }}>
+          <thead>
+            <tr><th>Date</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Balance</th></tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.entry_no}>
+                <td>{e.entry_date}</td><td>{e.particulars}</td>
+                <td>{money(e.debit)}</td><td>{money(e.credit)}</td>
+                <td><b>{money(e.balance)}</b></td>
+              </tr>
+            ))}
+          </tbody>
+        </Box>
+      </Box>
+      {a.status !== 'Closed' && (
+        <>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1, flexWrap: 'wrap' }}>
+            <TextField size="small" type="date" label="Interest up to" value={upto}
+              onChange={(e) => { setUpto(e.target.value); setPreview(null); }}
+              InputLabelProps={{ shrink: true }} sx={{ width: 160 }} />
+            <Button size="small" variant="outlined" disabled={busy} onClick={() => void calc()}
+              sx={{ textTransform: 'none' }}>Calculate</Button>
+            {preview && (
+              <Button size="small" variant="contained" disabled={busy}
+                onClick={() => void postInterest()} sx={{ textTransform: 'none' }}>
+                Post ₹ {money(preview.interest)} interest
+              </Button>
+            )}
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.8, flexWrap: 'wrap' }}>
+            <TextField size="small" type="date" label="EMI received on" value={emiDate}
+              onChange={(e) => setEmiDate(e.target.value)}
+              InputLabelProps={{ shrink: true }} sx={{ width: 160 }} />
+            <TextField size="small" label="Amount" value={emiAmt}
+              placeholder={a.emi_amount != null ? String(a.emi_amount) : ''}
+              onChange={(e) => setEmiAmt(e.target.value)} sx={{ width: 130 }} />
+            <Button size="small" variant="outlined" sx={{ textTransform: 'none' }}
+              disabled={busy || !emiAmt || !(Number(emiAmt) > 0)}
+              onClick={() => void postEmi()}>Record EMI receipt</Button>
+          </Box>
+        </>
+      )}
+      {msg && <Typography sx={{ fontSize: 11.8, color: 'success.main', mt: 0.6 }}>{msg}</Typography>}
+      {err && <Typography sx={{ fontSize: 11.8, color: 'error.main', mt: 0.6 }}>{err}</Typography>}
+    </Box>
+  );
+}
+
 function TranchesBlock({ lendingId }: { lendingId: string }) {
   const [data, setData] = useState<any | null>(null);
   useEffect(() => {
