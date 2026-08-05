@@ -346,11 +346,28 @@ _PARA = re.compile(r'<w:p(?: [^>]*)?/>|<w:p(?: [^>]*)?>.*?</w:p>', re.S)
 _TAGS = re.compile(r'<[^>]+>')
 
 
+_RUN = re.compile(r'<w:r(?: [^>]*)?>.*?</w:r>', re.S)
+
+
+def _art_only(para: str) -> str:
+    """Strip the TEXT runs out of a letterhead paragraph, keeping the artwork.
+    A template's top paragraph often holds the logo AND the company name in one
+    line — the letter body reproduces the name (in the template's own style), so
+    keeping the text here would print it twice."""
+    return _RUN.sub(
+        lambda m: '' if ('<w:t' in m.group(0)
+                         and '<w:drawing' not in m.group(0)
+                         and '<w:pict' not in m.group(0)) else m.group(0),
+        para)
+
+
 def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
     """The template's LEADING paragraphs that are letterhead, not letter: logos
     (drawings/pictures) and blank spacers, up to the first paragraph with real
-    text. Word cannot nest w:p in w:p, so the non-greedy paragraph match is exact
-    for this leading scan (a leading table ends the scan anyway)."""
+    text. Art paragraphs keep only their art — any caption text beside the logo
+    is the letter's to re-state, once. Word cannot nest w:p in w:p, so the
+    non-greedy paragraph match is exact for this leading scan (a leading table
+    ends the scan anyway)."""
     kept: list[str] = []
     pos = 0
     for _ in range(cap):
@@ -362,7 +379,7 @@ def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
         has_text = bool(_TAGS.sub('', para).strip())
         if has_text and not has_art:
             break
-        kept.append(para)
+        kept.append(_art_only(para) if has_art and has_text else para)
         pos = m.end()
     return ''.join(kept)
 
