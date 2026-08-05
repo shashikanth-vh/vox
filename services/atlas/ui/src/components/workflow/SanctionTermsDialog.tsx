@@ -150,6 +150,12 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       const filed = [...reports].reverse().find((r) => r.document_id);
       const typed: Record<string, string> = {};
       for (const [k, v] of Object.entries(f)) if (v?.trim()) typed[k] = v.trim();
+      // What the CAM cannot know — the committee's references and today's date —
+      // rides along too, so Ref. No. / Date come out filled, not as [____] blanks.
+      if (decision?.committee_reference) typed.committee_reference = decision.committee_reference;
+      if (decision?.sanction_letter_reference) typed.sanction_letter_reference = decision.sanction_letter_reference;
+      typed.letter_date = new Date().toLocaleDateString('en-GB',
+        { day: '2-digit', month: 'short', year: 'numeric' });
       await camService.draftLetter(lendingId, {
         template_doc_id: tmpl.id,
         ...(filed?.document_id ? { cam_doc_id: filed.document_id } : {}),

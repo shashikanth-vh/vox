@@ -777,8 +777,10 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             "FEE, INTEREST & CHARGES, …) is a '## ' heading; tabular particulars are "
             "Markdown tables with a header row, label in the first column; wrap the "
             "key commercial terms the borrower must not miss — sanctioned amount, "
-            "rate, tenor, crucial conditions — in ==double equals== to highlight "
-            "them, as the template does. "
+            "rate, tenor, crucial conditions — in ==double equals== (yellow marker); "
+            "wrap deal-variable figures the analyst must verify — notice periods, "
+            "day counts, dates, anything that changes per deal — in ::double "
+            "colons:: (blue marker), exactly where the template marks them. "
             "Output the LETTER ONLY, in clean Markdown — no commentary.")
         system = (
             "You draft SANCTION LETTERS for a climate-finance lender. You fill the "

@@ -77,23 +77,28 @@ _STYLES = (
 
 
 # ---- inline runs ----------------------------------------------------------- #
-# ==text== is the HIGHLIGHT mark (yellow, like a marker pen on the letterhead
-# template) — the engine is told to wrap must-not-miss terms in it.
+# The letterhead template speaks TWO marker colors, and the marks mirror them:
+# ==text== is YELLOW (key clauses the borrower must not miss);
+# ::text:: is CYAN (deal-variable figures the analyst must verify — notice days,
+# day counts, dates — exactly what the template marks in blue).
 _INLINE = re.compile(
-    r'(\*\*.+?\*\*|__.+?__|==[^=\n]+?==|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
+    r'(\*\*.+?\*\*|__.+?__|==[^=\n]+?==|::[^:\n]+?::|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
 
 
 def _runs(text: str, *, bold: bool = False, color: str | None = None) -> str:
-    """**bold**, *italic*, `code`, ==highlight== → <w:r> runs; else plain text."""
+    """**bold**, *italic*, `code`, ==yellow==, ::cyan:: → <w:r> runs."""
     out: list[str] = []
     for piece in _INLINE.split(text):
         if not piece:
             continue
-        b, i, mono, mark = bold, False, False, False
+        b, i, mono = bold, False, False
+        mark: str | None = None
         if piece.startswith(('**', '__')) and piece.endswith(('**', '__')) and len(piece) > 4:
             b, piece = True, piece[2:-2]
         elif piece.startswith('==') and piece.endswith('==') and len(piece) > 4:
-            mark, piece = True, piece[2:-2]
+            mark, piece = 'yellow', piece[2:-2]
+        elif piece.startswith('::') and piece.endswith('::') and len(piece) > 4:
+            mark, piece = 'cyan', piece[2:-2]
         elif piece.startswith(('*', '_')) and piece.endswith(('*', '_')) and len(piece) > 2:
             i, piece = True, piece[1:-1]
         elif piece.startswith('`') and piece.endswith('`') and len(piece) > 2:
@@ -101,7 +106,7 @@ def _runs(text: str, *, bold: bool = False, color: str | None = None) -> str:
         rpr = ('<w:rPr>' + ('<w:b/>' if b else '') + ('<w:i/>' if i else '')
                + ('<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>' if mono else '')
                + (f'<w:color w:val="{color}"/>' if color else '')
-               + ('<w:highlight w:val="yellow"/>' if mark else '')
+               + (f'<w:highlight w:val="{mark}"/>' if mark else '')
                + '</w:rPr>') if (b or i or mono or mark or color) else ''
         out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{escape(piece)}</w:t></w:r>')
     return ''.join(out) or '<w:r><w:t xml:space="preserve"></w:t></w:r>'
@@ -218,8 +223,20 @@ def _render_body(md: str, title: str | None = None, *,
     sanction-letter visual language: ## headings become full-width navy banner
     bars and tables get the navy header band + navy bold label column."""
     body: list[str] = []
+    # A blank Markdown line is a BLOCK BREAK. Letter templates set Normal spacing
+    # to zero (address blocks must stack tight), so in letterhead mode the break
+    # must become a real empty paragraph — otherwise every block butts together.
+    gap = False
+
+    def emit(x: str) -> None:
+        nonlocal gap
+        if letterhead and gap and body and body[-1] != '<w:p/>':
+            body.append('<w:p/>')
+        gap = False
+        body.append(x)
+
     if title:
-        body.append(_p(title, style="Title"))
+        emit(_p(title, style="Title"))
 
     lines = md.replace('\r\n', '\n').split('\n')
     i = 0
@@ -229,7 +246,7 @@ def _render_body(md: str, title: str | None = None, *,
         if line.strip().startswith('```'):                       # fenced code
             i += 1
             while i < len(lines) and not lines[i].strip().startswith('```'):
-                body.append(_code_p(lines[i]))
+                emit(_code_p(lines[i]))
                 i += 1
             i += 1
             body.append('<w:p/>')
@@ -246,16 +263,17 @@ def _render_body(md: str, title: str | None = None, *,
                 i += 1
             if rows:
                 width = max(len(r) for r in rows)
-                body.append(_table([r + [''] * (width - len(r)) for r in rows], header,
-                                   letterhead=letterhead, accent=accent))
+                emit(_table([r + [''] * (width - len(r)) for r in rows], header,
+                            letterhead=letterhead, accent=accent))
             continue
 
         if not line.strip():
+            gap = True
             i += 1
             continue
         if _HR.match(line):
-            body.append('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" '
-                        'w:color="BFBFBF"/></w:pBdr></w:pPr></w:p>')
+            emit('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" '
+                 'w:color="BFBFBF"/></w:pBdr></w:pPr></w:p>')
             i += 1
             continue
         if (m := _HEADING.match(line)):
@@ -263,28 +281,28 @@ def _render_body(md: str, title: str | None = None, *,
             text = m.group(2).strip().strip('#').strip()
             if letterhead and level == 2:
                 # The letterhead's section bars: full-width accent band, white bold.
-                body.append(_p(text, bold=True, color='FFFFFF', fill=accent))
+                emit(_p(text, bold=True, color='FFFFFF', fill=accent))
             else:
-                body.append(_p(text, style=f"Heading{level}"))
+                emit(_p(text, style=f"Heading{level}"))
             i += 1
             continue
         if (m := _BULLET.match(line)):
             depth = len(m.group(1)) // 2
-            body.append(_p(m.group(2), indent=360 + depth * 360, bullet=True))
+            emit(_p(m.group(2), indent=360 + depth * 360, bullet=True))
             i += 1
             continue
         if (m := _NUMBERED.match(line)):
             depth = len(m.group(1)) // 2
-            body.append(_p(m.group(3), indent=360 + depth * 360,
-                           number=f"{m.group(2)}."))
+            emit(_p(m.group(3), indent=360 + depth * 360,
+                    number=f"{m.group(2)}."))
             i += 1
             continue
         if line.lstrip().startswith('>'):
-            body.append(_p(line.lstrip()[1:].strip(), indent=360))
+            emit(_p(line.lstrip()[1:].strip(), indent=360))
             i += 1
             continue
 
-        body.append(_p(line.strip()))
+        emit(_p(line.strip()))
         i += 1
 
     return ''.join(body)
