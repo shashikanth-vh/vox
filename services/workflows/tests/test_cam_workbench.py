@@ -581,3 +581,44 @@ async def test_draft_letter_fills_the_template_and_returns_word(monkeypatch):
     bad = await _call(app, "POST", f"/v1/cam/{LENDING}/draft-letter",
                       json={"template_doc_id": "pdf-1"})
     assert bad.status_code == 422, bad.text
+
+
+async def test_letter_renders_into_the_template_package():
+    """markdown_into_template keeps the template's own package — styles (colors),
+    extra parts, leading letterhead art — and replaces only the letter text.
+    A non-docx template falls back to the standalone package."""
+    import io
+    import zipfile
+
+    from app.docx_out import markdown_into_template, markdown_to_docx
+
+    base = markdown_to_docx("placeholder", None)
+    with zipfile.ZipFile(io.BytesIO(base)) as z:
+        parts = {n: z.read(n) for n in z.namelist()}
+    styles = parts["word/styles.xml"].decode()
+    parts["word/styles.xml"] = styles.replace(
+        '<w:style w:type="paragraph" w:styleId="Heading1">',
+        '<w:style w:type="paragraph" w:styleId="Heading1">'
+        '<w:rPr><w:color w:val="ABCDEF"/></w:rPr>').encode()
+    doc = parts["word/document.xml"].decode()
+    letterhead = ('<w:p><w:r><w:drawing/><w:t></w:t></w:r></w:p>'
+                  '<w:p><w:r><w:t xml:space="preserve">OLD TEMPLATE BODY</w:t></w:r></w:p>')
+    doc = doc.replace("<w:body>", "<w:body>" + letterhead, 1)
+    parts["word/document.xml"] = doc.encode()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for n, b in parts.items():
+            z.writestr(n, b)
+
+    out = markdown_into_template("# New Letter\n\nDear Sir,", buf.getvalue())
+    with zipfile.ZipFile(io.BytesIO(out)) as z:
+        out_doc = z.read("word/document.xml").decode()
+        out_styles = z.read("word/styles.xml").decode()
+    assert "ABCDEF" in out_styles                 # template styling survives
+    assert "<w:drawing/>" in out_doc              # letterhead art survives
+    assert "OLD TEMPLATE BODY" not in out_doc     # letter text replaced
+    assert "New Letter" in out_doc and "Dear Sir," in out_doc
+    assert out_doc.count("<w:sectPr") == 1        # exactly one section block
+
+    fallback = markdown_into_template("# X", b"not a zip at all")
+    assert fallback[:2] == b"PK"                  # standalone package fallback

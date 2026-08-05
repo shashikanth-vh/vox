@@ -29,7 +29,7 @@ from typing import Any
 from fastapi import Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.docx_out import markdown_to_docx
+from app.docx_out import markdown_into_template, markdown_to_docx
 
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/csv")
 _DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -741,7 +741,14 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         if err is not None:
             return err
         caller, _ = caller_context(request, who)
-        tmpl_text, tmpl_skip = await _doc_text(request, caller, who, payload.template_doc_id)
+        # One fetch, two uses: the TEXT goes to the engine; the BYTES stay the
+        # package the answer renders back into (styles, theme, logo, letterhead).
+        tmpl_blob, _ctype, fetch_err = await _doc_fetch(
+            request, caller, who, payload.template_doc_id)
+        if fetch_err is not None:
+            return problem(422, "Template unreadable",
+                           f"The sanction letter template could not be read: {fetch_err}.")
+        tmpl_text, tmpl_skip = extract_text(_ctype, tmpl_blob or b"")
         if not tmpl_text.strip():
             return problem(422, "Template unreadable",
                            f"The sanction letter template could not be read: "
@@ -778,7 +785,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 [{"role": "user", "content": "\n\n".join(parts)}])
         except RuntimeError as exc:
             return problem(502, "Letter drafting failed", str(exc))
-        blob = markdown_to_docx(reply, None)
+        # Rendered INTO the template package — its fonts, colors and letterhead
+        # are the credit team's, so the draft looks like the letter, not a memo.
+        blob = markdown_into_template(reply, tmpl_blob or b"")
         return Response(
             content=blob, media_type=_DOCX_TYPE,
             headers={"Content-Disposition":

@@ -165,8 +165,9 @@ def _is_separator(line: str) -> bool:
     return bool(body) and all(re.fullmatch(r'\s*:?-{3,}:?\s*', c) for c in body.split('|'))
 
 
-def markdown_to_docx(md: str, title: str | None = None) -> bytes:
-    """Render workbench Markdown into a complete .docx (bytes, ready to serve)."""
+def _render_body(md: str, title: str | None = None) -> str:
+    """Markdown → the <w:body> INNER XML (no sectPr) — shared by the standalone
+    package and the render-into-template path."""
     body: list[str] = []
     if title:
         body.append(_p(title, style="Title"))
@@ -232,9 +233,14 @@ def markdown_to_docx(md: str, title: str | None = None) -> bytes:
         body.append(_p(line.strip()))
         i += 1
 
+    return ''.join(body)
+
+
+def markdown_to_docx(md: str, title: str | None = None) -> bytes:
+    """Render workbench Markdown into a complete standalone .docx."""
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<w:document {_W}><w:body>' + ''.join(body)
+        f'<w:document {_W}><w:body>' + _render_body(md, title)
         + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
           '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>'
           '</w:sectPr></w:body></w:document>')
@@ -246,4 +252,63 @@ def markdown_to_docx(md: str, title: str | None = None) -> bytes:
         z.writestr('word/_rels/document.xml.rels', _DOC_RELS)
         z.writestr('word/styles.xml', _STYLES)
         z.writestr('word/document.xml', document)
+    return buf.getvalue()
+
+
+# ---- render INTO an existing template ------------------------------------- #
+_PARA = re.compile(r'<w:p(?: [^>]*)?/>|<w:p(?: [^>]*)?>.*?</w:p>', re.S)
+_TAGS = re.compile(r'<[^>]+>')
+
+
+def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
+    """The template's LEADING paragraphs that are letterhead, not letter: logos
+    (drawings/pictures) and blank spacers, up to the first paragraph with real
+    text. Word cannot nest w:p in w:p, so the non-greedy paragraph match is exact
+    for this leading scan (a leading table ends the scan anyway)."""
+    kept: list[str] = []
+    pos = 0
+    for _ in range(cap):
+        m = _PARA.match(body_xml, pos)
+        if m is None:
+            break
+        para = m.group(0)
+        has_art = '<w:drawing' in para or '<w:pict' in para
+        has_text = bool(_TAGS.sub('', para).strip())
+        if has_text and not has_art:
+            break
+        kept.append(para)
+        pos = m.end()
+    return ''.join(kept)
+
+
+def markdown_into_template(md: str, template_blob: bytes,
+                           title: str | None = None) -> bytes:
+    """Render Markdown INSIDE the template's own package: its styles, theme,
+    fonts, numbering, images and section setup all survive, so the output looks
+    like the credit team's letterhead — only the letter text is replaced. Heading
+    styles resolve against the TEMPLATE's Heading1/2/3 (colors included). Falls
+    back to the standalone package when the template is not a readable .docx."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(template_blob)) as z:
+            parts = {n: z.read(n) for n in z.namelist()}
+        doc = parts['word/document.xml'].decode('utf-8', 'ignore')
+        m = re.search(r'(<w:body(?: [^>]*)?>)(.*)(</w:body>)', doc, re.S)
+        if m is None:
+            return markdown_to_docx(md, title)
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return markdown_to_docx(md, title)
+    inner = m.group(2)
+    sect = re.search(r'<w:sectPr(?: [^>]*)?>[\s\S]*?</w:sectPr>|<w:sectPr(?: [^>]*)?/>',
+                     inner)
+    sect_xml = sect.group(0) if sect else \
+        ('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+         '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>')
+    new_inner = _letterhead_prefix(inner) + _render_body(md, title) + sect_xml
+    parts['word/document.xml'] = (
+        doc[:m.start(2)] + new_inner + doc[m.end(2):]).encode('utf-8')
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name, blob in parts.items():
+            z.writestr(name, blob)
     return buf.getvalue()
