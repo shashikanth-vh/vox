@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import Counter
 from datetime import UTC, datetime
@@ -966,6 +967,18 @@ async def document_checklist_template(
     return {"applies_to": applies_to, "required_total": required_total, "sections": sections}
 
 
+def _content_disposition(filename: str, disposition: str = "inline") -> str:
+    """RFC 6266 Content-Disposition. HTTP headers are latin-1, and a filename like
+    "CAM example — Pinnacle …" (em-dash, U+2014) crashes response encoding — the
+    download 500s for exactly the documents people name by hand. ASCII fallback for
+    old agents, percent-encoded UTF-8 (filename*) for every current browser."""
+    from urllib.parse import quote
+
+    fallback = re.sub(r"[^\x20-\x7e]", "_", filename).replace('"', "'") or "document"
+    return (f'{disposition}; filename="{fallback}"; '
+            f"filename*=UTF-8''{quote(filename, safe='')}")
+
+
 @router.get("/v1/documents/{doc_id}/content", tags=["Documents"],
             summary="Fetch a document's bytes (inline) or its storage reference")
 async def download_document(
@@ -982,7 +995,7 @@ async def download_document(
         return Response(
             content=doc.inline_content,
             media_type=doc.content_type or "application/octet-stream",
-            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+            headers={"Content-Disposition": _content_disposition(filename)},
         )
     if doc.storage_uri:
         parsed = storage_mod.parse_s3_uri(doc.storage_uri)
@@ -994,7 +1007,7 @@ async def download_document(
                 return Response(
                     content=blob,
                     media_type=doc.content_type or "application/octet-stream",
-                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                    headers={"Content-Disposition": _content_disposition(filename)},
                 )
             return RedirectResponse(await store.presigned_get_url(key, filename=filename))
         if doc.storage_uri.startswith(("http://", "https://")):
