@@ -189,6 +189,19 @@ export const camService = {
     }
   },
 
+  /** Engine-read the sanction letter: its CP / CS / covenant lists as data, for the
+   *  terms form to pre-fill. The analyst reviews before anything is seeded. */
+  async extractTerms(docId: string): Promise<{
+    engine: string; cp_items: string[];
+    cs_items: { label: string; timeline?: string }[];
+    covenants: { name: string; frequency: string; timeline?: string }[];
+  }> {
+    try {
+      return await orchestrator.post<any>('/v1/cam/extract-terms', { doc_id: docId },
+        { timeoutMs: 320_000 });
+    } catch (e) { throw new Error(msg(e, 'read the conditions out of the letter')); }
+  },
+
   /** Put a prompt / sanction letter / any workbench input on the lending line's file. */
   async uploadDoc(lendingId: string, file: File, docType: string,
                   section = 'CAM'): Promise<{ id: string }> {

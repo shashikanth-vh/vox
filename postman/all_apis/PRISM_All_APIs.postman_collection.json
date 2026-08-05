@@ -12475,7 +12475,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (50 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (51 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
@@ -12522,6 +12522,56 @@
                   ]
                 },
                 "description": "The extracted text of a Data Register document \u2014 the workbench shows it so\nthe analyst can SEE what goes to the engine (and copy it if they want to work\noutside). A document with no extractable text answers with the reason instead;\na scanned PDF says it will be attached visually."
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/cam/extract-terms \u2014 Read CP / CS / covenants OUT of a sanction letter (engine-parsed)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/extract-terms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "extract-terms"
+                  ]
+                },
+                "description": "The signed sanction letter already lists the Conditions Precedent, the\nConditions Subsequent (with timelines) and the Reporting Covenants \u2014 nobody\nshould re-type them into the terms form. The engine reads the letter and hands\nback the three lists as data; the analyst reviews and saves. Everything stays\ncheckable: the response names the engine, and the analyst edits before seeding.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"doc_id\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               }
             },
             {

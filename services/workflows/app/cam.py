@@ -186,6 +186,11 @@ class RefineIn(BaseModel):
     source_doc_ids: list[str] = Field(default_factory=list, max_length=25)
 
 
+class ExtractTermsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    doc_id: str = Field(min_length=1, max_length=64)
+
+
 class FinaliseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, max_length=200)
@@ -334,6 +339,85 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             out["reason"] = reason
             out["attachable"] = (reason == _SCANNED_PDF and engine.supports_documents)
         return out
+
+    @app.post("/v1/cam/extract-terms", tags=["CAM"],
+              summary="Read CP / CS / covenants OUT of a sanction letter (engine-parsed)")
+    async def cam_extract_terms(payload: ExtractTermsIn, request: Request) -> Any:
+        """The signed sanction letter already lists the Conditions Precedent, the
+        Conditions Subsequent (with timelines) and the Reporting Covenants — nobody
+        should re-type them into the terms form. The engine reads the letter and hands
+        back the three lists as data; the analyst reviews and saves. Everything stays
+        checkable: the response names the engine, and the analyst edits before seeding."""
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        caller, _ = caller_context(request, who)
+
+        blob, ctype, fetch_err = await _doc_fetch(request, caller, who, payload.doc_id)
+        if fetch_err is not None:
+            return problem(404, "Not found", f"Document {payload.doc_id!r}: {fetch_err}")
+        text, reason = extract_text(ctype, blob or b"")
+        content: Any
+        instruction = (
+            "Read the sanction letter above and extract THREE lists exactly as the "
+            "letter states them. Respond with ONLY a JSON object, no prose, shaped:\n"
+            '{"cp_items": ["<each Condition Precedent, one short line>"],\n'
+            ' "cs_items": [{"label": "<Condition Subsequent>", "timeline": "<as stated>"}],\n'
+            ' "covenants": [{"name": "<reporting covenant>", '
+            '"frequency": "Monthly|Quarterly|SemiAnnual|Annual", '
+            '"timeline": "<as stated>"}]}\n'
+            "Frequency: infer from the stated timeline (monthly→Monthly, quarter→"
+            "Quarterly, half-year→SemiAnnual, annual→Annual); default Monthly. "
+            "Do not invent conditions that are not in the letter.")
+        if text.strip():
+            content = f"===== SANCTION LETTER =====\n{text[:max_doc_chars]}\n\n{instruction}"
+        elif (reason == _SCANNED_PDF and engine.supports_documents and blob
+              and len(blob) <= _PDF_ATTACH_MAX_BYTES):
+            content = [_pdf_block(blob), {"type": "text", "text": instruction}]
+        else:
+            return problem(422, "Validation failed",
+                           f"The letter could not be read{f' ({reason})' if reason else ''} "
+                           "— enter the conditions by hand.")
+        try:
+            reply = await engine.generate(
+                request.app.state.http,
+                "You extract structured data from credit documents. You answer with "
+                "JSON only — no commentary, no code fences.",
+                [{"role": "user", "content": content}])
+        except Exception as exc:  # noqa: BLE001 — vendor errors surface as text
+            return problem(502, "Extraction failed", str(exc))
+        import json as _json
+        import re as _re
+
+        m = _re.search(r"\{.*\}", reply, _re.DOTALL)
+        try:
+            data = _json.loads(m.group(0)) if m else {}
+        except ValueError:
+            data = {}
+        cp = [str(x).strip() for x in (data.get("cp_items") or []) if str(x).strip()]
+        cs = [({"label": str(x.get("label") or "").strip(),
+                **({"timeline": str(x.get("timeline")).strip()} if x.get("timeline") else {})}
+               if isinstance(x, dict) else {"label": str(x).strip()})
+              for x in (data.get("cs_items") or [])]
+        cs = [x for x in cs if x["label"]]
+        freq_ok = {"Monthly", "Quarterly", "SemiAnnual", "Annual"}
+        cov = []
+        for x in (data.get("covenants") or []):
+            if not isinstance(x, dict) or not str(x.get("name") or "").strip():
+                continue
+            f = str(x.get("frequency") or "").strip()
+            cov.append({"name": str(x["name"]).strip(),
+                        "frequency": f if f in freq_ok else "Monthly",
+                        **({"timeline": str(x.get("timeline")).strip()}
+                           if x.get("timeline") else {})})
+        if not (cp or cs or cov):
+            return problem(422, "Extraction failed",
+                           "The engine did not return usable lists from this letter — "
+                           "enter the conditions by hand (the offline stub engine "
+                           "cannot parse documents).")
+        return {"engine": engine.name, "cp_items": cp, "cs_items": cs, "covenants": cov}
 
     @app.post("/v1/cam/{lending_id}/generate", status_code=201, tags=["CAM"],
               summary="Draft a CAM from selected documents + the prompt doc")

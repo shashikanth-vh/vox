@@ -351,6 +351,51 @@ def test_docx_and_unreadable_formats_extract_or_say_why():
     assert why and "no extractor" in why
 
 
+async def test_the_sanction_letter_yields_cp_cs_and_covenants_as_data(monkeypatch):
+    """extract-terms: the engine reads the letter and hands back the three lists —
+    validated, frequency coerced to the register's vocabulary, nothing invented by the
+    endpoint itself. The offline stub (which answers prose, not JSON) refuses with
+    'fill by hand' instead of seeding garbage."""
+    from app import cam as cam_mod
+
+    class _JsonEngine(cam_mod.CamEngine):
+        name = "test:json"
+        supports_documents = True
+
+        async def generate(self, http, system, turns):  # noqa: ANN001
+            assert "JSON only" in system
+            return ('{"cp_items": ["Security created", "Escrow account opened"], '
+                    '"cs_items": [{"label": "End-use certificate", '
+                    '"timeline": "30 days from first disbursement"}], '
+                    '"covenants": [{"name": "Monthly stock statement", '
+                    '"frequency": "Monthly"}, {"name": "Debtor ageing", '
+                    '"frequency": "every quarter"}]}')
+
+    monkeypatch.setattr(cam_mod, "build_engine", lambda _s: _JsonEngine())
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    stub.docs["letter-1"] = ("text/markdown", "# Sanction letter\nCP: security. CS: …")
+    app.state.http = stub
+
+    r = await _call(app, "POST", "/v1/cam/extract-terms", json={"doc_id": "letter-1"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["cp_items"] == ["Security created", "Escrow account opened"]
+    assert out["cs_items"][0]["timeline"].startswith("30 days")
+    # An off-vocabulary frequency lands on the register's default, not on garbage.
+    assert [c["frequency"] for c in out["covenants"]] == ["Monthly", "Monthly"]
+
+    # The stub engine's prose reply parses to nothing → an honest refusal.
+    monkeypatch.undo()                       # drop the fake engine (and re-set below)
+    app2 = _app(monkeypatch)
+    stub2 = _RegisterStub()
+    stub2.docs["letter-1"] = ("text/markdown", "# Sanction letter\nCP: security.")
+    app2.state.http = stub2
+    r2 = await _call(app2, "POST", "/v1/cam/extract-terms", json={"doc_id": "letter-1"})
+    assert r2.status_code == 422, r2.text
+    assert "by hand" in r2.json()["error"]["detail"]
+
+
 async def test_committee_triad_maps_verbs_to_register_decisions(monkeypatch):
     """/approve → Approved, /return → Returned (note through), and no committee
     authority means 403 before the register is ever asked."""

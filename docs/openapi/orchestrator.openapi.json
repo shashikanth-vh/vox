@@ -990,6 +990,22 @@
         "title": "EwsCaseStartIn",
         "type": "object"
       },
+      "ExtractTermsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "doc_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Doc Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_id"
+        ],
+        "title": "ExtractTermsIn",
+        "type": "object"
+      },
       "FacilityDecision": {
         "additionalProperties": false,
         "description": "The committee's outcome for ONE lending facility. Committee approval is\nfacility-specific: each line gets its own recorded outcome, note, CONDITIONS (a\nconditional approval) and validity window.",
@@ -2134,6 +2150,48 @@
           }
         },
         "summary": "What the engine will actually read from one document",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/extract-terms": {
+      "post": {
+        "description": "The signed sanction letter already lists the Conditions Precedent, the\nConditions Subsequent (with timelines) and the Reporting Covenants \u2014 nobody\nshould re-type them into the terms form. The engine reads the letter and hands\nback the three lists as data; the analyst reviews and saves. Everything stays\ncheckable: the response names the engine, and the analyst edits before seeding.",
+        "operationId": "cam_extract_terms_v1_cam_extract_terms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtractTermsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Extract Terms V1 Cam Extract Terms Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read CP / CS / covenants OUT of a sanction letter (engine-parsed)",
         "tags": [
           "CAM"
         ]

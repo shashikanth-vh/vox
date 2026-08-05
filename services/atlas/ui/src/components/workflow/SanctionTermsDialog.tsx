@@ -87,6 +87,27 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setLetterBusy('');
   };
 
+  // The letter already LISTS the CPs, the CSs (with timelines) and the reporting
+  // covenants — the engine reads them out and pre-fills the form. The analyst reviews,
+  // sets the first-due dates, and only then saves & seeds.
+  const readLetter = async () => {
+    if (!letter) return;
+    setErr(''); setLetterBusy('parse');
+    try {
+      const out = await camService.extractTerms(letter.id);
+      setCpText(out.cp_items.join('\n'));
+      setCsText(out.cs_items
+        .map((c) => c.label + (c.timeline ? ` (${c.timeline})` : '')).join('\n'));
+      setCovs(out.covenants.map((c) => ({
+        ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
+        frequency: c.frequency,
+      })));
+      setInfo(`Read from the letter: ${out.cp_items.length} CP, ${out.cs_items.length} CS, `
+        + `${out.covenants.length} covenant(s). Review below and set each covenant's first due date.`);
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setLetterBusy('');
+  };
+
   const [f, setF] = useState<Record<string, string>>({});
   const [cpText, setCpText] = useState('');
   const [csText, setCsText] = useState('');
@@ -182,6 +203,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               <input hidden type="file" accept=".docx,.pdf"
                 onChange={(e) => { void uploadLetter(e.target.files?.[0] || null); e.target.value = ''; }} />
             </Button>
+            {letter && !existing && (
+              <Button size="small" variant="contained" disabled={!!letterBusy}
+                onClick={() => void readLetter()} sx={{ textTransform: 'none' }}
+                title="The engine reads the letter's CP / CS / covenant sections and pre-fills the lists below — you review and save">
+                {letterBusy === 'parse' ? 'Reading the letter…' : 'Read CP / CS / covenants from the letter'}
+              </Button>
+            )}
           </Box>
         </Box>
 
