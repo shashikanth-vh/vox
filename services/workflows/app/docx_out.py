@@ -268,6 +268,19 @@ def _render_body(md: str, title: str | None = None, *,
     return ''.join(body)
 
 
+def _notice_p(text: str) -> str:
+    """A DRAFT notice the reader cannot miss and the analyst deletes at the end:
+    amber box, bordered, italic — visibly not part of the letter itself."""
+    border = ''.join(f'<w:{side} w:val="single" w:sz="6" w:color="B8860B"/>'
+                     for side in ('top', 'left', 'bottom', 'right'))
+    return ('<w:p><w:pPr>'
+            f'<w:pBdr>{border}</w:pBdr>'
+            '<w:shd w:val="clear" w:fill="FFF3CD"/>'
+            '<w:spacing w:before="120" w:after="240"/>'
+            '</w:pPr><w:r><w:rPr><w:i/><w:color w:val="7A5C00"/></w:rPr>'
+            f'<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>')
+
+
 def markdown_to_docx(md: str, title: str | None = None, *,
                      letterhead: bool = False) -> bytes:
     """Render workbench Markdown into a complete standalone .docx."""
@@ -316,7 +329,8 @@ def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
 
 def markdown_into_template(md: str, template_blob: bytes,
                            title: str | None = None, *,
-                           letterhead: bool = False) -> bytes:
+                           letterhead: bool = False,
+                           notice: str | None = None) -> bytes:
     """Render Markdown INSIDE the template's own package: its styles, theme,
     fonts, numbering, images and section setup all survive, so the output looks
     like the credit team's letterhead — only the letter text is replaced. Heading
@@ -338,6 +352,7 @@ def markdown_into_template(md: str, template_blob: bytes,
         ('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
          '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>')
     new_inner = (_letterhead_prefix(inner)
+                 + (_notice_p(notice) if notice else '')
                  + _render_body(md, title, letterhead=letterhead) + sect_xml)
     parts['word/document.xml'] = (
         doc[:m.start(2)] + new_inner + doc[m.end(2):]).encode('utf-8')
