@@ -98,8 +98,10 @@ _ASK_SYSTEM = (
     "directly and helpfully — questions, summaries, rewrites, calculations, pasted "
     "text. Use any supplied documents as the factual record: never invent figures "
     "about the borrower; where a borrower figure is not in the documents, say 'not on "
-    "record'. General knowledge questions are fine to answer from your own knowledge. "
-    "Answer in clean Markdown."
+    "record'. If a supplied document is itself a prompt or instruction sheet (the "
+    "credit team's CAM prompt, a drafting guide), FOLLOW it as instructions for this "
+    "answer rather than treating it as facts. General knowledge questions are fine to "
+    "answer from your own knowledge. Answer in clean Markdown."
 )
 
 
