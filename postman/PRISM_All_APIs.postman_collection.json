@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (255 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (256 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -10696,6 +10696,43 @@
                   ]
                 },
                 "description": "Newest tenant-level Template document of this doc_type (sanction_template,\ncam_prompt, cam_example, \u2026) \u2014 what 'use the default' resolves to. The bytes are\nread through the ordinary /v1/documents/{id}/content route."
+              }
+            },
+            {
+              "name": "GET /v1/templates/{doc_type}/all \u2014 EVERY tenant default template of one kind, newest first",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/templates/{{doc_type}}/all",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "templates",
+                    "{{doc_type}}",
+                    "all"
+                  ]
+                },
+                "description": "All tenant-level Template documents of this doc_type, newest first \u2014 the\nworkbench's prompt PICKER: when several prompt versions are on record (the shipped\ndefault plus later uploads), the analyst chooses which one rides with an ask."
               }
             }
           ]

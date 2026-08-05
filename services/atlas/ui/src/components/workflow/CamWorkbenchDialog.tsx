@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider,
+  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider, MenuItem,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -50,6 +50,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [docs, setDocs] = useState<EntityDoc[]>([]);
   const [defaults, setDefaults] = useState<{ prompt?: { id: string; title: string };
     example?: { id: string; title: string } }>({});
+  // The CAM Prompt picker: every prompt version on record, newest first. The chosen
+  // one rides with EVERY Ask (empty = ask without a prompt).
+  const [prompts, setPrompts] = useState<{ id: string; title: string }[]>([]);
+  const [promptId, setPromptId] = useState('');
   const [sel, setSel] = useState<Set<string>>(new Set());
   // The documents stay folded out of the way until the analyst wants them.
   const [docsOpen, setDocsOpen] = useState(false);
@@ -81,14 +85,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const load = async () => {
     setLoading(true);
     try {
-      const [r, d, tp, te] = await Promise.all([
+      const [r, d, tps, te] = await Promise.all([
         camService.list(subjectId),
         entityId ? camService.entityDocs(entityId) : Promise.resolve([]),
-        camService.template('cam_prompt'),
+        camService.templates('cam_prompt'),
         camService.template('cam_example'),
       ]);
       setReports(r); setDocs(d);
-      setDefaults({ prompt: tp || undefined, example: te || undefined });
+      setPrompts(tps);
+      setPromptId((prev) => prev || tps[0]?.id || '');
+      setDefaults({ prompt: tps[0] || undefined, example: te || undefined });
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLoading(false);
   };
@@ -96,7 +102,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   useEffect(() => {
     if (!open) return;
     setSel(new Set()); setInstruction(''); setTitle('');
-    setNote(''); setErr(''); setInfo(''); setBusy('');
+    setNote(''); setErr(''); setInfo(''); setBusy(''); setPromptId('');
     void load();
   }, [open, subjectId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -107,18 +113,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const working = live && (live.status === 'Draft' || live.status === 'Returned') ? live : undefined;
   const submitted = live && live.status === 'Submitted' ? live : undefined;
 
-  // Everything pickable, in BOTH states: the company's own file, PLUS the credit
-  // team's EVAM CAM prompt as the first row — tick it and it rides with the next
-  // Ask exactly like a document, so the engine answers under the team's own
-  // instructions. (The reference CAM stays a DOWNLOAD — "Download CAM template" —
-  // not a picker row; a CAM to update by Claude is uploaded as a company document.)
-  const sources: EntityDoc[] = useMemo(() => [
-    ...(defaults.prompt ? [{
-      id: defaults.prompt.id, title: defaults.prompt.title,
-      section: 'EVAM default', doc_type: 'CAM prompt', content_type: '', status: '',
-    }] : []),
-    ...docs,
-  ], [docs, defaults.prompt]);
+  // Everything pickable, in BOTH states: the company's own file. The CAM Prompt has
+  // its OWN picker above the Documents fold (a dropdown when several versions are on
+  // record); the reference CAM stays a DOWNLOAD — "Download CAM template".
+  const sources: EntityDoc[] = docs;
 
 
   const run = async (what: string, fn: () => Promise<string>) => {
@@ -140,9 +138,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
   // ONE conversation surface: whatever is in the box goes to Claude, and the answer
   // comes back INTO the box — editable, so the analyst appends the next question (or
-  // pastes document text) and sends again. Ticked documents ride along, then untick.
+  // pastes document text) and sends again. The chosen CAM Prompt rides with every
+  // Ask; ticked documents ride along too, then untick.
   const ask = (text?: string) => run('ask', async () => {
-    const out = await camService.refine(subjectId, (text || instruction).trim(), false, [...sel]);
+    const out = await camService.refine(subjectId, (text || instruction).trim(), false,
+      [...(promptId ? [promptId] : []), ...sel]);
     setInstruction(out.draft_md || '');
     setSel(new Set());
     const skipped = (out.documents || []).filter((d: any) => !d.included);
@@ -175,10 +175,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   };
 
   const downloadPrompt = async () => {
-    if (!defaults.prompt) return;
+    const p = prompts.find((x) => x.id === promptId) || defaults.prompt;
+    if (!p) return;
     setErr('');
     const out = await documentsService.download(
-      asEntry(defaults.prompt.id, `${defaults.prompt.title}.docx`) as any);
+      asEntry(p.id, `${p.title}.docx`) as any);
     if (!out.ok) setErr(out.error || 'The prompt download failed.');
   };
 
@@ -350,6 +351,24 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   sx={{ whiteSpace: 'nowrap' }}>Clear</Button>
               </Box>
             </Box>
+            {/* The CAM Prompt — its own picker, above the documents: a dropdown when
+                several prompt versions are on record; the chosen one goes to Claude
+                with every Ask. */}
+            {prompts.length > 0 && (
+              <Box sx={{ mt: 1.2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <TextField select size="small" label="CAM Prompt" value={promptId}
+                  onChange={(e) => setPromptId(e.target.value)} sx={{ minWidth: 280 }}>
+                  <MenuItem value="">None — ask without the prompt</MenuItem>
+                  {prompts.map((p) => (
+                    <MenuItem key={p.id} value={p.id}>{p.title}</MenuItem>
+                  ))}
+                </TextField>
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                  {promptId ? 'Goes with every Ask, along with the ticked documents.'
+                    : 'No prompt — asks go with the ticked documents only.'}
+                </Typography>
+              </Box>
+            )}
             {/* Documents — folded until wanted. */}
             {sources.length > 0 && (
               <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>

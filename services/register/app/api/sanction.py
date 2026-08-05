@@ -496,6 +496,27 @@ async def get_template(doc_type: str,
             "checksum": row.checksum}
 
 
+@router.get("/v1/templates/{doc_type}/all", tags=["Reference"],
+            summary="EVERY tenant default template of one kind, newest first")
+async def list_templates(doc_type: str,
+                         ctx: RequestContext = Depends(get_context)) -> list[dict[str, Any]]:
+    """All tenant-level Template documents of this doc_type, newest first — the
+    workbench's prompt PICKER: when several prompt versions are on record (the shipped
+    default plus later uploads), the analyst chooses which one rides with an ask."""
+    from app.models.documents import Document
+
+    rows = (await ctx.session.execute(select(Document).where(
+        Document.tenant_id == ctx.tenant_id,
+        Document.subject_type == "Template",
+        Document.doc_type == doc_type,
+        Document.deleted_at.is_(None))
+        .order_by(Document.uploaded_at.desc().nulls_last(),
+                  Document.created_at.desc()))).scalars().all()
+    return [{"id": str(r.id), "doc_type": r.doc_type, "title": r.title,
+             "content_type": r.content_type, "size_bytes": r.size_bytes,
+             "checksum": r.checksum} for r in rows]
+
+
 @router.get("/v1/internal/cam-reports/{report_id}", tags=["Internal"],
             summary="One CAM version, with its workbench transcript")
 async def get_cam_report(report_id: str,

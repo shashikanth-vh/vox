@@ -204,6 +204,18 @@ export const camService = {
     }
   },
 
+  /** EVERY template of one kind, newest first — the prompt picker's options. Falls
+   *  back to the single newest on an older register that lacks the list route. */
+  async templates(docType: string): Promise<{ id: string; title: string }[]> {
+    try {
+      const rows = await api.get<any[]>(`/templates/${docType}/all`);
+      return (rows || []).map((r) => ({ id: r.id, title: r.title }));
+    } catch {
+      const one = await this.template(docType);
+      return one ? [one] : [];
+    }
+  },
+
   /** Engine-read the sanction letter (plus the committee's credit note when given):
    *  CP / CS / covenant lists AND the numeric terms, as data for the forms to pre-fill.
    *  The analyst reviews before anything is seeded. */

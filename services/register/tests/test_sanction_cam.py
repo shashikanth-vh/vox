@@ -329,6 +329,16 @@ async def test_the_default_templates_resolve_by_doc_type(client: AsyncClient):
 
     assert (await client.get("/v1/templates/never-shipped")).status_code == 404
 
+    # The PICKER variant: every version of the kind, newest first — the workbench's
+    # CAM Prompt dropdown reads this. One shipped default here; an unknown kind is
+    # simply an empty list (nothing to pick).
+    allp = await client.get("/v1/templates/cam_prompt/all")
+    assert allp.status_code == 200, allp.text
+    rows = allp.json()
+    assert [r["doc_type"] for r in rows] == ["cam_prompt"]
+    assert rows[0]["id"] == body["id"]
+    assert (await client.get("/v1/templates/never-shipped/all")).json() == []
+
 
 async def test_the_roster_reconciles_from_access(client: AsyncClient, monkeypatch):
     """Access users become roster rows automatically — keyed by e-mail, roles copied,
