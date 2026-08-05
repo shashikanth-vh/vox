@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Alert, Box, Tab, Tabs, Typography } from '@mui/material';
+import { Alert, Box, Typography } from '@mui/material';
+import SubTabs from '../../../components/common/SubTabs';
 import { useQuery } from '@tanstack/react-query';
 import { lendingService } from '../../../services/lendingService';
 import { useAuth } from '../../../auth/AuthContext';
@@ -29,7 +30,7 @@ const Placeholder = ({ title, body }: { title: string; body: string }) => (
 
 export default function LmsView() {
   const { user } = useAuth();
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState('accounts');
 
   // One list feeds every tab: the lending lines this user may see (same scope rules as
   // LOS). Servicing shows the DISBURSED family — the lines that can hold an account.
@@ -46,23 +47,22 @@ export default function LmsView() {
 
   return (
     <Box>
-      <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ minHeight: 36, mb: 0.5,
-        '& .MuiTab-root': { minHeight: 36, textTransform: 'none', fontSize: 13 } }}>
-        <Tab label="Accounts" />
-        <Tab label="Covenants" />
-        <Tab label="Collections" />
-        <Tab label="EWS" />
-      </Tabs>
+      <SubTabs value={tab} onChange={setTab} items={[
+        { id: 'accounts', label: 'Accounts', icon: '📒' },
+        { id: 'covenants', label: 'Covenants', icon: '📑' },
+        { id: 'collections', label: 'Collections', icon: '💰' },
+        { id: 'ews', label: 'EWS', icon: '🚨' },
+      ]} />
       {!!error && <Alert severity="warning" sx={{ fontSize: 12.5, py: 0.2 }}>
         {(error as any)?.message || 'The lending list could not be read.'}</Alert>}
 
-      {tab === 0 && <AccountsTab rows={rows} />}
-      {tab === 1 && <CovenantsTab rows={rows} />}
-      {tab === 2 && <Placeholder title="Collections"
+      {tab === 'accounts' && <AccountsTab rows={rows} />}
+      {tab === 'covenants' && <CovenantsTab rows={rows} />}
+      {tab === 'collections' && <Placeholder title="Collections"
         body={'Overdue positions, DPD buckets and recovery follow-up graduate here. '
           + 'Until then the overdue position lives on each account (Accounts tab), '
           + 'set by the LMS Authorizer.'} />}
-      {tab === 3 && <Placeholder title="EWS — Early Warning Signals"
+      {tab === 'ews' && <Placeholder title="EWS — Early Warning Signals"
         body={'Cases open AUTOMATICALLY today: a covenant breach or an expired waiver '
           + 'raises an EWS case in the same transaction, deduplicated at the database. '
           + 'This tab becomes the case worklist (triage, assignment, resolution).'} />}

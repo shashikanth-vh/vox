@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Alert, MenuItem, TextField, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Alert, MenuItem, TextField } from '@mui/material';
+import SubTabs from '../../components/common/SubTabs';
 import LmsView from './lms/LmsView';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
@@ -74,12 +75,11 @@ export default function LendingPage() {
 
   return (
     <>
-      <ToggleButtonGroup exclusive size="small" value={side}
-        onChange={(_e, v) => { if (v) setSide(v); }} sx={{ mb: 1,
-          '& .MuiToggleButton-root': { textTransform: 'none', fontSize: 12.5, px: 1.6, py: 0.4 } }}>
-        <ToggleButton value="los">LOS · Origination</ToggleButton>
-        <ToggleButton value="lms">LMS · Servicing</ToggleButton>
-      </ToggleButtonGroup>
+      <SubTabs value={side} onChange={(id) => setSide(id as 'los' | 'lms')}
+        items={[
+          { id: 'los', label: 'LOS · Origination', icon: '📋' },
+          { id: 'lms', label: 'LMS · Servicing', icon: '🏦' },
+        ]} />
       {side === 'lms' && <LmsView />}
       {side === 'lms' ? null : <>
       <PageHint>Stage edits stamp the date automatically; sanction date lives in the company profile.
