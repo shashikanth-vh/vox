@@ -20,6 +20,22 @@ export interface LedgerEntry {
   debit?: number; credit?: number; balance: number;
 }
 
+export interface TrancheItem {
+  id: string; lending_id: string; tranche_ref: string; amount?: number;
+  disbursed_on?: string; advaya_reference?: string; note?: string;
+  recorded_by?: string; booking_status: 'Pending' | 'Booked' | 'Rejected' | string;
+  booked_by?: string; booked_at?: string; booking_note?: string;
+  tranche_no?: string | null;
+  // pending-queue extras
+  stage?: string; entity_id?: string;
+}
+
+export interface TrancheSchedule {
+  lending_id: string; stage: string; items: TrancheItem[];
+  total_disbursed: number; total_pending: number; ceiling?: number | null;
+  fully_disbursed: boolean; remaining?: number | null;
+}
+
 export interface Covenant {
   id: string; entity_id: string; lending_id?: string; name: string;
   covenant_type: string; description?: string; metric?: string; operator?: string;
@@ -83,6 +99,44 @@ export const lmsService = {
     try {
       return await api.patch<any>(`/lending/${lendingId}/loan-account`, input);
     } catch (e) { throw new Error(msg(e, 'update the account')); }
+  },
+
+  // ---- tranche bookings (increment ⑥) --------------------------------------
+  /** The tranche schedule with booking states and remaining headroom. */
+  async tranches(lendingId: string): Promise<TrancheSchedule | null> {
+    try {
+      return await api.get<any>(`/lending/${lendingId}/tranches`);
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      throw new Error(msg(e, 'read the tranche schedule'));
+    }
+  },
+
+  /** The MAKER's recorder (T2, T3, … from LMS) — lands as a PENDING booking. */
+  async recordTranche(lendingId: string, input: {
+    tranche_ref: string; amount: number; disbursed_on?: string; note?: string;
+  }): Promise<TrancheItem> {
+    try {
+      return await api.post<any>(`/lending/${lendingId}/tranches`, input);
+    } catch (e) { throw new Error(msg(e, 'record the tranche')); }
+  },
+
+  /** The AUTHORIZER's queue: every tranche awaiting booking approval, whole-book. */
+  async pendingBookings(): Promise<TrancheItem[]> {
+    try {
+      const out = await api.get<any>('/bookings/pending');
+      return out.items || [];
+    } catch (e) { throw new Error(msg(e, 'read the pending bookings')); }
+  },
+
+  /** Settle a pending booking — approval opens/grows the account in the same
+   *  transaction; rejection needs the reason. Four-eyes is enforced server-side. */
+  async book(lendingId: string, trancheId: string,
+             action: 'approve' | 'reject', note?: string): Promise<TrancheItem> {
+    try {
+      return await api.post<any>(`/lending/${lendingId}/tranches/${trancheId}/book`,
+        { action, ...(note ? { note } : {}) });
+    } catch (e) { throw new Error(msg(e, `${action} the booking`)); }
   },
 
   // ---- covenants -----------------------------------------------------------

@@ -10168,6 +10168,47 @@
       "name": "Lending",
       "item": [
         {
+          "name": "GET /v1/bookings/pending",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bookings/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bookings",
+                "pending"
+              ]
+            }
+          }
+        },
+        {
           "name": "GET /v1/lending/{{{lendingId}}}/committee-decision",
           "request": {
             "method": "GET",
@@ -10597,6 +10638,118 @@
                 "{{{lendingId}}}",
                 "tranches"
               ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{{{lendingId}}}/tranches",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/tranches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "tranches"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"advaya_reference\": \"sample advaya_reference\",\n  \"amount\": 1.0,\n  \"disbursed_on\": \"2026-03-31\",\n  \"note\": \"sample note\",\n  \"tranche_ref\": \"sample tranche_ref\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/lending/{{{lendingId}}}/tranches/{{tranche_id}}/book",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/lending/{{{lendingId}}}/tranches/{{tranche_id}}/book",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "lending",
+                "{{{lendingId}}}",
+                "tranches",
+                "{{tranche_id}}",
+                "book"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"sample action\",\n  \"note\": \"sample note\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }

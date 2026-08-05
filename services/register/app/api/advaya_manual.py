@@ -14,9 +14,11 @@ citing the offline artefact. Production-grade means:
   re-sending the same reference replays, it never duplicates.
 * **same machinery** — the attestation drives EXACTLY the code the machine lane
   drives (``apply_handoff`` / ``apply_tranche``): same package settlement, digest
-  from PRISM's OWN submitted package (a human never types a hash), same ceilings,
-  actuals and stage move. Downstream logic cannot tell the lanes apart — only the
-  provenance can: rows and audit entries carry ``source=manual-attestation``.
+  from PRISM's OWN submitted package (a human never types a hash), same ceilings.
+  One deliberate difference (LMS increment ⑥): a human-recorded ``disbursed``
+  lands as a PENDING BOOKING — the actuals, the stage move and the loan account
+  wait for the LMS Authorizer's approval, four-eyed. Rows and audit entries carry
+  ``source=manual-attestation``.
 
     POST /v1/lending/{lending_id}/advaya-events
         {"event": "accepted"|"rejected"|"disbursed", "reference": "...",
@@ -84,10 +86,14 @@ async def record_manual_advaya_event(
             raise ValidationAppError(
                 "A 'disbursed' event needs amount_cr — the tranche amount Advaya "
                 "confirmed.")
+        # A HUMAN relaying an offline confirmation records a PENDING BOOKING: the
+        # actuals, the stage move and the loan account wait for the LMS Authorizer's
+        # approval (the maker/checker seam at LOS→LMS). The machine lane, where the
+        # partner's own system speaks, still books directly.
         tranche = await apply_tranche(ctx, lid, TrancheIn(
             tranche_ref=payload.reference, amount=payload.amount_cr,
             disbursed_on=payload.disbursed_on, advaya_reference=payload.reference,
-            note=payload.note), source=_SOURCE)
+            note=payload.note), source=_SOURCE, require_booking=True)
         return {"event": "disbursed", "source": _SOURCE,
                 "recorded_by": ctx.user.email, "tranche": tranche}
 

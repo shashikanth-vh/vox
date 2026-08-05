@@ -9,9 +9,9 @@ on ``(tenant_id, handoff_key)``; the row is write-once (a trigger blocks UPDATE/
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -82,7 +82,13 @@ class AdvayaHandoff(RegisterBase):
 class DisbursementTranche(RegisterBase):
     """One disbursement tranche against a Lending line — the callback record from Advaya
     (or ops on its behalf). Append-only at the database (trigger): a recorded disbursement
-    is a fact; a correction is a NEW tranche with its own ref and a note."""
+    is a fact; a correction is a NEW tranche with its own ref and a note.
+
+    The BOOKING lifecycle (increment ⑥): a human-recorded tranche lands ``Pending`` and
+    waits for the LMS Authorizer — approval settles it ``Booked`` (actuals, stage move,
+    loan account, all in that transaction); rejection settles it ``Rejected`` with the
+    reason. The machine lane books directly. A trigger lets ONLY a Pending row settle,
+    once — the tranche facts themselves stay frozen."""
 
     __tablename__ = "disbursement_tranches"
     __table_args__ = (
@@ -98,3 +104,10 @@ class DisbursementTranche(RegisterBase):
     advaya_reference: Mapped[str | None] = mapped_column(String(200))
     note: Mapped[str | None] = mapped_column(Text)
     recorded_by: Mapped[str | None] = mapped_column(String(120))
+    # Pending → Booked | Rejected. Server default 'Booked' keeps historical rows factual.
+    booking_status: Mapped[str] = mapped_column(String(20), nullable=False,
+                                                default="Booked",
+                                                server_default="Booked")
+    booked_by: Mapped[str | None] = mapped_column(String(120))
+    booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    booking_note: Mapped[str | None] = mapped_column(Text)

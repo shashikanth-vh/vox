@@ -17,8 +17,10 @@ import { tokens } from '../../theme';
  *   2. ANSWER — the partner replies OFFLINE; the desk records accepted / rejected here,
  *      citing the partner's reference.
  *   3. TRANCHES — each confirmed phase is one "Record disbursement" (T1, T2, …) with
- *      amount, value date and UTR; the schedule and remaining headroom show inline.
- *      The FIRST tranche flips the line to Disbursed and opens the loan account.
+ *      amount, value date and UTR. A recording lands as a PENDING BOOKING: the LMS
+ *      Authorizer approves it in LMS · Servicing, and THAT is what flips the line to
+ *      Disbursed and opens the loan account (maker/checker at the LOS→LMS seam).
+ *      Once the account is on the servicing book, later phases are recorded there.
  *
  * Reopen the dialog any time — it lands on whichever step is live.
  */
@@ -139,11 +141,9 @@ export default function DisburseDialog({ action, onClose, onDone }: {
         disbursed_on: trDate || undefined,
         ...(note.trim() ? { note: note.trim() } : {}) });
     setTrRef('');
-    const first = tranches.length === 0;
-    onDone(`Tranche T${tranches.length + 1} recorded${first
-      ? ' — the line is Disbursed, the loan account is open and the covenants start.'
-      : '.'}`);
-    return `T${tranches.length + 1} recorded.`;
+    onDone('Tranche recorded — awaiting the LMS Authorizer\'s booking approval '
+      + '(LMS · Servicing → Accounts). The line moves to Disbursed when it is booked.');
+    return 'Recorded — pending LMS booking approval.';
   });
 
   if (!action) return null;
@@ -253,26 +253,43 @@ export default function DisburseDialog({ action, onClose, onDone }: {
             {tranches.map((t) => (
               <Box key={t.id} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
                 py: 0.3, borderBottom: `1px dashed ${tokens.line}` }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 700, minWidth: 26 }}>{t.tranche_no}</Typography>
+                <Typography sx={{ fontSize: 12, fontWeight: 700, minWidth: 26 }}>{t.tranche_no || '—'}</Typography>
                 <Typography sx={{ fontSize: 12.5 }}>{money(t.amount)}</Typography>
-                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted, flex: 1 }}>
                   {[t.disbursed_on, t.advaya_reference || t.tranche_ref].filter(Boolean).join(' · ')}
                 </Typography>
+                {t.booking_status === 'Pending' && (
+                  <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
+                    bgcolor: '#FFF3CD', color: '#7A5C00' }}>Pending approval</Typography>
+                )}
+                {t.booking_status === 'Rejected' && (
+                  <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7, borderRadius: 1,
+                    bgcolor: '#FDE8E4', color: '#7C4A3E' }}
+                    title={t.booking_note || ''}>Rejected</Typography>
+                )}
               </Box>
             ))}
             {sched && tranches.length > 0 && (
               <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
-                Disbursed <b>{money(sched.total_disbursed)}</b>
+                Booked <b>{money(sched.total_disbursed)}</b>
+                {(sched.total_pending ?? 0) > 0 && <> · pending approval {money(sched.total_pending)}</>}
                 {sched.ceiling != null && <> of {money(sched.ceiling)}
                   {sched.fully_disbursed ? ' — fully disbursed' : ` · remaining ${money(sched.remaining)}`}</>}
               </Typography>
             )}
-            {!sched?.fully_disbursed && (
+            {tranches.some((t: any) => t.booking_status === 'Booked') && !sched?.fully_disbursed && (
+              <Alert severity="info" sx={{ mt: 1, py: 0.2, fontSize: 12 }}>
+                This line is on the servicing book — record further tranches in
+                LMS · Servicing → Accounts (open the account, Record disbursement tranche).
+              </Alert>
+            )}
+            {!sched?.fully_disbursed && !tranches.some((t: any) => t.booking_status === 'Booked') && (
               <>
                 <Divider sx={{ my: 1.2 }} />
                 <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
                   Record T{tranches.length + 1} from the partner's manual confirmation —
-                  phases repeat here until the line is fully disbursed.
+                  it lands as a pending booking; the LMS Authorizer's approval moves the
+                  money onto the book.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <TextField size="small" type="number" label="Amount ₹ Cr" required

@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (257 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (260 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -9119,6 +9119,42 @@
           "name": "Lending",
           "item": [
             {
+              "name": "GET /v1/bookings/pending \u2014 The LMS Authorizer's queue: every tranche awaiting booking approval",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/bookings/pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "bookings",
+                    "pending"
+                  ]
+                },
+                "description": "Whole-book by design (servicing sees the book, like a bank's LMS): every PENDING\ntranche recording across the tenant, oldest first, with enough of the line to act\non. Readable by the servicing pair and the senior credit bridge."
+              }
+            },
+            {
               "name": "GET /v1/lending/{lending_id}/committee-decision \u2014 The committee's recorded decision on this line (note included)",
               "request": {
                 "method": "GET",
@@ -9491,7 +9527,109 @@
                     "tranches"
                   ]
                 },
-                "description": "The USER-facing read of the same schedule \u2014 the internal route stays service-only\n(it is the write lane's mirror), while the drawer needs to show T1/T2, amounts,\nUTRs and what remains. Gated like every other company-composite read."
+                "description": "The USER-facing read of the same schedule \u2014 the internal route stays service-only\n(it is the write lane's mirror), while the drawer needs to show T1/T2, amounts,\nUTRs, booking states and what remains. Gated like every other company-composite read."
+              }
+            },
+            {
+              "name": "POST /v1/lending/{lending_id}/tranches \u2014 Record a disbursement tranche for LMS booking approval (human lane)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/tranches",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "tranches"
+                  ]
+                },
+                "description": "The MAKER's recorder \u2014 the LMS Operator (or the credit desk on bridge grants)\nrecords a later phase (T2, T3, \u2026) directly in LMS \u00b7 Servicing. It lands as a\nPENDING BOOKING, exactly like the LOS manual attestation's first tranche.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tranche_ref\": \"sample\",\n  \"amount\": 1.0,\n  \"disbursed_on\": \"2026-01-31\",\n  \"advaya_reference\": \"sample\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/lending/{lending_id}/tranches/{tranche_id}/book \u2014 Settle a pending tranche booking (LMS Authorizer: approve | reject)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/tranches/{{tranche_id}}/book",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "tranches",
+                    "{{tranche_id}}",
+                    "book"
+                  ]
+                },
+                "description": "The CHECKER's verb. Approval makes the money real \u2014 actuals, the stage move and\nthe loan account (with covenant stamping) all land in this one transaction.\nRejection needs the reason and returns the recording to its maker; the corrected\nfigure is a fresh recording with its own ref. Four-eyes is enforced: the recorder\ncan never settle their own booking.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"action\": \"REPLACE-to-match-^(approve|reject)$\",\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               }
             }
           ]

@@ -29,8 +29,9 @@ async def _submitted_line(client: AsyncClient) -> str:
 
 
 async def test_manual_attestation_full_boundary(client: AsyncClient):
-    """accepted → package settles with the cited reference; disbursed → tranche +
-    actuals + stage 'Disbursed' — all attributed to the HUMAN, source-marked."""
+    """accepted → package settles with the cited reference; disbursed → a PENDING
+    BOOKING attributed to the human — nothing moves until the LMS Authorizer approves;
+    then actuals + stage 'Disbursed' land in the approval's transaction."""
     lid = await _submitted_line(client)
 
     acc = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
@@ -48,20 +49,35 @@ async def test_manual_attestation_full_boundary(client: AsyncClient):
                             json={"event": "disbursed", "reference": "UTR-0042",
                                   "amount_cr": 5.0, "disbursed_on": "2026-08-01"})
     assert dis.status_code == 201, dis.text
-    assert dis.json()["tranche"]["amount"] == 5.0
+    tranche = dis.json()["tranche"]
+    assert tranche["amount"] == 5.0
+    # The human lane records a PENDING booking — the line has NOT moved yet.
+    assert tranche["booking_status"] == "Pending"
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed"
-    assert float(line["disbursed_amount"]) == 5.0
-    assert line["disbursement_date"] == "2026-08-01"
-    # Provenance survives on the stage history.
-    assert line["stage_history"][-1]["source"] == "manual-attestation"
+    assert line["stage"] == "Ready for Disbursement"
+    assert not line.get("disbursed_amount")
 
     # Replaying the SAME reference is idempotent — the offline artefact keys the write.
     again = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
                               json={"event": "disbursed", "reference": "UTR-0042",
                                     "amount_cr": 5.0})
     assert again.status_code == 201
-    assert float((await client.get(f"/v1/lending/{lid}")).json()["disbursed_amount"]) == 5.0
+    assert again.json()["tranche"]["id"] == tranche["id"]
+
+    # The LMS AUTHORIZER approves the booking — actuals, stage and account land now.
+    authorizer = {"X-User-Email": "authz@evamfinance.com",
+                  "X-User-Roles": "LMS Authorizer"}
+    ok = await client.post(f"/v1/lending/{lid}/tranches/{tranche['id']}/book",
+                           json={"action": "approve"}, headers=authorizer)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["booking_status"] == "Booked"
+    assert ok.json()["booked_by"] == "authz@evamfinance.com"
+    line = (await client.get(f"/v1/lending/{lid}")).json()
+    assert line["stage"] == "Disbursed"
+    assert float(line["disbursed_amount"]) == 5.0
+    assert line["disbursement_date"] == "2026-08-01"
+    # Provenance survives on the stage history: the approval moved the line.
+    assert line["stage_history"][-1]["source"] == "lms-booking-approval"
 
 
 async def test_manual_attestation_guards(client: AsyncClient):

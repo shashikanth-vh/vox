@@ -5,7 +5,7 @@ import {
   Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { lmsService, type LedgerEntry, type LoanAccount } from '../../../services/lmsService';
+import { lmsService, type LedgerEntry, type LoanAccount, type TrancheSchedule } from '../../../services/lmsService';
 import { useAuth } from '../../../auth/AuthContext';
 import { can, whoCan } from '../../../auth/rbac';
 import { tokens } from '../../../theme';
@@ -31,6 +31,7 @@ export default function AccountDialog({ row, onClose }: {
 
   const [acct, setAcct] = useState<LoanAccount | null>(null);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
+  const [sched, setSched] = useState<TrancheSchedule | null>(null);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
@@ -42,11 +43,14 @@ export default function AccountDialog({ row, onClose }: {
   const [entry, setEntry] = useState({ entry_date: '', kind: 'EMI', amount: '', particulars: '' });
   // Classification (authorizer).
   const [cls, setCls] = useState({ status: '', overdue_position: '', provisioning_amount: '', closed_on: '', note: '' });
+  // The T2+ recorder (operator) — the maker's side of the booking gate.
+  const [tr, setTr] = useState({ amount: '', disbursed_on: '', ref: '' });
 
   const load = async () => {
     if (!row) return;
     setErr('');
     try {
+      setSched(await lmsService.tranches(row.id).catch(() => null));
       const out = await lmsService.account(row.id);
       if (out === null) { setMissing(true); setAcct(null); setEntries([]); return; }
       setMissing(false); setAcct(out.account); setEntries(out.entries);
@@ -58,6 +62,7 @@ export default function AccountDialog({ row, onClose }: {
     setErr(''); setInfo(''); setBusy(''); setPreview(null); setAccrueTo('');
     setEntry({ entry_date: '', kind: 'EMI', amount: '', particulars: '' });
     setCls({ status: '', overdue_position: '', provisioning_amount: '', closed_on: '', note: '' });
+    setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
     void load();
   }, [open, row?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -108,7 +113,22 @@ export default function AccountDialog({ row, onClose }: {
     return `Account updated — status ${a.status}.`;
   });
 
+  const doRecordTranche = () => run('tranche', async () => {
+    if (!row) throw new Error('No line.');
+    if (tr.ref.trim().length < 3) throw new Error('Cite the UTR / confirmation reference (3+ characters).');
+    if (!tr.amount || !(Number(tr.amount) > 0)) throw new Error('Enter the confirmed tranche amount.');
+    const t = await lmsService.recordTranche(row.id, {
+      tranche_ref: tr.ref.trim(), amount: Number(tr.amount),
+      ...(tr.disbursed_on ? { disbursed_on: tr.disbursed_on } : {}),
+    });
+    setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
+    return `${t.tranche_ref} recorded — awaiting the LMS Authorizer's booking approval; `
+      + 'the account grows when it is booked.';
+  });
+
   const closed = acct?.status === 'Closed' || !!acct?.closed_on;
+  const pendingTranches = (sched?.items || []).filter((t) => t.booking_status === 'Pending');
+  const nextTrancheNo = (sched?.items || []).filter((t) => t.booking_status !== 'Rejected').length + 1;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -126,6 +146,15 @@ export default function AccountDialog({ row, onClose }: {
           <Alert severity="info" sx={{ py: 0.4, fontSize: 12.5 }}>
             No loan account on this line yet — one opens automatically on the first
             confirmed disbursement tranche (LOS → Disburse).
+          </Alert>
+        )}
+
+        {pendingTranches.length > 0 && (
+          <Alert severity="info" sx={{ mb: 1, py: 0.2, fontSize: 12 }}>
+            {pendingTranches.length === 1
+              ? `Tranche ${pendingTranches[0].tranche_ref} (₹ ${inr(pendingTranches[0].amount)}) is awaiting the LMS Authorizer's booking approval`
+              : `${pendingTranches.length} tranches are awaiting the LMS Authorizer's booking approval`}
+            {' '}— see Pending bookings on the Accounts tab.
           </Alert>
         )}
 
@@ -220,6 +249,32 @@ export default function AccountDialog({ row, onClose }: {
                     {busy === 'entry' ? 'Recording…' : 'Record'}
                   </Button>
                 </Box>
+
+                {/* ---- the T2+ recorder: the maker's side of the booking gate ------ */}
+                {sched && !sched.fully_disbursed && (
+                  <>
+                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, mt: 1.4, mb: 0.6 }}>
+                      Record disbursement tranche (T{nextTrancheNo})
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.6 }}>
+                      Later phases are recorded here from the partner's confirmation —
+                      each lands as a pending booking for the LMS Authorizer.
+                      {sched.remaining != null && <> Remaining headroom ₹ {inr(sched.remaining)} Cr.</>}
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <TextField size="small" type="number" label="Amount ₹ Cr" value={tr.amount}
+                        onChange={(e) => setTr({ ...tr, amount: e.target.value })} sx={{ width: 140 }} />
+                      <TextField size="small" type="date" label="Value date" InputLabelProps={{ shrink: true }}
+                        value={tr.disbursed_on} onChange={(e) => setTr({ ...tr, disbursed_on: e.target.value })} sx={{ width: 160 }} />
+                      <TextField size="small" label="UTR / reference" value={tr.ref}
+                        onChange={(e) => setTr({ ...tr, ref: e.target.value })} sx={{ flex: 1, minWidth: 160 }} />
+                      <Button size="small" variant="contained" disabled={!!busy}
+                        onClick={doRecordTranche} sx={{ textTransform: 'none' }}>
+                        {busy === 'tranche' ? 'Recording…' : 'Record for approval'}
+                      </Button>
+                    </Box>
+                  </>
+                )}
               </>
             )}
             {!closed && !operate && (
