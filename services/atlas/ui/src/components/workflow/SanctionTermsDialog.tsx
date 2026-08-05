@@ -93,12 +93,10 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         if (!drafted?.draft_md) {
           setErr('No CAM on this line yet — prepare it in the CAM workbench first.');
         } else {
-          const url = URL.createObjectURL(new Blob([drafted.draft_md],
-            { type: 'text/markdown' }));
-          const a = document.createElement('a');
-          a.href = url; a.download = `CAM_v${drafted.report_version}.md`;
-          a.click();
-          URL.revokeObjectURL(url);
+          // A DRAFT is still a CAM the letter can be written from — rendered to Word
+          // so it reads like the filed one would.
+          await camService.exportDocx(lendingId, drafted.draft_md,
+            `CAM v${drafted.report_version} draft`);
         }
       }
     } catch (e: any) { setErr(e?.message || String(e)); }

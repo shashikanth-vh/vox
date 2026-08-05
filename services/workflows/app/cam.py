@@ -23,10 +23,13 @@ Extraction lives in ``extract_text``; adding a format is one branch there.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from fastapi import Request
+from fastapi import Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.docx_out import markdown_to_docx
 
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/csv")
 _DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -208,6 +211,13 @@ class ExtractTermsIn(BaseModel):
     # The committee's credit note — extra context so the numeric terms (amount, rate,
     # tenor, EMI, …) come out of what was actually approved, not only the letter.
     credit_note: str | None = Field(default=None, max_length=20_000)
+
+
+class ExportDocxIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # The box content — the engine's answer (Markdown) after the analyst's edits.
+    markdown: str = Field(min_length=1, max_length=400_000)
+    title: str | None = Field(default=None, max_length=200)
 
 
 class FinaliseIn(BaseModel):
@@ -662,6 +672,24 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 "engine": engine.name, "draft_md": reply,
                 "updated_draft": payload.update_draft,
                 **({"documents": doc_notes} if payload.source_doc_ids else {})}
+
+    @app.post("/v1/cam/{lending_id}/export-docx", tags=["CAM"],
+              summary="Render workbench Markdown into a Word (.docx) file to review and upload")
+    async def cam_export_docx(lending_id: str, payload: ExportDocxIn,
+                              request: Request) -> Any:
+        """The box content, as a Word document. Pure rendering — nothing is filed,
+        no engine is called; the analyst reviews the file in Word and uploads it
+        through the normal 'completed CAM' lane."""
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        blob = markdown_to_docx(payload.markdown, payload.title or None)
+        safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", payload.title or "CAM").strip() or "CAM"
+        return Response(
+            content=blob, media_type=_DOCX_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{safe}.docx"'})
 
     @app.post("/v1/cam/{lending_id}/finalise", tags=["CAM"],
               summary="File the draft to the Data Register and submit it to committee")

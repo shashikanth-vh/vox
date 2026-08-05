@@ -1067,6 +1067,34 @@
         "title": "EwsCaseStartIn",
         "type": "object"
       },
+      "ExportDocxIn": {
+        "additionalProperties": false,
+        "properties": {
+          "markdown": {
+            "maxLength": 400000,
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "title": "ExportDocxIn",
+        "type": "object"
+      },
       "ExtractTermsIn": {
         "additionalProperties": false,
         "properties": {
@@ -2281,6 +2309,59 @@
           }
         },
         "summary": "Read CP / CS / covenants OUT of a sanction letter (engine-parsed)",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/{lending_id}/export-docx": {
+      "post": {
+        "description": "The box content, as a Word document. Pure rendering \u2014 nothing is filed,\nno engine is called; the analyst reviews the file in Word and uploads it\nthrough the normal 'completed CAM' lane.",
+        "operationId": "cam_export_docx_v1_cam__lending_id__export_docx_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportDocxIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Export Docx V1 Cam  Lending Id  Export Docx Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Render workbench Markdown into a Word (.docx) file to review and upload",
         "tags": [
           "CAM"
         ]

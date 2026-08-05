@@ -149,6 +149,15 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       + (skipped.length ? ` ${skipped.length} document(s) could not be read.` : '');
   });
 
+  // The box content, rendered server-side into a styled Word file (headings, lists,
+  // tables). The analyst reviews it in Word, adjusts, and uploads it as the completed
+  // CAM — the answer becomes the document without retyping a word.
+  const toWord = () => run('to-word', async () => {
+    await camService.exportDocx(subjectId, instruction,
+      title.trim() || `CAM v${working?.report_version ?? 1}`);
+    return 'Word file downloaded — review it in Word, then upload it below as the completed CAM.';
+  });
+
   // ---- the Word lane: download the template, fill it OUTSIDE, upload the result ----
   const asEntry = (id: string, name: string) =>
     ({ id, name, size: 0, type: '', when: '', by: '', label: '' });
@@ -329,6 +338,12 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 <Button variant="outlined" size="small" disabled={!instruction || !!busy}
                   onClick={() => void navigator.clipboard?.writeText(instruction)}
                   sx={{ whiteSpace: 'nowrap' }}>Copy</Button>
+                <Button variant="outlined" size="small" disabled={!instruction.trim() || !!busy}
+                  onClick={() => void toWord()}
+                  title="Turns the box content into a styled Word file — review it in Word, then upload it as the completed CAM"
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
+                  {busy === 'to-word' ? 'Rendering…' : 'To Word'}
+                </Button>
                 <Button variant="outlined" size="small" disabled={!instruction || !!busy}
                   onClick={() => setInstruction('')}
                   sx={{ whiteSpace: 'nowrap' }}>Clear</Button>
@@ -397,6 +412,20 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             )}
 
             <Divider sx={{ my: 1.4 }} />
+            {!!working?.draft_md && (
+              <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
+                Draft CAM on record (v{working.report_version})
+                <Box component="span" onClick={() => void run('draft-word', async () => {
+                    await camService.exportDocx(subjectId, working!.draft_md!,
+                      `CAM v${working!.report_version} draft`);
+                    return 'Draft downloaded as Word — continue in Word, then upload it below.';
+                  })}
+                  sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
+                    textDecoration: 'underline' }}>
+                  {busy === 'draft-word' ? 'Rendering…' : 'Download as Word'}
+                </Box>
+              </Typography>
+            )}
             {!!working?.document_id && (
               <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
                 ✓ Completed CAM on file

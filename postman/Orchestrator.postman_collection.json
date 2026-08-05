@@ -111,6 +111,61 @@
           }
         },
         {
+          "name": "POST /v1/cam/{{{lendingId}}}/export-docx",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{orchestratorUrl}}/v1/cam/{{{lendingId}}}/export-docx",
+              "host": [
+                "{{orchestratorUrl}}"
+              ],
+              "path": [
+                "v1",
+                "cam",
+                "{{{lendingId}}}",
+                "export-docx"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"markdown\": \"sample markdown\",\n  \"title\": \"sample title\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/cam/{{{lendingId}}}/finalise",
           "request": {
             "method": "POST",

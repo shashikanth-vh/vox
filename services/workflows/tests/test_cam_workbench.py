@@ -457,3 +457,54 @@ async def test_committee_triad_maps_verbs_to_register_decisions(monkeypatch):
                        {"approved_by": "x", "note": "carried"}, "Credit Head")
     assert ok.status_code == 200, ok.text
     assert stub.reports[rid]["status"] == "Approved"
+
+
+async def test_export_docx_renders_the_box_content_as_word(monkeypatch):
+    """The box content (Markdown) comes back as a real .docx: valid zip, valid XML,
+    and the text round-trips through the workbench's own extractor — headings, list
+    items and table cells all present."""
+    app = _app(monkeypatch)
+    md = ("# Credit Assessment Memo\n\n"
+          "## Borrower\n"
+          "**Advika Renewables** — solar EPC, *Karnataka*.\n\n"
+          "- DSCR `1.31x`\n"
+          "- Tenor 60 months\n\n"
+          "| Metric | Value |\n|---|---|\n| Amount | ₹ 24 Cr |\n| Rate | 11.5% |\n")
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/export-docx",
+                    json={"markdown": md, "title": "CAM v1"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    assert 'filename="CAM v1.docx"' in r.headers["content-disposition"]
+    blob = r.content
+    assert blob[:2] == b"PK"
+
+    import io
+    import zipfile
+    from xml.dom import minidom
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        names = set(z.namelist())
+        assert {"[Content_Types].xml", "word/document.xml", "word/styles.xml"} <= names
+        minidom.parseString(z.read("word/document.xml"))   # well-formed XML
+        minidom.parseString(z.read("word/styles.xml"))
+
+    from app.cam import extract_text
+    text, reason = extract_text(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob)
+    assert reason is None
+    for expected in ("Credit Assessment Memo", "Borrower", "Advika Renewables",
+                     "DSCR", "Tenor 60 months", "₹ 24 Cr", "11.5%", "CAM v1"):
+        assert expected in text, expected
+
+
+async def test_export_docx_requires_markdown_and_the_api_key(monkeypatch):
+    app = _app(monkeypatch)
+    empty = await _call(app, "POST", f"/v1/cam/{LENDING}/export-docx",
+                        json={"markdown": ""})
+    assert empty.status_code == 422
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        keyless = await c.post(f"/v1/cam/{LENDING}/export-docx",
+                               json={"markdown": "# x"},
+                               headers={"X-Tenant": "EVAM"})
+    assert keyless.status_code in (401, 403), keyless.text

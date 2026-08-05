@@ -135,6 +135,21 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
+  /** The box content rendered as a Word file — headings, lists, tables styled like
+   *  the CAM template. Downloads in the browser; the analyst reviews it in Word and
+   *  uploads it through the normal completed-CAM lane. */
+  async exportDocx(lendingId: string, markdown: string, title?: string): Promise<void> {
+    try {
+      const blob = await orchestrator.postBlob(`/v1/cam/${lendingId}/export-docx`,
+        { markdown, ...(title ? { title } : {}) }, { timeoutMs: 60_000 });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${(title || 'CAM').replace(/[\\/:*?"<>|]+/g, '_')}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { throw new Error(msg(e, 'render the Word file')); }
+  },
+
   /** File the draft to the Data Register and submit it to the committee. Passing a
    *  documentId instead submits that ALREADY-UPLOADED file (the Word-template lane) —
    *  it becomes the committee copy, with or without an in-app draft. */

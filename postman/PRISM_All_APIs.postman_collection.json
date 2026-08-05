@@ -12576,7 +12576,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (52 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (53 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
@@ -12667,6 +12667,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"doc_id\": \"sample\",\n  \"credit_note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/cam/{lending_id}/export-docx \u2014 Render workbench Markdown into a Word (.docx) file to review and upload",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/{{lending_id}}/export-docx",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "{{lending_id}}",
+                    "export-docx"
+                  ]
+                },
+                "description": "The box content, as a Word document. Pure rendering \u2014 nothing is filed,\nno engine is called; the analyst reviews the file in Word and uploads it\nthrough the normal 'completed CAM' lane.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"markdown\": \"sample\",\n  \"title\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
