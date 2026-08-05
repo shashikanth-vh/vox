@@ -41,8 +41,10 @@ export default function LmsView() {
   });
   const rows: LendingRow[] = useMemo(() => {
     const all: LendingRow[] = (data as any)?.rows ?? (Array.isArray(data) ? data : []);
-    return all.filter((r) => ['Disbursed', 'Ready for Disbursement', 'CP/CS Completed']
-      .includes(r.stage));
+    // The LMS workspace starts AT THE SEAM: a line appears once a booking can arrive
+    // (Ready for Disbursement) and joins the book when one is approved. Earlier stages
+    // are origination pipeline — LOS's world, not the servicing desk's.
+    return all.filter((r) => ['Disbursed', 'Ready for Disbursement'].includes(r.stage));
   }, [data]);
 
   return (

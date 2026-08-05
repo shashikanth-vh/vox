@@ -235,11 +235,26 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
           books the first disbursement tranche (recorded in LOS → Disburse).
         </Typography>
       )}
-      {noAccount > 0 && acctRows.length > 0 && (
-        <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.6 }}>
-          {noAccount} line{noAccount > 1 ? 's' : ''} in the disbursed family {noAccount > 1 ? 'have' : 'has'} no
-          loan account yet — {noAccount > 1 ? 'they appear' : 'it appears'} here once the first tranche is booked.
-        </Typography>
+      {/* Lines on their way but not yet booked stay VISIBLE — the book is empty,
+          not the pipeline. */}
+      {noAccount > 0 && !bookQuery.isLoading && (
+        <Box sx={{ border: `1px dashed ${tokens.line}`, borderRadius: 1, p: 1.2, mt: 1.2 }}>
+          <Typography sx={{ fontSize: 12.5, fontWeight: 600, mb: 0.4 }}>
+            Awaiting first booking ({noAccount})
+          </Typography>
+          {rows.filter((r) => !acctRows.some((a) => a.id === r.id)).map((r) => (
+            <Box key={r.id} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
+              py: 0.3, borderBottom: `1px dashed ${tokens.line}`,
+              '&:last-of-type': { borderBottom: 'none' } }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 600 }}>{r._name}</Typography>
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}</Typography>
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted, flex: 1 }}>{r.stage}</Typography>
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                record the tranche in LOS → Disburse; the account opens when it is booked
+              </Typography>
+            </Box>
+          ))}
+        </Box>
       )}
 
       <AccountDrawer row={open} onClose={() => setOpen(null)} onChanged={refresh} />
