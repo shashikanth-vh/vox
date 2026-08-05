@@ -84,3 +84,12 @@ staticPasswords:
     hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
     username: ananya
     userID: ananya-uid
+  # The LMS servicing pair (maker/checker at the booking gate). Password: "prism".
+  - email: lms.operator@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: lms-operator
+    userID: lms-operator-uid
+  - email: lms.authorizer@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: lms-authorizer
+    userID: lms-authorizer-uid
