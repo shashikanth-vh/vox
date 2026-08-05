@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (255 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (253 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -6789,90 +6789,6 @@
           "name": "Internal",
           "item": [
             {
-              "name": "POST /v1/internal/advaya-handoffs \u2014 Record an Advaya handoff outcome (single-winner)",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "X-Tenant",
-                    "value": "{{tenant}}"
-                  },
-                  {
-                    "key": "X-User-Email",
-                    "value": "{{userEmail}}"
-                  },
-                  {
-                    "key": "X-User-Roles",
-                    "value": "Admin"
-                  },
-                  {
-                    "key": "Authorization",
-                    "value": "Bearer {{adminToken}}"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "v1",
-                    "internal",
-                    "advaya-handoffs"
-                  ]
-                },
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"handoff_key\": \"sample\",\n  \"lending_id\": \"sample\",\n  \"payload_sha256\": \"REPLACE-to-match-^[0-9a-fA-F]{64}$\",\n  \"status\": \"REPLACE-to-match-^(Accepted|Rejected)\",\n  \"acknowledgement_id\": \"sample\",\n  \"workflow_id\": \"sample\",\n  \"run_id\": \"sample\",\n  \"note\": \"sample\"\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                }
-              }
-            },
-            {
-              "name": "GET /v1/internal/advaya-handoffs/{handoff_key} \u2014 Read a recorded Advaya handoff outcome",
-              "request": {
-                "method": "GET",
-                "header": [
-                  {
-                    "key": "X-Tenant",
-                    "value": "{{tenant}}"
-                  },
-                  {
-                    "key": "X-User-Email",
-                    "value": "{{userEmail}}"
-                  },
-                  {
-                    "key": "X-User-Roles",
-                    "value": "Admin"
-                  },
-                  {
-                    "key": "Authorization",
-                    "value": "Bearer {{adminToken}}"
-                  }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/v1/internal/advaya-handoffs/{{handoff_key}}",
-                  "host": [
-                    "{{baseUrl}}"
-                  ],
-                  "path": [
-                    "v1",
-                    "internal",
-                    "advaya-handoffs",
-                    "{{handoff_key}}"
-                  ]
-                }
-              }
-            },
-            {
               "name": "POST /v1/internal/cam-reports \u2014 Open a CAM version (Draft \u2014 the workbench writes into it)",
               "request": {
                 "method": "POST",
@@ -12576,7 +12492,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (51 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (52 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
@@ -13814,6 +13730,56 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"deal_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"product_type\": \"sample\",\n  \"rm\": \"sample\",\n  \"credit_note_reference\": \"sample\",\n  \"decision_timeout_hours\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/workflows/disburse \u2014 DISBURSE: send the disbursement request, unmet CPs riding along",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/workflows/disburse",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "workflows",
+                    "disburse"
+                  ]
+                },
+                "description": "The desk's single verb. Stages the line to 'Ready for Disbursement' if the CP\napproval just landed, prepares the request package with every CP condition NOT\nmet spelled out in its note, and marks it SENT \u2014 a recorded intent, generic over\nthe partner (Advaya today). The partner's answers come back through\n'Disbursement Update', phase by phase.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lending_id\": \"sample\",\n  \"requested_by\": \"sample\",\n  \"proposed_amount\": 1.0,\n  \"proposed_date\": \"sample\",\n  \"recipient\": \"sample\",\n  \"note\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

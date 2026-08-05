@@ -45,7 +45,7 @@ export interface WorkflowAction {
   reason?: string;
   /** Named screen for a step a flat form cannot express; otherwise build from `form`. */
   screen?: 'cpcs-checklist' | 'handover-package' | 'executed-agreement'
-    | 'cam-workbench' | 'sanction-terms';
+    | 'cam-workbench' | 'sanction-terms' | 'disburse';
   /** Ids and constants the plane pre-filled; merged under the form's own values. */
   body: Record<string, any>;
   /**

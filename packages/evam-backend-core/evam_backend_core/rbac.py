@@ -156,7 +156,9 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     # Advaya handover maker-checker: a maker PREPARES the package; a DIFFERENT checker APPROVES it,
     # which advances the line to 'Disbursed'. Both are senior credit authority.
     "initiate_advaya_handover":       _row("F F - - F - - - - -"),
-    "record_handover_package":        _row("F F - - F - - - - -"),
+    # The ANALYST sends the disbursement request (the CP approval already gated the
+    # money movement) — so Deal Analyst holds this alongside the credit seniors.
+    "record_handover_package":        _row("F F - - F F - - - -"),
     "approve_advaya_handover":        _row("F F - - F - - - - -"),
     "export_csv":                     _row("F F F F F F F F F F"),
     "backup_restore":                 _row("F - - - - - - - - -"),

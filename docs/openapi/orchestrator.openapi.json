@@ -823,6 +823,71 @@
         "title": "DecisionIn",
         "type": "object"
       },
+      "DisburseIn": {
+        "additionalProperties": false,
+        "description": "One click from the desk: stage the line if needed, prepare the request package\n(unmet CPs riding in its note), and mark it SENT to the disbursement partner \u2014\nAdvaya today, PRISM's own arm tomorrow; the flow does not care.",
+        "properties": {
+          "lending_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lending Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "proposed_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Amount"
+          },
+          "proposed_date": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Date"
+          },
+          "recipient": {
+            "default": "Advaya (disbursement partner)",
+            "maxLength": 200,
+            "title": "Recipient",
+            "type": "string"
+          },
+          "requested_by": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Requested By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lending_id"
+        ],
+        "title": "DisburseIn",
+        "type": "object"
+      },
       "DocExpiryMonitorIn": {
         "additionalProperties": false,
         "description": "Start (or attach to) the tenant's document-expiry monitor. Overrides default to\ndeployment settings when omitted.",
@@ -3624,6 +3689,66 @@
           }
         },
         "summary": "Start a deal-structuring workflow (awaits the committee decision)",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/v1/workflows/disburse": {
+      "post": {
+        "description": "The desk's single verb. Stages the line to 'Ready for Disbursement' if the CP\napproval just landed, prepares the request package with every CP condition NOT\nmet spelled out in its note, and marks it SENT \u2014 a recorded intent, generic over\nthe partner (Advaya today). The partner's answers come back through\n'Disbursement Update', phase by phase.",
+        "operationId": "disburse_v1_workflows_disburse_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisburseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Disburse V1 Workflows Disburse Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "DISBURSE: send the disbursement request, unmet CPs riding along",
         "tags": [
           "Workflows"
         ]

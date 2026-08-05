@@ -327,7 +327,10 @@ async def submit_handover_package(lending_id: str,
     Accepted/Rejected outcome and only THAT settles the package."""
     from app.authz.engine import enforce_operation
 
-    enforce_operation(ctx.user, "approve_advaya_handover")
+    # SENDING is mechanical, not a second approval: the four-eyes gate on money movement
+    # is the CP checklist approval that released disbursement. A Prepared package may be
+    # sent directly (the optional approve step still works where a desk wants it).
+    enforce_operation(ctx.user, "record_handover_package")
     pkg = (await ctx.session.execute(select(AdvayaHandoverPackage).where(
         AdvayaHandoverPackage.tenant_id == ctx.tenant_id,
         AdvayaHandoverPackage.lending_id == lending_id,
@@ -336,10 +339,11 @@ async def submit_handover_package(lending_id: str,
         raise NotFoundError(f"No handover package for Lending line {lending_id!r}.")
     if pkg.status == "Submitted":
         return _serialize(pkg)                      # idempotent resend
-    if pkg.status != "Approved":
+    if pkg.status not in ("Prepared", "Approved"):
         raise ConflictError(
-            f"Package is {pkg.status!r}; only an Approved package can be submitted "
-            "(prepare → approve → submit → Advaya accepts/rejects).")
+            f"Package is {pkg.status!r}; only a Prepared or Approved package can be "
+            "sent (prepare → send → the disbursement partner accepts/rejects).")
+    prior = pkg.status
     submitter, _submitter_id = _ident(ctx)
     pkg.status = "Submitted"
     pkg.updated_by = ctx.actor
@@ -350,7 +354,7 @@ async def submit_handover_package(lending_id: str,
         tenant_id=ctx.tenant_id, actor=ctx.actor, action="advaya.handover.submit",
         resource_type="advaya_handover_packages", resource_id=str(pkg.id),
         request_id=request_id_ctx.get(),
-        changes={"lending_id": lending_id, "from": "Approved", "to": "Submitted",
+        changes={"lending_id": lending_id, "from": prior, "to": "Submitted",
                  "submitted_by": submitter}))
     return _serialize(pkg)
 

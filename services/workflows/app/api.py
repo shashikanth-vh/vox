@@ -244,64 +244,29 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "form": [],
         },
         {
-            "key": "lending.ready-for-disbursement",
-            "label": "Move to Ready for Disbursement",
-            "method": "PATCH", "url": "/v1/lending/{subject_id}",
-            "roles": _CREDIT_MAKERS, "stages": {"CP/CS Completed"},
-            "stage_reason": "The line moves here from 'CP/CS Completed', once the drawdown "
-                            "it proposes is recorded.",
-            # The register requires BOTH proposed figures to enter this stage, and carries
-            # them into the Advaya handover package. They are the maker's to state — this
-            # is what PRISM proposes, not a confirmation that money moved — so unlike the
-            # CP/CS move they are asked for rather than derived.
-            "constant": {"stage": "Ready for Disbursement"},
-            "form": [_f("proposed_disbursement_amount", "Proposed drawdown \u20b9 Cr",
-                        "number", required=True),
-                     _f("proposed_disbursement_date", "Proposed drawdown date", "date",
-                        required=True,
-                        help_text="What PRISM proposes. The ACTUAL disbursement is "
-                                  "recorded later, from Advaya's own confirmation.")],
-        },
-        {
-            "key": "handover.prepare",
-            # The package must cite the executed agreement's digest; the plane supplies it.
-            "needs_evidence_refs": True,
-            "label": "Prepare disbursement request (Advaya)",
-            "method": "POST", "url": "/v1/workflows/advaya-handover",
-            # EXACTLY 'Ready for Disbursement': the register refuses a handover from any
-            # other stage, so offering it at 'CP/CS Completed' only produced a 409 after
-            # the maker had named a recipient and picked the documents.
-            "roles": _CREDIT_MAKERS, "stages": {"Ready for Disbursement"},
-            "stage_reason": "Available once the CP/CS checklist has been approved.",
-            # The package names a SET of executed documents, picked against what is
-            # actually on the company's file.
-            "screen": "handover-package",
+            # ONE verb for the desk: shows the unmet CPs, stages the line if the CP
+            # approval just landed, prepares the request package (unmet CPs in its
+            # note), and marks it SENT. Generic over the partner — Advaya today,
+            # PRISM's own arm tomorrow.
+            "key": "disburse",
+            "label": "Disburse",
+            "method": "POST", "url": "/v1/workflows/disburse",
+            "roles": _CREDIT_MAKERS,
+            "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            "stage_reason": "Disbursement follows the Conditions Precedent approval.",
+            "screen": "disburse",
             "prefill": {"lending_id": "id"},
-            "form": [_f("recipient", "Recipient", required=True),
-                     _f("delivery_method", "Delivery", "select", required=True,
-                        options=["SFTP", "Email", "Portal"]),
-                     _NOTE],
-        },
-        {
-            "key": "handover.submit",
-            # Only an APPROVED package may be submitted.
-            "package": "Approved",
-            "label": "Send disbursement request to Advaya",
-            "method": "POST",
-            "url": "/v1/internal/handover-packages/{subject_id}/submit",
-            "roles": {"Credit Head", "Management", "Admin"},
-            "stages": {"Ready for Disbursement"},
-            "stage_reason": "Available once the handover package has been approved.",
             "form": [],
         },
         {
             "key": "advaya.attest",
             # And Advaya's answer only means anything once it has been sent one.
             "package": "Submitted",
-            "label": "Update disbursement status",
+            "label": "Disbursement Update",
             "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
             "roles": {"Credit Head", "Management", "Admin"},
-            "stages": {"Ready for Disbursement"},
+            # 'Disbursed' too: later phases (T2, T3, ...) are recorded the same way.
+            "stages": {"Ready for Disbursement", "Disbursed"},
             "stage_reason": "Available once the handover has been submitted to Advaya.",
             # ORDER MATTERS and the register enforces it: a disbursement tranche may only
             # be recorded once Advaya has ACCEPTED the handover, so recording one first is
@@ -402,8 +367,7 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "run.resubmit": ("by",),
     "cpcs.prepare": ("requested_by",),
     "cpcs.update-cs": ("requested_by",),
-    "handover.prepare": ("requested_by",),
-    "handover.submit": (),
+    "disburse": ("requested_by",),
     "advaya.attest": (),
     # A plain stage write: the register attributes it to the verified caller from
     # the forwarded identity, so there is no identity FIELD to fill.
@@ -908,6 +872,19 @@ class CpcsChecklistIn(BaseModel):
     deal_id: str | None = Field(default=None, max_length=64)
     checklist_version: int = Field(default=1, ge=1)
     note: str | None = Field(default=None, max_length=2000)
+
+
+class DisburseIn(BaseModel):
+    """One click from the desk: stage the line if needed, prepare the request package
+    (unmet CPs riding in its note), and mark it SENT to the disbursement partner —
+    Advaya today, PRISM's own arm tomorrow; the flow does not care."""
+    model_config = ConfigDict(extra="forbid")
+    lending_id: str = Field(min_length=1, max_length=64)
+    requested_by: str = Field(default="", max_length=200)
+    proposed_amount: float | None = Field(default=None, gt=0)
+    proposed_date: str | None = Field(default=None, max_length=10)
+    recipient: str = Field(default="Advaya (disbursement partner)", max_length=200)
+    note: str | None = Field(default=None, max_length=4000)
 
 
 class CpcsApproveIn(BaseModel):
@@ -2188,6 +2165,97 @@ def create_app() -> FastAPI:
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
             "status_url": f"/v1/workflows/{handle.id}"})
+
+    @app.post("/v1/workflows/disburse", tags=["Workflows"],
+              summary="DISBURSE: send the disbursement request, unmet CPs riding along")
+    async def disburse(payload: DisburseIn, request: Request,
+                       x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+                       ) -> Any:
+        """The desk's single verb. Stages the line to 'Ready for Disbursement' if the CP
+        approval just landed, prepares the request package with every CP condition NOT
+        met spelled out in its note, and marks it SENT — a recorded intent, generic over
+        the partner (Advaya today). The partner's answers come back through
+        'Disbursement Update', phase by phase."""
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        who, err = await _verified_email(request, payload.requested_by)
+        if err is not None:
+            return err
+        caller, verified = _caller_context(request, who)
+        if settings.internal_signing_secret and not verified:
+            return _problem(403, "Forbidden",
+                            "A verified, route-bound caller identity is required.")
+        lid = payload.lending_id
+        line, lerr = await _register_get_as(request, f"/v1/lending/{lid}", who, caller)
+        if lerr is not None:
+            return lerr
+        stage = str(line.get("stage") or "")
+        if stage not in ("CP/CS Completed", "Ready for Disbursement"):
+            return _problem(409, "Conflict",
+                            f"The line is {stage!r} — disbursement follows the CP "
+                            "checklist approval.")
+        # Stage + proposed figures: fold "Move to Ready for Disbursement" into the verb.
+        amount = payload.proposed_amount or line.get("proposed_disbursement_amount")
+        date_ = payload.proposed_date or line.get("proposed_disbursement_date")
+        if stage == "CP/CS Completed":
+            if not amount or not date_:
+                return _problem(422, "Validation failed",
+                                "Enter the proposed drawdown amount and date — they "
+                                "travel with the disbursement request.")
+            moved = await _register_patch_as(
+                request, f"/v1/lending/{lid}", who, caller,
+                {"stage": "Ready for Disbursement",
+                 "proposed_disbursement_amount": amount,
+                 "proposed_disbursement_date": str(date_)})
+            if not (isinstance(moved, ORJSONResponse) and moved.status_code == 200):
+                return moved
+        # Every CP condition NOT met rides with the request — the partner sees exactly
+        # what is outstanding, and the frozen package snapshot proves it later.
+        unmet: list[str] = []
+        try:
+            cl, _cerr = await _register_get_as(
+                request, f"/v1/internal/cpcs-checklists?lending_id={lid}&limit=50",
+                who, caller)
+            rows = cl.get("items", cl) if isinstance(cl, dict) else cl
+            approved_rows = [x for x in (rows or []) if x.get("status") == "Approved"]
+            latest = max(approved_rows, key=lambda x: x.get("checklist_version") or 0,
+                         default=None)
+            unmet = [
+                f"{i.get('label') or i.get('key')} — {i.get('status') or 'Pending'}"
+                for i in ((latest or {}).get("items") or [])
+                if str(i.get("condition_type")) == "CP"
+                and str(i.get("status") or "Pending") != "Completed"]
+        except (AttributeError, ValueError, TypeError):
+            pass
+        note = ((payload.note + "\n\n") if payload.note else "")
+        if unmet:
+            note += ("Conditions Precedent NOT met at disbursement request "
+                     "(waived / deferred / outstanding):\n- " + "\n- ".join(unmet))
+        prep = await _register_post_as(
+            request, "/v1/internal/handover-packages", who, caller,
+            {"lending_id": lid, "recipient": payload.recipient,
+             "delivery_method": "Portal",
+             **({"note": note} if note.strip() else {})})
+        prep_failed = not (isinstance(prep, ORJSONResponse) and prep.status_code == 200)
+        if prep_failed:
+            # A package may already exist (a resend after a rejection) — sending is
+            # still the intent, so fall through to submit; any other failure surfaces.
+            body_txt = bytes(getattr(prep, "body", b"") or b"").decode("utf-8", "ignore")
+            if "already" not in body_txt.lower():
+                return prep
+        sent = await _register_post_as(
+            request, f"/v1/internal/handover-packages/{lid}/submit", who, caller, {})
+        if not (isinstance(sent, ORJSONResponse) and sent.status_code == 200):
+            return sent
+        pkg = orjson.loads(sent.body)
+        return ORJSONResponse(status_code=200, content={
+            "status": "Requested", "lending_id": lid,
+            "sent_to": payload.recipient,
+            "unmet_conditions": unmet,
+            "package_sha256": pkg.get("package_sha256"),
+            "next": "Await the partner's manual confirmation, then record each phase "
+                    "with 'Disbursement Update' — the first disbursed tranche opens "
+                    "the loan account."})
 
     @app.post("/v1/workflows/advaya-handover/{lending_id}/approve", tags=["Workflows"],
               summary="CHECKER approves a prepared Advaya handover (different person)")

@@ -5,6 +5,7 @@ import CpcsChecklistDialog from './CpcsChecklistDialog';
 import HandoverPackageDialog from './HandoverPackageDialog';
 import ExecutedAgreementDialog from './ExecutedAgreementDialog';
 import CamWorkbenchDialog from './CamWorkbenchDialog';
+import DisburseDialog from './DisburseDialog';
 import SanctionTermsDialog from './SanctionTermsDialog';
 import { workflowActionsService, type SubjectActions, type SubjectType, type WorkflowAction }
   from '../../services/workflowActionsService';
@@ -81,6 +82,8 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
         subjectId={subjectId} entityId={entityId}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <SanctionTermsDialog action={open?.screen === 'sanction-terms' ? open : null}
+        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+      <DisburseDialog action={open?.screen === 'disburse' ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
     </>
   );

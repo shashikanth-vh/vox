@@ -30,19 +30,18 @@ def _action(key: str, subject: str = "Lending") -> dict:
 # --------------------------------------------------------------------------------- #
 def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
     """The whole point of returning a disabled action: the reason teaches the process."""
-    submit = _action("handover.submit")
-    ok, reason = _evaluate_action(submit, roles={"Credit Head"}, stage="Diligence",
+    attest = _action("advaya.attest")
+    ok, reason = _evaluate_action(attest, roles={"Credit Head"}, stage="Diligence",
                                   run_state="none")
     assert not ok
-    assert reason == "Available once the handover package has been approved."
-    # 'Ready for Disbursement', not 'CP/CS Completed'. This assertion used to encode the
-    # catalogue's own belief rather than the register's rule, so it agreed with the bug:
-    # a handover offered a stage early, refused with a 409 after the maker had named a
-    # recipient and picked the documents.
-    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="Ready for Disbursement",
-                             run_state="none")
-    assert ok
-    ok, _ = _evaluate_action(submit, roles={"Credit Head"}, stage="CP/CS Completed",
+    assert reason == "Available once the handover has been submitted to Advaya."
+    # Offered exactly where the register accepts the write: once a request can have been
+    # sent, and STILL at 'Disbursed' so later phases (T2, T3, …) record the same way.
+    for stage in ("Ready for Disbursement", "Disbursed"):
+        ok, _ = _evaluate_action(attest, roles={"Credit Head"}, stage=stage,
+                                 run_state="none")
+        assert ok, stage
+    ok, _ = _evaluate_action(attest, roles={"Credit Head"}, stage="CP/CS Completed",
                              run_state="none")
     assert not ok
 
@@ -310,7 +309,7 @@ def test_screen_backed_actions_are_offered_and_name_their_screen():
     from app.api import _evaluate_action as ev
 
     for key, screen in (("cpcs.prepare", "cpcs-checklist"),
-                        ("handover.prepare", "handover-package")):
+                        ("disburse", "disburse")):
         spec = _action(key)
         assert spec.get("screen") == screen
         assert not spec.get("needs_screen"), f"{key} still gated behind a missing screen"
@@ -375,7 +374,7 @@ def test_every_screen_the_catalogue_names_is_one_the_client_implements():
     agreement meant asking a credit manager to type a SHA-256 by hand, a question with
     no answer inside the product. Keep the two lists in step."""
     implemented = {"cpcs-checklist", "handover-package", "executed-agreement",
-                   "cam-workbench", "sanction-terms"}
+                   "cam-workbench", "sanction-terms", "disburse"}
     named = {spec["screen"] for actions in _MAKER_ACTIONS.values()
              for spec in actions if spec.get("screen")}
     assert named <= implemented, f"no client screen for {sorted(named - implemented)}"
@@ -413,9 +412,9 @@ def test_every_action_declares_which_service_answers_it():
             else:
                 assert plane == "register", spec["key"]
 
-    # The two that bit: register routes that are NOT under /v1/workflows.
+    # The one that bit: a register route that is NOT under /v1/workflows.
     by_key = {s["key"]: s for acts in _MAKER_ACTIONS.values() for s in acts}
-    for key in ("handover.submit", "advaya.attest"):
+    for key in ("advaya.attest",):
         assert _plane_of(by_key[key], by_key[key]["url"]) == "register", key
 
 
@@ -535,60 +534,24 @@ def test_no_signed_read_is_minted_with_a_query_string():
         "mint the internal context with _token_path(path) — a raw path may carry a query")
 
 
-def test_the_handover_lane_is_gated_where_the_register_gates_it():
-    """A handover may be prepared ONLY from 'Ready for Disbursement' — the register
-    refuses every other stage outright. The catalogue offered the whole lane from
-    'CP/CS Completed' too, which is one stage early: the dialog opened, the maker filled
-    it in, and the register answered 409.
-    """
-    for key in ("handover.prepare", "handover.submit", "advaya.attest"):
-        spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == key)
-        assert spec["stages"] == {"Ready for Disbursement"}, key
-
-
-def test_getting_to_ready_for_disbursement_is_a_step_with_the_figures_it_needs():
-    """That stage has MANDATORY FIELDS, not evidence: the register will not enter it
-    without the proposed drawdown, and carries both into the handover package.
-
-    They are the maker's to state — this is what PRISM PROPOSES, never a claim that money
-    moved — so unlike the CP/CS move they are asked for rather than derived.
-    """
-    from evam_backend_core.policy import MANDATORY_FOR_STAGE
-
-    spec = next(s for s in _MAKER_ACTIONS["Lending"]
-                if s["key"] == "lending.ready-for-disbursement")
-    assert spec["constant"]["stage"] == "Ready for Disbursement"
-    assert spec["stages"] == {"CP/CS Completed"}
-    asked = {f["name"] for f in spec["form"] if f.get("required")}
-    assert asked == set(MANDATORY_FOR_STAGE["Lending"]["Ready for Disbursement"]), (
-        "the form must collect exactly what the register demands for that stage")
-
-
-def test_the_handover_sequence_is_enforced_and_not_merely_described():
-    """prepare -> approve -> submit -> Advaya's outcome.
-
-    Those steps read as a sequence and their reasons SAID so, while nothing enforced it:
-    a user could open "Record an Advaya confirmation" against a package that had only been
-    approved, fill the form in, and be told by the register that it had not been submitted.
-    A panel that offers a step it knows will be refused is worse than one that hides it —
-    it costs the user the whole form first.
-
-    The plane reads the package's state and gates on it, naming the state the package IS
-    in as well as the one it needs to be in.
-    """
+def test_disburse_is_the_single_verb_and_the_partner_answer_is_gated():
+    """The desk's lane collapsed to ONE verb: 'Disburse' (offered from the CP approval
+    onward — it stages the line itself when needed), and 'Disbursement Update' for the
+    partner's manual confirmations, offered only once a request has been SENT and kept
+    available at 'Disbursed' so later phases (T2, T3, …) record the same way."""
     from app.api import _PACKAGE_REASON
 
-    submit = _action("handover.submit")
+    disburse = _action("disburse")
+    assert disburse["stages"] == {"CP/CS Completed", "Ready for Disbursement"}
+    assert disburse["screen"] == "disburse"
+    assert "package" not in disburse          # sending is how a package comes to exist
+
     attest = _action("advaya.attest")
-    assert submit["package"] == "Approved"
     assert attest["package"] == "Submitted"
+    assert attest["stages"] == {"Ready for Disbursement", "Disbursed"}
+    assert "Submitted" in _PACKAGE_REASON
 
-    # Both reasons say what to do next, not merely what is wrong.
-    for state in ("Approved", "Submitted"):
-        assert state in _PACKAGE_REASON
-        words = _PACKAGE_REASON[state].lower()
-        assert "submit" in words or "approve" in words, state
-
-    # Preparing is NOT package-gated: it is idempotent for the maker and is how a package
-    # comes to exist in the first place.
-    assert "package" not in _action("handover.prepare")
+    # The granular handover steps are gone from the catalogue.
+    keys = {s["key"] for s in _MAKER_ACTIONS["Lending"]}
+    assert not ({"handover.prepare", "handover.submit",
+                 "lending.ready-for-disbursement"} & keys)
