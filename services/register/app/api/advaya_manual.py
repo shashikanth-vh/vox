@@ -73,9 +73,10 @@ async def record_manual_advaya_event(
             "Manual Advaya events need a verified HUMAN identity — the attestation is "
             "attributed to the person recording it. A machine integration uses the "
             "service lane (/v1/internal/…).")
-    # The same authority that approves the handover may attest its outcome; a SCOPED
-    # grant must also cover this line's company.
-    await _ensure_subject_scope(ctx, "approve_advaya_handover", "Lending", lending_id)
+    # The desk that sends the request records the partner's answer — the same authority
+    # as sending (the CP approval already gated the money movement). A SCOPED grant must
+    # also cover this line's company.
+    await _ensure_subject_scope(ctx, "record_handover_package", "Lending", lending_id)
     lid = str(lending_id)
 
     if payload.event == "disbursed":

@@ -30,20 +30,17 @@ def _action(key: str, subject: str = "Lending") -> dict:
 # --------------------------------------------------------------------------------- #
 def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
     """The whole point of returning a disabled action: the reason teaches the process."""
-    attest = _action("advaya.attest")
-    ok, reason = _evaluate_action(attest, roles={"Credit Head"}, stage="Diligence",
+    disburse = _action("disburse")
+    ok, reason = _evaluate_action(disburse, roles={"Credit Head"}, stage="Diligence",
                                   run_state="none")
     assert not ok
-    assert reason == "Available once the handover has been submitted to Advaya."
-    # Offered exactly where the register accepts the write: once a request can have been
-    # sent, and STILL at 'Disbursed' so later phases (T2, T3, …) record the same way.
-    for stage in ("Ready for Disbursement", "Disbursed"):
-        ok, _ = _evaluate_action(attest, roles={"Credit Head"}, stage=stage,
+    assert reason == "Disbursement follows the Conditions Precedent approval."
+    # Offered from the CP approval onward, and STILL at 'Disbursed' — the same dialog
+    # records the partner's answers and every later tranche (T2, T3, …).
+    for stage in ("CP/CS Completed", "Ready for Disbursement", "Disbursed"):
+        ok, _ = _evaluate_action(disburse, roles={"Credit Head"}, stage=stage,
                                  run_state="none")
         assert ok, stage
-    ok, _ = _evaluate_action(attest, roles={"Credit Head"}, stage="CP/CS Completed",
-                             run_state="none")
-    assert not ok
 
     # And a step whose own screen does not exist yet says exactly that, rather than
     # pretending to be one stage away.
@@ -54,18 +51,18 @@ def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
 
 def test_role_gate_names_who_does_the_step():
     """A refusal that names the role is actionable; "not permitted" is not."""
-    attest = _action("advaya.attest")
-    ok, reason = _evaluate_action(attest, roles={"BDRM"}, stage="Ready for Disbursement",
+    disburse = _action("disburse")
+    ok, reason = _evaluate_action(disburse, roles={"Syn RM"}, stage="Ready for Disbursement",
                                   run_state="none")
     assert not ok
-    assert "Credit Head" in reason and "Management" in reason
+    assert "Credit Head" in reason
 
 
 def test_role_gate_is_checked_before_the_stage_gate():
     """Who you are does not change with the subject, so it is the more useful answer of
     the two when both fail."""
-    attest = _action("advaya.attest")
-    ok, reason = _evaluate_action(attest, roles={"BDRM"}, stage="Data Awaited",
+    disburse = _action("disburse")
+    ok, reason = _evaluate_action(disburse, roles={"Syn RM"}, stage="Data Awaited",
                                   run_state="none")
     assert not ok and "Credit Head" in reason
 
@@ -414,7 +411,7 @@ def test_every_action_declares_which_service_answers_it():
 
     # The one that bit: a register route that is NOT under /v1/workflows.
     by_key = {s["key"]: s for acts in _MAKER_ACTIONS.values() for s in acts}
-    for key in ("advaya.attest",):
+    for key in ("lending.cpcs-complete",):
         assert _plane_of(by_key[key], by_key[key]["url"]) == "register", key
 
 
@@ -542,16 +539,14 @@ def test_disburse_is_the_single_verb_and_the_partner_answer_is_gated():
     from app.api import _PACKAGE_REASON
 
     disburse = _action("disburse")
-    assert disburse["stages"] == {"CP/CS Completed", "Ready for Disbursement"}
+    assert disburse["stages"] == {"CP/CS Completed", "Ready for Disbursement", "Disbursed"}
     assert disburse["screen"] == "disburse"
     assert "package" not in disburse          # sending is how a package comes to exist
 
-    attest = _action("advaya.attest")
-    assert attest["package"] == "Submitted"
-    assert attest["stages"] == {"Ready for Disbursement", "Disbursed"}
     assert "Submitted" in _PACKAGE_REASON
 
-    # The granular handover steps are gone from the catalogue.
+    # The granular steps are ALL gone: the Disburse dialog itself records the partner's
+    # answer and every tranche.
     keys = {s["key"] for s in _MAKER_ACTIONS["Lending"]}
-    assert not ({"handover.prepare", "handover.submit",
+    assert not ({"handover.prepare", "handover.submit", "advaya.attest",
                  "lending.ready-for-disbursement"} & keys)

@@ -252,36 +252,13 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "label": "Disburse",
             "method": "POST", "url": "/v1/workflows/disburse",
             "roles": _CREDIT_MAKERS,
-            "stages": {"CP/CS Completed", "Ready for Disbursement"},
+            # 'Disbursed' too: the same dialog records the partner's answers and each
+            # later tranche (T2, T3, ...) — the whole journey lives in one place.
+            "stages": {"CP/CS Completed", "Ready for Disbursement", "Disbursed"},
             "stage_reason": "Disbursement follows the Conditions Precedent approval.",
             "screen": "disburse",
             "prefill": {"lending_id": "id"},
             "form": [],
-        },
-        {
-            "key": "advaya.attest",
-            # And Advaya's answer only means anything once it has been sent one.
-            "package": "Submitted",
-            "label": "Disbursement Update",
-            "method": "POST", "url": "/v1/lending/{subject_id}/advaya-events",
-            "roles": {"Credit Head", "Management", "Admin"},
-            # 'Disbursed' too: later phases (T2, T3, ...) are recorded the same way.
-            "stages": {"Ready for Disbursement", "Disbursed"},
-            "stage_reason": "Available once the handover has been submitted to Advaya.",
-            # ORDER MATTERS and the register enforces it: a disbursement tranche may only
-            # be recorded once Advaya has ACCEPTED the handover, so recording one first is
-            # a 409. The options are listed in the order they happen, and say so, rather
-            # than leaving a user to discover the sequence by being refused.
-            "form": [_f("event", "Confirmation", "select", required=True,
-                        options=["accepted", "rejected", "disbursed"],
-                        help_text="Advaya accepts (or rejects) the handover first; a "
-                                  "disbursement can only be recorded after an acceptance."),
-                     _f("reference", "Advaya reference / UTR", required=True,
-                        help_text="The reference on the confirmation you received. "
-                                  "Recorded as the evidence for this step."),
-                     _f("amount_cr", "Amount \u20b9 Cr", "number"),
-                     _f("disbursed_on", "Value date", "date"),
-                     _NOTE],
         },
     ),
     "Syndication": (
@@ -368,7 +345,6 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "cpcs.prepare": ("requested_by",),
     "cpcs.update-cs": ("requested_by",),
     "disburse": ("requested_by",),
-    "advaya.attest": (),
     # A plain stage write: the register attributes it to the verified caller from
     # the forwarded identity, so there is no identity FIELD to fill.
     "lending.cpcs-complete": (),
