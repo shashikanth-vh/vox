@@ -108,21 +108,17 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const submitted = live && live.status === 'Submitted' ? live : undefined;
 
   // Everything pickable, in BOTH states: the company's own file, PLUS the credit
-  // team's defaults as the first rows — the EVAM CAM prompt (the instructions) and
-  // the reference CAM (the document to UPDATE). Tick either and it rides with the
-  // next Ask exactly like a document: prompt + reference CAM + fresh financials in
-  // one Ask is "update this CAM from the new numbers", answered in the box.
+  // team's EVAM CAM prompt as the first row — tick it and it rides with the next
+  // Ask exactly like a document, so the engine answers under the team's own
+  // instructions. (The reference CAM stays a DOWNLOAD — "Download CAM template" —
+  // not a picker row; a CAM to update by Claude is uploaded as a company document.)
   const sources: EntityDoc[] = useMemo(() => [
     ...(defaults.prompt ? [{
       id: defaults.prompt.id, title: defaults.prompt.title,
       section: 'EVAM default', doc_type: 'CAM prompt', content_type: '', status: '',
     }] : []),
-    ...(defaults.example ? [{
-      id: defaults.example.id, title: defaults.example.title,
-      section: 'EVAM default', doc_type: 'CAM to update', content_type: '', status: '',
-    }] : []),
     ...docs,
-  ], [docs, defaults.prompt, defaults.example]);
+  ], [docs, defaults.prompt]);
 
 
   const run = async (what: string, fn: () => Promise<string>) => {
