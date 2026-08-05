@@ -70,6 +70,10 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   const [obs, setObs] = useState<Observation[]>([]);
   const [condReg, setCondReg] = useState<{ items: AccountCondition[]; open: number } | null>(null);
   const [receiving, setReceiving] = useState<{ key: string; evidence: string } | null>(null);
+  // Covenant verbs, inline per observation: record the period's result, or waive a
+  // breach against a recorded decision.
+  const [obsAct, setObsAct] = useState<{ id: string; kind: 'result' | 'waive';
+    actual: string; when: string; ref: string; note: string } | null>(null);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
@@ -445,13 +449,13 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
           </DrawerSection>
         )}
 
-        {/* ---- ③ Covenant compliance — read here, recorded on the Covenants tab ---- */}
+        {/* ---- ③ Covenant compliance — the chase lives ON the loan ----------------- */}
         {(acct || obs.length > 0) && (
           <DrawerSection title="Covenant compliance">
             {obs.length === 0 ? (
               <Typography sx={{ fontSize: 12, color: tokens.muted }}>
                 No covenant observations on this line yet — the sweep raises them as
-                periods fall due; results are recorded on the Covenants tab.
+                periods fall due.
               </Typography>
             ) : (
               <>
@@ -468,22 +472,83 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                     );
                   })}
                 </Box>
-                {obs.slice(0, 6).map((o) => (
-                  <Box key={o.id} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
-                    py: 0.3, borderBottom: `1px dashed ${tokens.line}`,
+                {obs.map((o) => (
+                  <Box key={o.id} sx={{ py: 0.3, borderBottom: `1px dashed ${tokens.line}`,
                     '&:last-of-type': { borderBottom: 'none' } }}>
-                    <Typography sx={{ fontSize: 12.3, flex: 1 }}>{o.covenant_name || '—'}</Typography>
-                    <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{o.due_date || ''}</Typography>
-                    {(() => { const t = OBS_TONE[o.status] || OBS_TONE.Pending;
-                      return <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
-                        borderRadius: 1, bgcolor: t.bg, color: t.fg }}>{o.status}</Typography>; })()}
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Typography sx={{ fontSize: 12.3, flex: 1 }}>{o.covenant_name || '—'}</Typography>
+                      <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{o.due_date || ''}</Typography>
+                      {(() => { const t = OBS_TONE[o.status] || OBS_TONE.Pending;
+                        return <Typography sx={{ fontSize: 10.5, fontWeight: 700, px: 0.7,
+                          borderRadius: 1, bgcolor: t.bg, color: t.fg }}>{o.status}</Typography>; })()}
+                      {!closed && operate && ['Pending', 'Overdue'].includes(o.status)
+                        && obsAct?.id !== o.id && (
+                        <Button size="small" variant="outlined" disabled={!!busy}
+                          onClick={() => setObsAct({ id: o.id, kind: 'result', actual: '',
+                            when: new Date().toISOString().slice(0, 10), ref: '', note: '' })}
+                          sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
+                          Record result…
+                        </Button>
+                      )}
+                      {!closed && authorize && o.status === 'Breached' && obsAct?.id !== o.id && (
+                        <Button size="small" variant="outlined" color="warning" disabled={!!busy}
+                          onClick={() => setObsAct({ id: o.id, kind: 'waive', actual: '',
+                            when: '', ref: '', note: '' })}
+                          sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
+                          Waive…
+                        </Button>
+                      )}
+                    </Box>
+                    {obsAct?.id === o.id && obsAct.kind === 'result' && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                        <TextField size="small" type="number" label="Actual value (if financial)"
+                          value={obsAct.actual} sx={{ width: 180 }}
+                          onChange={(e) => setObsAct({ ...obsAct, actual: e.target.value })} />
+                        <TextField size="small" type="date" label="Submitted on"
+                          InputLabelProps={{ shrink: true }} value={obsAct.when} sx={{ width: 150 }}
+                          onChange={(e) => setObsAct({ ...obsAct, when: e.target.value })} />
+                        <Button size="small" variant="contained" disabled={!!busy}
+                          onClick={() => run('obs', async () => {
+                            const r = await lmsService.submitResult(o.id, {
+                              ...(obsAct.actual ? { actual_value: Number(obsAct.actual) } : {}),
+                              ...(obsAct.when ? { submitted_on: obsAct.when } : {}),
+                            });
+                            setObsAct(null);
+                            return r.breached
+                              ? `${o.covenant_name}: BREACHED — an EWS case opened with the result.`
+                              : `${o.covenant_name}: recorded — ${r.status}.`;
+                          })}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>
+                          {busy === 'obs' ? 'Recording…' : 'Submit'}
+                        </Button>
+                        <Button size="small" onClick={() => setObsAct(null)}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>Cancel</Button>
+                      </Box>
+                    )}
+                    {obsAct?.id === o.id && obsAct.kind === 'waive' && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                        <TextField size="small" label="Waiver decision ref (required)" autoFocus
+                          value={obsAct.ref} sx={{ flex: 1, minWidth: 180 }}
+                          onChange={(e) => setObsAct({ ...obsAct, ref: e.target.value })} />
+                        <TextField size="small" label="Note" value={obsAct.note} sx={{ flex: 1, minWidth: 140 }}
+                          onChange={(e) => setObsAct({ ...obsAct, note: e.target.value })} />
+                        <Button size="small" variant="contained" color="warning"
+                          disabled={!!busy || !obsAct.ref.trim()}
+                          onClick={() => run('obs', async () => {
+                            await lmsService.waive(o.id, obsAct.ref.trim(),
+                              obsAct.note.trim() || undefined);
+                            setObsAct(null);
+                            return `${o.covenant_name}: waived against the recorded decision.`;
+                          })}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>
+                          {busy === 'obs' ? 'Waiving…' : 'Confirm waiver'}
+                        </Button>
+                        <Button size="small" onClick={() => setObsAct(null)}
+                          sx={{ textTransform: 'none', fontSize: 11.5 }}>Cancel</Button>
+                      </Box>
+                    )}
                   </Box>
                 ))}
-                {obs.length > 6 && (
-                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.5 }}>
-                    +{obs.length - 6} more on the Covenants tab.
-                  </Typography>
-                )}
               </>
             )}
           </DrawerSection>

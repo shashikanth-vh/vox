@@ -250,7 +250,9 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
               <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}</Typography>
               <Typography sx={{ fontSize: 11.5, color: tokens.muted, flex: 1 }}>{r.stage}</Typography>
               <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                record the tranche in LOS → Disburse; the account opens when it is booked
+                {r.stage === 'Disbursed' || r.stage === 'Ready for Disbursement'
+                  ? 'record the tranche in LOS → Disburse; the account opens when it is booked'
+                  : 'finish the disbursement request in LOS to reach the booking gate'}
               </Typography>
             </Box>
           ))}
