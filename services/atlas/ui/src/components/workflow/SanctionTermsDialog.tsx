@@ -103,33 +103,55 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setLetterBusy('');
   };
 
-  // The engine reads the FIGURES out of the letter + the committee's credit note —
-  // amount, rate, tenor, EMI, day count, … — and fills the form. Covenants ride along
-  // (their chase starts at disbursement). The analyst reviews, then saves & seeds.
-  // CP/CS live in their own screens now, which read the letter themselves.
+  // The engine reads the FIGURES out of a document + the committee's credit note —
+  // amount, rate, tenor, EMI, day count, … — and fills the form (only fields still
+  // empty). Covenants ride along (their chase starts at disbursement). The analyst
+  // reviews, then saves & seeds. Two sources, same mechanics: the approved CAM
+  // (BEFORE the letter exists — these figures are what the letter is written from)
+  // and the signed letter itself once it is filed.
+  const applyExtract = (out: Awaited<ReturnType<typeof camService.extractTerms>>,
+                        source: string) => {
+    const t = out.terms || {};
+    setF((p) => {
+      const next = { ...p };
+      for (const [k, v] of Object.entries(t)) {
+        if (v !== null && v !== undefined && !p[k]) next[k] = String(v);
+      }
+      return next;
+    });
+    if (out.covenants.length) {
+      setCovs(out.covenants.map((c) => ({
+        ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
+        frequency: c.frequency,
+      })));
+    }
+    setInfo(`Filled from ${source}: ${Object.keys(t).length} term field(s), `
+      + `${out.covenants.length} covenant(s). Review, then Save terms & seed.`);
+  };
+
   const fillFromLetter = async (letterDoc: EntityDoc | null, noteText?: string) => {
     if (!letterDoc) return;
     setErr(''); setLetterBusy('parse');
     try {
-      const out = await camService.extractTerms(letterDoc.id, noteText);
-      const t = out.terms || {};
-      setF((p) => {
-        const next = { ...p };
-        for (const [k, v] of Object.entries(t)) {
-          if (v !== null && v !== undefined && !p[k]) next[k] = String(v);
-        }
-        return next;
-      });
-      if (out.covenants.length) {
-        setCovs(out.covenants.map((c) => ({
-          ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
-          frequency: c.frequency,
-        })));
+      applyExtract(await camService.extractTerms(letterDoc.id, noteText),
+        `the letter${noteText ? ' + credit note' : ''}`);
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setLetterBusy('');
+  };
+
+  // Terms out of the COMPLETED CAM — usable before any letter exists, which is
+  // exactly when the analyst is drafting one.
+  const fillFromCam = async () => {
+    setErr(''); setLetterBusy('cam-parse');
+    try {
+      const reports = await camService.list(lendingId);
+      const filed = [...reports].reverse().find((r) => r.document_id);
+      if (!filed?.document_id) {
+        setErr('No completed CAM on this line yet — prepare it in the CAM workbench first.');
+      } else {
+        applyExtract(await camService.extractTerms(filed.document_id, decision?.note || undefined),
+          `the CAM${decision?.note ? ' + credit note' : ''}`);
       }
-      const filled = Object.keys(t).length;
-      setInfo(`Filled from the letter${noteText ? ' + credit note' : ''}: `
-        + `${filled} term field(s), ${out.covenants.length} covenant(s). `
-        + 'Review, then Save terms & seed.');
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLetterBusy('');
   };
@@ -267,6 +289,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               title="The latest CAM on this line — the letter is written from it">
               {letterBusy === 'cam' ? 'Fetching…' : 'Download CAM'}
             </Button>
+            {!existing && (
+              <Button size="small" variant="outlined" disabled={!!letterBusy}
+                onClick={() => void fillFromCam()} sx={{ textTransform: 'none' }}
+                title="The engine reads the amount, rate, tenor, EMI … out of the completed CAM (and the credit note) and fills the fields below — before the letter exists, while you draft it">
+                {letterBusy === 'cam-parse' ? 'Reading CAM…' : 'Fill terms from CAM'}
+              </Button>
+            )}
             <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
               disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
               {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace sanction letter…' : 'Upload sanction letter…'}
