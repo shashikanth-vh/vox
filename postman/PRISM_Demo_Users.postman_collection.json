@@ -312,7 +312,7 @@
         "description": "Identity + roles (the RBAC half). 409 = already provisioned — fine. The servicing MAKER: records tranches for booking approval (T2+ in LMS), posts computed interest and receipts, marks handed-over conditions received, records covenant results. Whole-book READ on lending; no origination writes (RBAC v3.6).",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"email\": \"lms.operator@evamfinance.com\",\n  \"full_name\": \"Lakshmi Narayanan\",\n  \"short_name\": \"Lakshmi\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Operator\"\n  ]\n}",
+          "raw": "{\n  \"email\": \"lakshmi.narayanan@evamfinance.com\",\n  \"full_name\": \"Lakshmi Narayanan\",\n  \"short_name\": \"Lakshmi\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Operator\"\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -375,7 +375,7 @@
         "description": "Identity + roles (the RBAC half). 409 = already provisioned — fine. The servicing CHECKER: approves/rejects pending bookings (approval opens/grows the loan account and hands the checklist over), classifies SMA/NPA, sets provisioning, waives covenant breaches against a recorded decision, closes accounts.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"email\": \"lms.authorizer@evamfinance.com\",\n  \"full_name\": \"Suresh Kumar\",\n  \"short_name\": \"Suresh\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Management\"\n  ]\n}",
+          "raw": "{\n  \"email\": \"suresh.kumar@evamfinance.com\",\n  \"full_name\": \"Suresh Kumar\",\n  \"short_name\": \"Suresh\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Management\"\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -722,7 +722,7 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/v1/people/resolve?name=lms.operator@evamfinance.com",
+          "raw": "{{baseUrl}}/v1/people/resolve?name=lakshmi.narayanan@evamfinance.com",
           "host": [
             "{{baseUrl}}"
           ],
@@ -734,7 +734,7 @@
           "query": [
             {
               "key": "name",
-              "value": "lms.operator@evamfinance.com"
+              "value": "lakshmi.narayanan@evamfinance.com"
             }
           ]
         }
