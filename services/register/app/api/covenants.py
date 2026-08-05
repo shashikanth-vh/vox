@@ -59,7 +59,7 @@ from app.repositories.subjects import load_subject
 router = api_router()
 
 _SWEEP_SERVICES = {"svc_workflows"}
-_WAIVER_AUTHORITY = {"Credit Head", "Management", "Admin", "LMS Authorizer"}
+_WAIVER_AUTHORITY = {"Credit Head", "Management", "Admin", "LMS Management"}
 
 _FREQUENCY_MONTHS = {"Monthly": 1, "Quarterly": 3, "SemiAnnual": 6, "Annual": 12}
 
@@ -432,7 +432,8 @@ async def waive_breach(monitoring_id: uuid.UUID, payload: WaiveIn,
         raise ValidationAppError(
             f"The referenced decision is {dec.decision!r} — only an Approved waiver "
             "decision can excuse a breach.")
-    if not (set(dec.roles or []) & _WAIVER_AUTHORITY):
+    from evam_backend_core.rbac_catalog import canonical_roles
+    if not (canonical_roles(dec.roles) & _WAIVER_AUTHORITY):
         raise ForbiddenError(
             "The referenced decision was not made with senior credit authority "
             f"(one of {sorted(_WAIVER_AUTHORITY)}).")

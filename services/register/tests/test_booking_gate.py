@@ -2,7 +2,7 @@
 
 A human-recorded disbursement (manual attestation in LOS, or the LMS recorder for
 later phases) lands as a PENDING BOOKING: no actuals, no stage move, no loan account.
-The LMS Authorizer settles it — approval runs the one settlement block (actuals +
+The LMS Management settles it — approval runs the one settlement block (actuals +
 stage + account + covenant stamping) in its own transaction; rejection needs the
 reason and frees the headroom. Four-eyes: the recorder can never settle their own
 booking. The machine lane (service keys) still books directly — test_increment4
@@ -19,7 +19,11 @@ from tests.test_handover import ADMIN, CREDIT_HEAD
 pytestmark = pytest.mark.asyncio
 
 OPERATOR = {"X-User-Email": "ops@evamfinance.com", "X-User-Roles": "LMS Operator"}
-AUTHORIZER = {"X-User-Email": "authz@evamfinance.com", "X-User-Roles": "LMS Authorizer"}
+AUTHORIZER = {"X-User-Email": "authz@evamfinance.com", "X-User-Roles": "LMS Management"}
+# v3.7 renamed "LMS Authorizer" → "LMS Management"; the OLD string must keep resolving
+# (ROLE_ALIASES) so a grant stored before the rename never silently loses access.
+LEGACY_AUTHORIZER = {"X-User-Email": "authz.legacy@evamfinance.com",
+                     "X-User-Roles": "LMS Authorizer"}
 
 
 async def _accepted_manual_line(client) -> str:  # noqa: ANN001
@@ -30,6 +34,22 @@ async def _accepted_manual_line(client) -> str:  # noqa: ANN001
                             json={"event": "accepted", "reference": "ADV-LTR/1"})
     assert acc.status_code == 201, acc.text
     return lid
+
+
+async def test_the_renamed_role_still_answers_to_its_old_name(client):
+    """A booking settles under the PRE-RENAME role string: the alias resolves it to
+    LMS Management, so nothing granted earlier breaks. New grants validate against
+    the current catalogue only (Access refuses 'LMS Authorizer' on creation)."""
+    lid = await _accepted_manual_line(client)
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-9500",
+                                  "amount_cr": 2.0})
+    assert dis.status_code == 201, dis.text
+    tid = dis.json()["tranche"]["id"]
+    ok = await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
+                           json={"action": "approve"}, headers=LEGACY_AUTHORIZER)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["booking_status"] == "Booked"
 
 
 async def test_lms_roles_read_the_line_whole_book_but_cannot_edit_it(client):
@@ -48,7 +68,7 @@ async def test_lms_roles_read_the_line_whole_book_but_cannot_edit_it(client):
 
 async def test_booking_gate_pending_four_eyes_approve(client):
     """Record (maker) → Pending in the queue → the recorder cannot settle it →
-    the LMS Authorizer approves → account opens, stage moves, actuals land."""
+    the LMS Management approves → account opens, stage moves, actuals land."""
     lid = await _accepted_manual_line(client)
     # Sanction terms so the account header has a rate when it opens.
     t = await client.post("/v1/internal/sanction-terms", json={

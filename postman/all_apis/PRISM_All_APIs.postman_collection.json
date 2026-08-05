@@ -9119,7 +9119,7 @@
           "name": "Lending",
           "item": [
             {
-              "name": "GET /v1/bookings/pending \u2014 The LMS Authorizer's queue: every tranche awaiting booking approval",
+              "name": "GET /v1/bookings/pending \u2014 The LMS Management's queue: every tranche awaiting booking approval",
               "request": {
                 "method": "GET",
                 "header": [
@@ -9721,7 +9721,7 @@
               }
             },
             {
-              "name": "POST /v1/lending/{lending_id}/tranches/{tranche_id}/book \u2014 Settle a pending tranche booking (LMS Authorizer: approve | reject)",
+              "name": "POST /v1/lending/{lending_id}/tranches/{tranche_id}/book \u2014 Settle a pending tranche booking (LMS Management: approve | reject)",
               "request": {
                 "method": "POST",
                 "header": [

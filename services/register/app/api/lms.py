@@ -132,7 +132,7 @@ def _maker(ctx: RequestContext) -> None:
 
 def _authorizer(ctx: RequestContext) -> None:
     """The hard-to-reverse verbs — classification, provisioning, closure — are the
-    LMS AUTHORIZER's (plus senior credit): four-eyes over the account's state."""
+    LMS MANAGEMENT's (plus senior credit): four-eyes over the account's state."""
     from app.authz.engine import enforce_operation
 
     enforce_operation(ctx.user, "authorize_loan_account")

@@ -131,8 +131,13 @@ def _looks_like_uuid(value: str) -> bool:
 
 
 def _stacked(matrix_row: dict[str, Access], roles: set[str]) -> Access:
-    """Role stacking: the highest access across all held roles."""
-    return max((matrix_row.get(r, Access.NONE) for r in roles), default=Access.NONE)
+    """Role stacking: the highest access across all held roles. Held role strings
+    pass through the rename table first (v3.7: "LMS Authorizer" → "LMS Management"),
+    so a grant stored under a role's OLD name never silently loses access."""
+    from evam_backend_core.rbac_catalog import canonical_roles
+
+    return max((matrix_row.get(r, Access.NONE) for r in canonical_roles(roles)),
+               default=Access.NONE)
 
 
 def enforce_service_read(resource: str | None = None,

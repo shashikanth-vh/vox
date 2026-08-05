@@ -136,7 +136,7 @@ async def test_the_committee_decision_reads_back_on_the_line(client):
 
 async def test_lms_roles_split_the_maker_from_the_checker(client, monkeypatch):
     """The servicing pair (RBAC v3.5): the LMS OPERATOR posts routine ledger events
-    but cannot classify; the LMS AUTHORIZER holds classification/closure. The LMS
+    but cannot classify; the LMS MANAGEMENT holds classification/closure. The LMS
     covenant tab's observations read answers under either role."""
     from app.core.config import get_settings
 
@@ -154,7 +154,7 @@ async def test_lms_roles_split_the_maker_from_the_checker(client, monkeypatch):
     OPERATOR = {**ADMIN, "X-User-Email": "ops@evamfinance.com",
                 "X-User-Roles": "LMS Operator"}
     AUTHORIZER = {**ADMIN, "X-User-Email": "authz@evamfinance.com",
-                  "X-User-Roles": "LMS Authorizer"}
+                  "X-User-Roles": "LMS Management"}
 
     # The operator's verb: a routine receipt posts.
     ok = await client.post(f"/v1/lending/{lid}/loan-account/entries",

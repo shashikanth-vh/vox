@@ -17,7 +17,7 @@ citing the offline artefact. Production-grade means:
   from PRISM's OWN submitted package (a human never types a hash), same ceilings.
   One deliberate difference (LMS increment ⑥): a human-recorded ``disbursed``
   lands as a PENDING BOOKING — the actuals, the stage move and the loan account
-  wait for the LMS Authorizer's approval, four-eyed. Rows and audit entries carry
+  wait for the LMS Management's approval, four-eyed. Rows and audit entries carry
   ``source=manual-attestation``.
 
     POST /v1/lending/{lending_id}/advaya-events
@@ -87,7 +87,7 @@ async def record_manual_advaya_event(
                 "A 'disbursed' event needs amount_cr — the tranche amount Advaya "
                 "confirmed.")
         # A HUMAN relaying an offline confirmation records a PENDING BOOKING: the
-        # actuals, the stage move and the loan account wait for the LMS Authorizer's
+        # actuals, the stage move and the loan account wait for the LMS Management's
         # approval (the maker/checker seam at LOS→LMS). The machine lane, where the
         # partner's own system speaks, still books directly.
         tranche = await apply_tranche(ctx, lid, TrancheIn(

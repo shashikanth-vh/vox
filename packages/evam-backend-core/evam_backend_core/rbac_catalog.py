@@ -18,7 +18,7 @@ from enum import IntEnum
 # The approved ATLAS RBAC policy version this package transcribes. Propagated into every
 # signed authorization context (claim: policy_version) and stamped on seeds and drift
 # reports, so an authorization decision can always answer "under which policy?".
-POLICY_VERSION = "3.6"
+POLICY_VERSION = "3.7"
 
 
 
@@ -34,8 +34,8 @@ class Access(IntEnum):
 
 # The catalogue roles (tier, vertical) — spec "Legend & Roles", extended with the two
 # LMS servicing roles (a maker/checker pair: the Operator posts routine ledger and
-# covenant events; the Authorizer holds the hard-to-reverse verbs — classification,
-# closure, waiver authority).
+# covenant events; LMS Management holds the hard-to-reverse verbs — booking approval,
+# classification, closure, waiver authority).
 ROLES: dict[str, dict[str, str]] = {
     "Admin":       {"tier": "Leadership", "vertical": "System"},
     "Management":  {"tier": "Leadership", "vertical": "All"},
@@ -48,10 +48,22 @@ ROLES: dict[str, dict[str, str]] = {
     "Syn RM":      {"tier": "IC",         "vertical": "Syndication"},
     "AM RM":       {"tier": "IC",         "vertical": "Asset Monetisation"},
     "LMS Operator":   {"tier": "IC",      "vertical": "Servicing"},
-    "LMS Authorizer": {"tier": "Head",    "vertical": "Servicing"},
+    "LMS Management": {"tier": "Head",    "vertical": "Servicing"},
 }
 
 _ROLE_ORDER = ["Admin", "Management", "BD Head", "BDRM", "Credit Head", "Deal Analyst",
                "Syn Head", "Syn RM", "AM Head", "AM RM",
-               "LMS Operator", "LMS Authorizer"]
+               "LMS Operator", "LMS Management"]
+
+# RENAMED roles (v3.7: "LMS Authorizer" → "LMS Management"). A role string stored
+# before the rename — an access_grants row, a signed context minted by an older
+# service, a decision's recorded roles — still resolves to the CURRENT role, so a
+# rename never silently strips anyone's access. New grants must use the current name.
+ROLE_ALIASES: dict[str, str] = {"LMS Authorizer": "LMS Management"}
+
+
+def canonical_roles(roles: "set[str] | list[str] | None") -> set[str]:
+    """Map every held role through the rename table (unknown strings pass through
+    unchanged — the matrix lookups ignore them, exactly as before)."""
+    return {ROLE_ALIASES.get(r, r) for r in (roles or [])}
 

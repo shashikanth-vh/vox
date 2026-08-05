@@ -44,9 +44,11 @@ from evam_backend_core.lifecycle import (  # noqa: E402, F401
 )
 from evam_backend_core.rbac_catalog import (  # noqa: E402, F401
     POLICY_VERSION,
+    ROLE_ALIASES,
     ROLES,
     Access,
     _ROLE_ORDER,
+    canonical_roles,
 )
 from evam_backend_core.service_policy import (  # noqa: E402, F401
     SERVICE_GRANTS,

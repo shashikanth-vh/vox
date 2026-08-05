@@ -83,9 +83,13 @@ async def compiled_matrix(
 
 
 def stacked(row: dict[str, str], roles: set[str]) -> str:
-    """Role stacking on data cells: the highest access across held roles."""
+    """Role stacking on data cells: the highest access across held roles. Held roles
+    pass through the rename table first (v3.7: "LMS Authorizer" → "LMS Management")
+    so rows granted under a role's old name keep resolving."""
+    from evam_backend_core.rbac_catalog import canonical_roles
+
     best = Access.NONE
-    for r in roles:
+    for r in canonical_roles(roles):
         level = Access[row.get(r, "NONE")]
         if level > best:
             best = level

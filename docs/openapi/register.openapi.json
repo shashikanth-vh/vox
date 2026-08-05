@@ -20054,7 +20054,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "The LMS Authorizer's queue: every tranche awaiting booking approval",
+        "summary": "The LMS Management's queue: every tranche awaiting booking approval",
         "tags": [
           "Lending"
         ]
@@ -65304,7 +65304,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Settle a pending tranche booking (LMS Authorizer: approve | reject)",
+        "summary": "Settle a pending tranche booking (LMS Management: approve | reject)",
         "tags": [
           "Lending"
         ]

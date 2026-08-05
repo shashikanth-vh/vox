@@ -17,7 +17,7 @@ import AccountDrawer from './AccountDrawer';
  * The serviced BOOK, LOS-style: the same house table (filters, sort, exports, sticky
  * Actions), one row per LOAN ACCOUNT. Clicking a row opens the account drawer — the
  * post-disbursement life of the loan, tracked till closure. On top sits the BOOKING
- * QUEUE: every human-recorded tranche waiting for the LMS Authorizer; approval opens
+ * QUEUE: every human-recorded tranche waiting for the LMS Management; approval opens
  * or grows the account in the register's own transaction.
  */
 
@@ -143,7 +143,7 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
       {queue.length > 0 && (
         <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.4 }}>
           <Typography sx={{ fontSize: 12.5, fontWeight: 600, mb: 0.6 }}>
-            Pending bookings ({queue.length}) — awaiting the LMS Authorizer
+            Pending bookings ({queue.length}) — awaiting the LMS Management
           </Typography>
           {queue.map((t) => {
             const line = byLending.get(t.lending_id);
@@ -210,7 +210,7 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
           })}
           {!authorize && (
             <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.4 }}>
-              Approval is the LMS Authorizer's verb — recordings wait here until then.
+              Approval is the LMS Management's verb — recordings wait here until then.
             </Typography>
           )}
         </Box>
@@ -231,7 +231,7 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
       />
       {acctRows.length === 0 && !bookQuery.isLoading && (
         <Typography sx={{ fontSize: 12.5, color: tokens.muted, mt: 1 }}>
-          No loan accounts on the book yet — an account opens when the LMS Authorizer
+          No loan accounts on the book yet — an account opens when the LMS Management
           books the first disbursement tranche (recorded in LOS → Disburse).
         </Typography>
       )}

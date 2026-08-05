@@ -333,7 +333,7 @@
       ]
     },
     {
-      "name": "POST /access/v1/users — Suresh (LMS Authorizer)",
+      "name": "POST /access/v1/users — Suresh (LMS Management)",
       "request": {
         "method": "POST",
         "header": [
@@ -375,7 +375,7 @@
         "description": "Identity + roles (the RBAC half). 409 = already provisioned — fine. The servicing CHECKER: approves/rejects pending bookings (approval opens/grows the loan account and hands the checklist over), classifies SMA/NPA, sets provisioning, waives covenant breaches against a recorded decision, closes accounts.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"email\": \"lms.authorizer@evamfinance.com\",\n  \"full_name\": \"Suresh Kumar\",\n  \"short_name\": \"Suresh\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Authorizer\"\n  ]\n}",
+          "raw": "{\n  \"email\": \"lms.authorizer@evamfinance.com\",\n  \"full_name\": \"Suresh Kumar\",\n  \"short_name\": \"Suresh\",\n  \"is_active\": true,\n  \"roles\": [\n    \"LMS Management\"\n  ]\n}",
           "options": {
             "raw": {
               "language": "json"

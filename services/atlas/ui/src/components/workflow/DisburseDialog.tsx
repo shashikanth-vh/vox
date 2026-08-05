@@ -141,7 +141,7 @@ export default function DisburseDialog({ action, onClose, onDone }: {
         disbursed_on: trDate || undefined,
         ...(note.trim() ? { note: note.trim() } : {}) });
     setTrRef('');
-    onDone('Tranche recorded — awaiting the LMS Authorizer\'s booking approval '
+    onDone('Tranche recorded — awaiting the LMS Management\'s booking approval '
       + '(LMS · Servicing → Accounts). The line moves to Disbursed when it is booked.');
     return 'Recorded — pending LMS booking approval.';
   });
@@ -288,7 +288,7 @@ export default function DisburseDialog({ action, onClose, onDone }: {
                 <Divider sx={{ my: 1.2 }} />
                 <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
                   Record T{tranches.length + 1} from the partner's manual confirmation —
-                  it lands as a pending booking; the LMS Authorizer's approval moves the
+                  it lands as a pending booking; the LMS Management's approval moves the
                   money onto the book.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>

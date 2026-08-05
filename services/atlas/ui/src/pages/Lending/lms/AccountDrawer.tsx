@@ -169,7 +169,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
       ...(tr.disbursed_on ? { disbursed_on: tr.disbursed_on } : {}),
     });
     setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
-    return `${t.tranche_ref} recorded — awaiting the LMS Authorizer's booking approval.`;
+    return `${t.tranche_ref} recorded — awaiting the LMS Management's booking approval.`;
   });
 
   const closed = acct?.status === 'Closed' || !!acct?.closed_on;
@@ -197,7 +197,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
         {missing && (
           <Alert severity="info" sx={{ mb: 1.4, py: 0.4, fontSize: 12.5 }}>
-            No loan account on this line yet — it opens when the LMS Authorizer books
+            No loan account on this line yet — it opens when the LMS Management books
             the first disbursement tranche (recorded in LOS → Disburse).
           </Alert>
         )}
@@ -269,7 +269,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                 <Divider sx={{ my: 1 }} />
                 <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.6 }}>
                   Record T{nextTrancheNo} from the partner's confirmation — it lands as a
-                  pending booking for the LMS Authorizer.
+                  pending booking for the LMS Management.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <TextField size="small" type="number" label="Amount ₹ Cr" value={tr.amount}
@@ -556,7 +556,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
         {/* ---- ④ Classification & closure — the authorizer's verbs ----------------- */}
         {acct && !closed && authorize && (
-          <DrawerSection title="Classification & closure — LMS Authorizer">
+          <DrawerSection title="Classification & closure — LMS Management">
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
               <TextField size="small" select label="Status" value={cls.status}
                 onChange={(e) => setCls({ ...cls, status: e.target.value })} sx={{ width: 140 }}>

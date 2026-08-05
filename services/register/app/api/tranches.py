@@ -21,7 +21,7 @@ Two lanes, one maker/checker seam:
   loan account, covenant stamping, all in the same transaction (unchanged behaviour).
 * **human lane** (manual attestation in LOS, or the LMS recorder for later phases): a
   person relaying an offline confirmation records a PENDING BOOKING. Nothing moves
-  until the LMS AUTHORIZER approves it — then the same settlement runs, attributed and
+  until the LMS MANAGEMENT approves it — then the same settlement runs, attributed and
   four-eyed (the recorder can never approve their own booking). A rejection settles the
   row 'Rejected' with the reason; the corrected figure is a fresh recording.
 
@@ -200,7 +200,7 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
                         require_booking: bool = False) -> dict[str, Any]:
     """The ONE tranche-recording path — shared by the machine lane (Advaya's callbacks,
     ``require_booking=False``: books directly) and the human lanes (manual attestation /
-    the LMS recorder, ``require_booking=True``: lands Pending for the LMS Authorizer).
+    the LMS recorder, ``require_booking=True``: lands Pending for the LMS Management).
     Identical guards and ceilings; ``source`` marks the provenance."""
     line = await _line(ctx, lending_id)
     # Tranches are ADVAYA's disbursement evidence. They are recorded only after Advaya
@@ -340,7 +340,7 @@ async def list_tranches_user(lending_id: str,
 
 
 # ------------------------------------------------------------------------------------ #
-# The human lane: record → Pending; the LMS Authorizer settles.
+# The human lane: record → Pending; the LMS Management settles.
 # ------------------------------------------------------------------------------------ #
 @router.post("/v1/lending/{lending_id}/tranches", tags=["Lending"], status_code=201,
              summary="Record a disbursement tranche for LMS booking approval (human lane)")
@@ -367,7 +367,7 @@ class BookIn(BaseModel):
 
 
 @router.post("/v1/lending/{lending_id}/tranches/{tranche_id}/book", tags=["Lending"],
-             summary="Settle a pending tranche booking (LMS Authorizer: approve | reject)")
+             summary="Settle a pending tranche booking (LMS Management: approve | reject)")
 async def book_tranche(lending_id: uuid.UUID, tranche_id: uuid.UUID, payload: BookIn,
                        ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     """The CHECKER's verb. Approval makes the money real — actuals, the stage move and
@@ -397,7 +397,7 @@ async def book_tranche(lending_id: uuid.UUID, tranche_id: uuid.UUID, payload: Bo
     if row.recorded_by and row.recorded_by == ctx.actor:
         raise ValidationAppError(
             "Four-eyes: the person who recorded this tranche cannot settle its "
-            "booking — a different LMS Authorizer must decide.")
+            "booking — a different LMS Management must decide.")
     if payload.action == "reject":
         if not (payload.note or "").strip():
             raise ValidationAppError(
@@ -427,7 +427,7 @@ async def book_tranche(lending_id: uuid.UUID, tranche_id: uuid.UUID, payload: Bo
 
 
 @router.get("/v1/bookings/pending", tags=["Lending"],
-            summary="The LMS Authorizer's queue: every tranche awaiting booking approval")
+            summary="The LMS Management's queue: every tranche awaiting booking approval")
 async def pending_bookings(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     """Whole-book by design (servicing sees the book, like a bank's LMS): every PENDING
     tranche recording across the tenant, oldest first, with enough of the line to act

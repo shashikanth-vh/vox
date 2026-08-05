@@ -30,7 +30,7 @@ async def _submitted_line(client: AsyncClient) -> str:
 
 async def test_manual_attestation_full_boundary(client: AsyncClient):
     """accepted → package settles with the cited reference; disbursed → a PENDING
-    BOOKING attributed to the human — nothing moves until the LMS Authorizer approves;
+    BOOKING attributed to the human — nothing moves until the LMS Management approves;
     then actuals + stage 'Disbursed' land in the approval's transaction."""
     lid = await _submitted_line(client)
 
@@ -64,9 +64,9 @@ async def test_manual_attestation_full_boundary(client: AsyncClient):
     assert again.status_code == 201
     assert again.json()["tranche"]["id"] == tranche["id"]
 
-    # The LMS AUTHORIZER approves the booking — actuals, stage and account land now.
+    # The LMS MANAGEMENT approves the booking — actuals, stage and account land now.
     authorizer = {"X-User-Email": "authz@evamfinance.com",
-                  "X-User-Roles": "LMS Authorizer"}
+                  "X-User-Roles": "LMS Management"}
     ok = await client.post(f"/v1/lending/{lid}/tranches/{tranche['id']}/book",
                            json={"action": "approve"}, headers=authorizer)
     assert ok.status_code == 200, ok.text

@@ -12,7 +12,7 @@
 export const ROLES = [
   'Admin', 'Management', 'BD Head', 'BDRM', 'Credit Head', 'Deal Analyst',
   'Syn Head', 'Syn RM', 'AM Head', 'AM RM',
-  'LMS Operator', 'LMS Authorizer',
+  'LMS Operator', 'LMS Management',
 ] as const;
 export type Role = typeof ROLES[number];
 
@@ -21,7 +21,7 @@ export const ROLE_VERTICAL: Record<Role, 'System' | 'All' | 'BD' | 'Credit' | 'S
   Admin: 'System', Management: 'All', 'BD Head': 'BD', BDRM: 'BD',
   'Credit Head': 'Credit', 'Deal Analyst': 'Credit',
   'Syn Head': 'Syndication', 'Syn RM': 'Syndication', 'AM Head': 'AM', 'AM RM': 'AM',
-  'LMS Operator': 'Servicing', 'LMS Authorizer': 'Servicing',
+  'LMS Operator': 'Servicing', 'LMS Management': 'Servicing',
 };
 
 // full = read+write, no scope limit · scoped = read+write on own/assigned rows only
@@ -32,7 +32,7 @@ const F: Access = 'full', S: Access = 'scoped', R: Access = 'read', N: Access = 
 
 // Columns are ROLES, in order. Rows are app tab ids.
 // order: Admin, Management, BD Head, BDRM, Credit Head, Deal Analyst, Syn Head, Syn RM, AM Head, AM RM
-// order: … AM RM, LMS Operator, LMS Authorizer (the servicing pair live on Lending's
+// order: … AM RM, LMS Operator, LMS Management (the servicing pair live on Lending's
 // LMS tab — scoped there, read-only visitors elsewhere they need context from).
 const VIEW_ROWS: Record<string, Access[]> = {
   today:    [F, F, S, S, S, S, S, S, S, S, S, S],
@@ -65,12 +65,16 @@ const GROUP: Record<string, string[]> = { masters: ['clients', 'fi', 'emp'], act
 // spec ("when roles overlap, the higher role's permissions apply").
 // ---------------------------------------------------------------------------
 export type RoleInput = Role | Role[] | undefined;
-const asRoles = (r: RoleInput): Role[] => (r == null ? [] : Array.isArray(r) ? r : [r]);
+// v3.7 rename table: a role string issued under its OLD name (a stored grant, a
+// not-yet-migrated Access row) still resolves — a rename never strips access.
+const ROLE_ALIASES: Record<string, Role> = { 'LMS Authorizer': 'LMS Management' };
+const asRoles = (r: RoleInput): Role[] =>
+  (r == null ? [] : Array.isArray(r) ? r : [r]).map((x) => ROLE_ALIASES[x as string] ?? x);
 
 // Privilege ranking — used to pick the single "primary" role for labels/defaults.
 export const ROLE_RANK: Record<Role, number> = {
   Admin: 100, Management: 90,
-  'BD Head': 70, 'Credit Head': 70, 'Syn Head': 70, 'AM Head': 70, 'LMS Authorizer': 70,
+  'BD Head': 70, 'Credit Head': 70, 'Syn Head': 70, 'AM Head': 70, 'LMS Management': 70,
   BDRM: 40, 'Deal Analyst': 40, 'Syn RM': 40, 'AM RM': 40, 'LMS Operator': 40,
 };
 export function primaryRole(roles: Role[]): Role {
@@ -161,8 +165,8 @@ const OPS: Record<Op, Role[]> = {
   exportCsv:          ALL,
   backupRestore:      ['Admin'],
   newsScan:           ALL,
-  lmsOperate:         ['Admin', 'Management', 'Credit Head', 'Deal Analyst', 'LMS Operator', 'LMS Authorizer'],
-  lmsAuthorize:       ['Admin', 'Management', 'Credit Head', 'LMS Authorizer'],
+  lmsOperate:         ['Admin', 'Management', 'Credit Head', 'Deal Analyst', 'LMS Operator', 'LMS Management'],
+  lmsAuthorize:       ['Admin', 'Management', 'Credit Head', 'LMS Management'],
 };
 
 /**

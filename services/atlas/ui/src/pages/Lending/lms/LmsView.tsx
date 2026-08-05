@@ -27,7 +27,7 @@ export default function LmsView() {
   // origination (Admin, Management, the credit desk) keeps the fuller pipeline view,
   // CP/CS Completed included, because for them LOS and LMS are one journey.
   const lmsOnly = user.roles.length > 0 &&
-    user.roles.every((r) => r === 'LMS Operator' || r === 'LMS Authorizer');
+    user.roles.every((r) => r === 'LMS Operator' || r === 'LMS Management');
   const rows: LendingRow[] = useMemo(() => {
     const all: LendingRow[] = (data as any)?.rows ?? (Array.isArray(data) ? data : []);
     const stages = lmsOnly

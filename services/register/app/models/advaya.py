@@ -85,7 +85,7 @@ class DisbursementTranche(RegisterBase):
     is a fact; a correction is a NEW tranche with its own ref and a note.
 
     The BOOKING lifecycle (increment ⑥): a human-recorded tranche lands ``Pending`` and
-    waits for the LMS Authorizer — approval settles it ``Booked`` (actuals, stage move,
+    waits for the LMS Management — approval settles it ``Booked`` (actuals, stage move,
     loan account, all in that transaction); rejection settles it ``Rejected`` with the
     reason. The machine lane books directly. A trigger lets ONLY a Pending row settle,
     once — the tranche facts themselves stay frozen."""
