@@ -214,6 +214,84 @@ async def approve_checklist(checklist_id: str,
     return _serialize(row)
 
 
+class CsProgressItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=80)
+    label: str | None = Field(default=None, max_length=1000)
+    status: str = Field(default="Pending", pattern="^(Pending|Completed)$")
+    evidence_ref: str | None = Field(default=None, max_length=300)
+    note: str | None = Field(default=None, max_length=2000)
+    required: bool = True
+
+
+class CsProgressIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CsProgressItem] = Field(min_length=1, max_length=100)
+
+
+@router.post("/v1/internal/cpcs-checklists/{checklist_id}/cs-progress", tags=["Internal"],
+             summary="Record CS document receipt on the APPROVED checklist (no new version)")
+async def record_cs_progress(checklist_id: str, payload: CsProgressIn,
+                             ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Conditions Subsequent are collected for months after the CP approval. Each
+    received document is PROGRESS, not a governance decision — so it updates the
+    approved checklist's CS items in place (maker authority, audited per change),
+    and the chase reminders shrink immediately. Only CS items may change; the CP half
+    and the approval's decision fields stay frozen (DB trigger enforces the latter)."""
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "prepare_cpcs_checklist")
+    try:
+        cid = uuid.UUID(checklist_id)
+    except (ValueError, AttributeError):
+        raise ValidationAppError("checklist_id must be a valid id.") from None
+    row = (await ctx.session.execute(select(CpcsChecklist).where(
+        CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.id == cid,
+        CpcsChecklist.deleted_at.is_(None)).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No CP/CS checklist {checklist_id!r}.")
+    if row.status != "Approved":
+        raise ConflictError(
+            f"CS progress is recorded on the APPROVED checklist; this one is "
+            f"{row.status!r}.")
+    items = [dict(i) for i in (row.items or [])]
+    by_key = {str(i.get("key")): i for i in items}
+    changed: list[str] = []
+    for upd in payload.items:
+        existing = by_key.get(upd.key)
+        if existing is None:
+            # A CS obligation discovered later joins the record — appended, audited.
+            items.append({"key": upd.key, "label": upd.label or upd.key,
+                          "condition_type": "CS", "required": upd.required,
+                          "status": upd.status,
+                          **({"evidence_ref": upd.evidence_ref} if upd.evidence_ref else {}),
+                          **({"reason": upd.note} if upd.note else {})})
+            changed.append(f"+{upd.key}")
+            continue
+        if str(existing.get("condition_type")) != "CS":
+            raise ValidationAppError(
+                f"Item {upd.key!r} is a CP — the CP half is decided by the checker and "
+                "does not change here.")
+        existing["status"] = upd.status
+        if upd.evidence_ref is not None:
+            existing["evidence_ref"] = upd.evidence_ref
+        if upd.note is not None:
+            existing["reason"] = upd.note
+        if upd.label:
+            existing["label"] = upd.label
+        changed.append(upd.key)
+    row.items = items                      # new list → JSONB change detection
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="cpcs.cs-progress",
+        resource_type="cp_cs_checklists", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": row.lending_id,
+                 "checklist_version": row.checklist_version, "items": changed}))
+    await ctx.session.flush()
+    return _serialize(row)
+
+
 class ReturnIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # A return without a reason is useless to the maker — the note is mandatory.

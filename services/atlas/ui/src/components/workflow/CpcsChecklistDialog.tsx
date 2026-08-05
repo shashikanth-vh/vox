@@ -59,6 +59,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   const phase: 'CP' | 'CS' = action?.key === 'cpcs.update-cs' ? 'CS' : 'CP';
   const [items, setItems] = useState<CpcsItem[]>([]);
   const [carried, setCarried] = useState<CpcsItem[]>([]);
+  // The CS step writes PROGRESS onto the approved checklist row — it needs its id.
+  const [latestId, setLatestId] = useState('');
+  const [latestStatus, setLatestStatus] = useState('');
   // The maker owns the version: v1 first time, raised when re-preparing after a checker
   // returned the previous one. The register keys the checklist on (lending, version), so
   // re-sending v1 after a return is a conflict — the field is here to be seen, not hidden.
@@ -100,6 +103,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     // invented starter conditions: the letter is the source of truth.
     setCarried([]);
     setItems([]);
+    setLatestId(''); setLatestStatus('');
     // The plane knows which version comes next — a checklist is keyed on (lending,
     // version), so opening on 1 every time hands the user a 409 after they have filled
     // the whole form in.
@@ -120,6 +124,11 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         const raw = await api.get<any>('/internal/cpcs-checklists', { lending_id: lid })
           .catch(() => []);
         const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
+        if (alive && lists.length) {
+          const last = lists[lists.length - 1];
+          setLatestId(String(last.id || ''));
+          setLatestStatus(String(last.status || ''));
+        }
         let seeded: any[] = lists.length ? (lists[lists.length - 1].items || []) : [];
         if (!seeded.length) {
           const { camService } = await import('../../services/camService');
@@ -154,6 +163,38 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   const drop = (i: number) => setItems((rows) => rows.filter((_, n) => n !== i));
 
   const submit = async () => {
+    // The CS lane is a LIVE record, not a decision: receipt is saved straight onto the
+    // approved checklist — no new version, no checker round-trip. The chase reminders
+    // shrink the moment this saves.
+    if (phase === 'CS') {
+      const namedCs = items.filter((r) => r.label.trim());
+      if (!namedCs.length) { setErr('Nothing to save — add or read the CS conditions first.'); return; }
+      if (!latestId || latestStatus !== 'Approved') {
+        setErr('CS progress is recorded on the APPROVED checklist — get the CP checklist approved first.');
+        return;
+      }
+      setBusy(true);
+      try {
+        const { api } = await import('../../api/http');
+        await api.post(`/internal/cpcs-checklists/${latestId}/cs-progress`, {
+          items: namedCs.map((r) => ({
+            key: (r.key.trim() || r.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 80),
+            label: r.label.trim(),
+            status: r.status === 'Completed' ? 'Completed' : 'Pending',
+            ...(r.evidence_ref.trim() ? { evidence_ref: r.evidence_ref.trim() } : {}),
+            ...(r.reason.trim() ? { note: r.reason.trim() } : {}),
+            required: r.required,
+          })),
+        });
+        setBusy(false);
+        onDone('CS progress saved — the chase reminders now cover only what is still open.');
+        onClose();
+      } catch (e: any) {
+        setBusy(false);
+        setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+      }
+      return;
+    }
     const named = items.filter((r) => r.label.trim() || r.key.trim());
     if (!named.length) { setErr('A checklist needs at least one condition.'); return; }
     const unlabelled = named.findIndex((r) => !r.label.trim());
@@ -219,9 +260,11 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ fontSize: 16 }}>
         {phase === 'CP' ? 'Prepare CP checklist' : 'Update CS checklist'}
-        <TextField size="small" type="number" label="Version" value={version}
-          onChange={(e) => setVersion(Math.max(1, Number(e.target.value) || 1))}
-          sx={{ ml: 1.5, width: 104 }} inputProps={{ min: 1 }} />
+        {phase === 'CP' && (
+          <TextField size="small" type="number" label="Version" value={version}
+            onChange={(e) => setVersion(Math.max(1, Number(e.target.value) || 1))}
+            sx={{ ml: 1.5, width: 104 }} inputProps={{ min: 1 }} />
+        )}
       </DialogTitle>
       <DialogContent dividers>
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>
@@ -234,9 +277,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
             re-preparing after a return.</>
           ) : (
             <>Conditions SUBSEQUENT — read from the sanction letter — are collected while
-            disbursement runs. Each time documents arrive, mark them Completed and send
-            this updated version for checking; the chase reminders on Today keep running
-            for whatever is still open, until nothing is left.</>
+            disbursement runs. As documents arrive, mark them Completed and <b>Save</b> —
+            no approval round: this updates the record directly, and the chase reminders
+            on Today keep running for whatever is still open, until nothing is left.</>
           )}
           {carried.length > 0 && (
             <> The {phase === 'CP' ? 'CS' : 'CP'} half ({carried.length} item{carried.length === 1 ? '' : 's'})
@@ -272,7 +315,8 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
               <TextField size="small" select label="Status" value={r.status}
                 onChange={(e) => set(i, { status: e.target.value as CpcsItem['status'] })}
                 sx={{ width: 160 }}>
-                {STATUSES.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+                {(phase === 'CS' ? (['Pending', 'Completed'] as const) : STATUSES)
+                  .map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
               </TextField>
               <TextField size="small" select label="Required" value={r.required ? 'y' : 'n'}
                 onChange={(e) => set(i, { required: e.target.value === 'y' })}
@@ -312,7 +356,8 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
         <Button onClick={submit} variant="contained" disabled={busy}>
-          {busy ? 'Sending…' : 'Send for checking'}
+          {busy ? (phase === 'CS' ? 'Saving…' : 'Sending…')
+            : phase === 'CS' ? 'Save updates' : 'Send for checking'}
         </Button>
       </DialogActions>
     </Dialog>

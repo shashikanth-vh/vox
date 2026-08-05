@@ -8243,6 +8243,62 @@
           }
         },
         {
+          "name": "POST /v1/internal/cpcs-checklists/{{{checklistId}}}/cs-progress",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{{checklistId}}}/cs-progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cpcs-checklists",
+                "{{{checklistId}}}",
+                "cs-progress"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"evidence_ref\": \"sample evidence_ref\",\n      \"key\": \"sample key\",\n      \"label\": \"sample label\",\n      \"note\": \"sample note\",\n      \"required\": false,\n      \"status\": \"sample status\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "POST /v1/internal/cpcs-checklists/{{{checklistId}}}/reject",
           "request": {
             "method": "POST",

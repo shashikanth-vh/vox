@@ -3729,6 +3729,88 @@
         "title": "CovenantUpdate",
         "type": "object"
       },
+      "CsProgressIn": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CsProgressItem"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CsProgressIn",
+        "type": "object"
+      },
+      "CsProgressItem": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Ref"
+          },
+          "key": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "status": {
+            "default": "Pending",
+            "pattern": "^(Pending|Completed)$",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "CsProgressItem",
+        "type": "object"
+      },
       "DealCreate": {
         "additionalProperties": false,
         "properties": {
@@ -49938,6 +50020,252 @@
           }
         },
         "summary": "Approve the CP/CS checklist (checker; must differ from the maker)",
+        "tags": [
+          "Internal"
+        ]
+      }
+    },
+    "/v1/internal/cpcs-checklists/{checklist_id}/cs-progress": {
+      "post": {
+        "description": "Conditions Subsequent are collected for months after the CP approval. Each\nreceived document is PROGRESS, not a governance decision \u2014 so it updates the\napproved checklist's CS items in place (maker authority, audited per change),\nand the chase reminders shrink immediately. Only CS items may change; the CP half\nand the approval's decision fields stay frozen (DB trigger enforces the latter).",
+        "operationId": "record_cs_progress_v1_internal_cpcs_checklists__checklist_id__cs_progress_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "checklist_id",
+            "required": true,
+            "schema": {
+              "title": "Checklist Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Actor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Actor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Email",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-On-Behalf-Of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-On-Behalf-Of"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Roles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Roles"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Gateway-Auth",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Gateway-Auth"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Authz-Decision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Authz-Decision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Report-Ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Report-Ids"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-User-Reports",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-User-Reports"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Internal-Context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Context"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CsProgressIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Record Cs Progress V1 Internal Cpcs Checklists  Checklist Id  Cs Progress Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record CS document receipt on the APPROVED checklist (no new version)",
         "tags": [
           "Internal"
         ]

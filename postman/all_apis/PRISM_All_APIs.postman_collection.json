@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (254 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (255 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -7382,6 +7382,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/cpcs-checklists/{checklist_id}/cs-progress \u2014 Record CS document receipt on the APPROVED checklist (no new version)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cpcs-checklists/{{checklist_id}}/cs-progress",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cpcs-checklists",
+                    "{{checklist_id}}",
+                    "cs-progress"
+                  ]
+                },
+                "description": "Conditions Subsequent are collected for months after the CP approval. Each\nreceived document is PROGRESS, not a governance decision \u2014 so it updates the\napproved checklist's CS items in place (maker authority, audited per change),\nand the chase reminders shrink immediately. Only CS items may change; the CP half\nand the approval's decision fields stay frozen (DB trigger enforces the latter).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"items\": [\n    {\n      \"key\": \"sample\",\n      \"label\": \"sample\",\n      \"status\": \"REPLACE-to-match-^(Pending|Completed)\",\n      \"evidence_ref\": \"sample\",\n      \"note\": \"sample\",\n      \"required\": false\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
