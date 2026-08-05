@@ -77,35 +77,44 @@ _STYLES = (
 
 
 # ---- inline runs ----------------------------------------------------------- #
-_INLINE = re.compile(r'(\*\*.+?\*\*|__.+?__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
+# ==text== is the HIGHLIGHT mark (yellow, like a marker pen on the letterhead
+# template) — the engine is told to wrap must-not-miss terms in it.
+_INLINE = re.compile(
+    r'(\*\*.+?\*\*|__.+?__|==[^=\n]+?==|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
 
 
-def _runs(text: str, *, bold: bool = False) -> str:
-    """**bold**, *italic*, `code` → <w:r> runs; everything else plain text."""
+def _runs(text: str, *, bold: bool = False, color: str | None = None) -> str:
+    """**bold**, *italic*, `code`, ==highlight== → <w:r> runs; else plain text."""
     out: list[str] = []
     for piece in _INLINE.split(text):
         if not piece:
             continue
-        b, i, mono = bold, False, False
+        b, i, mono, mark = bold, False, False, False
         if piece.startswith(('**', '__')) and piece.endswith(('**', '__')) and len(piece) > 4:
             b, piece = True, piece[2:-2]
+        elif piece.startswith('==') and piece.endswith('==') and len(piece) > 4:
+            mark, piece = True, piece[2:-2]
         elif piece.startswith(('*', '_')) and piece.endswith(('*', '_')) and len(piece) > 2:
             i, piece = True, piece[1:-1]
         elif piece.startswith('`') and piece.endswith('`') and len(piece) > 2:
             mono, piece = True, piece[1:-1]
         rpr = ('<w:rPr>' + ('<w:b/>' if b else '') + ('<w:i/>' if i else '')
                + ('<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>' if mono else '')
-               + '</w:rPr>') if (b or i or mono) else ''
+               + (f'<w:color w:val="{color}"/>' if color else '')
+               + ('<w:highlight w:val="yellow"/>' if mark else '')
+               + '</w:rPr>') if (b or i or mono or mark or color) else ''
         out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{escape(piece)}</w:t></w:r>')
     return ''.join(out) or '<w:r><w:t xml:space="preserve"></w:t></w:r>'
 
 
 def _p(text: str, *, style: str | None = None, indent: int = 0,
-       bullet: bool = False, number: str | None = None, bold: bool = False) -> str:
+       bullet: bool = False, number: str | None = None, bold: bool = False,
+       color: str | None = None, fill: str | None = None) -> str:
     ppr = ''
-    if style or indent or bullet:
+    if style or indent or bullet or fill:
         ppr = ('<w:pPr>'
                + (f'<w:pStyle w:val="{style}"/>' if style else '')
+               + (f'<w:shd w:val="clear" w:fill="{fill}"/>' if fill else '')
                + (f'<w:ind w:left="{indent}" w:hanging="240"/>' if (bullet or number) and indent
                   else f'<w:ind w:left="{indent}"/>' if indent else '')
                + '</w:pPr>')
@@ -114,7 +123,7 @@ def _p(text: str, *, style: str | None = None, indent: int = 0,
         lead = '<w:r><w:t xml:space="preserve">•  </w:t></w:r>'
     elif number:
         lead = f'<w:r><w:t xml:space="preserve">{escape(number)}  </w:t></w:r>'
-    return f'<w:p>{ppr}{lead}{_runs(text, bold=bold)}</w:p>'
+    return f'<w:p>{ppr}{lead}{_runs(text, bold=bold, color=color)}</w:p>'
 
 
 def _code_p(text: str) -> str:
@@ -130,7 +139,12 @@ _TBL_BORDER = ('<w:tblBorders>'
                + '</w:tblBorders>')
 
 
-def _table(rows: list[list[str]], header: bool) -> str:
+# The letterhead's table language: a NAVY band with white bold text for header
+# rows, and the label column in navy bold — matching the credit team's letter.
+_NAVY = '1F4D78'
+
+
+def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False) -> str:
     xml = ['<w:tbl><w:tblPr>'
            '<w:tblW w:w="0" w:type="auto"/>' + _TBL_BORDER
            + '<w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
@@ -138,10 +152,20 @@ def _table(rows: list[list[str]], header: bool) -> str:
     for r, cells in enumerate(rows):
         is_head = header and r == 0
         xml.append('<w:tr>')
-        for cell in cells:
-            shade = '<w:shd w:val="clear" w:fill="F2F2F2"/>' if is_head else ''
-            xml.append(f'<w:tc><w:tcPr>{shade}</w:tcPr>'
-                       + _p(cell, bold=is_head) + '</w:tc>')
+        for c, cell in enumerate(cells):
+            if is_head and letterhead:
+                shade = f'<w:shd w:val="clear" w:fill="{_NAVY}"/>'
+                para = _p(cell, bold=True, color='FFFFFF')
+            elif is_head:
+                shade = '<w:shd w:val="clear" w:fill="F2F2F2"/>'
+                para = _p(cell, bold=True)
+            elif letterhead and c == 0:
+                shade = ''
+                para = _p(cell, bold=True, color=_NAVY)
+            else:
+                shade = ''
+                para = _p(cell)
+            xml.append(f'<w:tc><w:tcPr>{shade}</w:tcPr>{para}</w:tc>')
         xml.append('</w:tr>')
     xml.append('</w:tbl>')
     # Word requires a paragraph after a table (a table may not end the body directly,
@@ -165,9 +189,12 @@ def _is_separator(line: str) -> bool:
     return bool(body) and all(re.fullmatch(r'\s*:?-{3,}:?\s*', c) for c in body.split('|'))
 
 
-def _render_body(md: str, title: str | None = None) -> str:
+def _render_body(md: str, title: str | None = None, *,
+                 letterhead: bool = False) -> str:
     """Markdown → the <w:body> INNER XML (no sectPr) — shared by the standalone
-    package and the render-into-template path."""
+    package and the render-into-template path. ``letterhead`` switches on the
+    sanction-letter visual language: ## headings become full-width navy banner
+    bars and tables get the navy header band + navy bold label column."""
     body: list[str] = []
     if title:
         body.append(_p(title, style="Title"))
@@ -197,7 +224,8 @@ def _render_body(md: str, title: str | None = None) -> str:
                 i += 1
             if rows:
                 width = max(len(r) for r in rows)
-                body.append(_table([r + [''] * (width - len(r)) for r in rows], header))
+                body.append(_table([r + [''] * (width - len(r)) for r in rows], header,
+                                   letterhead=letterhead))
             continue
 
         if not line.strip():
@@ -210,8 +238,12 @@ def _render_body(md: str, title: str | None = None) -> str:
             continue
         if (m := _HEADING.match(line)):
             level = min(len(m.group(1)), 3)
-            body.append(_p(m.group(2).strip().strip('#').strip(),
-                           style=f"Heading{level}"))
+            text = m.group(2).strip().strip('#').strip()
+            if letterhead and level == 2:
+                # The letterhead's section bars: full-width navy band, white bold.
+                body.append(_p(text, bold=True, color='FFFFFF', fill=_NAVY))
+            else:
+                body.append(_p(text, style=f"Heading{level}"))
             i += 1
             continue
         if (m := _BULLET.match(line)):
@@ -236,11 +268,12 @@ def _render_body(md: str, title: str | None = None) -> str:
     return ''.join(body)
 
 
-def markdown_to_docx(md: str, title: str | None = None) -> bytes:
+def markdown_to_docx(md: str, title: str | None = None, *,
+                     letterhead: bool = False) -> bytes:
     """Render workbench Markdown into a complete standalone .docx."""
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<w:document {_W}><w:body>' + _render_body(md, title)
+        f'<w:document {_W}><w:body>' + _render_body(md, title, letterhead=letterhead)
         + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
           '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>'
           '</w:sectPr></w:body></w:document>')
@@ -282,7 +315,8 @@ def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
 
 
 def markdown_into_template(md: str, template_blob: bytes,
-                           title: str | None = None) -> bytes:
+                           title: str | None = None, *,
+                           letterhead: bool = False) -> bytes:
     """Render Markdown INSIDE the template's own package: its styles, theme,
     fonts, numbering, images and section setup all survive, so the output looks
     like the credit team's letterhead — only the letter text is replaced. Heading
@@ -294,16 +328,17 @@ def markdown_into_template(md: str, template_blob: bytes,
         doc = parts['word/document.xml'].decode('utf-8', 'ignore')
         m = re.search(r'(<w:body(?: [^>]*)?>)(.*)(</w:body>)', doc, re.S)
         if m is None:
-            return markdown_to_docx(md, title)
+            return markdown_to_docx(md, title, letterhead=letterhead)
     except (zipfile.BadZipFile, KeyError, OSError):
-        return markdown_to_docx(md, title)
+        return markdown_to_docx(md, title, letterhead=letterhead)
     inner = m.group(2)
     sect = re.search(r'<w:sectPr(?: [^>]*)?>[\s\S]*?</w:sectPr>|<w:sectPr(?: [^>]*)?/>',
                      inner)
     sect_xml = sect.group(0) if sect else \
         ('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
          '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>')
-    new_inner = _letterhead_prefix(inner) + _render_body(md, title) + sect_xml
+    new_inner = (_letterhead_prefix(inner)
+                 + _render_body(md, title, letterhead=letterhead) + sect_xml)
     parts['word/document.xml'] = (
         doc[:m.start(2)] + new_inner + doc[m.end(2):]).encode('utf-8')
 

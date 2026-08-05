@@ -773,6 +773,12 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             "and wording; fill every figure and particular from the CAM, the credit "
             "note and the typed terms (typed terms win on conflict). Where a value is "
             "genuinely not on record, leave a [____] placeholder for the analyst. "
+            "Formatting: every section title (CREDIT FACILITY DETAILS, REPAYMENT, "
+            "FEE, INTEREST & CHARGES, …) is a '## ' heading; tabular particulars are "
+            "Markdown tables with a header row, label in the first column; wrap the "
+            "key commercial terms the borrower must not miss — sanctioned amount, "
+            "rate, tenor, crucial conditions — in ==double equals== to highlight "
+            "them, as the template does. "
             "Output the LETTER ONLY, in clean Markdown — no commentary.")
         system = (
             "You draft SANCTION LETTERS for a climate-finance lender. You fill the "
@@ -787,7 +793,10 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return problem(502, "Letter drafting failed", str(exc))
         # Rendered INTO the template package — its fonts, colors and letterhead
         # are the credit team's, so the draft looks like the letter, not a memo.
-        blob = markdown_into_template(reply, tmpl_blob or b"")
+        # letterhead=True adds the letter's visual language: navy section bars,
+        # navy table headers with white text, navy bold label columns, and
+        # ==highlights== as yellow marker.
+        blob = markdown_into_template(reply, tmpl_blob or b"", letterhead=True)
         return Response(
             content=blob, media_type=_DOCX_TYPE,
             headers={"Content-Disposition":
