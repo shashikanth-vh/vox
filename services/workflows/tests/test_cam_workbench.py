@@ -551,3 +551,33 @@ async def test_anthropic_engine_accumulates_streamed_deltas():
             'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"part"}}',
             'data: {"type":"error","error":{"message":"overloaded"}}',
         ]), "sys", [{"role": "user", "content": "x"}])
+
+
+async def test_draft_letter_fills_the_template_and_returns_word(monkeypatch):
+    """draft-letter: template text + CAM + credit note + typed terms go to the engine
+    in ONE turn; the reply comes back rendered as .docx. Nothing is filed on the
+    register. An unreadable template is a 422 that says why."""
+    app = _app(monkeypatch)
+    stub = _RegisterStub()
+    app.state.http = stub
+
+    r = await _call(app, "POST", f"/v1/cam/{LENDING}/draft-letter", json={
+        "template_doc_id": "prompt-1", "cam_doc_id": "fin-1",
+        "credit_note": "Approved at 15% fixed",
+        "terms": {"amount_cr": "1.0", "rate_pct": "15", "note": ""}})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    assert "Sanction letter - draft.docx" in r.headers["content-disposition"]
+    assert r.content[:2] == b"PK"
+    from app.cam import extract_text
+    text, reason = extract_text(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        r.content)
+    assert reason is None and "stub" in text.lower()   # the stub engine's reply
+    # No register writes: drafting a letter opens no CAM version, records no turn.
+    assert stub.reports == {} and stub.turns == []
+
+    bad = await _call(app, "POST", f"/v1/cam/{LENDING}/draft-letter",
+                      json={"template_doc_id": "pdf-1"})
+    assert bad.status_code == 422, bad.text

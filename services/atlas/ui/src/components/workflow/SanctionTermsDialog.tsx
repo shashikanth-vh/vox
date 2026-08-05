@@ -139,6 +139,29 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     setLetterBusy('');
   };
 
+  // The whole letter in one go: the engine fills the TEMPLATE with the CAM's /
+  // credit note's / typed terms' figures and the draft downloads as Word. The
+  // analyst edits it there, signs, and uploads it through the normal lane.
+  const generateLetter = async () => {
+    if (!tmpl) return;
+    setErr(''); setLetterBusy('draft');
+    try {
+      const reports = await camService.list(lendingId);
+      const filed = [...reports].reverse().find((r) => r.document_id);
+      const typed: Record<string, string> = {};
+      for (const [k, v] of Object.entries(f)) if (v?.trim()) typed[k] = v.trim();
+      await camService.draftLetter(lendingId, {
+        template_doc_id: tmpl.id,
+        ...(filed?.document_id ? { cam_doc_id: filed.document_id } : {}),
+        ...(decision?.note ? { credit_note: decision.note } : {}),
+        ...(Object.keys(typed).length ? { terms: typed } : {}),
+      });
+      setInfo('Draft letter downloaded — review and edit it in Word, then upload the '
+        + 'signed letter here.');
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setLetterBusy('');
+  };
+
   // Terms out of the COMPLETED CAM — usable before any letter exists, which is
   // exactly when the analyst is drafting one.
   const fillFromCam = async () => {
@@ -294,6 +317,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
                 onClick={() => void fillFromCam()} sx={{ textTransform: 'none' }}
                 title="The engine reads the amount, rate, tenor, EMI … out of the completed CAM (and the credit note) and fills the fields below — before the letter exists, while you draft it">
                 {letterBusy === 'cam-parse' ? 'Reading CAM…' : 'Fill terms from CAM'}
+              </Button>
+            )}
+            {!letter && (
+              <Button size="small" variant="contained" disabled={!tmpl || !!letterBusy}
+                onClick={() => void generateLetter()} sx={{ textTransform: 'none' }}
+                title="The engine fills the letterhead template with the CAM's, credit note's and typed terms' figures — the draft downloads as Word for you to edit, sign, and upload">
+                {letterBusy === 'draft' ? 'Drafting…' : 'Generate letter (draft)'}
               </Button>
             )}
             <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}

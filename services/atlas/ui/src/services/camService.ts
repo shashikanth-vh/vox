@@ -204,6 +204,24 @@ export const camService = {
     }
   },
 
+  /** The engine FILLS the sanction-letter template (structure + wording) with the
+   *  CAM's / credit note's / typed terms' figures and the browser downloads the
+   *  result as .docx — the analyst edits it in Word and uploads the signed letter. */
+  async draftLetter(lendingId: string, input: {
+    template_doc_id: string; cam_doc_id?: string; credit_note?: string;
+    terms?: Record<string, string>;
+  }): Promise<void> {
+    try {
+      const blob = await orchestrator.postBlob(`/v1/cam/${lendingId}/draft-letter`,
+        input, { timeoutMs: 320_000 });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'Sanction letter - draft.docx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { throw new Error(msg(e, 'draft the sanction letter')); }
+  },
+
   /** EVERY template of one kind, newest first — the prompt picker's options. Falls
    *  back to the single newest on an older register that lacks the list route. */
   async templates(docType: string): Promise<{ id: string; title: string }[]> {

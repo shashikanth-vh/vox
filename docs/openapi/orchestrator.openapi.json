@@ -1004,6 +1004,57 @@
         "title": "DocumentReceivedIn",
         "type": "object"
       },
+      "DraftLetterIn": {
+        "additionalProperties": false,
+        "properties": {
+          "cam_doc_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cam Doc Id"
+          },
+          "credit_note": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Note"
+          },
+          "template_doc_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Template Doc Id",
+            "type": "string"
+          },
+          "terms": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms"
+          }
+        },
+        "required": [
+          "template_doc_id"
+        ],
+        "title": "DraftLetterIn",
+        "type": "object"
+      },
       "EwsCaseStartIn": {
         "additionalProperties": false,
         "description": "Attach a Temporal clock to an EWS case the Register already holds \u2014 the case\nrecord stays the single source of truth; the run keeps it honest against its SLAs.",
@@ -2309,6 +2360,59 @@
           }
         },
         "summary": "Read CP / CS / covenants OUT of a sanction letter (engine-parsed)",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/{lending_id}/draft-letter": {
+      "post": {
+        "description": "The engine FILLS the sanction-letter template \u2014 its structure and wording,\nthe CAM's + credit note's + typed terms' figures \u2014 and the result comes back\nas a .docx to review and hand-edit in Word. Nothing is filed: the analyst\nuploads the finished, signed letter through the normal lane.",
+        "operationId": "cam_draft_letter_v1_cam__lending_id__draft_letter_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftLetterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Draft Letter V1 Cam  Lending Id  Draft Letter Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft the sanction letter as Word: template structure, CAM figures",
         "tags": [
           "CAM"
         ]

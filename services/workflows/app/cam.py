@@ -243,6 +243,19 @@ class ExportDocxIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
 
 
+class DraftLetterIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # The letterhead template whose STRUCTURE the draft must follow.
+    template_doc_id: str = Field(min_length=1, max_length=64)
+    # The completed CAM the figures come from (optional — a letter can draft from the
+    # credit note and typed terms alone, with placeholders for the rest).
+    cam_doc_id: str | None = Field(default=None, max_length=64)
+    credit_note: str | None = Field(default=None, max_length=20_000)
+    # Whatever the analyst has ALREADY typed into the terms form — these override the
+    # documents (the human's figures win).
+    terms: dict[str, Any] | None = None
+
+
 class FinaliseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, max_length=200)
@@ -713,6 +726,63 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         return Response(
             content=blob, media_type=_DOCX_TYPE,
             headers={"Content-Disposition": f'attachment; filename="{safe}.docx"'})
+
+    @app.post("/v1/cam/{lending_id}/draft-letter", tags=["CAM"],
+              summary="Draft the sanction letter as Word: template structure, CAM figures")
+    async def cam_draft_letter(lending_id: str, payload: DraftLetterIn,
+                               request: Request) -> Any:
+        """The engine FILLS the sanction-letter template — its structure and wording,
+        the CAM's + credit note's + typed terms' figures — and the result comes back
+        as a .docx to review and hand-edit in Word. Nothing is filed: the analyst
+        uploads the finished, signed letter through the normal lane."""
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        caller, _ = caller_context(request, who)
+        tmpl_text, tmpl_skip = await _doc_text(request, caller, who, payload.template_doc_id)
+        if not tmpl_text.strip():
+            return problem(422, "Template unreadable",
+                           f"The sanction letter template could not be read: "
+                           f"{tmpl_skip or 'no text'}.")
+        parts = [f"===== SANCTION LETTER TEMPLATE =====\n{tmpl_text}"]
+        if payload.cam_doc_id:
+            cam_text, cam_skip = await _doc_text(request, caller, who, payload.cam_doc_id)
+            if cam_text.strip():
+                parts.append(f"===== APPROVED CAM =====\n{cam_text}")
+            else:
+                parts.append(f"(The CAM document could not be read: {cam_skip or 'no text'})")
+        if payload.credit_note:
+            parts.append(f"===== COMMITTEE CREDIT NOTE =====\n{payload.credit_note}")
+        typed = {k: v for k, v in (payload.terms or {}).items()
+                 if v not in (None, "", [])}
+        if typed:
+            parts.append("===== TERMS ALREADY TYPED BY THE ANALYST (these override "
+                         "the documents) =====\n"
+                         + "\n".join(f"{k}: {v}" for k, v in sorted(typed.items())))
+        parts.append(
+            "Draft the sanction letter now: follow the TEMPLATE's structure, sections "
+            "and wording; fill every figure and particular from the CAM, the credit "
+            "note and the typed terms (typed terms win on conflict). Where a value is "
+            "genuinely not on record, leave a [____] placeholder for the analyst. "
+            "Output the LETTER ONLY, in clean Markdown — no commentary.")
+        system = (
+            "You draft SANCTION LETTERS for a climate-finance lender. You fill the "
+            "credit team's own template faithfully — structure, clauses and tone — "
+            "with figures taken ONLY from the supplied documents and terms; never "
+            "invent a number. Missing values become [____] placeholders.")
+        try:
+            reply = await engine.generate(
+                request.app.state.http, system,
+                [{"role": "user", "content": "\n\n".join(parts)}])
+        except RuntimeError as exc:
+            return problem(502, "Letter drafting failed", str(exc))
+        blob = markdown_to_docx(reply, None)
+        return Response(
+            content=blob, media_type=_DOCX_TYPE,
+            headers={"Content-Disposition":
+                     'attachment; filename="Sanction letter - draft.docx"'})
 
     @app.post("/v1/cam/{lending_id}/finalise", tags=["CAM"],
               summary="File the draft to the Data Register and submit it to committee")

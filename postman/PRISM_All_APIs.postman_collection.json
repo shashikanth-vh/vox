@@ -12613,7 +12613,7 @@
       ]
     },
     {
-      "name": "Orchestrator  (53 requests \u00b7 {{baseUrl}}/orchestrator)",
+      "name": "Orchestrator  (54 requests \u00b7 {{baseUrl}}/orchestrator)",
       "item": [
         {
           "name": "CAM",
@@ -12704,6 +12704,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"doc_id\": \"sample\",\n  \"credit_note\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /orchestrator/v1/cam/{lending_id}/draft-letter \u2014 Draft the sanction letter as Word: template structure, CAM figures",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/orchestrator/v1/cam/{{lending_id}}/draft-letter",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "orchestrator",
+                    "v1",
+                    "cam",
+                    "{{lending_id}}",
+                    "draft-letter"
+                  ]
+                },
+                "description": "The engine FILLS the sanction-letter template \u2014 its structure and wording,\nthe CAM's + credit note's + typed terms' figures \u2014 and the result comes back\nas a .docx to review and hand-edit in Word. Nothing is filed: the analyst\nuploads the finished, signed letter through the normal lane.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"template_doc_id\": \"sample\",\n  \"cam_doc_id\": \"sample\",\n  \"credit_note\": \"sample\",\n  \"terms\": {}\n}",
                   "options": {
                     "raw": {
                       "language": "json"
