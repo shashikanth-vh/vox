@@ -182,11 +182,43 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
       const deal = await api.get<any>(`/deals/${w.subjectId}`);
       const ent = deal?.entity_id
         ? await api.get<any>(`/entities/${deal.entity_id}`).catch(() => null) : null;
+      // The CAM prepared for this decision: the deal's lending line carries the filed
+      // document (and/or the in-app draft) — the committee reads it HERE, on the card.
+      let cam: any = null;
+      let document: { id: string; name: string } | undefined;
+      try {
+        const lendRows = rows(await api.get<any>('/lending',
+          { deal_id: w.subjectId, limit: 10 }).catch(() => []));
+        for (const line of lendRows) {
+          const cams = rows(await api.get<any>('/internal/cam-reports',
+            { lending_id: line.id }).catch(() => []));
+          const withContent = cams.filter((r: any) => r.draft_md || r.document_id).pop();
+          if (withContent) {
+            cam = withContent;
+            if (cam.document_id) {
+              const docs = rows(await api.get<any>(`/lending/${line.id}/documents`)
+                .catch(() => []));
+              const d = docs.find((x: any) => x.id === cam.document_id);
+              const ct = String(d?.content_type || '');
+              const ext = ct.includes('wordprocessingml') ? '.docx' : ct.includes('pdf') ? '.pdf'
+                : ct.includes('markdown') ? '.md' : ct.includes('plain') ? '.txt' : '';
+              document = { id: String(cam.document_id),
+                name: `${d?.title || `CAM v${cam.report_version}`}${ext}` };
+            }
+            break;
+          }
+        }
+      } catch { /* the card still works without the CAM */ }
       return {
-        headline: `Credit committee decision on ${ent?.display_name || ent?.legal_name || 'this deal'}.`,
+        headline: `Credit committee decision on ${ent?.display_name || ent?.legal_name || 'this deal'}.`
+          + (document ? ' The prepared CAM is attached below.' : ''),
         facts: clean([['Company', ent?.legal_name], ['Product', deal.product_type],
           ['Amount ₹ Cr', deal.amount_cr], ['RM', deal.rm], ['Analyst', deal.analyst],
-          ['Stage', deal.stage]]),
+          ['Stage', deal.stage],
+          ['CAM', cam ? `v${cam.report_version} · prepared by ${cam.prepared_by || '—'}` : undefined],
+          ['Filed document', document?.name]]),
+        preview: cam?.draft_md || undefined,
+        document,
       };
     }
     if (['cpcs-checklist', 'cam-report', 'advaya-handover'].includes(w.kind)) {

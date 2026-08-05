@@ -519,8 +519,11 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         report = await _open_report(request, caller, who, lending_id)
 
         # The uploaded-document lane: the analyst filled the CAM in Word and uploaded
-        # it — that FILE goes to the committee. No open draft is fine (they may have
-        # worked entirely outside); a version row is opened to carry the review.
+        # it. Filing is WORKBENCH work — the document is attached to the version and the
+        # version stays Draft. The committee request is a separate, deliberate step
+        # ("Send to credit committee"), which reads this filed document. No open draft
+        # is fine (they may have worked entirely outside): a version row is opened to
+        # carry the file.
         if payload.document_id:
             if report is None:
                 open_path = "/v1/internal/cam-reports"
@@ -533,19 +536,20 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                                    f"The register would not open a CAM version (HTTP "
                                    f"{opened.status_code}): {opened.text[:300]}")
                 report = opened.json()
-            await _record_turn(
-                request, caller, who, report["id"], "user",
-                f"[uploaded CAM] The analyst filed the completed CAM document "
-                f"(document {payload.document_id}) — it is the committee copy.")
-            sub_path = f"/v1/internal/cam-reports/{report['id']}/submit"
-            sub = await request.app.state.http.post(
-                f"{base}{sub_path}", json={"document_id": payload.document_id},
-                headers=_reg_headers(request, caller, who, "POST", sub_path))
-            if sub.status_code >= 300:
-                return problem(502, "Submit failed", sub.text[:500])
+            turn_path = f"/v1/internal/cam-reports/{report['id']}/turns"
+            filed = await request.app.state.http.post(
+                f"{base}{turn_path}",
+                json={"role": "user",
+                      "content": f"[uploaded CAM] The analyst filed the completed CAM "
+                                 f"document (document {payload.document_id}) — the "
+                                 f"committee copy once this goes to committee.",
+                      "document_id": payload.document_id},
+                headers=_reg_headers(request, caller, who, "POST", turn_path))
+            if filed.status_code >= 300:
+                return problem(502, "Filing failed", filed.text[:500])
             return {"report_id": report["id"],
                     "report_version": report["report_version"],
-                    "document_id": payload.document_id, "status": "Submitted"}
+                    "document_id": payload.document_id, "status": "Draft"}
 
         if report is None:
             return problem(404, "Not found",

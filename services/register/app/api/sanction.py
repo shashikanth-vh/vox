@@ -264,6 +264,9 @@ class CamTurnIn(BaseModel):
     # The assistant's turn usually carries the NEW full draft; storing it on the report
     # keeps "current draft" a one-row read.
     draft_md: str | None = Field(default=None, max_length=500_000)
+    # The analyst may FILE the completed CAM (a Data Register document) while the
+    # version is still Draft — filing is workbench work, not the committee submission.
+    document_id: str | None = Field(default=None, max_length=64)
 
 
 class CamDecideIn(BaseModel):
@@ -369,6 +372,8 @@ async def append_cam_turn(report_id: str, payload: CamTurnIn,
                             content=payload.content, created_by=ctx.actor))
     if payload.draft_md is not None:
         row.draft_md = payload.draft_md
+    if payload.document_id is not None:
+        row.document_id = payload.document_id
     row.updated_by = ctx.actor
     await ctx.session.flush()
     return {"ok": True, "turn_no": next_turn, "report_version": row.report_version,

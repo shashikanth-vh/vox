@@ -2651,6 +2651,40 @@ def create_app() -> FastAPI:
                        "conditions": line_conditions[lid],
                        "valid_days": line_valid_days[lid]})
         authoritative_by = (record.get("decided_by") if record else "") or decided_by
+        # The committee read the CAM as part of this decision (the approval card carries
+        # the filed document). Close the loop on the register: each APPROVED line's open
+        # CAM version — filed but deliberately left Draft by the workbench — is submitted
+        # and recorded Approved by the same decider. Best-effort: a line whose CAM cannot
+        # be closed out keeps its sanction; the CAM just stays open for the analyst.
+        for line in lines:
+            lid = str(line)
+            if line_outcome.get(lid) != "Approved":
+                continue
+            try:
+                cams, cerr = await _register_get_as(
+                    request, f"/v1/internal/cam-reports?lending_id={lid}",
+                    decided_by, approver)
+                if cerr is not None or not isinstance(cams, list):
+                    continue
+                open_cam = next(
+                    (r for r in reversed(cams)
+                     if r.get("status") in ("Draft", "Returned")
+                     and (r.get("draft_md") or r.get("document_id"))), None)
+                if open_cam is None:
+                    continue
+                rid = open_cam["id"]
+                await _register_post_as(
+                    request, f"/v1/internal/cam-reports/{rid}/submit",
+                    decided_by, approver, {})
+                await _register_post_as(
+                    request, f"/v1/internal/cam-reports/{rid}/decide",
+                    decided_by, approver,
+                    {"decision": "Approved",
+                     "note": "Sanctioned by the credit committee "
+                             f"({payload.committee_reference or workflow_id})."})
+            except Exception as exc:  # noqa: BLE001 — never block the sanction on this
+                log.warning("cam_closeout_failed",
+                            extra={"lending_id": lid, "error": str(exc)})
         # The signal is only a WAKE-UP: the workflow re-reads the authoritative decision record and
         # derives the outcome/approver/note/references from it — nothing here is trusted by the run.
         try:

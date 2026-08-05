@@ -201,16 +201,17 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     if (!out.ok) setErr(out.error || 'The prompt download failed.');
   };
 
-  // The completed CAM (a filled .docx, usually) is filed on the line and THAT document
-  // is submitted to the committee — with or without an in-app draft underneath.
+  // The completed CAM (a filled .docx, usually) is FILED on the line and attached to
+  // the working version — nothing goes to any approver from here. The committee request
+  // is the drawer's own "Send to credit committee" step, which carries this document.
   const uploadFinal = (file: File | null) => {
     if (!file) return;
     void run('upload-final', async () => {
       const doc = await camService.uploadDoc(subjectId, file, 'CAM', 'Sanction');
       await camService.finalise(subjectId,
         title.trim() || file.name.replace(/\.[^.]+$/, ''), String(doc.id));
-      onDone(`Completed CAM "${file.name}" filed and submitted to the committee.`);
-      return 'Submitted to the committee.';
+      onDone(`Completed CAM "${file.name}" is on file — use "Send to credit committee" to raise the review.`);
+      return 'Filed. Raise "Send to credit committee" when ready.';
     });
   };
 
@@ -425,14 +426,25 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             )}
 
             <Divider sx={{ my: 1.4 }} />
+            {!!working.document_id && (
+              <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
+                ✓ Completed CAM on file
+                <Box component="span" onClick={() => void downloadFiled(working.document_id!)}
+                  sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
+                    textDecoration: 'underline' }}>
+                  Download
+                </Box>
+                {' '}— "Send to credit committee" will carry it to the approver.
+              </Typography>
+            )}
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <TextField size="small" sx={{ flex: 1 }} label="Filed title (optional)"
                 placeholder={`CAM v${working.report_version}`}
                 value={title} onChange={(e) => setTitle(e.target.value)} />
               <Button component="label" variant="contained" size="small" disabled={!!busy}
-                title="The uploaded file is filed on the line and submitted to the credit committee"
+                title="Files the document on this line only — the committee request is the separate 'Send to credit committee' step"
                 sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM & send to committee'}
+                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM'}
                 <input hidden type="file" accept=".docx,.pdf,.md,.txt"
                   onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
               </Button>
@@ -454,7 +466,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography sx={{ fontSize: 12, color: tokens.muted, flex: 1 }}>
                   Prefer Word? Download the CAM template, fill it in, and upload the
-                  completed CAM — that file goes straight to the committee.
+                  completed CAM — it is filed on this line, ready for the
+                  "Send to credit committee" step.
                 </Typography>
                 {defaults.example && (
                   <Button variant="outlined" size="small" sx={{ textTransform: 'none', whiteSpace: 'nowrap' }}

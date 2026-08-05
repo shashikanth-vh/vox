@@ -84,6 +84,8 @@ class _RegisterStub:
             self.turns.append({"report_id": rid, **body})
             if body.get("draft_md") is not None:
                 self.reports[rid]["draft_md"] = body["draft_md"]
+            if body.get("document_id") is not None:
+                self.reports[rid]["document_id"] = body["document_id"]
             return httpx.Response(201, json={"ok": True},
                                   request=httpx.Request("POST", u))
         if "/submit" in u:
@@ -144,10 +146,12 @@ async def test_generate_refine_finalise_with_the_stub_engine(monkeypatch):
     assert stub.reports[out["report_id"]]["status"] == "Submitted"
 
 
-async def test_an_uploaded_cam_document_submits_without_an_inapp_draft(monkeypatch):
+async def test_an_uploaded_cam_document_files_without_submitting(monkeypatch):
     """The Word lane: the analyst downloads the template, fills it OUTSIDE, uploads the
-    file — finalise with its document_id opens a version row (none existed), records the
-    filing on the transcript, and submits THAT document to the committee."""
+    file — finalise with its document_id opens a version row (none existed) and ATTACHES
+    the document, but the version stays Draft. Filing is workbench work; the committee
+    request is the separate "Send to credit committee" step, so nothing lands on any
+    approver's queue from here."""
     app = _app(monkeypatch)
     stub = _RegisterStub()
     app.state.http = stub
@@ -156,13 +160,14 @@ async def test_an_uploaded_cam_document_submits_without_an_inapp_draft(monkeypat
                       json={"document_id": "doc-word-1"})
     assert fin.status_code == 200, fin.text
     out = fin.json()
-    assert out["status"] == "Submitted" and out["document_id"] == "doc-word-1"
+    assert out["status"] == "Draft" and out["document_id"] == "doc-word-1"
     row = stub.reports[out["report_id"]]
-    assert row["status"] == "Submitted" and row["document_id"] == "doc-word-1"
+    assert row["status"] == "Draft" and row["document_id"] == "doc-word-1"
     assert row["engine"] == "analyst:document"       # no engine drafted this one
     assert any("[uploaded CAM]" in t["content"] for t in stub.turns)
 
-    # With an OPEN draft the uploaded file joins that version — no second row.
+    # With an OPEN draft the uploaded file joins that version — no second row, and the
+    # version still is not submitted.
     stub2 = _RegisterStub()
     app.state.http = stub2
     gen = await _call(app, "POST", f"/v1/cam/{LENDING}/generate", json={
@@ -173,6 +178,7 @@ async def test_an_uploaded_cam_document_submits_without_an_inapp_draft(monkeypat
     assert fin2.status_code == 200, fin2.text
     assert fin2.json()["report_id"] == rid
     assert stub2.reports[rid]["document_id"] == "doc-word-2"
+    assert stub2.reports[rid]["status"] == "Draft"
     assert len(stub2.reports) == 1
 
 
