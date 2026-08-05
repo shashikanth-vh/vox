@@ -34,13 +34,6 @@ export interface CpcsItem {
 
 const STATUSES: CpcsItem['status'][] = ['Pending', 'Completed', 'Waived', 'Deferred as CS'];
 
-/** A sensible opening checklist — the conditions almost every sanction carries. */
-const STARTER: Omit<CpcsItem, 'status' | 'evidence_ref' | 'reason' | 'expiry_date'>[] = [
-  { key: 'security-creation', label: 'Security created and charge filed', condition_type: 'CP', required: true },
-  { key: 'insurance', label: 'Insurance assigned to the lender', condition_type: 'CP', required: true },
-  { key: 'end-use', label: 'End-use certificate', condition_type: 'CS', required: true },
-];
-
 const blank = (n: number, t: 'CP' | 'CS' = 'CP'): CpcsItem => ({
   key: `condition-${n}`, label: '', condition_type: t, required: true,
   status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
@@ -73,14 +66,40 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [parsing, setParsing] = useState(false);
+
+  // The conditions COME FROM the sanction letter — the engine reads them out, one row
+  // each, so nobody re-types the letter into the checklist. Phase-aware: the CP step
+  // pulls the Conditions Precedent, the CS step the Conditions Subsequent.
+  const readLetter = async () => {
+    const lid = String(action?.body?.lending_id || '');
+    if (!lid) return;
+    setErr(''); setParsing(true);
+    try {
+      const { camService } = await import('../../services/camService');
+      const docs = await camService.lendingDocs(lid);
+      const letter = docs.filter((d) => d.doc_type === 'sanction_letter').pop();
+      if (!letter) throw new Error('No sanction letter on this line yet — upload it in "Enter sanction terms" first.');
+      const out = await camService.extractTerms(letter.id);
+      const labels = phase === 'CP'
+        ? out.cp_items
+        : out.cs_items.map((c) => c.label + (c.timeline ? ` (${c.timeline})` : ''));
+      if (!labels.length) throw new Error(`The letter yielded no ${phase} conditions.`);
+      setItems(labels.map((label, n) => ({
+        key: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80) || `condition-${n + 1}`,
+        label, condition_type: phase, required: true,
+        status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
+      })));
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    setParsing(false);
+  };
 
   useEffect(() => {
     if (!open) return;
+    // Empty until the seeded checklist / terms load — or the letter is read. No
+    // invented starter conditions: the letter is the source of truth.
     setCarried([]);
-    setItems(phase === 'CP'
-      ? STARTER.filter((s) => s.condition_type === 'CP')
-        .map((s) => ({ ...s, status: 'Pending', evidence_ref: '', reason: '', expiry_date: '' }))
-      : []);
+    setItems([]);
     // The plane knows which version comes next — a checklist is keyed on (lending,
     // version), so opening on 1 every time hands the user a 409 after they have filled
     // the whole form in.
@@ -226,6 +245,17 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         </Typography>
         {err && <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
           onClose={() => setErr('')}>{err}</Alert>}
+        <Button size="small" variant="outlined" disabled={parsing || busy}
+          onClick={() => void readLetter()} sx={{ textTransform: 'none', mb: 1.2 }}
+          title={`The engine reads the ${phase === 'CP' ? 'Conditions Precedent' : 'Conditions Subsequent'} out of the filed sanction letter — one row each`}>
+          {parsing ? 'Reading the letter…' : `Read ${phase} conditions from the sanction letter`}
+        </Button>
+        {items.length === 0 && (
+          <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 1 }}>
+            No {phase} conditions yet — read them from the sanction letter above, or add
+            them by hand.
+          </Typography>
+        )}
 
         {items.map((r, i) => (
           <Box key={i} sx={{ border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.2, mb: 1 }}>
