@@ -3714,6 +3714,12 @@ def create_app() -> FastAPI:
         # chase (call, collect, record) and LMS Management oversees it, until closure.
         _REMINDER_ROLES = {"BDRM", "Deal Analyst", "Credit Head", "Management", "Admin",
                            "LMS Operator", "LMS Management"}
+        # WHO sees the whole tenant's chases vs their OWN BOOK: the desks that run
+        # whole books (credit seniors, the servicing pair) are unscoped; an IC's
+        # reminders are the lines they prepared or that name them as RM/analyst —
+        # Today says "on your book" and must mean it.
+        _WHOLE_BOOK_REMINDER_ROLES = {"Credit Head", "Management", "Admin",
+                                      "LMS Operator", "LMS Management"}
         if (kind is None or kind in _REMINDER_KINDS) and (
                 caller_roles is None or caller_roles & _REMINDER_ROLES):
             reg_headers = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
@@ -3726,8 +3732,13 @@ def create_app() -> FastAPI:
                     await request.app.state.http.post(
                         f"{base_url}/v1/internal/covenants/run-sweep",
                         json={"horizon_days": 35}, headers=reg_headers)
+                fu_params: dict[str, str] = {}
+                if (caller_roles is not None and _who
+                        and not (caller_roles & _WHOLE_BOOK_REMINDER_ROLES)):
+                    fu_params["scope_email"] = _who
                 fu = await request.app.state.http.get(
-                    f"{base_url}/v1/internal/follow-ups", headers=reg_headers)
+                    f"{base_url}/v1/internal/follow-ups", headers=reg_headers,
+                    params=fu_params)
                 for row in (fu.json().get("items", []) if fu.status_code == 200 else []):
                     if kind is not None and row.get("kind") != kind:
                         continue

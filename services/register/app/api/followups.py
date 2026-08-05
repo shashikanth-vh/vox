@@ -66,9 +66,34 @@ def current_due(first_due_on: date, frequency: str, today: date) -> date:
             summary="Open CS chases and covenant cycles due — computed fresh")
 async def list_follow_ups(
         window_days: int = Query(default=14, ge=0, le=120),
+        scope_email: str | None = Query(default=None),
         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     today = date.today()
     items: list[dict[str, Any]] = []
+
+    # OWN-BOOK scoping (``scope_email``): an IC's reminders are their book, not the
+    # tenant's — an item stays when they PREPARED it or the line names them as its
+    # RM/analyst (the people roster maps the email to those names). Heads and the
+    # servicing desk call without it and keep the whole book.
+    scope_names: set[str] = set()
+    if scope_email:
+        from app.models.registry import Person
+        person = (await ctx.session.execute(select(Person).where(
+            Person.tenant_id == ctx.tenant_id,
+            Person.email == scope_email,
+            Person.deleted_at.is_(None)))).scalars().first()
+        if person is not None:
+            scope_names = {n for n in (person.name, person.full_name) if n}
+
+    def _in_scope(line: Any, prepared_by: str | None) -> bool:
+        if not scope_email:
+            return True
+        if prepared_by and prepared_by == scope_email:
+            return True
+        if line is not None and scope_names:
+            return (getattr(line, "rm", None) in scope_names
+                    or getattr(line, "analyst", None) in scope_names)
+        return False
 
     # ---- the lending lines involved, read once ---------------------------------------
     lendings = (await ctx.session.execute(select(LendingTracker).where(
@@ -108,7 +133,7 @@ async def list_follow_ups(
         outstanding = [str(i.get("label") or i.get("key") or "condition")
                        for i in (c.items or [])
                        if str(i.get("status") or "Pending") not in _DONE]
-        if not outstanding:
+        if not outstanding or not _in_scope(line, c.prepared_by):
             continue
         items.append({
             "kind": "cs-followup", "lending_id": lending_id,
@@ -123,7 +148,7 @@ async def list_follow_ups(
         if line is not None and str(getattr(line, "stage", "") or "") == "Closed":
             continue
         open_conds = [cr for cr in conds if cr.status not in _DONE]
-        if not open_conds:
+        if not open_conds or not _in_scope(line, None):
             continue
         first = min((cr.created_at for cr in open_conds if cr.created_at), default=None)
         items.append({
@@ -164,6 +189,8 @@ async def list_follow_ups(
         # and a closed one nothing left. A covenant with no lending line is skipped too —
         # its cycle belongs to whatever mandate carries it.
         if line is None or str(getattr(line, "stage", "") or "") != "Disbursed":
+            continue
+        if not _in_scope(line, None):
             continue
         base = {"kind": "covenant-due", "covenant_id": str(cov.id),
                 "lending_id": str(cov.lending_id), "entity_id": str(cov.entity_id),

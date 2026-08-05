@@ -126,3 +126,45 @@ async def test_a_deferred_cp_completes_its_lifecycle_through_cs_progress(client)
                            json={"items": [{"key": "cp1", "status": "Pending"}]},
                            headers=ADMIN)
     assert cp.status_code == 422 and "CP" in cp.text
+
+
+async def test_follow_ups_scope_to_a_persons_own_book(client):
+    """``scope_email``: an IC's reminders are their book, not the tenant's — the item
+    stays when they PREPARED the checklist or the line names them as RM/analyst;
+    an unrelated IC sees nothing (Today says "on your book" and must mean it)."""
+    eid = await _entity(client)
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence",
+                                   "rm": "Chasey"})).json()["id"]
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": lid, "status": "Completed",
+              "items": [{"key": "cs1", "label": "End-use certificate",
+                         "condition_type": "CS", "status": "Pending"}]},
+        headers=ADMIN)
+    assert chk.status_code == 201, chk.text
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{chk.json()['id']}/approve",
+                              headers=CREDIT_HEAD)).status_code == 200
+
+    def mine(body):  # noqa: ANN001
+        return [i for i in body["items"]
+                if i["kind"] == "cs-followup" and i["lending_id"] == lid]
+
+    # Unscoped (heads, servicing desk): the item is there.
+    assert mine((await client.get("/v1/internal/follow-ups", headers=ADMIN)).json())
+    # The PREPARER keeps their own chase.
+    assert mine((await client.get(
+        "/v1/internal/follow-ups",
+        params={"scope_email": "admin@evamfinance.com"}, headers=ADMIN)).json())
+    # An unrelated IC sees nothing of it.
+    assert not mine((await client.get(
+        "/v1/internal/follow-ups",
+        params={"scope_email": "stranger@evamfinance.com"}, headers=ADMIN)).json())
+    # The line's RM (resolved through the people roster) sees it.
+    p = await client.post("/v1/people", json={
+        "name": "Chasey", "full_name": "Chasey Bookman", "role": "RM",
+        "email": "chasey@evamfinance.com"}, headers=ADMIN)
+    assert p.status_code == 201, p.text
+    assert mine((await client.get(
+        "/v1/internal/follow-ups",
+        params={"scope_email": "chasey@evamfinance.com"}, headers=ADMIN)).json())
