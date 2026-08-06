@@ -882,15 +882,19 @@ async def verify_facility_decisions(line_ids: list[str],
 @activity.defn
 async def advance_stage(resource: str, obj_id: str, stage_field: str, stage_value: str,
                         extra: dict[str, Any] | None = None,
-                        caller: CallerContext | None = None) -> dict[str, Any]:
+                        caller: CallerContext | None = None,
+                        only_if_stage: str | None = None) -> dict[str, Any]:
     """Advance a line's lifecycle stage through the Register's normal, policy-enforcing update API
     (never a side-door write) — so ordered-transition, mandatory-field, field-lock and EVIDENCE
     gates all apply. ``extra`` carries the mandatory fields a target stage needs (e.g. product_type
     + rm for Sanctioned). Idempotent: re-applying the same target stage is a no-op the Register
-    accepts."""
+    accepts. ``only_if_stage`` makes the move CONDITIONAL: it applies only while the row still
+    holds that stage (the rejection-rollback lane — a line a human already moved stays put)."""
     body: dict[str, Any] = {stage_field: stage_value, **(extra or {})}
     async with _client(caller) as reg:
         lead = await reg.get(resource, obj_id, request_id=activity.info().workflow_id)
+        if only_if_stage is not None and lead.get(stage_field) != only_if_stage:
+            return lead   # someone moved it on purpose — not ours to undo
         if lead.get(stage_field) == stage_value and not extra:
             return lead   # already there — nothing to do
         return await reg.update(resource, obj_id, body,

@@ -898,6 +898,11 @@ class DealStructuringWorkflow:
                 note="This deal has no lending tracker line. Create the facility line first — "
                      "credit structuring and sanction run on the lending record, not the deal.")
 
+        # The stage each line held BEFORE this request walked it forward — a rejection
+        # (or a withdrawal) restores it, so the maker starts the rework from where they
+        # actually were instead of hand-editing stages backwards.
+        prior_stages = {str(line.get("id")): str(line.get("stage") or "") for line in lines}
+
         # -- 1. Walk each line up the ordered pipeline to the committee stage (Note Circulated).
         #       Each hop goes through the Register's policy-enforcing API, so sequencing is
         #       enforced. Idempotent.
@@ -910,6 +915,26 @@ class DealStructuringWorkflow:
                         activities.advance_stage,
                         args=["lending", line_id, "stage", stage, None, caller], **_IO)
             lines[i] = line
+
+        async def _restore_stages() -> None:
+            """Reject / withdraw = start fresh: each line goes back to its pre-request
+            stage (Note Circulated → Diligence is an allowed transition), CONDITIONAL
+            on it still sitting at the committee stage — a line a human already moved
+            stays where they put it. Best-effort per line: rollback must never turn a
+            clean rejection into a failed run."""
+            for ln in lines:
+                lid = str(ln.get("id"))
+                prior = prior_stages.get(lid) or ""
+                if not prior or prior == "Note Circulated":
+                    continue
+                try:
+                    await workflow.execute_activity(
+                        activities.advance_stage,
+                        args=["lending", lid, "stage", prior, None, caller,
+                              "Note Circulated"], **_IO)
+                except Exception:                                  # noqa: BLE001
+                    workflow.logger.warning("stage_rollback_failed",
+                                            extra={"line": lid, "target": prior})
 
         # -- 2. Circulate the structured credit note as evidence (the structuring artefact),
         #       filed against each lending line — the subject the committee will decide on.
@@ -1031,6 +1056,8 @@ class DealStructuringWorkflow:
                     if verified_action == "Resubmitted" else [inp.requested_by])
             if self._fnd.business_status == "Cancelled":
                 self._stage = "Cancelled"
+                # A withdrawal starts fresh the same way a rejection does.
+                await _restore_stages()
                 return DealStructuringResult(
                     workflow_id=wf_id, deal_id=inp.deal_id, status="Cancelled",
                     decided_by=self._fnd.cancelled_by,
@@ -1161,6 +1188,9 @@ class DealStructuringWorkflow:
             self._stage = "Rejected"
             self._fnd.business_status = "Rejected"
             _upsert_search(inp.emit_search_attributes, "Rejected", subject)
+            # Start fresh: the lines return to their pre-request stage, so the maker
+            # amends and re-raises without hand-editing stages backwards.
+            await _restore_stages()
             return DealStructuringResult(
                 workflow_id=wf_id, deal_id=inp.deal_id, status="Rejected",
                 decided_by=decided_by, stage="Rejected", evidence_ids=evidence_ids,

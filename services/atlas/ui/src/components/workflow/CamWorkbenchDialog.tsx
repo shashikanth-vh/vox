@@ -425,16 +425,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             )}
             {mayDecide && (
               <>
+                {/* TWO verbs (field decision): a rejection carries the note, the
+                    analyst amends and submits a NEW version — no returned limbo. */}
                 <TextField fullWidth size="small" multiline minRows={2} sx={{ mt: 1 }}
-                  label="Committee note (required to return or reject)"
+                  label="Committee note (required to reject)"
                   value={note} onChange={(e) => setNote(e.target.value)} />
                 <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                   <Button size="small" variant="contained" disabled={!!busy}
                     onClick={() => void decide('Approved')}>
                     {busy === 'Approved' ? 'Approving…' : 'Approve'}
                   </Button>
-                  <Button size="small" variant="outlined" disabled={!!busy}
-                    onClick={() => void decide('Returned')}>Return for rework</Button>
                   <Button size="small" color="error" variant="outlined" disabled={!!busy}
                     onClick={() => void decide('Rejected')}>Reject</Button>
                 </Box>

@@ -140,14 +140,18 @@ export function isReturned(w: PendingWorkflow): boolean {
   return (w.businessStatus || '').toLowerCase().includes('return');
 }
 
-/** Which verbs this item actually offers — the buttons the UI may render. */
+/** Which verbs this item actually offers — the buttons the UI may render.
+ *
+ * TWO on purpose (field decision): Approve or Reject. The three-verb model's Return
+ * lane confused more than it helped — a rejection carries the mandatory note, the
+ * maker is notified with it, amends, and raises a FRESH request (the plane restarts
+ * a closed run cleanly). The return machinery stays server-side for anything already
+ * parked as returned — those runs still resolve through their resubmit surfaces. */
 export function actionsFor(w: PendingWorkflow): DecisionAction[] {
-  // A RETURNED run is the maker's to-do, not the approver's: offering decision verbs
-  // on it kept it in the approver's queue after they had already sent it back.
+  // A legacy RETURNED run is the maker's to-do, not the approver's.
   if (isReturned(w)) return [];
   const out: DecisionAction[] = [];
   if (w.decisionUrl || w.approveUrl) out.push('approve');
-  if (w.returnUrl || w.controlUrl) out.push('return');
   if (w.rejectUrl || w.decisionUrl) out.push('reject');
   return out;
 }
