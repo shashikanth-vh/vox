@@ -111,6 +111,10 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
 
   const stage = live?.stage || w.stage;
   const status = live?.status || w.status;
+  // The credit note the committee is deciding ON — the reference the maker typed at
+  // send (or the latest rework revision), read live from the run's own state.
+  const noteRef = String(live?.state?.credit_note_reference || '');
+  const noteVersion = Number(live?.state?.credit_note_version || 0);
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
@@ -146,6 +150,10 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
         <FieldGrid>
           <Fact label="Requested by" value={w.requestedBy} />
           <Fact label="Status" value={status} />
+          {noteRef && (
+            <Fact label="Credit note"
+              value={noteVersion > 1 ? `${noteRef} (v${noteVersion})` : noteRef} mono />
+          )}
         </FieldGrid>
         {committee && (
           <Box sx={{ mt: 1.4 }}>

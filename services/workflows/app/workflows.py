@@ -826,6 +826,9 @@ class DealStructuringWorkflow:
         # revision (revise_credit_note) bumps it.
         self._note_version = 0
         self._note_revisions: list[tuple] = []
+        # The reference of the note CURRENTLY before the committee — what an approver's
+        # review card must show, so the state query carries it alongside the version.
+        self._note_reference = ""
 
     @workflow.signal
     def committee_decision(self, decision_ref: str = "") -> None:
@@ -859,12 +862,14 @@ class DealStructuringWorkflow:
         """BUSINESS status and TECHNICAL stage, separately — dashboards should never have
         to infer one from the other."""
         return {**self._fnd.state(self._stage),
-                "credit_note_version": self._note_version}
+                "credit_note_version": self._note_version,
+                "credit_note_reference": self._note_reference}
 
     @workflow.run
     async def run(self, inp: DealStructuringInput) -> DealStructuringResult:
         wf_id = workflow.info().workflow_id
         caller = inp.caller
+        self._note_reference = inp.credit_note_reference
 
         # -- 0. Credit execution runs on the deal's LENDING line(s) — a deal with none has nothing
         #       to structure. Fail clearly up front rather than wait for a committee decision that
@@ -957,6 +962,7 @@ class DealStructuringWorkflow:
             while self._note_revisions:
                 ref, sha, revised_by = self._note_revisions.pop(0)
                 self._note_version += 1
+                self._note_reference = ref
                 self._stage = f"Circulating credit note v{self._note_version}"
                 for line in lines:
                     ev = await workflow.execute_activity(
