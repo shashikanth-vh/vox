@@ -271,6 +271,9 @@ export const authService = {
 
   current: getSession,
   signOut(): void {
+    // Also drop Google's auto-select for this site, so a shared machine cannot
+    // One-Tap the previous user straight back in.
+    import('../auth/googleIdentity').then((m) => m.googleSignOutHint()).catch(() => {});
     clearSession();
   },
   /** Real sign-in is attempted only when the app is pointed at a live backend. */

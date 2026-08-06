@@ -1,6 +1,7 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { ROLES, primaryRole, type Role } from './rbac';
 import { db } from '../api/atlasStore';
+import { GOOGLE_SSO_CLIENT_ID } from '../api/axiosClient';
 import { authService } from '../services/authService';
 import { getSession, type PrismSession } from './session';
 
@@ -65,6 +66,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<PrismSession | null>(restored);
   const [user, setUser] = useState<AppUser>(restored ? userFromSession(restored) : adminUser);
   const [authed, setAuthed] = useState(Boolean(restored));
+
+  // Google id_tokens live ~1 hour. Five minutes before expiry, quietly re-mint one
+  // (Google auto-selects the signed-in account — no interaction) so a working
+  // afternoon never sees a surprise sign-out. If the silent path fails, the next
+  // 401 routes to the login screen as before — this only removes the common case.
+  useEffect(() => {
+    if (!session?.idToken || !GOOGLE_SSO_CLIENT_ID) return;
+    let alive = true;
+    void (async () => {
+      const g = await import('./googleIdentity');
+      if (!alive || !g.isGoogleToken(session.idToken)) return;
+      const left = g.tokenSecondsLeft(session.idToken);
+      if (left == null) return;
+      const timer = setTimeout(async () => {
+        const fresh = await g.silentReauth(GOOGLE_SSO_CLIENT_ID);
+        if (!alive || !fresh) return;
+        try {
+          const s = await authService.signInWithGoogleCredential(fresh);
+          if (alive) { setSession(s); setUser(userFromSession(s)); }
+        } catch { /* the next 401 falls back to the login screen */ }
+      }, Math.max(5, left - 300) * 1000);
+      const drop = () => clearTimeout(timer);
+      if (!alive) drop();
+    })();
+    return () => { alive = false; };
+  }, [session?.idToken]);
 
   const value = useMemo<AuthCtx>(() => ({
     user,

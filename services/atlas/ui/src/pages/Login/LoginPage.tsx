@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Box, Paper, Typography, TextField, Button, Divider, Alert, CircularProgress } from '@mui/material';
 import { useAuth } from '../../auth/AuthContext';
 import { GOOGLE_SSO_CLIENT_ID } from '../../api/axiosClient';
+import { renderGoogleButton } from '../../auth/googleIdentity';
 import { tokens } from '../../theme';
 
 // Login field label with the mandatory red asterisk (Forms spec: both fields MANDATORY).
@@ -27,29 +28,13 @@ export default function LoginPage() {
   // fixed-identity shortcut button stays.
   const gisRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!GOOGLE_SSO_CLIENT_ID) return;
-    const setup = () => {
-      const g = (window as any).google?.accounts?.id;
-      if (!g || !gisRef.current) return;
-      g.initialize({
-        client_id: GOOGLE_SSO_CLIENT_ID,
-        callback: (resp: any) => {
-          setErr(''); setBusy(true);
-          signInWithGoogleCredential(String(resp?.credential || ''))
-            .catch((e: any) => setErr(e?.message || 'Google sign-in failed.'))
-            .finally(() => setBusy(false));
-        },
-      });
-      g.renderButton(gisRef.current, {
-        theme: 'outline', size: 'large', width: 320, text: 'continue_with',
-      });
-    };
-    if ((window as any).google?.accounts?.id) { setup(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.onload = setup;
-    document.head.appendChild(s);
+    if (!GOOGLE_SSO_CLIENT_ID || !gisRef.current) return;
+    renderGoogleButton(GOOGLE_SSO_CLIENT_ID, gisRef.current, (credential) => {
+      setErr(''); setBusy(true);
+      signInWithGoogleCredential(credential)
+        .catch((e: any) => setErr(e?.message || 'Google sign-in failed.'))
+        .finally(() => setBusy(false));
+    }).catch((e: any) => setErr(e?.message || 'Google sign-in could not load.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
