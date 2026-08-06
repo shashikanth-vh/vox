@@ -71,7 +71,11 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
   // On a laptop it stays the floating, draggable surface it has always been.
   const placement = useMemo(() => (mobile
     ? (rolled
-        ? { left: 0, right: 0, bottom: 0, top: 'auto' as const,
+        // Docked ABOVE the bottom nav (its ~54px + the phone's safe-area inset), not
+        // over it — a minimised panel that buries Today/Dashboard/Leads/Deals would
+        // make the rest of the app unreachable, which is the opposite of minimising.
+        ? { left: 0, right: 0, top: 'auto' as const,
+            bottom: 'calc(56px + env(safe-area-inset-bottom))',
             width: '100%', borderRadius: '14px 14px 0 0' }
         : { left: 0, right: 0, top: 0, bottom: 0,
             width: '100%', height: '100%', borderRadius: 0 })
