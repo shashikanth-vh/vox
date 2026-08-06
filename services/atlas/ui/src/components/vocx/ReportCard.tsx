@@ -226,16 +226,18 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
    * `window.open` after an await is a pop-up, and browsers block it.
    */
   const openPrintView = async () => {
-    const w = window.open('', '_blank', 'noopener');
+    // The handle must be minted synchronously in the click (pop-up rules) and WITHOUT
+    // 'noopener' — that flag makes window.open return NULL by spec, which read as
+    // "pop-ups blocked" on every browser, every time. The blob URL replaces
+    // document.write, which mobile Chrome silently drops in fresh tabs.
+    const w = window.open('about:blank', '_blank');
     if (!w) { setErr('Allow pop-ups for this site to open the print view.'); return; }
-    w.document.write('<!doctype html><title>Preparing…</title>'
-      + '<body style="font:14px system-ui;padding:24px">Preparing the report…</body>');
     setErr('');
     const r = await vocxService.printable(rm, captureId);
     if (!r.ok) { w.close(); setErr(r.error); return; }
-    w.document.open();
-    w.document.write(r.data);
-    w.document.close();
+    const url = URL.createObjectURL(new Blob([r.data], { type: 'text/html' }));
+    w.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const jumpTo = (key: string) => {
