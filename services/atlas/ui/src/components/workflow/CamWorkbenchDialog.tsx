@@ -75,6 +75,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [promptUse, setPromptUse] = useState<'default' | 'custom' | 'none'>('default');
   const [customPrompt, setCustomPrompt] = useState<{ id: string; title: string } | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  // The company's file, folded until the analyst clicks Documents.
+  const [docsOpen, setDocsOpen] = useState(false);
   // "Show me what the engine will read" — the extracted text of any pickable document.
   const [preview, setPreview] = useState<{ title: string; text: string; note?: string } | null>(null);
 
@@ -200,29 +202,41 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   };
 
   // The point of the conversation: everything established above + the prompt + the
-  // ticked documents becomes the CAM draft. The reply lands in the chat AND as the
-  // working draft on record — "Download as Word" in the rail turns it into the file.
+  // ticked documents becomes the CAM draft — SHAPED BY THE CAM TEMPLATE, which rides
+  // along so the engine mirrors its exact sections. The finished draft downloads as
+  // Word immediately: verify it, adjust if needed, upload it as the completed CAM.
   const generateCam = () => {
     if (busy) return;
     // A typed-but-unsent question still counts — it rides inside the brief.
     const pending = question.trim();
     const brief =
       'Prepare the complete CAM report now. '
-      + (activePromptId ? "Follow the prompt document's structure and instructions exactly. " : '')
+      + (defaults.example
+        ? 'A CAM TEMPLATE document is attached: reproduce its exact structure — the same '
+          + 'sections, in the same order, under the same headings; fill each with this '
+          + "case's content. "
+        : '')
+      + (activePromptId ? "Follow the prompt document's instructions exactly. " : '')
       + 'Use everything established in this conversation and every document provided. '
       + 'Where information is missing, name the gap rather than inventing a figure. '
       + 'Output the full CAM in Markdown with headings and tables, ready to render to Word.'
       + (pending ? `\n\nAlso take this into account: ${pending}` : '');
     setQuestion('');
     setChat((c) => [...c, { role: 'user',
-      text: 'Generate the CAM report from this conversation.'
+      text: 'Generate the CAM report from this conversation, in the CAM template\'s format.'
         + (pending ? `\n(Also: ${pending})` : '') }]);
     void run('generate', async () => {
-      const ride = [...(activePromptId ? [activePromptId] : []), ...sel];
+      const ride = [...(activePromptId ? [activePromptId] : []),
+                    ...(defaults.example ? [defaults.example.id] : []), ...sel];
       const out = await camService.refine(subjectId, brief, true, ride);
       setChat((c) => [...c, { role: 'assistant', text: out.draft_md || '' }]);
       setSel(new Set());
-      return 'CAM draft ready — use "To Word" on the answer, review it in Word, then upload the completed CAM.';
+      // The draft is FOR VERIFICATION — hand it over as a Word file straight away.
+      if (out.draft_md) {
+        await camService.exportDocx(subjectId, out.draft_md,
+          title.trim() || `CAM v${working?.report_version ?? 1} draft`);
+      }
+      return 'CAM generated and downloaded as Word — verify it, make any updates, then upload the completed CAM.';
     });
   };
 
@@ -247,9 +261,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     if (!out.ok) setErr(out.error || 'The template download failed.');
   };
 
-  // Downloads whichever prompt is IN USE — the default, or the custom upload.
   const downloadPrompt = async () => {
-    const p = promptUse === 'custom' && customPrompt ? customPrompt : defaults.prompt;
+    const p = defaults.prompt;
     if (!p) return;
     setErr('');
     const out = await documentsService.download(asEntry(p.id, `${p.title}.docx`) as any);
@@ -443,20 +456,28 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 </Box>
               )}
 
-              <Typography sx={railHead}>Word lane</Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
-                {defaults.example && (
-                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                    onClick={() => void downloadTemplate()}>Download CAM template</Button>
-                )}
-                {(defaults.prompt || customPrompt) && (
-                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                    onClick={() => void downloadPrompt()}>Download CAM prompt</Button>
-                )}
-              </Box>
+              {defaults.example && (
+                <Button fullWidth variant="outlined" size="small"
+                  sx={{ textTransform: 'none', mt: 1.2 }}
+                  title="The Word template the CAM must follow — Generate mirrors its structure"
+                  onClick={() => void downloadTemplate()}>Download CAM template</Button>
+              )}
 
-              <Typography sx={railHead}>Prompt</Typography>
-              <FormControlLabel sx={{ display: 'flex', mr: 0, alignItems: 'flex-start',
+              <Typography sx={railHead}>Prompts</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                {defaults.prompt && (
+                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
+                    onClick={() => void downloadPrompt()}>Download default CAM prompt</Button>
+                )}
+                <Button fullWidth size="small" component="label" variant="outlined"
+                  disabled={tplBusy || !!busy} sx={{ textTransform: 'none' }}
+                  title="File a case-specific prompt on this line — tick it to use it instead of the default">
+                  {tplBusy ? 'Uploading…' : 'Upload custom CAM prompt…'}
+                  <input hidden type="file" accept=".docx,.md,.txt,.pdf"
+                    onChange={(e) => { void uploadCustomPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
+                </Button>
+              </Box>
+              <FormControlLabel sx={{ display: 'flex', mr: 0, mt: 0.4, alignItems: 'flex-start',
                 '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.4 } }}
                 control={<Checkbox size="small" sx={{ py: 0.3 }} checked={promptUse === 'default'}
                   disabled={!defaults.prompt} onChange={() => pickPrompt('default')} />}
@@ -470,13 +491,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 label={customPrompt
                   ? `Use custom prompt — ${customPrompt.title}`
                   : 'Use custom prompt (upload one first)'} />
-              <Button fullWidth size="small" component="label" variant="outlined"
-                disabled={tplBusy || !!busy} sx={{ textTransform: 'none', mt: 0.5 }}
-                title="File a case-specific prompt on this line — it rides instead of the default">
-                {tplBusy ? 'Uploading…' : 'Upload custom prompt…'}
-                <input hidden type="file" accept=".docx,.md,.txt,.pdf"
-                  onChange={(e) => { void uploadCustomPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </Button>
               {promptUse === 'none' && (
                 <Typography sx={{ fontSize: 11, color: tokens.muted, mt: 0.4 }}>
                   No prompt — questions go with the ticked documents only.
@@ -517,35 +531,45 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
               {sources.length > 0 && (
                 <>
-                  <Typography sx={railHead}>Documents ({sources.length})</Typography>
-                  <Box sx={{ maxHeight: 190, overflowY: 'auto',
-                    border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
-                    {sources.map((d, i) => (
-                      <Box key={d.id} sx={{ display: 'flex', alignItems: 'flex-start', px: 0.3,
-                        py: 0.2, borderTop: i ? `1px solid ${tokens.line}` : 'none' }}>
-                        <Checkbox size="small" sx={{ py: 0.4 }} checked={sel.has(d.id)}
-                          onChange={() => toggle(d.id)} />
-                        <Box sx={{ flex: 1, minWidth: 0, pt: 0.5 }}>
-                          <Typography sx={{ fontSize: 11.8, lineHeight: 1.3 }}>{d.title}</Typography>
-                          <Typography sx={{ fontSize: 10, color: tokens.muted }}>
-                            {[d.section, d.doc_type].filter(Boolean).join(' · ')}
-                          </Typography>
-                        </Box>
-                        <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
-                          sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, px: 0.5 }}>view</Button>
-                      </Box>
-                    ))}
-                  </Box>
-                  <Button fullWidth size="small" variant="outlined" disabled={!sel.size || !!busy}
-                    onClick={() => send(SUMMARY_BRIEF,
-                      `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`)}
-                    title="The engine digests the ticked documents — facts, figures, gaps — into the conversation"
-                    sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.6 }}>
-                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
-                  </Button>
-                  <Typography sx={{ fontSize: 10.5, color: tokens.muted, mt: 0.4 }}>
-                    Ticked documents ride with the next question / Generate, then untick.
+                  {/* Click to unfold the company's whole file — every document, tickable. */}
+                  <Typography onClick={() => setDocsOpen((v) => !v)}
+                    sx={{ ...railHead, cursor: 'pointer', userSelect: 'none',
+                      '&:hover': { color: tokens.ink } }}>
+                    {docsOpen ? '▾' : '▸'} Documents ({sources.length})
+                    {!docsOpen && sel.size > 0 ? ` — ${sel.size} ticked` : ''}
                   </Typography>
+                  {docsOpen && (
+                    <>
+                      <Box sx={{ maxHeight: 190, overflowY: 'auto',
+                        border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+                        {sources.map((d, i) => (
+                          <Box key={d.id} sx={{ display: 'flex', alignItems: 'flex-start', px: 0.3,
+                            py: 0.2, borderTop: i ? `1px solid ${tokens.line}` : 'none' }}>
+                            <Checkbox size="small" sx={{ py: 0.4 }} checked={sel.has(d.id)}
+                              onChange={() => toggle(d.id)} />
+                            <Box sx={{ flex: 1, minWidth: 0, pt: 0.5 }}>
+                              <Typography sx={{ fontSize: 11.8, lineHeight: 1.3 }}>{d.title}</Typography>
+                              <Typography sx={{ fontSize: 10, color: tokens.muted }}>
+                                {[d.section, d.doc_type].filter(Boolean).join(' · ')}
+                              </Typography>
+                            </Box>
+                            <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
+                              sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, px: 0.5 }}>view</Button>
+                          </Box>
+                        ))}
+                      </Box>
+                      <Button fullWidth size="small" variant="outlined" disabled={!sel.size || !!busy}
+                        onClick={() => send(SUMMARY_BRIEF,
+                          `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`)}
+                        title="The engine digests the ticked documents — facts, figures, gaps — into the conversation"
+                        sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.6 }}>
+                        {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
+                      </Button>
+                      <Typography sx={{ fontSize: 10.5, color: tokens.muted, mt: 0.4 }}>
+                        Ticked documents ride with the next question / Generate, then untick.
+                      </Typography>
+                    </>
+                  )}
                 </>
               )}
 
