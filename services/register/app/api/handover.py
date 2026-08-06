@@ -315,6 +315,13 @@ async def approve_handover_package(lending_id: str,
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "from": "Prepared", "to": "Approved",
                  "maker": pkg.initiated_by, "checker": checker_name}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=pkg.initiated_by, event="handover.approved",
+        title="Advaya handover package approved",
+        body=f"Approved by {checker_name} — the package can now be submitted.",
+        subject_type="Lending", subject_id=lending_id,
+        dedupe_key=f"ntf:handover:{pkg.id}:approved")
     return _serialize(pkg)
 
 
@@ -400,6 +407,13 @@ async def return_handover_package(lending_id: str, payload: HandoverReturnIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "status": "Returned", "checker": checker_name,
                  "note": payload.note}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=pkg.initiated_by, event="handover.returned", severity="warning",
+        title="Advaya handover package returned for revision",
+        body=f"Returned by {checker_name}: {payload.note}",
+        subject_type="Lending", subject_id=lending_id,
+        dedupe_key=f"ntf:handover:{pkg.id}:returned:{pkg.version or 0}")
     return _serialize(pkg)
 
 
@@ -438,6 +452,14 @@ async def reject_handover_package(lending_id: str, payload: HandoverReturnIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": lending_id, "status": "Rejected", "checker": checker_name,
                  "note": payload.note, "label": lending_id}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=pkg.initiated_by, event="handover.rejected", severity="warning",
+        title="Advaya handover package rejected",
+        body=f"Rejected by {checker_name}: {payload.note} "
+             "(terminal for this attempt — a revival is a fresh prepare cycle).",
+        subject_type="Lending", subject_id=lending_id,
+        dedupe_key=f"ntf:handover:{pkg.id}:rejected")
     return _serialize(pkg)
 
 

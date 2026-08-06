@@ -16,6 +16,7 @@ import { stageRequestService, canApproveLine } from '../../services/stageRequest
 import { workflowService, kindLabel, since, pendingKey, actionsFor,
   type PendingWorkflow, type DecisionAction } from '../../services/workflowService';
 import { lmsService, type TrancheItem } from '../../services/lmsService';
+import { notificationsService, type InboxItem } from '../../services/notificationsService';
 import { clientsService } from '../../services/clientsService';
 import { fmt } from '../../utils/format';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
@@ -116,6 +117,21 @@ export default function TodayPage() {
     refetchInterval: 60000,
     staleTime: 30000,
   });
+  // DECISIONS ON YOUR WORK — the maker's answer to "how do I learn a checker
+  // returned/rejected my item without watching the screen": every decision writes a
+  // durable inbox row (in-transaction with the decision itself), and this strip reads
+  // the unread ones. Marking one read clears it here; the record stays in the store.
+  const { data: inbox = { items: [] as InboxItem[], unread: 0 }, refetch: refetchInbox }
+    = useQuery({
+      queryKey: ['inbox', 'unread'],
+      queryFn: () => notificationsService.unread(),
+      refetchInterval: 60000,
+      staleTime: 30000,
+    });
+  const dismissInbox = async (n: InboxItem) => {
+    await notificationsService.markRead(n.id);
+    await refetchInbox();
+  };
   const todayISO = new Date().toISOString().slice(0, 10);
   const overdueOf = (t: TrancheItem) =>
     (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < todayISO).length;
@@ -194,7 +210,8 @@ export default function TodayPage() {
   );
 
   const empty = !data.due.length && !data.contactRed.length && !data.contactAmber.length && !data.stageRed.length && !data.stageAmber.length
-    && !wfActionable.length && !wfMine.length && !wfReminders.length && !bookings.length;
+    && !wfActionable.length && !wfMine.length && !wfReminders.length && !bookings.length
+    && !inbox.items.length;
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto' }}>
@@ -207,6 +224,28 @@ export default function TodayPage() {
 
       {bookErr && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookErr('')}>{bookErr}</Alert>}
       {bookFlash && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookFlash('')}>{bookFlash}</Alert>}
+
+      {inbox.items.length > 0 && (
+        <Section title="Decisions on your work" count={inbox.items.length} defaultOpen>
+          {inbox.items.map((n) => (
+            <ChLine key={n.id}>
+              <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: '50%',
+                flexShrink: 0,
+                bgcolor: n.severity === 'warning' ? '#c46a16'
+                  : n.severity === 'critical' ? '#b0223a' : '#1B7F5C' }} />
+              <Box component="b" sx={{ color: tokens.ink }}>{n.title}</Box>
+              {n.body && hint(n.body)}
+              {n.created_at && hint(since(n.created_at))}
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" onClick={() => void dismissInbox(n)}
+                sx={{ fontSize: 11, color: tokens.muted, minWidth: 0 }}>
+                ✓ Read
+              </Button>
+            </ChLine>
+          ))}
+        </Section>
+      )}
+
       {canBook && bookings.length > 0 && (
         <Section title="Booking approvals — LMS" count={bookings.length} defaultOpen>
           {bookings.map((t) => (

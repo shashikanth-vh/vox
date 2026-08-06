@@ -446,6 +446,16 @@ async def decide_cam_report(report_id: str, payload: CamDecideIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": row.lending_id, "report_version": row.report_version,
                  "decision": payload.decision}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=row.prepared_by,
+        event=f"cam.{payload.decision.lower()}",
+        severity="info" if payload.decision == "Approved" else "warning",
+        title=f"CAM v{row.report_version} {payload.decision.lower()}",
+        body=f"{payload.decision} by {ctx.actor}."
+             + (f" Note: {payload.note}" if payload.note else ""),
+        subject_type="Lending", subject_id=row.lending_id,
+        dedupe_key=f"ntf:cam:{row.id}:{payload.decision.lower()}")
     return _cam_out(row)
 
 

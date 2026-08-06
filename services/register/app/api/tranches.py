@@ -422,6 +422,18 @@ async def book_tranche(lending_id: uuid.UUID, tranche_id: uuid.UUID, payload: Bo
                  "recorded_by": row.recorded_by,
                  "conditions_open_at_recording": len(row.conditions_open or []),
                  **({"note": payload.note} if payload.note else {})}))
+    # The RECORDER learns of the outcome without watching the screen: the decision
+    # writes their inbox row in the same transaction.
+    from app.api.notify import notify_maker
+    outcome = "booked" if row.booking_status == "Booked" else "rejected"
+    await notify_maker(
+        ctx, recipient=row.recorded_by, event=f"booking.{outcome}",
+        severity="info" if outcome == "booked" else "warning",
+        title=f"Tranche {row.tranche_ref or ''} ₹ {float(row.amount)} Cr {outcome}",
+        body=(f"{'Booked' if outcome == 'booked' else 'Rejected'} by {ctx.actor}."
+              + (f" Note: {row.booking_note}" if row.booking_note else "")),
+        subject_type="Lending", subject_id=str(lending_id),
+        dedupe_key=f"ntf:booking:{row.id}:{outcome}")
     await ctx.session.refresh(row)
     return _serialize(row)
 

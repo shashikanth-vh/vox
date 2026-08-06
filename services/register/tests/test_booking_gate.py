@@ -357,3 +357,29 @@ async def test_a_blank_emi_is_computed_at_account_opening(client):
     assert acct["emi_amount"] is not None
     # ₹4,47,608 ± a couple of rupees of rounding, expressed in ₹ Cr.
     assert abs(acct["emi_amount"] * 1e7 - 447608) <= 3, acct["emi_amount"]
+
+
+async def test_the_recorder_learns_the_booking_outcome_in_their_inbox(client):
+    """"How will the maker know?" — the decision writes the recorder's inbox row in
+    the same transaction: a rejection lands as an unread notification carrying the
+    checker's reason, and marking it read clears it."""
+    lid = await _accepted_manual_line(client)
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-9700",
+                                  "amount_cr": 1.0})
+    assert dis.status_code == 201, dis.text
+    tid = dis.json()["tranche"]["id"]
+    rej = await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
+                            json={"action": "reject",
+                                  "note": "UTR does not match the advice."},
+                            headers=AUTHORIZER)
+    assert rej.status_code == 200, rej.text
+
+    inbox = (await client.get("/v1/notifications", params={"unread_only": "true"},
+                              headers=CREDIT_HEAD)).json()
+    mine = [n for n in inbox["items"] if n["event"] == "booking.rejected"
+            and "UTR does not match" in (n["body"] or "")]
+    assert mine, inbox
+    read = await client.post(f"/v1/notifications/{mine[0]['id']}/read",
+                             headers=CREDIT_HEAD)
+    assert read.status_code == 200, read.text

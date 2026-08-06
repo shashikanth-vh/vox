@@ -1126,6 +1126,15 @@ class DealStructuringWorkflow:
                 line_outcomes[line_id] = "Rejected"
 
         sanctioned = [lid for lid, o in line_outcomes.items() if o == "Sanctioned"]
+        # The MAKER learns the outcome without watching the screen: one durable inbox
+        # notification the moment the committee's decision is acted on.
+        await _emit_ops("committee_decided", {
+            "subject": subject, "requested_by": inp.requested_by,
+            "decided_by": decided_by, "note": note,
+            "note_reference": self._note_reference,
+            "line_outcomes": line_outcomes},
+            notify_to=[inp.requested_by],
+            severity="info" if sanctioned else "warning")
         if not sanctioned:
             self._stage = "Rejected"
             self._fnd.business_status = "Rejected"

@@ -211,6 +211,14 @@ async def approve_checklist(checklist_id: str,
         changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
                  "status": "Approved",
                  **({"note": payload.note} if payload and payload.note else {})}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=row.prepared_by, event="cpcs.approved",
+        title=f"CP/CS checklist v{row.checklist_version} approved",
+        body=f"Approved by {ctx.actor}."
+             + (f" Note: {payload.note}" if payload and payload.note else ""),
+        subject_type="Lending", subject_id=row.lending_id,
+        dedupe_key=f"ntf:cpcs:{row.id}:approved")
     return _serialize(row)
 
 
@@ -357,6 +365,13 @@ async def return_checklist(checklist_id: str, payload: ReturnIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
                  "status": "Returned", "note": payload.note}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=row.prepared_by, event="cpcs.returned", severity="warning",
+        title=f"CP/CS checklist v{row.checklist_version} returned for revision",
+        body=f"Returned by {ctx.actor}: {payload.note}",
+        subject_type="Lending", subject_id=row.lending_id,
+        dedupe_key=f"ntf:cpcs:{row.id}:returned:v{row.checklist_version}")
     return _serialize(row)
 
 
@@ -404,6 +419,14 @@ async def reject_checklist(checklist_id: str, payload: RejectIn,
         request_id=request_id_ctx.get(),
         changes={"lending_id": row.lending_id, "checklist_version": row.checklist_version,
                  "status": "Rejected", "label": row.lending_id}))
+    from app.api.notify import notify_maker
+    await notify_maker(
+        ctx, recipient=row.prepared_by, event="cpcs.rejected", severity="warning",
+        title=f"CP/CS checklist v{row.checklist_version} rejected",
+        body=f"Rejected by {ctx.actor}: {payload.note} "
+             "(terminal for this version — a revival is a new version).",
+        subject_type="Lending", subject_id=row.lending_id,
+        dedupe_key=f"ntf:cpcs:{row.id}:rejected")
     return _serialize(row)
 
 
