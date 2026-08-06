@@ -118,8 +118,12 @@ class Settings(BaseServiceSettings):
     # --- Increment 7: notifications / calendar / document expiry ---------------------- #
     # Master switch: when true, operational events that name recipients ALSO land as
     # durable in-app notifications in the Register (and fan out to the channels below).
-    # Off = the increment-1 posture (structured log + optional ops webhook) unchanged.
-    notifications_enabled: bool = False
+    # ON by default: the bell and Today's inbox strip are how a maker learns their
+    # request was returned, rejected or applied — with this off, every workflow-lane
+    # outcome (committee return, conversion decision, run-control) silently became
+    # log-only and "the approver returned it but I got nothing". External channels
+    # stay opt-in below; the in-app row is core UX, not an integration.
+    notifications_enabled: bool = True
     # External channels to request on every notification, comma-separated subset of
     # "email,sms,webhook". In-app is implicit (the durable row IS the in-app channel).
     # Channels missing their transport config below are skipped with a warning.

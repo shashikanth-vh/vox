@@ -483,10 +483,11 @@ services:
       # Prometheus scrape endpoint for the worker's SDK metrics ("" = off).
       WORKFLOWS_METRICS_BIND_ADDRESS: "${WORKFLOWS_METRICS_BIND_ADDRESS:-}"
       WORKFLOWS_WORKER_BUILD_ID: "${WORKFLOWS_WORKER_BUILD_ID:-}"
-      # --- Increment 7: durable notifications (off by default). When enabled, ops
-      # events that name recipients also land as in-app inbox rows in the Register,
-      # fanning out to the channels below (the notifier service drives delivery).
-      WORKFLOWS_NOTIFICATIONS_ENABLED: "${WORKFLOWS_NOTIFICATIONS_ENABLED:-false}"
+      # --- Increment 7: durable notifications (ON by default — the bell/Today inbox
+      # is how a maker learns their request was returned or decided; external
+      # channels below stay opt-in). Ops events that name recipients land as in-app
+      # inbox rows in the Register (the notifier service drives channel delivery).
+      WORKFLOWS_NOTIFICATIONS_ENABLED: "${WORKFLOWS_NOTIFICATIONS_ENABLED:-true}"
       WORKFLOWS_NOTIFY_CHANNELS: "${WORKFLOWS_NOTIFY_CHANNELS:-}"
       WORKFLOWS_SMTP_HOST: "${WORKFLOWS_SMTP_HOST:-}"
       WORKFLOWS_SMTP_PORT: "${WORKFLOWS_SMTP_PORT:-587}"

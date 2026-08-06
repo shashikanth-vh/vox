@@ -315,7 +315,9 @@ export default function TodayPage() {
                 {isReturned(w) ? 'Returned for revision' : (w.stage || 'Awaiting a decision')}
               </Box>
               {isReturned(w)
-                ? hint('returned to you — open the deal: "File a revised credit note", then "Send back for decision"')
+                ? hint(w.kind === 'lead-conversion'
+                    ? 'returned to you — open the lead\'s "Push to Deals": Resubmit or Withdraw'
+                    : 'returned to you — open the deal: "File a revised credit note", then "Send back for decision"')
                 : hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
             </ChLine>
           ))}

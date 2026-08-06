@@ -20,6 +20,9 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
   const { user } = useAuth();
   const ref = referenceService;
   const [existingCode, setExistingCode] = useState<string | null>(null);
+  // A LIVE conversion run on this lead: the dialog becomes the request's control
+  // surface (resubmit a returned one, withdraw an open one) instead of a second push.
+  const [run, setRun] = useState<{ returned: boolean; workflowId: string } | null>(null);
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -42,13 +45,40 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
       if (!alive || !ex) return;
       setExistingCode(ex); setCode(ex);
     });
-    setErr(''); setBusy(false);
+    setErr(''); setBusy(false); setRun(null);
+    void conversionService.conversionRun(lead).then((r) => {
+      if (alive && r) setRun({ returned: r.returned, workflowId: r.workflowId });
+    });
     setFlags({ lend: false, syn: true, am: false });
     setCl((p) => ({ ...p, sector: ref.getRefSync('Sector').includes(lead.sector) ? lead.sector : 'Other', lens: lead.lens || 'Mitigation', temp: lead.temp || 'Warm', source: lead.source || 'BDRM', sourceDetail: lead.sourceDetail || '' }));
     return () => { alive = false; };   // a slow lookup must not land on the next lead
   }, [lead]);
 
   if (!lead) return null;
+
+  // The returned lane: the SAME request goes back to the approver (SLA restarts).
+  // Amendments to the lead itself travel automatically — the approver re-reads it.
+  const resubmit = async () => {
+    if (!run) return;
+    setErr(''); setBusy(true);
+    const r = await conversionService.controlConversion(
+      run.workflowId, 'resubmit', user.full, 'Resubmitted after amendments.');
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'Could not resubmit.'); return; }
+    onDone(); onClose();
+  };
+
+  // Withdraw ends the open request; the form then serves a fresh push (e.g. when the
+  // amounts or product mix must change — those were fixed when the request started).
+  const withdraw = async () => {
+    if (!run) return;
+    setErr(''); setBusy(true);
+    const r = await conversionService.controlConversion(
+      run.workflowId, 'cancel', user.full, 'Withdrawn by requester.');
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'Could not withdraw.'); return; }
+    setRun(null);
+  };
 
   const push = async () => {
     // Forms spec: ≥1 product; State mandatory; each ticked line's amount mandatory (no default).
@@ -95,6 +125,14 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
         <IconButton onClick={onClose} sx={{ position: 'absolute', right: 8, top: 8 }}><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
       <DialogContent dividers>
+        {run && (
+          <Alert severity={run.returned ? 'warning' : 'info'} sx={{ mb: 1.4, py: 0.3, fontSize: 12.5 }}>
+            {run.returned
+              ? 'The approver RETURNED this request — amend the lead if needed, then resubmit it below. To change the amounts or product mix, withdraw and push afresh.'
+              : 'This lead is already with the approver, awaiting their decision. You can withdraw the request if it should not proceed.'}
+          </Alert>
+        )}
+        {!run && (<>
         <Typography sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.teal, fontWeight: 800, mb: 1 }}>Client</Typography>
         <FieldGrid>
           <SelectFld label="Segment / sector" required value={cl.sector} onChange={(v) => setCl((p) => ({ ...p, sector: v, lens: ADAPT_SECT.includes(v) ? 'Adaptation' : 'Mitigation' }))} options={ref.getRefSync('Sector')} />
@@ -141,12 +179,30 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
             <SelectFld label="Status" required value={am.status} onChange={(v) => setAm((p) => ({ ...p, status: v }))} options={ref.getRefSync('Asset Mon Status')} />
           </FieldGrid>
         </ProductBox>
+        </>)}
         {err && <Alert severity="warning" sx={{ mt: 1.4, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
       <DialogActions>
-        <Typography sx={{ fontSize: 11.6, color: tokens.muted, mr: 'auto' }}>One save: client + deal + product rows; the lead leaves the register.</Typography>
-        <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
-        <Button onClick={push} variant="contained" disabled={busy}>{busy ? 'Qualifying & converting…' : 'Push to Deals'}</Button>
+        <Typography sx={{ fontSize: 11.6, color: tokens.muted, mr: 'auto' }}>
+          {run ? 'This request is open on the workflow plane — act on it below.'
+               : 'One save: client + deal + product rows; the lead leaves the register.'}
+        </Typography>
+        <Button onClick={onClose} variant="outlined" disabled={busy}>Close</Button>
+        {run && (
+          <Button onClick={withdraw} color="error" variant="outlined" disabled={busy}>
+            {busy ? 'Working…' : 'Withdraw request'}
+          </Button>
+        )}
+        {run?.returned && (
+          <Button onClick={resubmit} variant="contained" disabled={busy}>
+            {busy ? 'Working…' : 'Resubmit to approver'}
+          </Button>
+        )}
+        {!run && (
+          <Button onClick={push} variant="contained" disabled={busy}>
+            {busy ? 'Qualifying & converting…' : 'Push to Deals'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

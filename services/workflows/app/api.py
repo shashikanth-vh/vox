@@ -1397,6 +1397,29 @@ def create_app() -> FastAPI:
                 409, "Conflict",
                 f"Lead '{lead_row.get('lead_no') or payload.lead_id}' is already "
                 "Converted; it has left the lead register.")
+        # ONE live request per lead — checked BEFORE the pre-flight links people or
+        # companies. Pushing again while a run was open answered 202 "started" while
+        # silently attaching to the old run — a returned request looked simply
+        # ignorable, and the maker had no way to learn the real next step.
+        live = None
+        if (tclient := getattr(request.app.state, "temporal", None)) is not None:
+            with contextlib.suppress(Exception):
+                live = await _live_run_business(
+                    tclient, f"leadconv-{_tenant_slug(caller.tenant)}-{payload.lead_id}")
+        if live is not None:
+            live_id, business = live
+            if business in _RETURNED_STATES or "return" in business.lower():
+                return _problem(
+                    409, "Conflict",
+                    "The approver RETURNED this conversion request — it is still open. "
+                    "Amend the lead if needed, then RESUBMIT it (Push to Deals offers "
+                    "Resubmit / Withdraw on a returned request). A new request cannot "
+                    f"be raised while it is open. [{live_id}]")
+            return _problem(
+                409, "Conflict",
+                "This lead's conversion is already with the approver — the request is "
+                "open and awaiting their decision. Withdraw it or wait for the "
+                f"decision before raising another. [{live_id}]")
         if (err := await _settle_people(request, caller, lead_row, payload)) is not None:
             return err
         if not lead_row.get("entity_id"):
@@ -2151,9 +2174,11 @@ def create_app() -> FastAPI:
         # a run was open (returned or not) answered 202 "started" while silently
         # attaching to the old run, which never learned the new reference.
         tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
-        live = await _live_run_business(
-            request.app.state.temporal,
-            f"struct-{_tenant_slug(tenant)}-{payload.deal_id}")
+        live = None
+        if (tclient := getattr(request.app.state, "temporal", None)) is not None:
+            with contextlib.suppress(Exception):
+                live = await _live_run_business(
+                    tclient, f"struct-{_tenant_slug(tenant)}-{payload.deal_id}")
         if live is not None:
             live_id, business = live
             if business in _RETURNED_STATES or "return" in business.lower():
@@ -3995,6 +4020,12 @@ def create_app() -> FastAPI:
             if desc.status == WorkflowExecutionStatus.RUNNING:
                 with contextlib.suppress(RPCError, TemporalError):
                     row["stage"] = await handle.query("status")
+                # The business state — how a client learns a run was RETURNED (the
+                # technical stage doesn't change when it is).
+                with contextlib.suppress(RPCError, TemporalError):
+                    st = await handle.query("state")
+                    if isinstance(st, dict):
+                        row["business_status"] = str(st.get("business_status") or "")
             runs.append(row)
             newest_desc = desc
         # Same read protection as the per-run status route, applied to the newest

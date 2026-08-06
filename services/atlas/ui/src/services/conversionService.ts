@@ -122,6 +122,41 @@ export const conversionService = {
    * the workflow refused must not disappear from the register and show up as a deal.
    * The local store is written only once the plane has accepted both steps.
    */
+  /**
+   * The lead's LIVE conversion run, if any — how Push to Deals learns a request is
+   * already open (awaiting the approver) or RETURNED (amend and resubmit). Null when
+   * no run is live, in mock mode, or when the plane is unreachable (fail open: the
+   * start route enforces the truth again with a clear 409).
+   */
+  async conversionRun(lead: Pick<Lead, 'id' | 'apiId'>): Promise<{
+    returned: boolean; workflowId: string; stage?: string } | null> {
+    if (!USE_REAL_API) return null;
+    try {
+      const r = await orchestrator.get<any>('/v1/workflows',
+        { kind: 'lead-conversion', subject_id: lead.apiId || lead.id });
+      const cur = r?.current;
+      if (!cur || cur.status !== 'RUNNING') return null;
+      return {
+        returned: /return/i.test(String(cur.business_status || '')),
+        workflowId: String(cur.workflow_id || ''),
+        stage: cur.stage ? String(cur.stage) : undefined,
+      };
+    } catch { return null; }
+  },
+
+  /** Resubmit (after amendments) or withdraw the OPEN conversion request. */
+  async controlConversion(workflowId: string, action: 'resubmit' | 'cancel',
+                          by: string, note?: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await orchestrator.post<any>(`/v1/workflows/${workflowId}/control`, {
+        action, by: getSession()?.email || by, ...(note ? { note } : {}) });
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: workflowError(e,
+        action === 'resubmit' ? 'resubmit the request' : 'withdraw the request') };
+    }
+  },
+
   async pushLeadToDeals(lead: Lead, p: PushPayload, by: string): Promise<{ ok: boolean; code?: string; error?: string }> {
     if (USE_REAL_API) {
       const session = getSession();
