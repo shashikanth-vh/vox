@@ -414,10 +414,18 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} variant="outlined" disabled={busy}>Close</Button>
+        <Button onClick={onClose} variant="outlined" disabled={busy || letterBusy === 'upload'}>
+          Close
+        </Button>
         {!existing && (
-          <Button onClick={() => void save()} variant="contained" disabled={busy || loading}>
-            {busy ? 'Saving…' : 'Save terms & seed'}
+          // Terms are entered ONCE — saving mid-extraction would record them half-filled
+          // and throw the engine's reading away, so the button waits for the letter work.
+          <Button onClick={() => void save()} variant="contained"
+            disabled={busy || loading || !!letterBusy}>
+            {busy ? 'Saving…'
+              : letterBusy === 'upload' ? 'Filing the letter…'
+                : letterBusy ? 'Reading the letter…'
+                  : 'Save terms & seed'}
           </Button>
         )}
       </DialogActions>

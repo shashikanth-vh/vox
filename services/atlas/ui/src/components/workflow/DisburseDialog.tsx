@@ -176,16 +176,16 @@ export default function DisburseDialog({ action, onClose, onDone }: {
         {step === 1 && (
           <>
             <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 1.2 }}>
-              Sends the disbursement request with the proposed drawdown. The conditions
-              below travel with it, spelled out — collection continues in parallel while
-              the money moves. Generic on purpose: Advaya today, and the flow does not
-              care who disburses.
+              Sends the disbursement request for the proposed drawdown to the
+              disbursement partner. Conditions not yet completed are disclosed in
+              the request — waived and deferred items with their decisions — and
+              their collection continues in parallel.
             </Typography>
             <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.2 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 0.4 }}>
                 {unmet.length
-                  ? `CP conditions NOT met (${unmet.length}) — travelling with the request`
-                  : 'Every CP condition is met — the request goes clean'}
+                  ? `Conditions disclosed in the request (${unmet.length})`
+                  : 'Every CP condition is completed — the request goes clean'}
               </Typography>
               {unmet.map((u) => (
                 <Typography key={u} sx={{ fontSize: 12, py: 0.2 }}>• {u}</Typography>

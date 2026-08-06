@@ -175,7 +175,10 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
         headline: `Convert ${lead.company || 'this lead'} into a client, deal and lending line.`,
         facts: clean([['Company', lead.company], ['RM', lead.rm], ['Sector', lead.sector],
           ['Temperature', lead.temperature], ['Source', lead.source],
-          ['Next action', lead.next_action], ['Notes', lead.notes]]),
+          ['Next action', lead.next_action],
+          // The qualification stamp appends its internal run id to the notes —
+          // plumbing, not information; the approver reads words only.
+          ['Notes', String(lead.notes || '').replace(/\s*\(workflow [^)]*\)\.?/g, '')]]),
       };
     }
     if (w.kind === 'deal-structuring') {

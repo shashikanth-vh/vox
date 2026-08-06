@@ -95,7 +95,9 @@ log = get_logger("orchestrator")
 # Roles that may do MAKER work in each vertical. Wider than the approver sets in
 # _APPROVER_ROLES — preparing is not deciding — and deliberately so: the four-eyes rules
 # that stop a preparer approving their own work are enforced at the write, not here.
-_CREDIT_MAKERS = {"Credit Head", "Deal Analyst", "BD Head", "BDRM", "Management", "Admin"}
+# The CREDIT desk prepares the CAM, raises the committee and works the sanction —
+# the sourcing RM (BD) hands over at qualification and does not drive credit steps.
+_CREDIT_MAKERS = {"Credit Head", "Deal Analyst", "Management", "Admin"}
 _SYN_MAKERS = {"Syn Head", "Syn RM", "Management", "Admin"}
 _AM_MAKERS = {"AM Head", "AM RM", "Management", "Admin"}
 

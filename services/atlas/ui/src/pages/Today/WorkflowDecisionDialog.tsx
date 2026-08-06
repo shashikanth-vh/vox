@@ -160,9 +160,8 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
             placeholder="Your decision note — required for Return and Reject" />
         </Box>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
-          Recorded on the workflow plane as <b>{getSession()?.email || user.full}</b>.
-          Approve releases the item and advances the flow · Return sends it back to the
-          maker for revision (it comes round again) · Reject is terminal for this attempt.
+          Your decision is recorded in the audit trail under{' '}
+          <b>{getSession()?.email || user.full}</b> and cannot be edited afterwards.
         </Typography>
         {err && <Alert severity="warning" sx={{ mt: 1.2, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
@@ -170,13 +169,16 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
         <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
         <Box sx={{ flex: 1 }} />
         {verbs.includes('reject') && (
-          <Button onClick={() => void submit('reject')} color="error" disabled={busy}>Reject</Button>
+          <Button onClick={() => void submit('reject')} color="error" disabled={busy}
+            title="Refuse permanently — this attempt ends here">Reject</Button>
         )}
         {verbs.includes('return') && (
-          <Button onClick={() => void submit('return')} color="warning" disabled={busy}>Return</Button>
+          <Button onClick={() => void submit('return')} color="warning" disabled={busy}
+            title="Send back to the maker for revision — it returns to this queue when resubmitted">Return</Button>
         )}
         {verbs.includes('approve') && (
           <Button onClick={() => void submit('approve')} variant="contained" disabled={busy}
+            title="Release the item and advance the flow"
             startIcon={busy ? <CircularProgress size={13} color="inherit" /> : undefined}>
             {busy ? 'Recording…' : 'Approve'}
           </Button>
