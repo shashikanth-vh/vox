@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, IconButton, Tooltip, Snackbar, Alert } from '@mui/material';
+import { Button, FormControlLabel, IconButton, Switch, Tooltip, Snackbar, Alert } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { useQueryClient } from '@tanstack/react-query';
@@ -26,6 +26,10 @@ export default function LeadsPage() {
   const [push, setPush] = useState<Lead | null>(null);
   const [del, setDel] = useState<Lead | null>(null);
   const [delErr, setDelErr] = useState('');
+  // Management's history view: converted leads back in the grid, read-only, for
+  // source-of-business analysis. Off by default — nobody works out of it.
+  const mgmt = user.roles.some((r: string) => r === 'Management' || r === 'Admin');
+  const [showConverted, setShowConverted] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ['leads'] });
 
   const columns = useMemo<MRT_ColumnDef<Lead>[]>(() => [
@@ -43,13 +47,26 @@ export default function LeadsPage() {
 
   return (
     <>
-      <PageHint>Click a lead to update it in place. Converted leads leave this register automatically.</PageHint>
+      <PageHint>
+        {showConverted
+          ? 'Showing converted leads too — they are read-only history; their working life continues in Deals.'
+          : 'Click a lead to update it in place. Converted leads leave this register automatically.'}
+      </PageHint>
       <CommonTable<Lead>
-        queryKey={['leads']}
-        fetcher={(q) => leadsService.list(q, scopeFor(user.roles, 'leads', user.name))}
+        queryKey={['leads', showConverted ? 'all' : 'open']}
+        fetcher={(q) => leadsService.list(q, scopeFor(user.roles, 'leads', user.name),
+          { includeConverted: showConverted })}
         columns={columns}
         csvName="atlas_leads"
-        toolbarLeft={can(user.roles, 'addLead') && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add lead</Button>}
+        toolbarLeft={<>
+          {can(user.roles, 'addLead') && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add lead</Button>}
+          {mgmt && (
+            <FormControlLabel sx={{ ml: 1, '& .MuiTypography-root': { fontSize: 12.5 } }}
+              control={<Switch size="small" checked={showConverted}
+                onChange={(e) => setShowConverted(e.target.checked)} />}
+              label="Show converted" />
+          )}
+        </>}
         // No View icon — clicking the row opens the lead.
         onRowClick={(l) => setEdit(l)}
         onEdit={(l) => setEdit(l)}
@@ -57,11 +74,13 @@ export default function LeadsPage() {
         onDelete={can(user.roles, 'deleteRow') ? (l) => setDel(l) : undefined}
         // Push to deals — convert this lead into a deal (v11 doPush flow).
         extraActions={can(user.roles, 'pushToDeals') ? (l) => (
-          <Tooltip title="Push to deal">
-            <IconButton sx={{ color: tokens.teal }} onClick={() => setPush(l)}>
-              <RocketLaunchIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          l.status === 'Converted' ? null : (
+            <Tooltip title="Push to deal">
+              <IconButton sx={{ color: tokens.teal }} onClick={() => setPush(l)}>
+                <RocketLaunchIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )
         ) : undefined}
       />
       <AddLeadDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={refresh} />

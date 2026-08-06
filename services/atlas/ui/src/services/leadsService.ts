@@ -163,7 +163,8 @@ async function leadTotal(): Promise<number> {
 }
 
 export const leadsService = {
-  async list(q: TableQuery, scope?: RowScope | null) {
+  async list(q: TableQuery, scope?: RowScope | null,
+             opts?: { includeConverted?: boolean }) {
     return withFallback<Paged<Lead>>(
       async () => {
         // Server-paged: `limit` is the table's page size and Next carries the cursor the
@@ -176,15 +177,19 @@ export const leadsService = {
         // No inScope here: the register already scoped this list (see auth/rbac.ts).
         const all = asRows(data, 'leads').map(toLeadRow);
         // The page promises "Converted leads leave this register automatically" — the
-        // register keeps them (the deal is their continuation), so the LIVE list must
-        // drop them here, exactly as the mock path always did.
-        const rows = all.filter((l) => l.status !== 'Converted');
+        // register keeps them (the deal is their continuation), so the LIVE list drops
+        // them here, exactly as the mock path always did. Management's "Show
+        // converted" toggle lifts the filter for source-of-business analysis.
+        const rows = opts?.includeConverted ? all
+          : all.filter((l) => l.status !== 'Converted');
         const total = Math.max(0, totalOf(data, all.length) - (all.length - rows.length));
         return { rows, total, nextCursor: nextCursorOf(data) };
       },
       async () => {
         await delay();
-        const rows = db().leads.filter((l: Lead) => l.status !== 'Converted').filter((l: Lead) => inScope(scope ?? null, l));
+        const rows = db().leads
+          .filter((l: Lead) => opts?.includeConverted || l.status !== 'Converted')
+          .filter((l: Lead) => inScope(scope ?? null, l));
         return applyQuery(rows, { ...q, searchFields: ['id', 'company', 'sector', 'rm'] });
       },
     );
