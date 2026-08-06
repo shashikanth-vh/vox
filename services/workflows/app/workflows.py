@@ -903,11 +903,16 @@ class DealStructuringWorkflow:
             self._stage = "Circulating credit note"
             self._note_version = 1
             for line in lines:
+                # decision_ref carries the VERSION: the register allows one evidence row
+                # per (decision_ref, kind), so a bare workflow id here made every later
+                # revision collide with v1 — a 409 that killed the run exactly when the
+                # committee had returned it for rework.
                 note_ev = await workflow.execute_activity(
                     activities.attach_evidence,
                     args=["Lending", str(line.get("id")), "credit_note",
                           inp.credit_note_reference, None,
-                          "Structured credit note circulated to committee (v1)", caller],
+                          "Structured credit note circulated to committee (v1)", caller,
+                          f"{wf_id}:credit-note:v1"],
                     **_DURABLE_IO)
                 evidence_ids.append(note_ev.get("id"))
 
@@ -965,13 +970,15 @@ class DealStructuringWorkflow:
                 self._note_reference = ref
                 self._stage = f"Circulating credit note v{self._note_version}"
                 for line in lines:
+                    # Same versioned decision_ref rule as v1 — each circulation is its
+                    # own evidence row, never a unique-index collision with the last.
                     ev = await workflow.execute_activity(
                         activities.attach_evidence,
                         args=["Lending", str(line.get("id")), "credit_note", ref, sha,
                               f"Revised credit note circulated to committee "
                               f"(v{self._note_version}"
                               + (f", by {revised_by}" if revised_by else "") + ")",
-                              caller],
+                              caller, f"{wf_id}:credit-note:v{self._note_version}"],
                         **_DURABLE_IO)
                     evidence_ids.append(ev.get("id"))
                 self._stage = "Awaiting committee decision"

@@ -23,6 +23,9 @@ export interface PendingWorkflow {
   workflowId: string;
   status: string;          // RUNNING / Completed / Prepared …
   stage: string;           // 'Awaiting committee decision'
+  /** The BUSINESS state, separate from the technical stage — 'ReturnedForInformation'
+   *  means the run is parked with its REQUESTER, not awaiting an approver. */
+  businessStatus?: string;
   requestedBy: string;
   startedAt: string;
   statusUrl?: string;
@@ -69,6 +72,7 @@ function toPending(r: any): PendingWorkflow {
     workflowId: r?.workflow_id || '',
     status: r?.status || '',
     stage: r?.stage || '',
+    businessStatus: r?.business_status || undefined,
     requestedBy: r?.requested_by || '',
     startedAt: r?.started_at || '',
     statusUrl: r?.status_url || undefined,
@@ -131,8 +135,16 @@ export interface DecisionInput {
   sanctionLetterReference?: string;
 }
 
+/** A run the committee sent back — it sits with the REQUESTER until resubmitted. */
+export function isReturned(w: PendingWorkflow): boolean {
+  return (w.businessStatus || '').toLowerCase().includes('return');
+}
+
 /** Which verbs this item actually offers — the buttons the UI may render. */
 export function actionsFor(w: PendingWorkflow): DecisionAction[] {
+  // A RETURNED run is the maker's to-do, not the approver's: offering decision verbs
+  // on it kept it in the approver's queue after they had already sent it back.
+  if (isReturned(w)) return [];
   const out: DecisionAction[] = [];
   if (w.decisionUrl || w.approveUrl) out.push('approve');
   if (w.returnUrl || w.controlUrl) out.push('return');

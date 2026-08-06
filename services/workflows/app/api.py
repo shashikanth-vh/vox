@@ -1064,6 +1064,38 @@ def create_app() -> FastAPI:
                         return h
                     n += 1
 
+    async def _attempts(client: Client, base_id: str) -> list[tuple[str, Any]]:
+        """Every existing attempt for a deterministic business id, oldest first — the
+        base id plus its ``-rN`` retries. The retry suffix means "the newest attempt IS
+        the run" for any reader; resolving only the base id reads a dead first attempt
+        and mis-states the subject's whole workflow state."""
+        out: list[tuple[str, Any]] = []
+        cur, n = base_id, 2
+        while True:
+            try:
+                desc = await client.get_workflow_handle(cur).describe()
+            except (RPCError, TemporalError):
+                break
+            out.append((cur, desc))
+            cur = f"{base_id}-r{n}"
+            n += 1
+        return out
+
+    async def _live_run_business(client: Client,
+                                 base_id: str) -> tuple[str, str] | None:
+        """(workflow_id, business_status) of the newest RUNNING attempt — None when no
+        attempt is live. The business status comes from the run's own state query;
+        a run without one reports ''."""
+        for wf_id, desc in reversed(await _attempts(client, base_id)):
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                business = ""
+                with contextlib.suppress(RPCError, TemporalError):
+                    st = await client.get_workflow_handle(wf_id).query("state")
+                    if isinstance(st, dict):
+                        business = str(st.get("business_status") or "")
+                return wf_id, business
+        return None
+
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict:
         return {"status": "ok", "service": "prism-orchestrator"}
@@ -2109,6 +2141,33 @@ def create_app() -> FastAPI:
     async def start_structuring(payload: DealStructuringIn, request: Request,
                                 x_api_key: str | None = Header(default=None, alias="X-API-Key"),
                                 ) -> Any:
+        if (resp := denied(x_api_key)) is not None:
+            return resp
+        _, err = await _verified_email(request, payload.requested_by)
+        if err is not None:
+            return err
+        # ONE live committee request per deal — checked BEFORE any number is minted, so
+        # a refused send never burns a series number. Without this, a second send while
+        # a run was open (returned or not) answered 202 "started" while silently
+        # attaching to the old run, which never learned the new reference.
+        tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
+        live = await _live_run_business(
+            request.app.state.temporal,
+            f"struct-{_tenant_slug(tenant)}-{payload.deal_id}")
+        if live is not None:
+            live_id, business = live
+            if business in _RETURNED_STATES or "return" in business.lower():
+                return _problem(
+                    409, "Conflict",
+                    "The committee RETURNED this request to you — it is still open. "
+                    "Amend it from the deal drawer ('File a revised credit note'), then "
+                    "'Send back for decision'. A new request cannot be raised while it "
+                    f"is open. [{live_id}]")
+            return _problem(
+                409, "Conflict",
+                "This deal is already with the credit committee — the request is open "
+                "and awaiting their decision. Withdraw it (cancel) or wait for the "
+                f"decision before raising another. [{live_id}]")
         # The credit note is NUMBERED FROM A SERIES, not typed: a blank reference draws
         # the next number for this company from the register. A typed one is an explicit
         # override and is used as-is. Minting sits behind the SAME gates the start does
@@ -2116,11 +2175,6 @@ def create_app() -> FastAPI:
         # series numbers — the number is drawn only for a send that will actually start.
         reference = (payload.credit_note_reference or "").strip()
         if not reference:
-            if (resp := denied(x_api_key)) is not None:
-                return resp
-            _, err = await _verified_email(request, payload.requested_by)
-            if err is not None:
-                return err
             reference, err = await _mint_credit_note_ref(request, payload.deal_id)
             if err is not None:
                 return err
@@ -3403,10 +3457,18 @@ def create_app() -> FastAPI:
             return read_err
         stage = str(row.get(_STAGE_FIELD[subject_type]) or "")
 
-        # RUN. One describe against the deterministic id the start route would mint.
+        # RUN. The deterministic id the start route would mint — resolved to the NEWEST
+        # attempt (-rN retries): after a failed first attempt was retried, reading the
+        # base id described the dead run, so the drawer offered the wrong actions and
+        # revise/resubmit targeted a workflow that could no longer hear them.
         prefix, id_field = _RUN_ID_FOR[subject_type]
         run_key = str(row.get(id_field) or "")
         workflow_id = f"{prefix}-{_tenant_slug(tenant)}-{run_key}" if run_key else ""
+        if workflow_id:
+            with contextlib.suppress(RPCError, TemporalError, AttributeError):
+                found = await _attempts(request.app.state.temporal, workflow_id)
+                if found:
+                    workflow_id = found[-1][0]
         run_state, run_info = "none", None
         # Provenance for governance evidence: the run that PRODUCED the thing being
         # attested. Captured whatever the run's status, because the run that sanctioned a
@@ -3716,9 +3778,19 @@ def create_app() -> FastAPI:
                     if (k != "lead-conversion" and stage is not None
                             and "awaiting" not in str(stage).lower()):
                         continue
+                    # BUSINESS status rides along: a run the committee RETURNED is still
+                    # parked (technical stage unchanged), but it is the MAKER's to-do,
+                    # not the approver's — without this field the approver's Today kept
+                    # showing it as an approval request after they had returned it.
+                    business = ""
+                    with contextlib.suppress(RPCError, TemporalError):
+                        st = await handle.query("state")
+                        if isinstance(st, dict):
+                            business = str(st.get("business_status") or "")
                     pending.append({
                         "kind": k, "subject_id": subject_id, "workflow_id": wf_id,
                         "status": "RUNNING", "stage": stage,
+                        "business_status": business,
                         "requested_by": requested_by,
                         "started_at": (ex.start_time.isoformat()
                                        if ex.start_time else None),

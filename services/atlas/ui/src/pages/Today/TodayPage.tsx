@@ -13,7 +13,7 @@ import BookingReviewDialog from './BookingReviewDialog';
 import CovenantResultDialog from './CovenantResultDialog';
 import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
-import { workflowService, kindLabel, since, pendingKey, actionsFor,
+import { workflowService, kindLabel, since, pendingKey, actionsFor, isReturned,
   type PendingWorkflow, type DecisionAction } from '../../services/workflowService';
 import { lmsService, type TrancheItem } from '../../services/lmsService';
 import { notificationsService, type InboxItem } from '../../services/notificationsService';
@@ -308,9 +308,15 @@ export default function TodayPage() {
           })}
           {wfMine.map((w) => (
             <ChLine key={pendingKey(w)}>
-              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDF1F3', color: tokens.muted, whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
-              <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
-              {hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
+              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700,
+                bgcolor: isReturned(w) ? '#FFF3E0' : '#EDF1F3',
+                color: isReturned(w) ? '#9A6A00' : tokens.muted, whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
+              <Box component="b" sx={{ color: tokens.ink }}>
+                {isReturned(w) ? 'Returned for revision' : (w.stage || 'Awaiting a decision')}
+              </Box>
+              {isReturned(w)
+                ? hint('returned to you — open the deal: "File a revised credit note", then "Send back for decision"')
+                : hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
             </ChLine>
           ))}
         </Section>
