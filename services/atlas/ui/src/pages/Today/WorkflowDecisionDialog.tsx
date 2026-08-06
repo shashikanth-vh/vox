@@ -46,13 +46,15 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
 }
 
 /**
- * The human decision on a workflow run. The plane parks the run and hands back the URL
- * that takes the decision, so this dialog only collects what the body carries: a note,
- * and — for a credit-committee decision — the committee and sanction-letter references.
- * References are pre-filled in the collection's shape and stay editable.
+ * REVIEW FIRST, then decide: the dialog opens from one Review button, shows WHAT is
+ * being decided in business words (headline, facts, the filed document), and carries
+ * the whole triad — Approve / Return / Reject — as its own actions. The note is typed
+ * before the verb; Return and Reject refuse to record without one. For a
+ * credit-committee decision the committee and sanction-letter references are
+ * pre-filled in the collection's shape and stay editable.
  */
-export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
-  w: PendingWorkflow | null; action: DecisionAction; onClose: () => void; onDone: () => void;
+export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
+  w: PendingWorkflow | null; verbs: DecisionAction[]; onClose: () => void; onDone: () => void;
 }) {
   const { user } = useAuth();
   const [note, setNote] = useState('');
@@ -64,7 +66,6 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
   const [ctx, setCtx] = useState<ApprovalContext | null>(null);
 
   const committee = !!w && isCommitteeDecision(w);
-  const approve = action === 'approve';
 
   // Keyed on the run, not on the object: the list refetches on a timer, and a new object
   // identity for the same run must not wipe what is being typed into the note.
@@ -73,7 +74,7 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
     if (!w) return;
     setNote(''); setErr(''); setBusy(false); setLive(null);
     setCc(committee ? committeeRef() : '');
-    setSl(committee && approve ? sanctionRef(w.subjectId) : '');
+    setSl(committee ? sanctionRef(w.subjectId) : '');
     // The list is a snapshot; read the run's own status so a decision is not taken on a
     // stale row. A failed read is not fatal — the list's stage still shows.
     let alive = true;
@@ -84,11 +85,17 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
     void approvalContext(w).then((c) => { if (alive) setCtx(c); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wid, action, committee]);
+  }, [wid, committee]);
 
   if (!w) return null;
 
-  const submit = async () => {
+  const submit = async (action: DecisionAction) => {
+    if (noteRequired(action) && !note.trim()) {
+      setErr(action === 'return'
+        ? 'A return needs the note — the maker corrects from your words.'
+        : 'A rejection needs the note — say why it is refused.');
+      return;
+    }
     setBusy(true); setErr('');
     const res = await workflowService.decide(w, {
       action,
@@ -107,7 +114,7 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontSize: 16 }}>{TITLE[action]} — {kindLabel(w.kind)}
+      <DialogTitle sx={{ fontSize: 16 }}>Review — {kindLabel(w.kind)}
         <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>{stage || 'Awaiting a decision'} · raised {since(w.startedAt) || w.startedAt}</Typography>
         <IconButton onClick={onClose} disabled={busy} sx={{ position: 'absolute', right: 8, top: 8 }}><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
@@ -139,33 +146,41 @@ export default function WorkflowDecisionDialog({ w, action, onClose, onDone }: {
         <FieldGrid>
           <Fact label="Requested by" value={w.requestedBy} />
           <Fact label="Status" value={status} />
-          <Fact label="Subject" value={w.subjectId} mono />
-          <Fact label="Workflow" value={w.workflowId} mono />
         </FieldGrid>
         {committee && (
           <Box sx={{ mt: 1.4 }}>
             <FieldGrid>
               <TextFld label="Committee reference" value={cc} onChange={setCc} />
-              {approve && <TextFld label="Sanction letter reference" value={sl} onChange={setSl} />}
+              <TextFld label="Sanction letter reference (on approval)" value={sl} onChange={setSl} />
             </FieldGrid>
           </Box>
         )}
         <Box sx={{ mt: 1.2 }}>
           <TextFld label="Note" value={note} onChange={setNote} multiline
-            placeholder={PLACEHOLDER[action]}
-            required={noteRequired(action)} />
+            placeholder="Your decision note — required for Return and Reject" />
         </Box>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
-          Recorded on the workflow plane as <b>{getSession()?.email || user.full}</b>. {EFFECT[action]}
+          Recorded on the workflow plane as <b>{getSession()?.email || user.full}</b>.
+          Approve releases the item and advances the flow · Return sends it back to the
+          maker for revision (it comes round again) · Reject is terminal for this attempt.
         </Typography>
         {err && <Alert severity="warning" sx={{ mt: 1.2, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
-        <Button onClick={submit} variant="contained" color={COLOR[action]} disabled={busy}
-          startIcon={busy ? <CircularProgress size={13} color="inherit" /> : undefined}>
-          {busy ? 'Recording…' : CTA[action]}
-        </Button>
+        <Box sx={{ flex: 1 }} />
+        {verbs.includes('reject') && (
+          <Button onClick={() => void submit('reject')} color="error" disabled={busy}>Reject</Button>
+        )}
+        {verbs.includes('return') && (
+          <Button onClick={() => void submit('return')} color="warning" disabled={busy}>Return</Button>
+        )}
+        {verbs.includes('approve') && (
+          <Button onClick={() => void submit('approve')} variant="contained" disabled={busy}
+            startIcon={busy ? <CircularProgress size={13} color="inherit" /> : undefined}>
+            {busy ? 'Recording…' : 'Approve'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

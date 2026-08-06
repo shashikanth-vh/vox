@@ -316,3 +316,27 @@ async def test_later_tranches_are_recorded_in_lms_by_the_operator(client):
     # The queue is empty again for this line.
     q = (await client.get("/v1/bookings/pending", headers=OPERATOR)).json()
     assert all(i["lending_id"] != lid for i in q["items"])
+
+
+async def test_a_blank_emi_is_computed_at_account_opening(client):
+    """The terms often leave the EMI blank — the account computes the standard
+    amortising EMI on the sanctioned amount (the desk's Excel figure: ₹4,47,608 on
+    1.75 Cr, 54 months @15%) instead of showing a dash."""
+    lid = await _accepted_manual_line(client)
+    t = await client.post("/v1/internal/sanction-terms", json={
+        "lending_id": lid, "amount_cr": 1.75, "rate_kind": "Fixed", "rate_pct": 15.0,
+        "tenor_months": 54, "day_count": "365"}, headers=ADMIN)
+    assert t.status_code == 201, t.text
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-9600",
+                                  "amount_cr": 1.75, "disbursed_on": "2026-03-24"})
+    assert dis.status_code == 201, dis.text
+    tid = dis.json()["tranche"]["id"]
+    assert (await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
+                              json={"action": "approve"},
+                              headers=AUTHORIZER)).status_code == 200
+    acct = (await client.get(f"/v1/lending/{lid}/loan-account",
+                             headers=ADMIN)).json()["account"]
+    assert acct["emi_amount"] is not None
+    # ₹4,47,608 ± a couple of rupees of rounding, expressed in ₹ Cr.
+    assert abs(acct["emi_amount"] * 1e7 - 447608) <= 3, acct["emi_amount"]

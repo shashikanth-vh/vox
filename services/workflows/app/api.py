@@ -3736,6 +3736,12 @@ def create_app() -> FastAPI:
                 if (caller_roles is not None and _who
                         and not (caller_roles & _WHOLE_BOOK_REMINDER_ROLES)):
                     fu_params["scope_email"] = _who
+                # A PURELY-servicing caller sees the serviced book, whole — but not
+                # LOS's pre-handover chases: their world starts at the handover.
+                _LMS_ONLY = {"LMS Operator", "LMS Management"}
+                if (caller_roles is not None and caller_roles
+                        and caller_roles <= _LMS_ONLY):
+                    fu_params["serviced_only"] = "true"
                 fu = await request.app.state.http.get(
                     f"{base_url}/v1/internal/follow-ups", headers=reg_headers,
                     params=fu_params)

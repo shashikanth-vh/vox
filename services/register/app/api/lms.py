@@ -54,6 +54,17 @@ def _round_rupee(x: float) -> float:
     return float(f"{x:.7f}")
 
 
+def computed_emi(principal_cr: float, rate_pct: float, tenor_months: int) -> float:
+    """The standard EMI: P × r × (1+r)^n / ((1+r)^n − 1), monthly r — the figure the
+    desk's Excel carries in its Repayment line (e.g. ₹4,47,608 on 1.75 Cr, 54m @15%).
+    Rounded to the rupee (7 decimals of a crore)."""
+    r = (rate_pct / 100.0) / 12.0
+    if r <= 0 or tenor_months <= 0:
+        return 0.0
+    growth = (1.0 + r) ** tenor_months
+    return _round_rupee(principal_cr * r * growth / (growth - 1.0))
+
+
 def interest_amount(balance: float, rate_pct: float, days: int, day_count: str) -> float:
     """The one interest formula: balance × rate% × days ÷ day-count, at rupee precision."""
     base = 360 if str(day_count).strip() == "360" else 365
@@ -245,6 +256,15 @@ async def open_or_grow_account(ctx: RequestContext, line: LendingTracker,
             repayment_start=(terms.repayment_start if terms else None),
             day_count=(terms.day_count if terms else "365"),
             created_by=ctx.actor)
+        # The terms sometimes leave the EMI blank — COMPUTE it rather than show "—":
+        # standard amortising EMI on the sanctioned amount, for the facilities that
+        # repay by EMI (term-loan family; bullet/WCL facilities carry no EMI).
+        if (acct.emi_amount is None and terms is not None
+                and terms.rate_pct and terms.tenor_months
+                and "term" in str(acct.facility_type or "").lower()):
+            principal = float(terms.amount_cr or amount)
+            acct.emi_amount = computed_emi(principal, float(terms.rate_pct),
+                                           int(terms.tenor_months)) or None
         ctx.session.add(acct)
         await ctx.session.flush()
         await _append(ctx, acct, entry_date=when, particulars="Loan Disbursement",

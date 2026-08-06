@@ -67,6 +67,7 @@ def current_due(first_due_on: date, frequency: str, today: date) -> date:
 async def list_follow_ups(
         window_days: int = Query(default=14, ge=0, le=120),
         scope_email: str | None = Query(default=None),
+        serviced_only: bool = Query(default=False),
         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     today = date.today()
     items: list[dict[str, Any]] = []
@@ -125,7 +126,9 @@ async def list_follow_ups(
         if cur is None or (c.checklist_version or 0) > (cur.checklist_version or 0):
             latest[c.lending_id] = c
     for lending_id, c in latest.items():
-        if c.status != "Approved" or lending_id in handed:
+        # Pre-handover chases are LOS work: a purely-servicing caller
+        # (``serviced_only``) starts where the handover did.
+        if c.status != "Approved" or lending_id in handed or serviced_only:
             continue
         line = lending_by_id.get(lending_id)
         if line is not None and str(getattr(line, "stage", "") or "") == "Closed":

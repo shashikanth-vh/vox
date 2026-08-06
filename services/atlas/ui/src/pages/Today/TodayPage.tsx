@@ -9,6 +9,7 @@ import { useSearch } from '../../context/SearchContext';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
 import WorkflowDecisionDialog from './WorkflowDecisionDialog';
+import BookingReviewDialog from './BookingReviewDialog';
 import CovenantResultDialog from './CovenantResultDialog';
 import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
@@ -17,7 +18,6 @@ import { workflowService, kindLabel, since, pendingKey, actionsFor,
 import { lmsService, type TrancheItem } from '../../services/lmsService';
 import { clientsService } from '../../services/clientsService';
 import { fmt } from '../../utils/format';
-import { TextField } from '@mui/material';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import type { AttnRow, ContactRow, DueRow } from './compute';
 import { tokens } from '../../theme';
@@ -90,7 +90,7 @@ export default function TodayPage() {
   // Workflow plane: runs parked on a human decision (GET /v1/workflows/pending). This is
   // Temporal's queue, separate from the local stage-change requests above — it is polled
   // because the plane releases runs on its own (a decision timeout, another approver).
-  const [wfDecide, setWfDecide] = useState<{ w: PendingWorkflow; action: DecisionAction } | null>(null);
+  const [wfDecide, setWfDecide] = useState<{ w: PendingWorkflow; verbs: DecisionAction[] } | null>(null);
   const [covRecord, setCovRecord] = useState<PendingWorkflow | null>(null);
   const [covFlash, setCovFlash] = useState('');
   const { data: wfPending = [], refetch: refetchWf } = useQuery({
@@ -108,7 +108,7 @@ export default function TodayPage() {
   const [bookBusy, setBookBusy] = useState('');
   const [bookErr, setBookErr] = useState('');
   const [bookFlash, setBookFlash] = useState('');
-  const [bookReject, setBookReject] = useState<{ id: string; note: string } | null>(null);
+  const [bookView, setBookView] = useState<TrancheItem | null>(null);
   const { data: bookings = [], refetch: refetchBookings } = useQuery({
     queryKey: ['lms-pending-bookings', 'today'],
     queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
@@ -126,7 +126,7 @@ export default function TodayPage() {
       setBookFlash(action === 'approve'
         ? `${t.tranche_ref} booked — the loan account is updated (LMS · Servicing has the statement).`
         : `${t.tranche_ref} rejected — the recorder corrects and records afresh.`);
-      setBookReject(null);
+      setBookView(null);
       await refetchBookings(); refresh();
     } catch (e: any) { setBookErr(e?.message || String(e)); }
     setBookBusy('');
@@ -221,28 +221,10 @@ export default function TodayPage() {
                 </Box>
               )}
               <Box sx={{ flex: 1 }} />
-              {bookReject?.id === t.id ? (
-                <>
-                  <TextField size="small" label="Rejection reason" autoFocus value={bookReject.note}
-                    onChange={(e) => setBookReject({ id: t.id, note: e.target.value })}
-                    sx={{ minWidth: 200 }} />
-                  <Button size="small" color="error" variant="contained"
-                    disabled={!!bookBusy || !bookReject.note.trim()}
-                    onClick={() => void settleBooking(t, 'reject', bookReject.note.trim())} sx={{ minWidth: 0 }}>
-                    {bookBusy === t.id ? '…' : 'Confirm'}
-                  </Button>
-                  <Button size="small" onClick={() => setBookReject(null)} sx={{ minWidth: 0 }}>Cancel</Button>
-                </>
-              ) : (
-                <>
-                  <Button size="small" variant="contained" disabled={!!bookBusy}
-                    onClick={() => void settleBooking(t, 'approve')} sx={{ minWidth: 0 }}>
-                    {bookBusy === t.id ? 'Booking…' : 'Approve & book'}
-                  </Button>
-                  <Button size="small" color="error" disabled={!!bookBusy}
-                    onClick={() => setBookReject({ id: t.id, note: '' })} sx={{ minWidth: 0 }}>Reject</Button>
-                </>
-              )}
+              <Button size="small" variant="contained" disabled={!!bookBusy}
+                onClick={() => setBookView(t)} sx={{ minWidth: 0 }}>
+                Review…
+              </Button>
             </ChLine>
           ))}
         </Section>
@@ -259,18 +241,13 @@ export default function TodayPage() {
                 {hint(`${w.status} · by ${w.requestedBy} · ${since(w.startedAt)}`
                   + (w.checklistVersion ? ` · v${w.checklistVersion}` : ''))}
                 <Box sx={{ flex: 1 }} />
-                {/* The WHOLE triad the platform enforces — approve, return for revision
-                    (non-terminal: back to the maker, then round again), reject. Only the
-                    verbs this item actually offers are rendered. */}
-                {verbs.includes('approve') && (
-                  <Button size="small" variant="contained" onClick={() => setWfDecide({ w, action: 'approve' })} sx={{ minWidth: 0 }}>Approve</Button>
-                )}
-                {verbs.includes('return') && (
-                  <Button size="small" color="warning" onClick={() => setWfDecide({ w, action: 'return' })} sx={{ minWidth: 0 }}>Return</Button>
-                )}
-                {verbs.includes('reject') && (
-                  <Button size="small" color="error" onClick={() => setWfDecide({ w, action: 'reject' })} sx={{ minWidth: 0 }}>Reject</Button>
-                )}
+                {/* One door in: REVIEW the content first — the dialog shows what is
+                    being decided and carries the whole triad (approve / return /
+                    reject), only the verbs this item actually offers. */}
+                <Button size="small" variant="contained"
+                  onClick={() => setWfDecide({ w, verbs })} sx={{ minWidth: 0 }}>
+                  Review…
+                </Button>
               </ChLine>
             );
           })}
@@ -352,7 +329,10 @@ export default function TodayPage() {
         </Section>
       )}
 
-      <WorkflowDecisionDialog w={wfDecide?.w ?? null} action={wfDecide?.action ?? 'approve'} onClose={() => setWfDecide(null)} onDone={wfDone} />
+      <WorkflowDecisionDialog w={wfDecide?.w ?? null} verbs={wfDecide?.verbs ?? []} onClose={() => setWfDecide(null)} onDone={wfDone} />
+      <BookingReviewDialog t={bookView} busy={!!bookBusy}
+        onClose={() => setBookView(null)}
+        onDecide={(t, action, note) => void settleBooking(t, action, note)} />
       <CovenantResultDialog w={covRecord} onClose={() => setCovRecord(null)}
         onDone={(m) => { setCovFlash(m); wfDone(); }} />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
