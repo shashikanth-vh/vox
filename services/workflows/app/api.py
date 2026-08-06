@@ -159,8 +159,10 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "stage_reason": "The committee decision has already been taken on this facility.",
             "run_reason": "A committee run is already open on this deal.",
             "prefill": {"deal_id": "deal_id"},
-            "form": [_f("credit_note_reference", "Credit note reference", required=True,
-                        placeholder="CN/<COMPANY>/2026-01"),
+            "form": [_f("credit_note_reference", "Credit note reference",
+                        placeholder="Auto-numbered — CN/<company>/<yyyymm>-<seq>",
+                        help_text="Leave blank and the register issues the next number "
+                                  "in this company's series; type one only to override."),
                      _f("product_type", "Product", placeholder="Term Loan"),
                      _f("rm", "Relationship manager")],
         },
@@ -1969,7 +1971,8 @@ def create_app() -> FastAPI:
 
     async def _start_business(request: Request, x_api_key: str | None, requested_by_raw: str,
                               workflow_cls: Any, arg_cls: Any, id_prefix: str, id_suffix: str,
-                              extra_memo: dict, **arg_fields: Any) -> Any:
+                              extra_memo: dict, extra_content: dict | None = None,
+                              **arg_fields: Any) -> Any:
         """Shared start path for the business-lifecycle workflows (qualification / structuring /
         document collection): API-key gate → verified initiator → fail-closed delegated identity →
         idempotent start under a tenant-bound business id."""
@@ -1997,7 +2000,8 @@ def create_app() -> FastAPI:
                              restart_if_closed=True, memo=memo)
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "started",
-            "status_url": f"/v1/workflows/{handle.id}"})
+            "status_url": f"/v1/workflows/{handle.id}",
+            **(extra_content or {})})
 
     @app.post("/v1/workflows/lead-qualifications", status_code=202, tags=["Workflows"],
               summary="Start a lead-qualification workflow")
@@ -2055,18 +2059,79 @@ def create_app() -> FastAPI:
                            "passed": r.passed, "note": r.note})
         return merged, None
 
+    def _series_stem(name: str) -> str:
+        """'EcoSoch Solar Pvt. Ltd' → 'ECOSOCHSOLAR' — the company chunk of an
+        auto-numbered reference, alphanumeric and bounded so the number stays typeable."""
+        return re.sub(r"[^A-Z0-9]", "", str(name).upper())[:12] or "COMPANY"
+
+    async def _mint_credit_note_ref(request: Request,
+                                    deal_id: str) -> tuple[str, Any | None]:
+        """The next credit-note number for this deal's company —
+        ``CN/<company>/<yyyymm>-<seq>`` from the register's number series (atomic, so
+        concurrent sends never draw the same number). Fail CLOSED: sending would put an
+        unnumbered note before the committee, so a register that cannot mint refuses
+        the send rather than letting one through without a reference."""
+        from datetime import UTC, datetime
+
+        tenant = (request.headers.get("X-Tenant") or settings.register_tenant).strip()
+        base = settings.register_base_url.rstrip("/")
+        svc = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant}
+        try:
+            deal = await request.app.state.http.get(f"{base}/v1/deals/{deal_id}",
+                                                    headers=svc)
+        except httpx.HTTPError as exc:
+            return "", _problem(503, "Service unavailable",
+                                "The deal could not be read to number the credit note: "
+                                f"{exc}")
+        if deal.status_code != 200:
+            return "", _problem(404 if deal.status_code == 404 else 502,
+                                "Deal lookup failed",
+                                f"Deal '{deal_id}' could not be read "
+                                f"(HTTP {deal.status_code}) — the credit note cannot "
+                                "be numbered without its company.")
+        stem = _series_stem(deal.json().get("company") or "")
+        yyyymm = datetime.now(UTC).strftime("%Y%m")
+        try:
+            mint = await request.app.state.http.post(
+                f"{base}/v1/internal/number-series/next",
+                json={"series_key": f"credit-note/{stem}/{yyyymm}"}, headers=svc)
+        except httpx.HTTPError as exc:
+            return "", _problem(503, "Service unavailable",
+                                f"The credit-note number could not be minted: {exc}")
+        if mint.status_code != 200:
+            return "", _problem(502, "Numbering failed",
+                                "The register refused to mint the credit-note number "
+                                f"(HTTP {mint.status_code}).")
+        return f"CN/{stem}/{yyyymm}-{int(mint.json()['value']):02d}", None
+
     @app.post("/v1/workflows/deal-structurings", status_code=202, tags=["Workflows"],
               summary="Start a deal-structuring workflow (awaits the committee decision)")
     async def start_structuring(payload: DealStructuringIn, request: Request,
                                 x_api_key: str | None = Header(default=None, alias="X-API-Key"),
                                 ) -> Any:
+        # The credit note is NUMBERED FROM A SERIES, not typed: a blank reference draws
+        # the next number for this company from the register. A typed one is an explicit
+        # override and is used as-is. Minting sits behind the SAME gates the start does
+        # (API key + verified identity), so an unauthenticated probe can never burn
+        # series numbers — the number is drawn only for a send that will actually start.
+        reference = (payload.credit_note_reference or "").strip()
+        if not reference:
+            if (resp := denied(x_api_key)) is not None:
+                return resp
+            _, err = await _verified_email(request, payload.requested_by)
+            if err is not None:
+                return err
+            reference, err = await _mint_credit_note_ref(request, payload.deal_id)
+            if err is not None:
+                return err
         return await _start_business(
             request, x_api_key, payload.requested_by, DealStructuringWorkflow,
             DealStructuringInput, "struct", payload.deal_id,
             {"deal_id": payload.deal_id, "subject_type": "Deal"},
+            extra_content={"credit_note_reference": reference},
             deal_id=payload.deal_id, requested_by=payload.requested_by,
             product_type=payload.product_type, rm=payload.rm,
-            credit_note_reference=payload.credit_note_reference,
+            credit_note_reference=reference,
             decision_timeout_hours=payload.decision_timeout_hours)
 
     @app.post("/v1/workflows/document-collections", status_code=202, tags=["Workflows"],

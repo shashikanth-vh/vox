@@ -10,6 +10,7 @@ import {
   type ApprovalContext, type PendingWorkflow, type DecisionAction,
 } from '../../services/workflowService';
 import { documentsService } from '../../services/documentsService';
+import DataRegisterDialog from '../Deals/DataRegisterDialog';
 import { tokens } from '../../theme';
 
 // Per-verb copy. Return is the middle verb of the triad: NON-terminal — it goes back
@@ -64,6 +65,7 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<any>(null);
   const [ctx, setCtx] = useState<ApprovalContext | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
 
   const committee = !!w && isCommitteeDecision(w);
 
@@ -139,6 +141,14 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
                 Download the filed document — {ctx.document.name}
               </Button>
             )}
+            {ctx.dataRegisterCode && (
+              <Button size="small" variant="outlined" sx={{ textTransform: 'none', mt: 1,
+                ml: ctx.document ? 1 : 0 }}
+                onClick={() => setDocsOpen(true)}
+                title="The company's Data Register — the documents the evidence references point at, opened here so you verify before deciding">
+                View collected documents…
+              </Button>
+            )}
             {ctx.preview && (
               <Box component="pre" sx={{
                 whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2, mt: 1,
@@ -192,6 +202,10 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
           </Button>
         )}
       </DialogActions>
+      {ctx?.dataRegisterCode && (
+        <DataRegisterDialog code={ctx.dataRegisterCode} entityId={ctx.dataRegisterEntityId}
+          open={docsOpen} onClose={() => setDocsOpen(false)} />
+      )}
     </Dialog>
   );
 }

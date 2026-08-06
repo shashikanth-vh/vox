@@ -23,6 +23,7 @@ from app.models.prism import (
 )
 from app.models.reconciliation import ImportReconciliationItem
 from app.models.registry import Counterparty, Entity, Person
+from app.models.series import NumberSeries
 from app.models.system import IdempotencyKey, RefValue, Tenant, TenantSettings
 from app.models.trackers import (
     AssetMonetisation,
@@ -75,4 +76,5 @@ __all__ = [
     "CamTurn",
     "LoanAccount",
     "LoanLedgerEntry",
+    "NumberSeries",
 ]

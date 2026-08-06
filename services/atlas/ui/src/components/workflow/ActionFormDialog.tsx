@@ -38,7 +38,10 @@ export default function ActionFormDialog({ action, onClose, onDone }: {
     const r = await workflowActionsService.run(action, values);
     setBusy(false);
     if (!r.ok) { setErr(r.error || 'The workflow plane refused this step.'); return; }
-    onDone(`${action.label} — done.`);
+    // A reference the plane issued (the auto-numbered credit note) is the one thing
+    // the maker needs to carry away from this step — say it in the confirmation.
+    const minted = r.data?.credit_note_reference;
+    onDone(`${action.label} — done.${minted ? ` Credit note ${minted}.` : ''}`);
     onClose();
   };
 

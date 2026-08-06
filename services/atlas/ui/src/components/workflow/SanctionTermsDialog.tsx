@@ -62,6 +62,18 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
     } catch { /* the letter block simply shows no file yet */ }
   };
 
+  // The letter ON FILE — the one thing a second visit to this dialog is usually for.
+  const downloadLetter = async () => {
+    if (!letter) return;
+    setErr(''); setLetterBusy('letter');
+    const ext = /wordprocessingml/.test(letter.content_type || '') ? '.docx'
+      : /pdf/.test(letter.content_type || '') ? '.pdf' : '';
+    const r = await documentsService.download({ id: letter.id,
+      name: `${letter.title}${ext}` } as any);
+    if (!r.ok) setErr(r.error || 'The letter download failed.');
+    setLetterBusy('');
+  };
+
   const downloadTemplate = async () => {
     if (!tmpl) return;
     setLetterBusy('template');
@@ -309,6 +321,13 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
               : 'Download the letterhead template, fill it from the committee\'s approval, and file the signed letter here.'}
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {letter && (
+              <Button size="small" variant="contained" disabled={letterBusy === 'letter'}
+                onClick={() => void downloadLetter()} sx={{ textTransform: 'none' }}
+                title="The signed sanction letter on file for this facility">
+                {letterBusy === 'letter' ? 'Fetching…' : 'Download sanction letter'}
+              </Button>
+            )}
             <Button size="small" variant="outlined" disabled={!tmpl || letterBusy === 'template'}
               onClick={() => void downloadTemplate()} sx={{ textTransform: 'none' }}>
               {letterBusy === 'template' ? 'Fetching…' : tmpl ? 'Download template' : 'No template on record'}

@@ -153,6 +153,12 @@ export interface ApprovalContext {
   preview?: string;
   /** The filed artefact itself (an uploaded CAM .docx) — the dialog offers a download. */
   document?: { id: string; name: string };
+  /** The company whose Data Register holds the collected documents — set when the
+   *  decision turns on documents (CP/CS check, handover), so the approver can open and
+   *  verify them without leaving the review. The entity id addresses the register
+   *  directly; the code is the display key. */
+  dataRegisterCode?: string;
+  dataRegisterEntityId?: string;
 }
 
 const rows = (x: any): any[] => (Array.isArray(x) ? x : (x?.items ?? []));
@@ -243,7 +249,9 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
           preview: items.map((i: any) =>
             `${i.condition_type || 'CP'} · ${i.label || i.key} — ${i.status}`
             + (i.reason ? ` (${i.reason})` : '')
-            + (i.evidence_ref ? `  [${i.evidence_ref}]` : '')).join('\n') || undefined,
+            + (i.evidence_ref ? `  [evidence: ${i.evidence_ref}]` : '')).join('\n') || undefined,
+          dataRegisterCode: ent?.code || undefined,
+          dataRegisterEntityId: ent?.id ? String(ent.id) : undefined,
         };
       }
       if (w.kind === 'cam-report') {
@@ -279,6 +287,8 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
           ['Delivery', pkg?.delivery_method],
           ['Documents', (pkg?.documents || []).length || undefined],
           ['Prepared by', pkg?.prepared_by || w.requestedBy]]),
+        dataRegisterCode: ent?.code || undefined,
+        dataRegisterEntityId: ent?.id ? String(ent.id) : undefined,
       };
     }
     if (w.kind === 'syndication' || w.kind === 'asset-monetisation') {

@@ -32,6 +32,7 @@ from app.api.rbac import router as rbac_router
 from app.api.reconciliation import router as reconciliation_router
 from app.api.resources import build_resource_router
 from app.api.sanction import router as sanction_router
+from app.api.series import router as series_router
 from app.api.tenants import router as tenants_router
 from app.api.tranches import router as tranches_router
 from app.core.config import get_settings
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
         closure_router,
         reconciliation_router,
         evidence_router,
+        series_router,
         build_resource_router(),
     ]
     # The DORMANT Advaya acknowledgement path (internal handoff record) is registered ONLY under an

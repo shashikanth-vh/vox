@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (263 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (264 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -8009,6 +8009,16 @@
                       "key": "window_days",
                       "value": "1",
                       "disabled": true
+                    },
+                    {
+                      "key": "scope_email",
+                      "value": "sample",
+                      "disabled": true
+                    },
+                    {
+                      "key": "serviced_only",
+                      "value": "False",
+                      "disabled": true
                     }
                   ]
                 }
@@ -8603,6 +8613,55 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"reason\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "POST /v1/internal/number-series/next \u2014 Mint the next value in a numbering series (service lane)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/number-series/next",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "number-series",
+                    "next"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"series_key\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

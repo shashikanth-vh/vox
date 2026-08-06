@@ -11,12 +11,15 @@ import { tokens } from '../../theme';
 
 const fmtKB = (b: number) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
 
-export default function DataRegisterDialog({ code, open, onClose }: { code: string; open: boolean; onClose: () => void }) {
+export default function DataRegisterDialog({ code, entityId: entityIdProp, open, onClose }: {
+  code: string; entityId?: string; open: boolean; onClose: () => void }) {
   const { user } = useAuth();
   const ro = !can(user.roles, 'uploadDocs');
   const c = clientsService.get(code);
   // The register keys documents by the COMPANY, so the entity id is what addresses them.
-  const entityId: string | undefined = (c as any)?.entityId;
+  // A caller that already knows it (the approval review) passes it in — the local client
+  // cache only covers companies the clients screen has loaded.
+  const entityId: string | undefined = entityIdProp || (c as any)?.entityId;
   const [docs, setDocs] = useState<DocIndex>({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
