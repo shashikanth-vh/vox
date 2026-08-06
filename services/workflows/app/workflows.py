@@ -673,6 +673,12 @@ class LeadConversionWorkflow:
                 args=[inp.lead_id, f"Conversion rejected by {self._decided_by}: "
                                    f"{self._note or 'no note'} (workflow {wf_id}).",
                       self._approver], **_DURABLE_IO)
+            # The REQUESTER hears the outcome (bell + Today) — a lead note alone only
+            # reaches whoever happens to reopen the lead.
+            await _emit_ops("conversion_rejected", {
+                "subject": f"Lead:{inp.lead_id}", "workflow_id": wf_id,
+                "rejected_by": self._decided_by, "note": self._note or ""},
+                notify_to=[inp.requested_by], severity="warning")
             return LeadConversionResult(workflow_id=wf_id, lead_id=inp.lead_id,
                                         status="Rejected", decided_by=self._decided_by,
                                         decision_note=self._note)
@@ -720,6 +726,15 @@ class LeadConversionWorkflow:
         self._stage = "Approved"
         self._fnd.business_status = "Approved"
         _upsert_search(inp.emit_search_attributes, "Approved", f"Lead:{inp.lead_id}")
+        # Tell the REQUESTER the conversion landed — the only signal used to be the lead
+        # quietly changing rows, which a grid open since before the approval never showed
+        # ("Priya pushed, Divya approved, but the deal is not converted").
+        await _emit_ops("conversion_applied", {
+            "subject": f"Lead:{inp.lead_id}", "workflow_id": wf_id,
+            "deal_id": deal["id"], "approved_by": self._decided_by,
+            "requested_by": inp.requested_by,
+            **{k: v for k, v in line_ids.items() if v}},
+            notify_to=[inp.requested_by])
         return LeadConversionResult(
             workflow_id=wf_id, lead_id=inp.lead_id, status="Approved",
             decided_by=self._decided_by, decision_note=self._note,

@@ -7,7 +7,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { useSearch } from '../../context/SearchContext';
@@ -61,6 +61,20 @@ export default function Navbar() {
   const [bellEl, setBellEl] = useState<null | HTMLElement>(null);
   const closeBell = () => setBellEl(null);
   const urgent = inbox.items.some((n) => n.severity !== 'info');
+
+  // News about YOUR work means the registers around you changed — a conversion landed,
+  // a committee decided, a checker returned something. Grids don't poll (deliberate,
+  // for load), so the bell's own 45s heartbeat doubles as the refresh trigger: when the
+  // unread count RISES, the main register queries are invalidated and any open grid
+  // refetches. This is what makes a converted lead leave the Leads page by itself.
+  const qc = useQueryClient();
+  const prevUnread = useRef(0);
+  useEffect(() => {
+    if (inbox.unread > prevUnread.current) {
+      ['leads', 'deals', 'lending'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    }
+    prevUnread.current = inbox.unread;
+  }, [inbox.unread, qc]);
   const readOne = async (n: InboxItem) => {
     await notificationsService.markRead(n.id);
     await refetchInbox();

@@ -174,8 +174,13 @@ export const leadsService = {
         // them — otherwise every accessorKey (id, temp, last, next) reads undefined
         // and the ID column shows a raw UUID instead of lead_no.
         // No inScope here: the register already scoped this list (see auth/rbac.ts).
-        const rows = asRows(data, 'leads').map(toLeadRow);
-        return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
+        const all = asRows(data, 'leads').map(toLeadRow);
+        // The page promises "Converted leads leave this register automatically" — the
+        // register keeps them (the deal is their continuation), so the LIVE list must
+        // drop them here, exactly as the mock path always did.
+        const rows = all.filter((l) => l.status !== 'Converted');
+        const total = Math.max(0, totalOf(data, all.length) - (all.length - rows.length));
+        return { rows, total, nextCursor: nextCursorOf(data) };
       },
       async () => {
         await delay();
