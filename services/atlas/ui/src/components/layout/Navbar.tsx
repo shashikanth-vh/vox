@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { InputBase, MenuItem, Menu, Divider, ListItemIcon, IconButton, Box, Typography, Stack } from '@mui/material';
+import { InputBase, MenuItem, Menu, Divider, ListItemIcon, IconButton, Box, Typography, Stack, Badge, Button } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { useSearch } from '../../context/SearchContext';
 import { referenceService } from '../../services/referenceService';
+import { notificationsService, type InboxItem } from '../../services/notificationsService';
+import { since } from '../../services/workflowService';
 import { onSave } from '../../utils/saveIndicator';
 import { tokens } from '../../theme';
 import { VocxNavButton } from "../vocx/VocxLauncher";
@@ -43,6 +47,29 @@ export default function Navbar() {
   const [menuEl, setMenuEl] = useState<null | HTMLElement>(null);
   const closeMenu = () => setMenuEl(null);
   const roleLabel = (role: string, name: string) => `${role} · ${name}`;
+
+  // The BELL: the same inbox Today's "Decisions on your work" strip reads (shared
+  // query key, so the two never disagree). The badge is the unread count, refreshed
+  // every 45s; the dropdown shows each decision and clears per-item or all at once.
+  const { data: inbox = { items: [] as InboxItem[], unread: 0 }, refetch: refetchInbox }
+    = useQuery({
+      queryKey: ['inbox', 'unread'],
+      queryFn: () => notificationsService.unread(),
+      refetchInterval: 45000,
+      staleTime: 20000,
+    });
+  const [bellEl, setBellEl] = useState<null | HTMLElement>(null);
+  const closeBell = () => setBellEl(null);
+  const urgent = inbox.items.some((n) => n.severity !== 'info');
+  const readOne = async (n: InboxItem) => {
+    await notificationsService.markRead(n.id);
+    await refetchInbox();
+  };
+  const readAll = async () => {
+    await Promise.all(inbox.items.map((n) => notificationsService.markRead(n.id)));
+    await refetchInbox();
+    closeBell();
+  };
 
   return (
     <Box component="header" className="no-print" sx={{ position: 'sticky', top: 0, zIndex: 60, color: '#fff',
@@ -82,6 +109,15 @@ export default function Navbar() {
         <Box sx={{ display: 'inline-flex', [MOBILE]: { display: 'none' } }}>
           <VocxNavButton />
         </Box>
+        <IconButton onClick={(e) => setBellEl(e.currentTarget)} aria-label="Notifications"
+          sx={{ color: '#C8D6E2', p: '5px',
+            '&:hover': { color: '#fff', background: 'rgba(255,255,255,.07)' } }}>
+          <Badge badgeContent={inbox.unread || 0} max={99}
+            color={urgent ? 'warning' : 'success'}
+            sx={{ '& .MuiBadge-badge': { fontSize: 9.5, height: 15, minWidth: 15 } }}>
+            <NotificationsNoneIcon sx={{ fontSize: 21 }} />
+          </Badge>
+        </IconButton>
         <Typography sx={{ fontSize: 12.5, color: '#C8D6E2', whiteSpace: 'nowrap', [MOBILE]: { display: 'none' } }}>
           {roleLabel(user.role, user.name)}
         </Typography>
@@ -91,6 +127,53 @@ export default function Navbar() {
           <AccountCircleIcon sx={{ fontSize: 22 }} />
         </IconButton>
       </Stack>
+
+      <Menu anchorEl={bellEl} open={!!bellEl} onClose={closeBell}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        slotProps={{ paper: { sx: { minWidth: 320, maxWidth: 420, mt: 0.5 } } }}>
+        {inbox.items.length === 0 ? (
+          <Box sx={{ px: 2, py: 1.4 }}>
+            <Typography sx={{ fontSize: 12.5, color: tokens.muted }}>
+              Nothing unread — decisions on your work land here.
+            </Typography>
+          </Box>
+        ) : ([
+          ...inbox.items.map((n) => (
+            <MenuItem key={n.id} onClick={() => void readOne(n)}
+              title="Click to mark read"
+              sx={{ alignItems: 'flex-start', gap: 1, whiteSpace: 'normal', py: 0.8 }}>
+              <Box aria-hidden sx={{ width: 8, height: 8, borderRadius: '50%', mt: '5px',
+                flexShrink: 0,
+                bgcolor: n.severity === 'warning' ? '#c46a16'
+                  : n.severity === 'critical' ? '#b0223a' : '#1B7F5C' }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: 12.6, fontWeight: 700, lineHeight: 1.3 }}>
+                  {n.title}
+                </Typography>
+                {n.body && (
+                  <Typography sx={{ fontSize: 11.6, color: tokens.muted, lineHeight: 1.35 }}>
+                    {n.body}
+                  </Typography>
+                )}
+                {n.created_at && (
+                  <Typography sx={{ fontSize: 10.6, color: tokens.muted }}>
+                    {since(n.created_at)}
+                  </Typography>
+                )}
+              </Box>
+            </MenuItem>
+          )),
+          <Divider key="bell-div" />,
+          <Box key="bell-actions" sx={{ display: 'flex', px: 1.2, py: 0.5, gap: 1 }}>
+            <Button size="small" onClick={() => void readAll()}
+              sx={{ fontSize: 11.5, textTransform: 'none' }}>✓ Mark all read</Button>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" onClick={() => { closeBell(); nav('/today'); }}
+              sx={{ fontSize: 11.5, textTransform: 'none' }}>Open Today</Button>
+          </Box>,
+        ])}
+      </Menu>
 
       <Menu anchorEl={menuEl} open={!!menuEl} onClose={closeMenu}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
