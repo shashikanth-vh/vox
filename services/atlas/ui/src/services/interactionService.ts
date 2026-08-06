@@ -24,11 +24,11 @@ const toStamp = (d?: string | null) => {
 };
 
 /** An API interaction read back as the ledger row the drawer renders. */
-function fromWire(r: any, refId: string): Interaction {
+function fromWire(r: any, refId: string, refType = 'Lead'): Interaction {
   const at = String(r?.occurred_at || '');
   return {
     interactionId: r?.id || newId(),
-    refId, refType: 'Lead',
+    refId, refType,
     occurredAt: at.slice(0, 10),
     loggedAt: r?.created_at || at,
     person: r?.performed_by || '',
@@ -60,6 +60,34 @@ export const interactionService = {
     db().interactions.push(full);
     writeAudit(by, 'Interaction logged', full.refId, full.interactionType + (full.notes ? ' — ' + full.notes.slice(0, 60) : ''));
     return full;
+  },
+
+  /**
+   * The COMPANY's whole story, live: interactions logged on the entity itself PLUS the
+   * lead-phase discussion from every lead that belongs to it — converted ones included.
+   * The deal team inherits the conversation that won the mandate, not just what was
+   * logged after conversion. Lead-phase rows carry refType 'Lead' so the drawer can
+   * badge them. Falls back to the local store (mock mode / unreachable register).
+   */
+  async forCompany(entityId: string | null | undefined, code: string): Promise<Interaction[]> {
+    if (!USE_REAL_API || !entityId) return this.for(code);
+    try {
+      const rowsOf = (d: any): any[] =>
+        (Array.isArray(d) ? d : (d?.items ?? d?.results ?? d?.interactions ?? d?.leads ?? []));
+      const [entData, leadData] = await Promise.all([
+        api.get<any>(`/entities/${entityId}/interactions`).catch(() => []),
+        api.get<any>('/leads', { entity_id: entityId, limit: 20 }).catch(() => null),
+      ]);
+      const out: Interaction[] = rowsOf(entData).map((r: any) => fromWire(r, code, 'Entity'));
+      const leadRows = rowsOf(leadData);
+      const perLead = await Promise.all(leadRows.map((l: any) =>
+        api.get<any>(`/leads/${l.id}/interactions`).then(rowsOf).catch(() => [])));
+      perLead.forEach((rows, i) => out.push(
+        ...rows.map((r: any) => fromWire(r, leadRows[i].lead_no || code, 'Lead'))));
+      out.sort((a, b) =>
+        ((b.occurredAt || '') + (b.loggedAt || '')).localeCompare((a.occurredAt || '') + (a.loggedAt || '')));
+      return out;
+    } catch { return this.for(code); }
   },
 
   /**

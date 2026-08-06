@@ -59,6 +59,9 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   const ref = referenceService;
   const [, force] = useState(0);
   const [logOpen, setLogOpen] = useState(false);
+  // The interactions panel tells the WHOLE story — entity-phase plus the lead-phase
+  // discussion that won the mandate — refetched when the log dialog closes.
+  const [ints, setInts] = useState<ReturnType<typeof interactionService.for>>([]);
   const [regOpen, setRegOpen] = useState(false);
   const [stageReq, setStageReq] = useState<{ line: StageLine; refId: string; current: string } | null>(null);
   const [noteText, setNoteText] = useState('');
@@ -97,6 +100,13 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
     }).catch(() => {});
     return () => { alive = false; };
   }, [code]);
+  useEffect(() => {
+    if (!code) return;
+    let alive = true;
+    const eid = ((db().clients[code] || {}) as any).entityId;
+    void interactionService.forCompany(eid, code).then((l) => { if (alive) setInts(l); });
+    return () => { alive = false; };
+  }, [code, logOpen]);
   if (!code) return null;
 
   const c = clientsService.get(code);
@@ -105,7 +115,6 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   const syn = syndicationService.byCode(code);
   const am = assetMonService.byCode(code);
   const refType = syn.length ? 'Platform Deals' : lend.length ? 'Lending' : am.length ? 'AssetMon' : 'General';
-  const ints = interactionService.for(code);
   const notes = notesService.for(code);
   const aud = notesService.auditFor(code);
 
@@ -283,6 +292,12 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               <Box key={i.interactionId} sx={{ mb: 1.2 }}>
                 <Typography sx={{ fontSize: 11, color: tokens.muted, fontWeight: 600 }}>
                   {i.occurredAt} · {i.interactionType} · by {i.person}{i.lenderName ? ` · ${i.lenderName}` : ''}
+                  {i.refType === 'Lead' && (
+                    <Box component="span" sx={{ ml: 0.7, px: 0.7, py: 0.1, borderRadius: '99px',
+                      bgcolor: '#FFF3E0', color: '#9A6A00', fontSize: 9.5, fontWeight: 700 }}>
+                      LEAD PHASE
+                    </Box>
+                  )}
                 </Typography>
                 <Typography sx={{ fontSize: 12.5, whiteSpace: 'pre-wrap', mt: 0.3 }}>{i.notes}</Typography>
                 {i.nextAction && <Typography sx={{ fontSize: 11.5, color: tokens.navy, bgcolor: '#EEF4F3', borderRadius: 1, px: 1, py: 0.4, mt: 0.5, display: 'inline-block' }}>Next: {i.nextAction}{i.nextActionDate ? ` by ${i.nextActionDate}` : ''}</Typography>}
