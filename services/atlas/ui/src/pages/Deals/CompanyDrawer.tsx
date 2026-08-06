@@ -315,7 +315,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
         <Button variant="outlined" onClick={onClose}>Done</Button>
       </Box>
 
-      <LogInteractionDialog code={code} refType={refType} open={logOpen} onClose={() => setLogOpen(false)} onDone={bump} />
+      <LogInteractionDialog code={code} refType={refType} entityId={((db().clients[code] || {}) as any).entityId} open={logOpen} onClose={() => setLogOpen(false)} onDone={bump} />
       <DataRegisterDialog code={code} open={regOpen} onClose={() => setRegOpen(false)} />
       <StageChangeDialog open={!!stageReq} code={code} presetLine={stageReq?.line} refId={stageReq?.refId} currentStage={stageReq?.current} onClose={() => setStageReq(null)} onDone={bump} />
     </Drawer>

@@ -106,6 +106,33 @@ export const interactionService = {
   },
 
   /**
+   * POST {{baseUrl}}/v1/entities/{obj_id}/interactions — the company drawer's Log
+   * interaction. This used to write ONLY the local store, so the entry showed in the
+   * local audit but never reached the register — and the register-backed timeline
+   * (forCompany) rightly refused to show it. Same append-only honesty as the lead lane.
+   */
+  async logForEntity(entityId: string, rec: Partial<Interaction>,
+                     by: string): Promise<{ ok: boolean; error?: string }> {
+    if (USE_REAL_API && entityId) {
+      try {
+        await api.post<any>(`/entities/${entityId}/interactions`, {
+          interaction_type: rec.interactionType || '',
+          occurred_at: toStamp(rec.occurredAt),
+          summary: rec.notes || '',
+          contact_name: rec.lenderName || '',
+          performed_by: rec.person || by,
+        });
+      } catch (e: any) {
+        const detail = errText(e?.response?.data);
+        if (e?.response) console.warn('[interactions] POST /entities/%s/interactions failed (%s):', entityId, e.response.status, e.response.data);
+        return { ok: false, error: detail || 'Could not log the interaction.' };
+      }
+    }
+    this.log({ ...rec, refType: rec.refType || 'General' }, by);
+    return { ok: true };
+  },
+
+  /**
    * POST {{baseUrl}}/v1/leads/{obj_id}/interactions. Awaited so a rejected entry doesn't
    * sit in the ledger looking recorded — the records are append-only, so a phantom one
    * can't be tidied up afterwards.

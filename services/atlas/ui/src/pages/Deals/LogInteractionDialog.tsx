@@ -6,10 +6,12 @@ import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
 
-export default function LogInteractionDialog({ code, refType, lead, open, onClose, onDone }: {
+export default function LogInteractionDialog({ code, refType, lead, entityId, open, onClose, onDone }: {
   code: string; refType?: string;
   /** Present when logging against a lead — routes to POST /v1/leads/{id}/interactions. */
   lead?: LeadRef;
+  /** Present when logging against a COMPANY — routes to POST /v1/entities/{id}/interactions. */
+  entityId?: string;
   open: boolean; onClose: () => void; onDone: () => void;
 }) {
   const { user } = useAuth();
@@ -33,10 +35,16 @@ export default function LogInteractionDialog({ code, refType, lead, open, onClos
   const save = async () => {
     if (missing) return;
     const rec = { ...f, refId: code, refType: refType || 'General', nextActionDate: f.nextActionDate || null };
-    // A lead's ledger lives behind the API; everything else is still the local store.
+    // Leads and companies both write to the REGISTER (the append-only ledger the
+    // timeline reads); only mock mode falls through to the local store alone.
     if (lead) {
       setSaving(true);
       const r = await interactionService.logForLead(lead, rec, user.full);
+      setSaving(false);
+      if (!r.ok) { setErr(r.error || 'Could not log the interaction.'); return; }
+    } else if (entityId) {
+      setSaving(true);
+      const r = await interactionService.logForEntity(entityId, rec, user.full);
       setSaving(false);
       if (!r.ok) { setErr(r.error || 'Could not log the interaction.'); return; }
     } else {
