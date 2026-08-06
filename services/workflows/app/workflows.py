@@ -943,16 +943,17 @@ class DealStructuringWorkflow:
             self._stage = "Circulating credit note"
             self._note_version = 1
             for line in lines:
-                # decision_ref carries the VERSION: the register allows one evidence row
-                # per (decision_ref, kind), so a bare workflow id here made every later
-                # revision collide with v1 — a 409 that killed the run exactly when the
-                # committee had returned it for rework.
+                # decision_ref carries the VERSION and the RUN: the register allows one
+                # evidence row per (decision_ref, kind), and Temporal REUSES a closed
+                # workflow's id for the next attempt — so the ref must be unique per
+                # revision (v1 vs v2 within a run) AND per attempt (reject → re-raise),
+                # or the reject-and-raise-again loop dies on its second lap.
                 note_ev = await workflow.execute_activity(
                     activities.attach_evidence,
                     args=["Lending", str(line.get("id")), "credit_note",
                           inp.credit_note_reference, None,
                           "Structured credit note circulated to committee (v1)", caller,
-                          f"{wf_id}:credit-note:v1"],
+                          f"{wf_id}:{workflow.info().run_id[:12]}:credit-note:v1"],
                     **_DURABLE_IO)
                 evidence_ids.append(note_ev.get("id"))
 
@@ -1018,7 +1019,7 @@ class DealStructuringWorkflow:
                               f"Revised credit note circulated to committee "
                               f"(v{self._note_version}"
                               + (f", by {revised_by}" if revised_by else "") + ")",
-                              caller, f"{wf_id}:credit-note:v{self._note_version}"],
+                              caller, f"{wf_id}:{workflow.info().run_id[:12]}:credit-note:v{self._note_version}"],
                         **_DURABLE_IO)
                     evidence_ids.append(ev.get("id"))
                 self._stage = "Awaiting committee decision"
@@ -1313,7 +1314,7 @@ class SyndicationMandateWorkflow:
             args=["Syndication", sid, "im_document", reference, sha,
                   f"IM circulated to lenders (v{self._im_version}"
                   + (f", by {by}" if by else "") + ")", caller,
-                  f"{workflow.info().workflow_id}:im:v{self._im_version}"],
+                  f"{workflow.info().workflow_id}:{workflow.info().run_id[:12]}:im:v{self._im_version}"],
             **_DURABLE_IO)
         evidence_ids.append(ev.get("id"))
 
@@ -1661,7 +1662,7 @@ class AssetMonetisationWorkflow:
             args=["AssetMonetisation", mid, "teaser_document", reference, sha,
                   f"Teaser circulated to buyers (v{self._teaser_version}"
                   + (f", by {by}" if by else "") + ")", caller,
-                  f"{workflow.info().workflow_id}:teaser:v{self._teaser_version}"],
+                  f"{workflow.info().workflow_id}:{workflow.info().run_id[:12]}:teaser:v{self._teaser_version}"],
             **_DURABLE_IO)
         evidence_ids.append(ev.get("id"))
 
