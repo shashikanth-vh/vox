@@ -103,8 +103,18 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   useEffect(() => {
     if (!code) return;
     let alive = true;
-    const eid = ((db().clients[code] || {}) as any).entityId;
-    void interactionService.forCompany(eid, code).then((l) => { if (alive) setInts(l); });
+    void (async () => {
+      // Resolve the entity id OURSELVES rather than peeking at the client cache: on a
+      // fresh page load the cache has not healed yet, so the peek came back empty, the
+      // timeline fell back to the (empty) local store, and never retried — a drawer
+      // showing Interactions (0) over a register full of them.
+      let eid = ((db().clients[code] || {}) as any).entityId as string | undefined;
+      if (!eid && USE_REAL_API) {
+        try { eid = (await entitiesService.byCode(code))?.entityId; } catch { /* fallback below */ }
+      }
+      const l = await interactionService.forCompany(eid, code);
+      if (alive) setInts(l);
+    })();
     return () => { alive = false; };
   }, [code, logOpen]);
   if (!code) return null;
