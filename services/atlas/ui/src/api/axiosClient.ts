@@ -61,6 +61,22 @@ function withBodyContentType<T extends { data?: unknown; headers: any }>(cfg: T)
   return cfg;
 }
 
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/**
+ * The 15s default is for API chatter, and it KILLED file transfers: a scanned
+ * financials PDF on a slow uplink takes longer than that to even leave the browser.
+ * Any request carrying a file (FormData) or fetching bytes (blob) gets a
+ * transfer-sized window instead — unless the caller already set its own.
+ */
+function withTransferTimeout<T extends { data?: unknown; responseType?: string;
+                                         timeout?: number }>(cfg: T): T {
+  if (cfg.timeout && cfg.timeout !== DEFAULT_TIMEOUT_MS) return cfg;
+  if (typeof FormData !== 'undefined' && cfg.data instanceof FormData) cfg.timeout = 180_000;
+  else if (cfg.responseType === 'blob') cfg.timeout = 120_000;
+  return cfg;
+}
+
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
@@ -72,7 +88,7 @@ const axiosClient = axios.create({
 // sign-in or sign-out takes effect immediately.
 axiosClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
-  return withBodyContentType(cfg);
+  return withTransferTimeout(withBodyContentType(cfg));
 });
 
 axiosClient.interceptors.response.use(
@@ -90,7 +106,7 @@ export const gwClient = axios.create({
 });
 gwClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
-  return withBodyContentType(cfg);
+  return withTransferTimeout(withBodyContentType(cfg));
 });
 
 export default axiosClient;

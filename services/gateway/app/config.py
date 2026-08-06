@@ -103,10 +103,12 @@ class Settings(BaseSettings):
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0
     # For the few paths that are slow BY DESIGN — a speech capture is transcribed
-    # synchronously, and a three-minute clip on CPU outlasts the ordinary budget. Scoped
-    # in _SLOW_PATHS so nothing else inherits a minutes-long window. Keep it >= the STT
-    # client's own 300s, or the gateway gives up while the transcription is still running.
-    slow_upstream_timeout_s: float = 300.0
+    # synchronously (a three-minute clip on CPU outlasts the ordinary budget), and a
+    # full CAM generation reads the template + prompt + documents and streams an
+    # 11-section memo back, which honestly runs past five minutes. Scoped in
+    # _SLOW_PATHS so nothing else inherits a minutes-long window. Keep it >= the STT
+    # client's own 300s, and the whole CAM chain (UI 620s, edge 625s) above this.
+    slow_upstream_timeout_s: float = 600.0
 
     # CORS — for a UI served from a DIFFERENT origin than this edge (a separate static
     # host, a local dev server). Comma-separated origins, e.g.

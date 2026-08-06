@@ -113,9 +113,10 @@ export const camService = {
   }): Promise<{ report_id: string; draft_md: string; engine: string;
                 included: any[]; skipped: any[] }> {
     try {
-      // Reading several documents and writing a long answer takes minutes, not seconds.
+      // Reading several documents and streaming a full memo takes minutes — the
+      // whole chain (edge 625s, gateway 600s) is budgeted for ten of them.
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/generate`, input,
-        { timeoutMs: 320_000 });
+        { timeoutMs: 620_000 });
     } catch (e) { throw new Error(msg(e, 'draft the CAM')); }
   },
 
@@ -131,7 +132,7 @@ export const camService = {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/refine`,
         { instruction, update_draft: updateDraft,
           ...(sourceDocIds.length ? { source_doc_ids: sourceDocIds } : {}) },
-        { timeoutMs: 320_000 });
+        { timeoutMs: 620_000 });
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
@@ -213,7 +214,7 @@ export const camService = {
   }): Promise<void> {
     try {
       const blob = await orchestrator.postBlob(`/v1/cam/${lendingId}/draft-letter`,
-        input, { timeoutMs: 320_000 });
+        input, { timeoutMs: 620_000 });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = 'Sanction letter - draft.docx';
@@ -261,7 +262,7 @@ export const camService = {
     try {
       return await orchestrator.post<any>('/v1/cam/extract-terms',
         { doc_id: docId, ...(creditNote ? { credit_note: creditNote } : {}) },
-        { timeoutMs: 320_000 });
+        { timeoutMs: 620_000 });
     } catch (e) { throw new Error(msg(e, 'read the terms out of the letter')); }
   },
 
