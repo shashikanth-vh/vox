@@ -46,8 +46,11 @@ type ChatMsg = { role: 'user' | 'assistant'; text: string };
 /** The rail's tiny section heading. */
 const railHead = {
   fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', color: tokens.muted,
-  textTransform: 'uppercase' as const, mt: 1.6, mb: 0.5,
+  textTransform: 'uppercase' as const, mt: 1.1, mb: 0.35,
 };
+
+/** Rail buttons stay dense — the rail is a toolbar, not a page. */
+const railBtn = { textTransform: 'none' as const, py: 0.3, fontSize: 12 };
 
 /** Turns the register's turn annotations into something a reader wants to see. */
 function displayTurn(text: string): string {
@@ -440,10 +443,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             flexDirection: { xs: 'column', md: 'row' } }}>
 
             {/* THE RAIL — set up once, then talk. */}
-            <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0,
+            <Box sx={{ width: { xs: '100%', md: 260 }, flexShrink: 0,
               borderRight: { md: `1px solid ${tokens.line}` },
               borderBottom: { xs: `1px solid ${tokens.line}`, md: 'none' },
-              overflowY: 'auto', px: 1.4, pb: 1.4,
+              overflowY: 'auto', px: 1.2, pb: 1.2,
               maxHeight: { xs: '38vh', md: 'none' } }}>
 
               {reports.length > 0 && (
@@ -458,7 +461,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
               {defaults.example && (
                 <Button fullWidth variant="outlined" size="small"
-                  sx={{ textTransform: 'none', mt: 1.2 }}
+                  sx={{ ...railBtn, mt: 0.8 }}
                   title="The Word template the CAM must follow — Generate mirrors its structure"
                   onClick={() => void downloadTemplate()}>Download CAM template</Button>
               )}
@@ -466,11 +469,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               <Typography sx={railHead}>Prompts</Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
                 {defaults.prompt && (
-                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                    onClick={() => void downloadPrompt()}>Download default CAM prompt</Button>
+                  <Button fullWidth variant="outlined" size="small" sx={railBtn}
+                    onClick={() => void downloadPrompt()}>Download CAM Prompt</Button>
                 )}
                 <Button fullWidth size="small" component="label" variant="outlined"
-                  disabled={tplBusy || !!busy} sx={{ textTransform: 'none' }}
+                  disabled={tplBusy || !!busy} sx={railBtn}
                   title="File a case-specific prompt on this line — tick it to use it instead of the default">
                   {tplBusy ? 'Uploading…' : 'Upload custom CAM prompt…'}
                   <input hidden type="file" accept=".docx,.md,.txt,.pdf"
@@ -478,19 +481,17 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 </Button>
               </Box>
               <FormControlLabel sx={{ display: 'flex', mr: 0, mt: 0.4, alignItems: 'flex-start',
-                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.4 } }}
+                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.3 } }}
                 control={<Checkbox size="small" sx={{ py: 0.3 }} checked={promptUse === 'default'}
                   disabled={!defaults.prompt} onChange={() => pickPrompt('default')} />}
-                label={defaults.prompt
-                  ? `Use default prompt — ${defaults.prompt.title}`
-                  : 'Use default prompt (none on record)'} />
+                title={defaults.prompt?.title || ''}
+                label={defaults.prompt ? 'Default Prompt' : 'Default Prompt (none on record)'} />
               <FormControlLabel sx={{ display: 'flex', mr: 0, alignItems: 'flex-start',
-                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.4 } }}
+                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.3 } }}
                 control={<Checkbox size="small" sx={{ py: 0.3 }} checked={promptUse === 'custom'}
                   disabled={!customPrompt} onChange={() => pickPrompt('custom')} />}
-                label={customPrompt
-                  ? `Use custom prompt — ${customPrompt.title}`
-                  : 'Use custom prompt (upload one first)'} />
+                title={customPrompt?.title || ''}
+                label={customPrompt ? 'Custom Prompt' : 'Custom Prompt (upload one first)'} />
               {promptUse === 'none' && (
                 <Typography sx={{ fontSize: 11, color: tokens.muted, mt: 0.4 }}>
                   No prompt — questions go with the ticked documents only.
@@ -562,7 +563,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                         onClick={() => send(SUMMARY_BRIEF,
                           `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`)}
                         title="The engine digests the ticked documents — facts, figures, gaps — into the conversation"
-                        sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.6 }}>
+                        sx={{ ...railBtn, fontSize: 11.5, mt: 0.5 }}>
                         {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
                       </Button>
                       <Typography sx={{ fontSize: 10.5, color: tokens.muted, mt: 0.4 }}>
@@ -609,7 +610,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 value={title} onChange={(e) => setTitle(e.target.value)} sx={{ mb: 0.6 }} />
               <Button fullWidth component="label" variant="contained" size="small" disabled={!!busy}
                 title="Files the document on this line only — the committee request is the separate 'Send to credit committee' step"
-                sx={{ textTransform: 'none' }}>
+                sx={railBtn}>
                 {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM'}
                 <input hidden type="file" accept=".docx,.pdf,.md,.txt"
                   onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
