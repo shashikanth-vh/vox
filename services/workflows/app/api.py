@@ -3484,13 +3484,25 @@ def create_app() -> FastAPI:
                 run_uuid = str(getattr(desc, "run_id", "") or "")
                 if desc.status == WorkflowExecutionStatus.RUNNING:
                     run_state = "live"
+                    # "Returned" is a BUSINESS state (the `state` query) — the technical
+                    # stage stays "Awaiting committee decision" while a run is parked
+                    # with its maker, so reading only `status` here kept the drawer's
+                    # revise/resubmit actions disabled exactly when they were needed.
+                    stage_q = ""
+                    with contextlib.suppress(RPCError, TemporalError):
+                        stage_q = str(await handle.query("status") or "")
                     business = ""
                     with contextlib.suppress(RPCError, TemporalError):
-                        business = str(await handle.query("status") or "")
-                    if business in _RETURNED_STATES or "return" in business.lower():
+                        st = await handle.query("state")
+                        if isinstance(st, dict):
+                            business = str(st.get("business_status") or "")
+                    if (business in _RETURNED_STATES or "return" in business.lower()
+                            or "return" in stage_q.lower()):
                         run_state = "returned"
                     run_info = {"workflow_id": workflow_id, "status": "RUNNING",
-                                "stage": business,
+                                "stage": ("Returned for revision — amend and resubmit"
+                                          if run_state == "returned" else stage_q),
+                                "business_status": business,
                                 "status_url": f"/v1/workflows/{workflow_id}"}
 
         # What governance evidence is already on file for this subject — read once, so an
