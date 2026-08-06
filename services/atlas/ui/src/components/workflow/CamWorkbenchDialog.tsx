@@ -96,7 +96,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(false);
   const [tplBusy, setTplBusy] = useState(false);
-  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
 
   const viewDoc = async (id: string, docTitle: string) => {
     setErr('');
@@ -286,33 +285,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     setTplBusy(false);
   };
 
-  const uploadDefaultPrompt = async (file: File | null) => {
-    if (!file) return;
-    setErr(''); setTplBusy(true);
-    try {
-      await camService.uploadTemplate('cam_prompt', file);
-      await load();
-      setPromptUse('default');
-    } catch (e: any) {
-      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
-    }
-    setTplBusy(false);
-  };
-
-  const renameDefaultPrompt = async () => {
-    const t = (renamingTitle || '').trim();
-    if (!t || !defaults.prompt) { setRenamingTitle(null); return; }
-    setErr(''); setTplBusy(true);
-    try {
-      await camService.renameTemplate(defaults.prompt.id, t);
-      await load();
-      setRenamingTitle(null);
-    } catch (e: any) {
-      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
-    }
-    setTplBusy(false);
-  };
-
   // The completed CAM (a filled .docx, usually) is FILED on the line and attached to
   // the working version — nothing goes to any approver from here. The committee request
   // is the drawer's own "Send to credit committee" step, which carries this document.
@@ -497,39 +469,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   No prompt — questions go with the ticked documents only.
                 </Typography>
               )}
-              {/* The tenant-wide default stays credit-desk authority. */}
-              {committee && renamingTitle === null && (
-                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.3 }}>
-                  {defaults.prompt && (
-                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none', fontSize: 11 }}
-                      onClick={() => setRenamingTitle(defaults.prompt?.title || '')}>
-                      Rename default…
-                    </Button>
-                  )}
-                  <Button size="small" component="label" disabled={tplBusy}
-                    sx={{ textTransform: 'none', fontSize: 11 }}
-                    title="File a new tenant-wide default prompt version — newest wins">
-                    Update default…
-                    <input hidden type="file" accept=".docx,.md,.txt,.pdf"
-                      onChange={(e) => { void uploadDefaultPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
-                  </Button>
-                </Box>
-              )}
-              {committee && renamingTitle !== null && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6, mt: 0.5 }}>
-                  <TextField size="small" label="New name" value={renamingTitle}
-                    onChange={(e) => setRenamingTitle(e.target.value)} />
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    <Button size="small" variant="contained" disabled={tplBusy || !renamingTitle.trim()}
-                      onClick={() => void renameDefaultPrompt()} sx={{ textTransform: 'none' }}>
-                      Save name
-                    </Button>
-                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
-                      onClick={() => setRenamingTitle(null)}>Cancel</Button>
-                  </Box>
-                </Box>
-              )}
-
               {sources.length > 0 && (
                 <>
                   {/* Click to unfold the company's whole file — every document, tickable. */}
