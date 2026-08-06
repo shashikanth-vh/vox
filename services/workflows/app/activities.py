@@ -671,7 +671,13 @@ async def _fan_out_notifications(payload: dict[str, Any],
                     subject_type=notify.get("subject_type"),
                     subject_id=notify.get("subject_id"),
                     workflow_id=str(payload.get("workflow_id")),
-                    dedupe_key=f"{payload.get('workflow_id')}:{payload.get('event')}:"
+                    # The RUN id is part of the key: Temporal reuses a closed workflow's
+                    # id for the next attempt, so a key without it collapsed "rejected
+                    # again on the re-raise" into the FIRST rejection's notification —
+                    # the maker heard the first refusal and none after. Within one run
+                    # an activity retry still dedupes exactly as before.
+                    dedupe_key=f"{payload.get('workflow_id')}:{payload.get('run_id')}:"
+                               f"{payload.get('event')}:"
                                f"{notify.get('discriminator', '')}:{recipient}"[:240],
                     channels=channels,
                     sms_to=notify.get("sms_to"),
@@ -713,8 +719,9 @@ async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str
 
     s = get_settings()
     wf_id = str(activity.info().workflow_id)
+    run_id = str(activity.info().workflow_run_id)
     notify = detail.pop("notify", None) if isinstance(detail, dict) else None
-    payload = {"event": event, "workflow_id": wf_id, **detail}
+    payload = {"event": event, "workflow_id": wf_id, "run_id": run_id, **detail}
     activity.logger.info("operational_event", extra={"ops": payload})
 
     result: dict[str, Any] = {"delivered": False, "channel": "log"}
