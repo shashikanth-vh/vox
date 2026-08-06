@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Paper, Typography, TextField, Button, Divider, Alert, CircularProgress } from '@mui/material';
 import { useAuth } from '../../auth/AuthContext';
+import { GOOGLE_SSO_CLIENT_ID } from '../../api/axiosClient';
 import { tokens } from '../../theme';
 
 // Login field label with the mandatory red asterisk (Forms spec: both fields MANDATORY).
@@ -13,11 +14,44 @@ function Lbl({ children }: { children: React.ReactNode }) {
 }
 
 export default function LoginPage() {
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn, signInWithGoogle, signInWithGoogleCredential } = useAuth();
   const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // PER-USER Google sign-in (Google Identity Services), switched on by a configured
+  // GOOGLE_SSO_CLIENT_ID: Google's own button renders below, the user picks THEIR
+  // account, and Google hands back an id_token minted for that person — which the
+  // gateway then verifies like any bearer. Without the client id, the legacy
+  // fixed-identity shortcut button stays.
+  const gisRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!GOOGLE_SSO_CLIENT_ID) return;
+    const setup = () => {
+      const g = (window as any).google?.accounts?.id;
+      if (!g || !gisRef.current) return;
+      g.initialize({
+        client_id: GOOGLE_SSO_CLIENT_ID,
+        callback: (resp: any) => {
+          setErr(''); setBusy(true);
+          signInWithGoogleCredential(String(resp?.credential || ''))
+            .catch((e: any) => setErr(e?.message || 'Google sign-in failed.'))
+            .finally(() => setBusy(false));
+        },
+      });
+      g.renderButton(gisRef.current, {
+        theme: 'outline', size: 'large', width: 320, text: 'continue_with',
+      });
+    };
+    if ((window as any).google?.accounts?.id) { setup(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = setup;
+    document.head.appendChild(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Both fields are mandatory before a credentialed sign-in (Google SSO stays optional).
   // The credentials go to PRISM via authService; anything the backend rejects comes back
@@ -86,8 +120,12 @@ export default function LoginPage() {
 
         <Divider sx={{ my: 1.8, color: tokens.muted, fontSize: 11 }}>or</Divider>
 
-        <Button fullWidth variant="outlined" size="large" startIcon={<GoogleG />} onClick={tryGoogle} disabled={busy}
-          sx={{ py: 1.2, color: tokens.ink, borderColor: tokens.line, fontWeight: 600 }}>Continue with Google</Button>
+        {GOOGLE_SSO_CLIENT_ID ? (
+          <Box ref={gisRef} sx={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+        ) : (
+          <Button fullWidth variant="outlined" size="large" startIcon={<GoogleG />} onClick={tryGoogle} disabled={busy}
+            sx={{ py: 1.2, color: tokens.ink, borderColor: tokens.line, fontWeight: 600 }}>Continue with Google</Button>
+        )}
       </Paper>
     </Box>
   );

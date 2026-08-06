@@ -246,6 +246,19 @@ export const authService = {
     return establish(email, idToken);
   },
 
+  /**
+   * PER-USER Google sign-in: the GIS button hands over the id_token Google minted for
+   * whoever just picked their account. The gateway verifies it (accounts.google.com in
+   * the accepted issuers) and Access decides their roles — a valid Google account that
+   * was never provisioned signs in to nothing.
+   */
+  async signInWithGoogleCredential(credential: string): Promise<PrismSession> {
+    if (!credential) throw new AuthError('Google returned no credential — try again.');
+    const email = emailFromIdToken(credential);
+    if (!email) throw new AuthError('The Google credential carries no e-mail claim.');
+    return establish(email, credential);
+  },
+
   /** True when a client_id, secret and refresh token are all present. */
   isGoogleConfigured: (): boolean =>
     Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN),

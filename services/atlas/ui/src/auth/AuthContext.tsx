@@ -46,6 +46,7 @@ interface AuthCtx {
   signInWithIdToken: (idToken: string) => Promise<void>;
   /** Sign in via folder 00c's Google refresh grant. No credentials are involved. */
   signInWithGoogle: () => Promise<void>;
+  signInWithGoogleCredential: (credential: string) => Promise<void>;
   signOut: () => void;
 }
 
@@ -89,6 +90,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithGoogle: async () => {
       if (!authService.isLive()) { setUser(adminUser); setSession(null); setAuthed(true); return; }
       const s = await authService.signInWithGoogle();
+      setSession(s); setUser(userFromSession(s)); setAuthed(true);
+    },
+    signInWithGoogleCredential: async (credential) => {
+      if (!authService.isLive()) { setUser(adminUser); setSession(null); setAuthed(true); return; }
+      const s = await authService.signInWithGoogleCredential(credential);
       setSession(s); setUser(userFromSession(s)); setAuthed(true);
     },
     signOut: () => { authService.signOut(); setSession(null); setAuthed(false); },

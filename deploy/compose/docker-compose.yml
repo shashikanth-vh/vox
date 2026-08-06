@@ -378,6 +378,11 @@ services:
         # UI_DEX_URL to the PUBLIC edge origin, e.g. https://<host>:8443 — the edge
         # proxies /dex to Dex, so the SPA's token call stays same-origin.
         VITE_DEX_URL: "${UI_DEX_URL:-}"
+        # Per-user Google sign-in: set GOOGLE_SSO_CLIENT_ID in deploy/compose/.env and
+        # rebuild the ui image. Public value (client id, never a secret) — safe as a
+        # build arg. Pair it with GATEWAY_OIDC_ISSUERS / WORKFLOWS_OIDC_ISSUERS so the
+        # backend accepts accounts.google.com tokens — see docs/GOOGLE_SSO.md.
+        VITE_GOOGLE_SSO_CLIENT_ID: "${GOOGLE_SSO_CLIENT_ID:-}"
         VITE_TENANT: "EVAM"
         # true = the app calls the REAL APIs (this platform). 'false' compiles the
         # standalone mock-data demo — never what you want behind this edge.

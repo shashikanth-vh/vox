@@ -29,6 +29,11 @@ ARG VITE_ORCHESTRATOR_URL="/orchestrator"
 # front-door key, so the browser never holds it.
 ARG VITE_VOCX_URL="/vocx"
 ARG VITE_DEX_URL=""
+# PER-USER Google sign-in (a PUBLIC OAuth client id — no secret involved). Set it and
+# the login screen renders Google's own account-picker button alongside the Dex
+# username/password form; leave it empty and only Dex sign-in shows.
+# The gateway must then accept accounts.google.com too — see docs/GOOGLE_SSO.md.
+ARG VITE_GOOGLE_SSO_CLIENT_ID=""
 ARG VITE_TENANT="EVAM"
 # The app ships a full MOCK data store for standalone demos and only calls the real
 # APIs when this compiles in as 'true'. On the platform the backend IS present, so
@@ -45,6 +50,7 @@ ENV VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
     VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \
     VITE_VOCX_URL=$VITE_VOCX_URL \
     VITE_DEX_URL=$VITE_DEX_URL \
+    VITE_GOOGLE_SSO_CLIENT_ID=$VITE_GOOGLE_SSO_CLIENT_ID \
     VITE_TENANT=$VITE_TENANT \
     VITE_USE_REAL_API=$VITE_USE_REAL_API
 RUN npm run build -- --base=/ui/

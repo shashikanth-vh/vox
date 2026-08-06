@@ -32,6 +32,12 @@ export const TENANT: string = import.meta.env.VITE_TENANT || 'EVAM';
 export const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 export const GOOGLE_CLIENT_SECRET: string = import.meta.env.VITE_GOOGLE_CLIENT_SECRET || '';
 export const GOOGLE_REFRESH_TOKEN: string = import.meta.env.VITE_GOOGLE_REFRESH_TOKEN || '';
+// PER-USER Google sign-in (Google Identity Services). A public OAuth client id — safe
+// in the bundle; no secret is involved in the credential flow. Setting it switches the
+// login screen's Google button from the fixed-identity dev shortcut above to a real
+// "pick your account" sign-in, verified by the gateway (accounts.google.com must be in
+// GATEWAY_OIDC_ISSUERS / WORKFLOWS_OIDC_ISSUERS — see docs/GOOGLE_SSO.md).
+export const GOOGLE_SSO_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_SSO_CLIENT_ID || '';
 // Google's token endpoint does answer cross-origin, so the direct URL is the default.
 // Override it with the dev-server proxy path if a CSP or a corporate proxy gets in the way.
 export const GOOGLE_TOKEN_URL: string =
