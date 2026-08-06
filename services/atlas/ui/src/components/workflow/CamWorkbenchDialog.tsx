@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider,
+  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress,
   FormControlLabel,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -19,15 +19,15 @@ import { tokens } from '../../theme';
  * company's file actually holds, reworks it turn by turn, and finalises it into the
  * Data Register for the committee.
  *
- * The surface is a CONVERSATION (field feedback: "like Claude's"): questions go in at
- * the bottom, answers stack above, and the whole exchange — plus the chosen prompt and
- * the ticked documents — becomes the CAM when the analyst clicks Generate CAM. The
- * transcript is durable: the register records every turn, so reopening the workbench
- * reopens the conversation, and "why does the CAM say this?" always has an answer.
+ * The layout is the one every AI workbench has taught people (field feedback: "like
+ * Claude's"): a LEFT RAIL holds everything that is set up once — template and prompt
+ * downloads, the prompt choice, the document ticks, the filing lane — and the
+ * CONVERSATION owns the rest of the surface, full height, question box at the bottom.
+ * The transcript is durable: the register records every turn, so reopening the
+ * workbench reopens the conversation, and "why does the CAM say this?" has an answer.
  *
- * The prompt is a choice, not a setting: the credit team's default (versioned on the
- * template shelf) or a case-specific upload filed on this line. Exactly one — or none —
- * rides with every question and with Generate.
+ * Generate CAM is the point of the conversation: the whole exchange, the chosen
+ * prompt, and the ticked documents become the draft in one click.
  *
  * The committee's decision also lives here (and on Today's queue): a SUBMITTED version
  * shows Approve / Return / Reject to committee authority. The register enforces
@@ -42,6 +42,19 @@ const TONE: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'>
 };
 
 type ChatMsg = { role: 'user' | 'assistant'; text: string };
+
+/** The rail's tiny section heading. */
+const railHead = {
+  fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', color: tokens.muted,
+  textTransform: 'uppercase' as const, mt: 1.6, mb: 0.5,
+};
+
+/** Turns the register's turn annotations into something a reader wants to see. */
+function displayTurn(text: string): string {
+  return text
+    .replace(/\n?\[documents sent: [^\]]*\]/g, '\n(documents attached)')
+    .replace(/^\[generate\][^\n]*/, 'Generate the CAM from the prompt and the attached documents.');
+}
 
 export default function CamWorkbenchDialog({ action, subjectId, entityId, onClose, onDone }: {
   action: WorkflowAction | null;
@@ -62,7 +75,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [promptUse, setPromptUse] = useState<'default' | 'custom' | 'none'>('default');
   const [customPrompt, setCustomPrompt] = useState<{ id: string; title: string } | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [docsOpen, setDocsOpen] = useState(false);
   // "Show me what the engine will read" — the extracted text of any pickable document.
   const [preview, setPreview] = useState<{ title: string; text: string; note?: string } | null>(null);
 
@@ -78,6 +90,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(false);
+  const [tplBusy, setTplBusy] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
 
   const viewDoc = async (id: string, docTitle: string) => {
     setErr('');
@@ -118,7 +132,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   useEffect(() => {
     if (!open) return;
     setSel(new Set()); setChat([]); setQuestion(''); setTitle('');
-    setNote(''); setErr(''); setInfo(''); setBusy('');
+    setNote(''); setErr(''); setInfo(''); setBusy(''); setPreview(null);
     setPromptUse('default'); setCustomPrompt(null); seededFor.current = '';
     void load();
   }, [open, subjectId]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -138,7 +152,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     void camService.get(id).then((full) => {
       const msgs: ChatMsg[] = (full.turns || [])
         .filter((t) => !String(t.content || '').startsWith('[manual edit]'))
-        .map((t) => ({ role: t.role, text: String(t.content || '') }));
+        .map((t) => ({ role: t.role, text: displayTurn(String(t.content || '')) }));
       // Never clobber questions already asked this session.
       if (msgs.length) setChat((c) => (c.length ? c : msgs));
     }).catch(() => {});
@@ -187,7 +201,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
   // The point of the conversation: everything established above + the prompt + the
   // ticked documents becomes the CAM draft. The reply lands in the chat AND as the
-  // working draft on record — "Download as Word" below turns it into the file.
+  // working draft on record — "Download as Word" in the rail turns it into the file.
   const generateCam = () => {
     if (busy) return;
     // A typed-but-unsent question still counts — it rides inside the brief.
@@ -208,14 +222,14 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       const out = await camService.refine(subjectId, brief, true, ride);
       setChat((c) => [...c, { role: 'assistant', text: out.draft_md || '' }]);
       setSel(new Set());
-      return 'CAM draft ready — use "To Word" on the answer (or "Download as Word" below), review it in Word, then upload the completed CAM.';
+      return 'CAM draft ready — use "To Word" on the answer, review it in Word, then upload the completed CAM.';
     });
   };
 
   const toWord = (markdown: string) => run('to-word', async () => {
     await camService.exportDocx(subjectId, markdown,
       title.trim() || `CAM v${working?.report_version ?? 1}`);
-    return 'Word file downloaded — review it in Word, then upload it below as the completed CAM.';
+    return 'Word file downloaded — review it in Word, then upload it as the completed CAM.';
   });
 
   // ---- the Word lane: download the template, fill it OUTSIDE, upload the result ----
@@ -255,11 +269,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     } catch (e: any) { setErr(e?.message || String(e)); }
     setTplBusy(false);
   };
-
-  // The tenant DEFAULT is the credit team's own document — updating it is an upload
-  // here (never a deploy); renaming keeps the picker honest.
-  const [tplBusy, setTplBusy] = useState(false);
-  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
 
   const uploadDefaultPrompt = async (file: File | null) => {
     if (!file) return;
@@ -334,25 +343,20 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const thinking = busy === 'ask' || busy === 'generate';
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ fontSize: 16 }}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
+      PaperProps={{ sx: { height: '92vh' } }}>
+      <DialogTitle sx={{ fontSize: 16, py: 1.2 }}>
         CAM workbench
         {loading && <CircularProgress size={13} sx={{ ml: 1, verticalAlign: 'middle' }} />}
         <IconButton onClick={onClose} sx={{ position: 'absolute', right: 8, top: 6 }}>
           <CloseIcon fontSize="small" />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers>
-        {err && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setErr('')}>{err}</Alert>}
-        {info && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setInfo('')}>{info}</Alert>}
-
-        {reports.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mb: 1.2 }}>
-            {reports.map((r) => (
-              <Chip key={r.id} size="small" color={TONE[r.status] || 'default'}
-                variant={live?.id === r.id ? 'filled' : 'outlined'}
-                label={`v${r.report_version} · ${r.status}`} />
-            ))}
+      <DialogContent dividers sx={{ p: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {(err || info) && (
+          <Box sx={{ px: 1.5, pt: 1 }}>
+            {err && <Alert severity="warning" sx={{ mb: 0.5, py: 0, fontSize: 12 }} onClose={() => setErr('')}>{err}</Alert>}
+            {info && <Alert severity="success" sx={{ mb: 0.5, py: 0, fontSize: 12 }} onClose={() => setInfo('')}>{info}</Alert>}
           </Box>
         )}
 
@@ -365,7 +369,16 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           const preparer = (submitted.prepared_by || '').trim().toLowerCase();
           const mayDecide = committee && (!me || me !== preparer);
           return (
-          <Box sx={{ mb: 1.5 }}>
+          <Box sx={{ p: 2, overflowY: 'auto' }}>
+            {reports.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mb: 1.2 }}>
+                {reports.map((r) => (
+                  <Chip key={r.id} size="small" color={TONE[r.status] || 'default'}
+                    variant={live?.id === r.id ? 'filled' : 'outlined'}
+                    label={`v${r.report_version} · ${r.status}`} />
+                ))}
+              </Box>
+            )}
             <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.6 }}>
               v{submitted.report_version} was submitted by <b>{submitted.prepared_by}</b> and
               awaits the committee. {mayDecide
@@ -408,62 +421,70 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           );
         })()}
 
-        {/* ---- analyst: the conversation workbench ----------------------------------- */}
+        {/* ---- analyst: rail on the left, the conversation owns the rest ------------- */}
         {!submitted && !loading && (
-          <Box>
-            {/* Downloads — the Word template to fill, and the prompt in use. */}
-            <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-              {defaults.example && (
-                <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                  onClick={() => void downloadTemplate()}>Download CAM template</Button>
-              )}
-              {(defaults.prompt || customPrompt) && (
-                <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                  onClick={() => void downloadPrompt()}>Download CAM prompt</Button>
-              )}
-              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                Ask below, then Generate CAM — or fill the template in Word yourself.
-              </Typography>
-            </Box>
+          <Box sx={{ display: 'flex', flex: 1, minHeight: 0,
+            flexDirection: { xs: 'column', md: 'row' } }}>
 
-            {working?.status === 'Returned' && (
-              <Alert severity="warning" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-                Returned by the committee{working?.decision_note ? ` — “${working.decision_note}”` : ''}.
-                Amend the CAM and upload it again.
-              </Alert>
-            )}
+            {/* THE RAIL — set up once, then talk. */}
+            <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0,
+              borderRight: { md: `1px solid ${tokens.line}` },
+              borderBottom: { xs: `1px solid ${tokens.line}`, md: 'none' },
+              overflowY: 'auto', px: 1.4, pb: 1.4,
+              maxHeight: { xs: '38vh', md: 'none' } }}>
 
-            {/* The prompt choice: default / custom / none. Exactly one rides. */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap',
-              border: `1px solid ${tokens.line}`, borderRadius: 1, px: 1, py: 0.3, mb: 1 }}>
-              <FormControlLabel sx={{ mr: 1.5, '& .MuiTypography-root': { fontSize: 12.5 } }}
-                control={<Checkbox size="small" checked={promptUse === 'default'}
+              {reports.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mt: 1.2 }}>
+                  {reports.map((r) => (
+                    <Chip key={r.id} size="small" color={TONE[r.status] || 'default'}
+                      variant={live?.id === r.id ? 'filled' : 'outlined'}
+                      label={`v${r.report_version} · ${r.status}`} />
+                  ))}
+                </Box>
+              )}
+
+              <Typography sx={railHead}>Word lane</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                {defaults.example && (
+                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
+                    onClick={() => void downloadTemplate()}>Download CAM template</Button>
+                )}
+                {(defaults.prompt || customPrompt) && (
+                  <Button fullWidth variant="outlined" size="small" sx={{ textTransform: 'none' }}
+                    onClick={() => void downloadPrompt()}>Download CAM prompt</Button>
+                )}
+              </Box>
+
+              <Typography sx={railHead}>Prompt</Typography>
+              <FormControlLabel sx={{ display: 'flex', mr: 0, alignItems: 'flex-start',
+                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.4 } }}
+                control={<Checkbox size="small" sx={{ py: 0.3 }} checked={promptUse === 'default'}
                   disabled={!defaults.prompt} onChange={() => pickPrompt('default')} />}
                 label={defaults.prompt
                   ? `Use default prompt — ${defaults.prompt.title}`
                   : 'Use default prompt (none on record)'} />
-              <FormControlLabel sx={{ mr: 0.5, '& .MuiTypography-root': { fontSize: 12.5 } }}
-                control={<Checkbox size="small" checked={promptUse === 'custom'}
+              <FormControlLabel sx={{ display: 'flex', mr: 0, alignItems: 'flex-start',
+                '& .MuiTypography-root': { fontSize: 12.3, lineHeight: 1.35, mt: 0.4 } }}
+                control={<Checkbox size="small" sx={{ py: 0.3 }} checked={promptUse === 'custom'}
                   disabled={!customPrompt} onChange={() => pickPrompt('custom')} />}
                 label={customPrompt
                   ? `Use custom prompt — ${customPrompt.title}`
-                  : 'Use custom prompt'} />
-              <Button size="small" component="label" disabled={tplBusy || !!busy}
-                sx={{ textTransform: 'none', fontSize: 11.5 }}
+                  : 'Use custom prompt (upload one first)'} />
+              <Button fullWidth size="small" component="label" variant="outlined"
+                disabled={tplBusy || !!busy} sx={{ textTransform: 'none', mt: 0.5 }}
                 title="File a case-specific prompt on this line — it rides instead of the default">
                 {tplBusy ? 'Uploading…' : 'Upload custom prompt…'}
                 <input hidden type="file" accept=".docx,.md,.txt,.pdf"
                   onChange={(e) => { void uploadCustomPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
               </Button>
-              <Box sx={{ flex: 1 }} />
               {promptUse === 'none' && (
-                <Typography sx={{ fontSize: 11, color: tokens.muted }}>
+                <Typography sx={{ fontSize: 11, color: tokens.muted, mt: 0.4 }}>
                   No prompt — questions go with the ticked documents only.
                 </Typography>
               )}
               {/* The tenant-wide default stays credit-desk authority. */}
               {committee && renamingTitle === null && (
-                <>
+                <Box sx={{ display: 'flex', gap: 0.5, mt: 0.3 }}>
                   {defaults.prompt && (
                     <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none', fontSize: 11 }}
                       onClick={() => setRenamingTitle(defaults.prompt?.title || '')}>
@@ -477,103 +498,126 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     <input hidden type="file" accept=".docx,.md,.txt,.pdf"
                       onChange={(e) => { void uploadDefaultPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
                   </Button>
-                </>
+                </Box>
               )}
               {committee && renamingTitle !== null && (
-                <>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6, mt: 0.5 }}>
                   <TextField size="small" label="New name" value={renamingTitle}
-                    onChange={(e) => setRenamingTitle(e.target.value)} sx={{ minWidth: 200 }} />
-                  <Button size="small" variant="contained" disabled={tplBusy || !renamingTitle.trim()}
-                    onClick={() => void renameDefaultPrompt()} sx={{ textTransform: 'none' }}>
-                    Save name
-                  </Button>
-                  <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
-                    onClick={() => setRenamingTitle(null)}>Cancel</Button>
-                </>
-              )}
-            </Box>
-
-            {/* Documents — folded until wanted; ticked ones ride with the next Send /
-                Summarise / Generate, then untick. */}
-            {sources.length > 0 && (
-              <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
-                <Box onClick={() => setDocsOpen((v) => !v)}
-                  sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.6, cursor: 'pointer',
-                    '&:hover': { bgcolor: '#FAFBFC' } }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
-                    {docsOpen ? '▾' : '▸'} Documents ({sources.length})
-                    {sel.size > 0 && ` — ${sel.size} will ride with the next question / Generate`}
-                  </Typography>
-                  <Button size="small" variant="outlined" disabled={!sel.size || !!busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!sel.size) { setDocsOpen(true); return; }
-                      send(SUMMARY_BRIEF, `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`);
-                    }}
-                    title="The engine digests the ticked documents — facts, figures, gaps — and the summary lands as an answer"
-                    sx={{ textTransform: 'none', fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
-                  </Button>
+                    onChange={(e) => setRenamingTitle(e.target.value)} />
+                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    <Button size="small" variant="contained" disabled={tplBusy || !renamingTitle.trim()}
+                      onClick={() => void renameDefaultPrompt()} sx={{ textTransform: 'none' }}>
+                      Save name
+                    </Button>
+                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
+                      onClick={() => setRenamingTitle(null)}>Cancel</Button>
+                  </Box>
                 </Box>
-                {docsOpen && (
-                  <Box sx={{ maxHeight: 150, overflow: 'auto' }}>
-                    {sources.map((d) => (
-                      <Box key={d.id} sx={{ display: 'flex', alignItems: 'center', px: 0.6,
-                        borderTop: `1px solid ${tokens.line}` }}>
-                        <Checkbox size="small" checked={sel.has(d.id)} onChange={() => toggle(d.id)} />
-                        <Typography sx={{ fontSize: 12, flex: 1 }}>{d.title}</Typography>
-                        <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
-                          {[d.section, d.doc_type].filter(Boolean).join(' · ')}
-                        </Typography>
+              )}
+
+              {sources.length > 0 && (
+                <>
+                  <Typography sx={railHead}>Documents ({sources.length})</Typography>
+                  <Box sx={{ maxHeight: 190, overflowY: 'auto',
+                    border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+                    {sources.map((d, i) => (
+                      <Box key={d.id} sx={{ display: 'flex', alignItems: 'flex-start', px: 0.3,
+                        py: 0.2, borderTop: i ? `1px solid ${tokens.line}` : 'none' }}>
+                        <Checkbox size="small" sx={{ py: 0.4 }} checked={sel.has(d.id)}
+                          onChange={() => toggle(d.id)} />
+                        <Box sx={{ flex: 1, minWidth: 0, pt: 0.5 }}>
+                          <Typography sx={{ fontSize: 11.8, lineHeight: 1.3 }}>{d.title}</Typography>
+                          <Typography sx={{ fontSize: 10, color: tokens.muted }}>
+                            {[d.section, d.doc_type].filter(Boolean).join(' · ')}
+                          </Typography>
+                        </Box>
                         <Button size="small" onClick={() => void viewDoc(d.id, d.title)}
-                          sx={{ textTransform: 'none', fontSize: 11, minWidth: 0, ml: 0.5 }}>view</Button>
+                          sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, px: 0.5 }}>view</Button>
                       </Box>
                     ))}
                   </Box>
-                )}
-              </Box>
-            )}
-            {preview && (
-              <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
-                    {preview.title}
+                  <Button fullWidth size="small" variant="outlined" disabled={!sel.size || !!busy}
+                    onClick={() => send(SUMMARY_BRIEF,
+                      `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`)}
+                    title="The engine digests the ticked documents — facts, figures, gaps — into the conversation"
+                    sx={{ textTransform: 'none', fontSize: 11.5, mt: 0.6 }}>
+                    {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
+                  </Button>
+                  <Typography sx={{ fontSize: 10.5, color: tokens.muted, mt: 0.4 }}>
+                    Ticked documents ride with the next question / Generate, then untick.
                   </Typography>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
-                  <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
-                    onClick={() => setPreview(null)}>Close</Button>
-                </Box>
-                {preview.note && (
-                  <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.5 }}>{preview.note}</Typography>
-                )}
-                {preview.text && (
-                  <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
-                    fontFamily: 'inherit', maxHeight: 180, overflow: 'auto', m: 0 }}>
-                    {preview.text}
-                  </Box>
-                )}
-              </Box>
-            )}
+                </>
+              )}
 
-            {/* The conversation: answers above, the question box below. */}
-            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1.5 }}>
-              <Box sx={{ maxHeight: 340, minHeight: 120, overflowY: 'auto', p: 1.2 }}>
+              {(working?.draft_md || working?.document_id) && (
+                <>
+                  <Typography sx={railHead}>On record</Typography>
+                  {!!working?.draft_md && (
+                    <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.4 }}>
+                      Draft v{working.report_version}
+                      <Box component="span" onClick={() => void run('draft-word', async () => {
+                          await camService.exportDocx(subjectId, working!.draft_md!,
+                            `CAM v${working!.report_version} draft`);
+                          return 'Draft downloaded as Word — continue in Word, then upload it below.';
+                        })}
+                        sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.6,
+                          textDecoration: 'underline' }}>
+                        {busy === 'draft-word' ? 'Rendering…' : 'Download as Word'}
+                      </Box>
+                    </Typography>
+                  )}
+                  {!!working?.document_id && (
+                    <Typography sx={{ fontSize: 11.8, color: tokens.muted }}>
+                      ✓ Completed CAM on file
+                      <Box component="span" onClick={() => void downloadFiled(working!.document_id!)}
+                        sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.6,
+                          textDecoration: 'underline' }}>
+                        Download
+                      </Box>
+                    </Typography>
+                  )}
+                </>
+              )}
+
+              <Typography sx={railHead}>File the CAM</Typography>
+              <TextField fullWidth size="small" label="Filed title (optional)"
+                placeholder={`CAM v${working?.report_version ?? 1}`}
+                value={title} onChange={(e) => setTitle(e.target.value)} sx={{ mb: 0.6 }} />
+              <Button fullWidth component="label" variant="contained" size="small" disabled={!!busy}
+                title="Files the document on this line only — the committee request is the separate 'Send to credit committee' step"
+                sx={{ textTransform: 'none' }}>
+                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM'}
+                <input hidden type="file" accept=".docx,.pdf,.md,.txt"
+                  onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </Button>
+            </Box>
+
+            {/* THE CONVERSATION — full height, question box at the bottom. */}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 240 }}>
+              {working?.status === 'Returned' && (
+                <Alert severity="warning" sx={{ py: 0, fontSize: 12, m: 1, mb: 0 }}>
+                  Returned by the committee{working?.decision_note ? ` — “${working.decision_note}”` : ''}.
+                  Amend the CAM and upload it again.
+                </Alert>
+              )}
+              <Box sx={{ flex: 1, overflowY: 'auto', p: 1.4 }}>
                 {!chat.length && !thinking && (
-                  <Typography sx={{ fontSize: 12, color: tokens.muted, textAlign: 'center', py: 3 }}>
+                  <Typography sx={{ fontSize: 12.3, color: tokens.muted, textAlign: 'center',
+                    maxWidth: 460, mx: 'auto', py: 5, lineHeight: 1.6 }}>
                     Ask about the documents, the figures, the risks — answers stack up here.
-                    Tick documents above to send them with a question. When the picture is
-                    complete, <b>Generate CAM</b> turns the whole conversation into the draft.
+                    Tick documents on the left to send them with a question. When the picture
+                    is complete, <b>Generate CAM</b> turns the whole conversation into the draft.
                   </Typography>
                 )}
                 {chat.map((m, i) => (
                   <Box key={i} sx={{ display: 'flex', mb: 0.8,
                     justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                    <Box sx={{ maxWidth: '92%', px: 1.2, py: 0.7, borderRadius: 2,
+                    <Box sx={{ maxWidth: m.role === 'user' ? '78%' : '94%',
+                      px: 1.2, py: 0.7, borderRadius: 2,
                       bgcolor: m.role === 'user' ? '#E7F3F0' : '#F6F8FA',
                       border: `1px solid ${tokens.line}` }}>
                       <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap',
-                        fontFamily: 'inherit', fontSize: 12.4, lineHeight: 1.5 }}>{m.text}</Box>
+                        fontFamily: 'inherit', fontSize: 12.6, lineHeight: 1.55 }}>{m.text}</Box>
                       {m.role === 'assistant' && !!m.text && (
                         <Box sx={{ display: 'flex', gap: 0.5, mt: 0.3 }}>
                           <Button size="small" sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, py: 0 }}
@@ -597,16 +641,39 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 )}
                 <Box ref={chatEndRef} />
               </Box>
+              {preview && (
+                <Box sx={{ mx: 1.4, mb: 0.6, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
+                      {preview.title}
+                    </Typography>
+                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                      onClick={() => void navigator.clipboard?.writeText(preview.text)}>Copy</Button>
+                    <Button size="small" sx={{ textTransform: 'none', fontSize: 11, minWidth: 0 }}
+                      onClick={() => setPreview(null)}>Close</Button>
+                  </Box>
+                  {preview.note && (
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted, mb: 0.5 }}>{preview.note}</Typography>
+                  )}
+                  {preview.text && (
+                    <Box component="pre" sx={{ whiteSpace: 'pre-wrap', fontSize: 11.5,
+                      fontFamily: 'inherit', maxHeight: 140, overflow: 'auto', m: 0 }}>
+                      {preview.text}
+                    </Box>
+                  )}
+                </Box>
+              )}
               {/* The question box — Enter sends, Shift+Enter for a new line. */}
-              <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-end', p: 0.8,
+              <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-end', p: 1,
                 borderTop: `1px solid ${tokens.line}` }}>
                 <TextField fullWidth size="small" multiline maxRows={6}
-                  placeholder="Ask anything — Enter to send, Shift+Enter for a new line"
+                  placeholder={'Ask anything — Enter to send, Shift+Enter for a new line'
+                    + (sel.size ? ` · ${sel.size} document(s) will ride along` : '')}
                   value={question} onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
                   }}
-                  sx={{ '& textarea': { fontSize: 12.6, lineHeight: 1.5 } }} />
+                  sx={{ '& textarea': { fontSize: 12.8, lineHeight: 1.5 } }} />
                 <Button variant="outlined" size="small" endIcon={<SendIcon sx={{ fontSize: 15 }} />}
                   disabled={!question.trim() || !!busy} onClick={() => send()}
                   sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
@@ -621,50 +688,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 </Button>
               </Box>
             </Box>
-
-            <Divider sx={{ my: 1.4 }} />
-            {!!working?.draft_md && (
-              <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
-                Draft CAM on record (v{working.report_version})
-                <Box component="span" onClick={() => void run('draft-word', async () => {
-                    await camService.exportDocx(subjectId, working!.draft_md!,
-                      `CAM v${working!.report_version} draft`);
-                    return 'Draft downloaded as Word — continue in Word, then upload it below.';
-                  })}
-                  sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
-                    textDecoration: 'underline' }}>
-                  {busy === 'draft-word' ? 'Rendering…' : 'Download as Word'}
-                </Box>
-              </Typography>
-            )}
-            {!!working?.document_id && (
-              <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
-                ✓ Completed CAM on file
-                <Box component="span" onClick={() => void downloadFiled(working!.document_id!)}
-                  sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
-                    textDecoration: 'underline' }}>
-                  Download
-                </Box>
-                {' '}— "Send to credit committee" will carry it to the approver.
-              </Typography>
-            )}
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField size="small" sx={{ flex: 1 }} label="Filed title (optional)"
-                placeholder={`CAM v${working?.report_version ?? 1}`}
-                value={title} onChange={(e) => setTitle(e.target.value)} />
-              <Button component="label" variant="contained" size="small" disabled={!!busy}
-                title="Files the document on this line only — the committee request is the separate 'Send to credit committee' step"
-                sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                {busy === 'upload-final' ? 'Filing…' : 'Upload the completed CAM'}
-                <input hidden type="file" accept=".docx,.pdf,.md,.txt"
-                  onChange={(e) => { uploadFinal(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </Button>
-            </Box>
           </Box>
         )}
 
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={{ py: 0.8 }}>
         <Button onClick={onClose} variant="outlined" disabled={!!busy}>Close</Button>
       </DialogActions>
     </Dialog>
