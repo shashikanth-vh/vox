@@ -1306,11 +1306,14 @@ class SyndicationMandateWorkflow:
     async def _file_im(self, sid: str, reference: str, sha: str | None, by: str,
                        caller: Any, evidence_ids: list) -> None:
         self._im_version += 1
+        # decision_ref carries the VERSION (one evidence row per (decision_ref, kind)
+        # at the register) — a bare workflow id made every IM revision collide with v1.
         ev = await workflow.execute_activity(
             activities.attach_evidence,
             args=["Syndication", sid, "im_document", reference, sha,
                   f"IM circulated to lenders (v{self._im_version}"
-                  + (f", by {by}" if by else "") + ")", caller],
+                  + (f", by {by}" if by else "") + ")", caller,
+                  f"{workflow.info().workflow_id}:im:v{self._im_version}"],
             **_DURABLE_IO)
         evidence_ids.append(ev.get("id"))
 
@@ -1476,6 +1479,10 @@ class SyndicationMandateWorkflow:
                 activities.advance_stage,
                 args=["syndication", inp.syndication_id, "status", "Rejected", None,
                       caller], **_DURABLE_IO)
+            await _emit_ops("syndication_decided", {
+                "subject": subject, "decision": "Rejected",
+                "decided_by": decided_by, "note": note or ""},
+                notify_to=[inp.requested_by], severity="warning")
             return SyndicationMandateResult(
                 workflow_id=wf_id, syndication_id=inp.syndication_id, status="Rejected",
                 decided_by=decided_by, im_version=self._im_version,
@@ -1495,6 +1502,10 @@ class SyndicationMandateWorkflow:
         self._stage = "Sanctioning mandate"
         current = await self._advance_mandate(inp.syndication_id, "Sanctioned", current,
                                               caller)
+        await _emit_ops("syndication_decided", {
+            "subject": subject, "decision": "Sanctioned",
+            "decided_by": decided_by, "note": note or ""},
+            notify_to=[inp.requested_by])
 
         # -- 4. Lender allocation (bounded wait; the run completes without one rather than
         #       blocking the sanction forever — allocation can still be recorded later).
@@ -1644,11 +1655,13 @@ class AssetMonetisationWorkflow:
     async def _file_teaser(self, mid: str, reference: str, sha: str | None, by: str,
                            caller: Any, evidence_ids: list) -> None:
         self._teaser_version += 1
+        # Versioned decision_ref — same collision fix as the credit note and the IM.
         ev = await workflow.execute_activity(
             activities.attach_evidence,
             args=["AssetMonetisation", mid, "teaser_document", reference, sha,
                   f"Teaser circulated to buyers (v{self._teaser_version}"
-                  + (f", by {by}" if by else "") + ")", caller],
+                  + (f", by {by}" if by else "") + ")", caller,
+                  f"{workflow.info().workflow_id}:teaser:v{self._teaser_version}"],
             **_DURABLE_IO)
         evidence_ids.append(ev.get("id"))
 
@@ -1849,6 +1862,10 @@ class AssetMonetisationWorkflow:
                 activities.advance_stage,
                 args=["asset-monetisation", inp.asset_mon_id, "status", "Dropped", None,
                       caller], **_DURABLE_IO)
+            await _emit_ops("am_decided", {
+                "subject": subject, "decision": "Lost",
+                "decided_by": decided_by, "note": note or ""},
+                notify_to=[inp.requested_by], severity="warning")
             return AssetMonetisationResult(
                 workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="Lost",
                 decided_by=decided_by, teaser_version=self._teaser_version,
@@ -1869,6 +1886,10 @@ class AssetMonetisationWorkflow:
         self._stage = "Closed"
         self._fnd.business_status = "Closed"
         _upsert_search(inp.emit_search_attributes, "Closed", subject)
+        await _emit_ops("am_decided", {
+            "subject": subject, "decision": "Closed",
+            "decided_by": decided_by, "note": note or ""},
+            notify_to=[inp.requested_by])
         return AssetMonetisationResult(
             workflow_id=wf_id, asset_mon_id=inp.asset_mon_id, status="Closed",
             decided_by=decided_by, teaser_version=self._teaser_version,
