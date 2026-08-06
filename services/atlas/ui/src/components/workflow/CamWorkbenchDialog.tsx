@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider, MenuItem,
+  IconButton, TextField, Alert, Chip, Checkbox, CircularProgress, Divider,
+  FormControlLabel,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import SendIcon from '@mui/icons-material/Send';
 import { camService, type CamReport, type EntityDoc } from '../../services/camService';
 import { documentsService } from '../../services/documentsService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
@@ -17,11 +19,15 @@ import { tokens } from '../../theme';
  * company's file actually holds, reworks it turn by turn, and finalises it into the
  * Data Register for the committee.
  *
- * The engine (Claude today — the plane records which) writes ONLY from the selected
- * documents plus the credit team's own PROMPT DOC; the workbench holds no judgement of
- * its own. Binary documents the plane cannot read are named as skipped, never silently
- * omitted — a CAM that pretends to cover a document it never saw is worse than one that
- * refuses.
+ * The surface is a CONVERSATION (field feedback: "like Claude's"): questions go in at
+ * the bottom, answers stack above, and the whole exchange — plus the chosen prompt and
+ * the ticked documents — becomes the CAM when the analyst clicks Generate CAM. The
+ * transcript is durable: the register records every turn, so reopening the workbench
+ * reopens the conversation, and "why does the CAM say this?" always has an answer.
+ *
+ * The prompt is a choice, not a setting: the credit team's default (versioned on the
+ * template shelf) or a case-specific upload filed on this line. Exactly one — or none —
+ * rides with every question and with Generate.
  *
  * The committee's decision also lives here (and on Today's queue): a SUBMITTED version
  * shows Approve / Return / Reject to committee authority. The register enforces
@@ -34,6 +40,8 @@ const TONE: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'>
   Draft: 'info', Submitted: 'warning', Approved: 'success',
   Returned: 'warning', Rejected: 'error',
 };
+
+type ChatMsg = { role: 'user' | 'assistant'; text: string };
 
 export default function CamWorkbenchDialog({ action, subjectId, entityId, onClose, onDone }: {
   action: WorkflowAction | null;
@@ -50,16 +58,26 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [docs, setDocs] = useState<EntityDoc[]>([]);
   const [defaults, setDefaults] = useState<{ prompt?: { id: string; title: string };
     example?: { id: string; title: string } }>({});
-  // The CAM Prompt picker: every prompt version on record, newest first. The chosen
-  // one rides with EVERY Ask (empty = ask without a prompt).
-  const [prompts, setPrompts] = useState<{ id: string; title: string }[]>([]);
-  const [promptId, setPromptId] = useState('');
+  // The prompt choice: the credit team's default, a case-specific custom upload, or none.
+  const [promptUse, setPromptUse] = useState<'default' | 'custom' | 'none'>('default');
+  const [customPrompt, setCustomPrompt] = useState<{ id: string; title: string } | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  // The documents stay folded out of the way until the analyst wants them.
   const [docsOpen, setDocsOpen] = useState(false);
-  // "Show me what the engine will read" — the extracted text of any pickable document,
-  // in place. Copyable, so the analyst can also work with it outside the workbench.
+  // "Show me what the engine will read" — the extracted text of any pickable document.
   const [preview, setPreview] = useState<{ title: string; text: string; note?: string } | null>(null);
+
+  // The conversation: answers above, the question box below — Claude-style.
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [question, setQuestion] = useState('');
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const seededFor = useRef('');
+
+  const [title, setTitle] = useState('');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const viewDoc = async (id: string, docTitle: string) => {
     setErr('');
@@ -74,35 +92,34 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       });
     } catch (e: any) { setErr(e?.message || String(e)); }
   };
-  const [instruction, setInstruction] = useState('');
-  const [title, setTitle] = useState('');
-  const [note, setNote] = useState('');
-  const [err, setErr] = useState('');
-  const [info, setInfo] = useState('');
-  const [busy, setBusy] = useState('');
-  const [loading, setLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [r, d, tps, te] = await Promise.all([
+      const [r, d, tps, te, ld] = await Promise.all([
         camService.list(subjectId),
         entityId ? camService.entityDocs(entityId) : Promise.resolve([]),
         camService.templates('cam_prompt'),
         camService.template('cam_example'),
+        camService.lendingDocs(subjectId).catch(() => [] as EntityDoc[]),
       ]);
       setReports(r); setDocs(d);
-      setPrompts(tps);
-      setPromptId((prev) => prev || tps[0]?.id || '');
       setDefaults({ prompt: tps[0] || undefined, example: te || undefined });
+      // A custom prompt filed on THIS line earlier — newest wins, same as the shelf.
+      const cps = ld.filter((x) => x.doc_type === 'CAM Prompt');
+      if (cps.length) {
+        setCustomPrompt((prev) => prev || { id: cps[cps.length - 1].id, title: cps[cps.length - 1].title });
+      }
+      if (!tps.length) setPromptUse((p) => (p === 'default' ? 'none' : p));
     } catch (e: any) { setErr(e?.message || String(e)); }
     setLoading(false);
   };
 
   useEffect(() => {
     if (!open) return;
-    setSel(new Set()); setInstruction(''); setTitle('');
-    setNote(''); setErr(''); setInfo(''); setBusy(''); setPromptId('');
+    setSel(new Set()); setChat([]); setQuestion(''); setTitle('');
+    setNote(''); setErr(''); setInfo(''); setBusy('');
+    setPromptUse('default'); setCustomPrompt(null); seededFor.current = '';
     void load();
   }, [open, subjectId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,48 +130,90 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const working = live && (live.status === 'Draft' || live.status === 'Returned') ? live : undefined;
   const submitted = live && live.status === 'Submitted' ? live : undefined;
 
-  // Everything pickable, in BOTH states: the company's own file. The CAM Prompt has
-  // its OWN picker above the Documents fold (a dropdown when several versions are on
-  // record); the reference CAM stays a DOWNLOAD — "Download CAM template".
-  const sources: EntityDoc[] = docs;
+  // Reopening the workbench reopens the CONVERSATION — the register kept every turn.
+  useEffect(() => {
+    const id = working?.id;
+    if (!open || !id || seededFor.current === id) return;
+    seededFor.current = id;
+    void camService.get(id).then((full) => {
+      const msgs: ChatMsg[] = (full.turns || [])
+        .filter((t) => !String(t.content || '').startsWith('[manual edit]'))
+        .map((t) => ({ role: t.role, text: String(t.content || '') }));
+      // Never clobber questions already asked this session.
+      if (msgs.length) setChat((c) => (c.length ? c : msgs));
+    }).catch(() => {});
+  }, [open, working?.id]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [chat, busy]);
+
+  const sources: EntityDoc[] = docs;
+  const activePromptId = promptUse === 'default' ? defaults.prompt?.id
+    : promptUse === 'custom' ? customPrompt?.id : undefined;
 
   const run = async (what: string, fn: () => Promise<string>) => {
     setErr(''); setInfo(''); setBusy(what);
     try {
       const message = await fn();
-      setInfo(message);
+      if (message) setInfo(message);
       await load();
     } catch (e: any) { setErr(e?.message || String(e)); }
     setBusy('');
   };
 
-  // Summary-first: the engine digests every selected document (facts, figures, gaps)
-  // into the box — the analyst then asks on, and hand-fills the Word template.
   const SUMMARY_BRIEF =
     'Summarise each of the supplied documents for a credit analyst: key facts, all '
     + 'figures with periods and units, parties, and NAME every gap (what a CAM would '
     + 'need that these documents do not contain). Do not draft the CAM yet.';
 
-  // ONE conversation surface: whatever is in the box goes to Claude, and the answer
-  // comes back INTO the box — editable, so the analyst appends the next question (or
-  // pastes document text) and sends again. The chosen CAM Prompt rides with every
-  // Ask; ticked documents ride along too, then untick.
-  const ask = (text?: string) => run('ask', async () => {
-    const out = await camService.refine(subjectId, (text || instruction).trim(), false,
-      [...(promptId ? [promptId] : []), ...sel]);
-    setInstruction(out.draft_md || '');
-    setSel(new Set());
-    const skipped = (out.documents || []).filter((d: any) => !d.included);
-    return 'The answer is in the box — edit it, or add your next question under it and ask again.'
-      + (skipped.length ? ` ${skipped.length} document(s) could not be read.` : '');
-  });
+  // One question down, one answer up. The register rebuilds the whole conversation
+  // server-side on every turn (engines are stateless), so each Send carries only the
+  // new question — plus the chosen prompt and the ticked documents, which untick after.
+  const send = (text?: string, shownAs?: string) => {
+    const q = (text ?? question).trim();
+    if (!q || busy) return;
+    setChat((c) => [...c, { role: 'user', text: shownAs || q }]);
+    setQuestion('');
+    void run('ask', async () => {
+      const ride = [...(activePromptId ? [activePromptId] : []), ...sel];
+      const out = await camService.refine(subjectId, q, false, ride);
+      setChat((c) => [...c, { role: 'assistant', text: out.draft_md || '' }]);
+      setSel(new Set());
+      const skipped = (out.documents || []).filter((d: any) => !d.included && d.reason);
+      return skipped.length ? `${skipped.length} document(s) could not be read.` : '';
+    });
+  };
 
-  // The box content, rendered server-side into a styled Word file (headings, lists,
-  // tables). The analyst reviews it in Word, adjusts, and uploads it as the completed
-  // CAM — the answer becomes the document without retyping a word.
-  const toWord = () => run('to-word', async () => {
-    await camService.exportDocx(subjectId, instruction,
+  // The point of the conversation: everything established above + the prompt + the
+  // ticked documents becomes the CAM draft. The reply lands in the chat AND as the
+  // working draft on record — "Download as Word" below turns it into the file.
+  const generateCam = () => {
+    if (busy) return;
+    // A typed-but-unsent question still counts — it rides inside the brief.
+    const pending = question.trim();
+    const brief =
+      'Prepare the complete CAM report now. '
+      + (activePromptId ? "Follow the prompt document's structure and instructions exactly. " : '')
+      + 'Use everything established in this conversation and every document provided. '
+      + 'Where information is missing, name the gap rather than inventing a figure. '
+      + 'Output the full CAM in Markdown with headings and tables, ready to render to Word.'
+      + (pending ? `\n\nAlso take this into account: ${pending}` : '');
+    setQuestion('');
+    setChat((c) => [...c, { role: 'user',
+      text: 'Generate the CAM report from this conversation.'
+        + (pending ? `\n(Also: ${pending})` : '') }]);
+    void run('generate', async () => {
+      const ride = [...(activePromptId ? [activePromptId] : []), ...sel];
+      const out = await camService.refine(subjectId, brief, true, ride);
+      setChat((c) => [...c, { role: 'assistant', text: out.draft_md || '' }]);
+      setSel(new Set());
+      return 'CAM draft ready — use "To Word" on the answer (or "Download as Word" below), review it in Word, then upload the completed CAM.';
+    });
+  };
+
+  const toWord = (markdown: string) => run('to-word', async () => {
+    await camService.exportDocx(subjectId, markdown,
       title.trim() || `CAM v${working?.report_version ?? 1}`);
     return 'Word file downloaded — review it in Word, then upload it below as the completed CAM.';
   });
@@ -174,42 +233,58 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     if (!out.ok) setErr(out.error || 'The template download failed.');
   };
 
+  // Downloads whichever prompt is IN USE — the default, or the custom upload.
   const downloadPrompt = async () => {
-    const p = prompts.find((x) => x.id === promptId) || defaults.prompt;
+    const p = promptUse === 'custom' && customPrompt ? customPrompt : defaults.prompt;
     if (!p) return;
     setErr('');
-    const out = await documentsService.download(
-      asEntry(p.id, `${p.title}.docx`) as any);
+    const out = await documentsService.download(asEntry(p.id, `${p.title}.docx`) as any);
     if (!out.ok) setErr(out.error || 'The prompt download failed.');
   };
 
-  // The prompt is the credit team's OWN document — updating it is an upload here
-  // (never a deploy), and the picker shows the new version under the file's name.
-  const [tplBusy, setTplBusy] = useState(false);
-  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
-  const tplErr = (e: any) =>
-    setErr(e?.response?.data?.error?.detail || e?.message || String(e));
-
-  const uploadPrompt = async (file: File | null) => {
+  // A CUSTOM prompt files on THIS lending line (any analyst may) — the tenant-wide
+  // default on the template shelf stays credit-desk authority, managed below.
+  const uploadCustomPrompt = async (file: File | null) => {
     if (!file) return;
     setErr(''); setTplBusy(true);
     try {
-      const created = await camService.uploadTemplate('cam_prompt', file);
-      await load();
-      setPromptId(created.id);
-    } catch (e: any) { tplErr(e); }
+      const doc = await camService.uploadDoc(subjectId, file, 'CAM Prompt', 'CAM');
+      setCustomPrompt({ id: String(doc.id), title: file.name.replace(/\.[^.]+$/, '') });
+      setPromptUse('custom');
+      setInfo(`Custom prompt "${file.name}" is on this line's file and now rides with every question.`);
+    } catch (e: any) { setErr(e?.message || String(e)); }
     setTplBusy(false);
   };
 
-  const renamePrompt = async () => {
-    const t = (renamingTitle || '').trim();
-    if (!t || !promptId) { setRenamingTitle(null); return; }
+  // The tenant DEFAULT is the credit team's own document — updating it is an upload
+  // here (never a deploy); renaming keeps the picker honest.
+  const [tplBusy, setTplBusy] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
+
+  const uploadDefaultPrompt = async (file: File | null) => {
+    if (!file) return;
     setErr(''); setTplBusy(true);
     try {
-      await camService.renameTemplate(promptId, t);
+      await camService.uploadTemplate('cam_prompt', file);
+      await load();
+      setPromptUse('default');
+    } catch (e: any) {
+      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+    }
+    setTplBusy(false);
+  };
+
+  const renameDefaultPrompt = async () => {
+    const t = (renamingTitle || '').trim();
+    if (!t || !defaults.prompt) { setRenamingTitle(null); return; }
+    setErr(''); setTplBusy(true);
+    try {
+      await camService.renameTemplate(defaults.prompt.id, t);
       await load();
       setRenamingTitle(null);
-    } catch (e: any) { tplErr(e); }
+    } catch (e: any) {
+      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+    }
     setTplBusy(false);
   };
 
@@ -251,6 +326,12 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const toggle = (id: string) => setSel((p) => {
     const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
+
+  // Ticking one prompt kind unticks the other — exactly one (or none) rides.
+  const pickPrompt = (kind: 'default' | 'custom') =>
+    setPromptUse((p) => (p === kind ? 'none' : kind));
+
+  const thinking = busy === 'ask' || busy === 'generate';
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -327,26 +408,24 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
           );
         })()}
 
-        {/* ---- analyst: the calm workbench ------------------------------------------- */}
-        {/* The CAM itself lives in WORD: download the template + the prompt document,
-            fill the template there, and upload the finished file — that document goes to
-            the committee. The box below is the conversation with Claude: prompts go down,
-            answers come back into the SAME box to edit and build on. */}
+        {/* ---- analyst: the conversation workbench ----------------------------------- */}
         {!submitted && !loading && (
           <Box>
+            {/* Downloads — the Word template to fill, and the prompt in use. */}
             <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
               {defaults.example && (
                 <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
                   onClick={() => void downloadTemplate()}>Download CAM template</Button>
               )}
-              {defaults.prompt && (
+              {(defaults.prompt || customPrompt) && (
                 <Button variant="outlined" size="small" sx={{ textTransform: 'none' }}
-                  onClick={() => void downloadPrompt()}>Download EVAM CAM prompt</Button>
+                  onClick={() => void downloadPrompt()}>Download CAM prompt</Button>
               )}
               <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                Fill the template in Word while you work below.
+                Ask below, then Generate CAM — or fill the template in Word yourself.
               </Typography>
             </Box>
+
             {working?.status === 'Returned' && (
               <Alert severity="warning" sx={{ py: 0, fontSize: 12, mb: 1 }}>
                 Returned by the committee{working?.decision_note ? ` — “${working.decision_note}”` : ''}.
@@ -354,103 +433,84 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               </Alert>
             )}
 
-            {/* The conversation — one box, both directions. */}
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-              <TextField fullWidth size="small" multiline minRows={8} maxRows={18}
-                label="Ask anything — the answer appears here; edit it or add your next question"
-                value={instruction} onChange={(e) => setInstruction(e.target.value)}
-                sx={{ '& textarea': { fontSize: 12.6, lineHeight: 1.5 } }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
-                <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
-                  disabled={!instruction.trim() || !!busy} onClick={() => void ask()}
-                  title="Sends everything in the box; the reply replaces it"
-                  sx={{ whiteSpace: 'nowrap' }}>
-                  {busy === 'ask' ? 'Asking…' : 'Ask'}
-                </Button>
-                <Button variant="outlined" size="small" disabled={!instruction || !!busy}
-                  onClick={() => void navigator.clipboard?.writeText(instruction)}
-                  sx={{ whiteSpace: 'nowrap' }}>Copy</Button>
-                <Button variant="outlined" size="small" disabled={!instruction.trim() || !!busy}
-                  onClick={() => void toWord()}
-                  title="Turns the box content into a styled Word file — review it in Word, then upload it as the completed CAM"
-                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                  {busy === 'to-word' ? 'Rendering…' : 'To Word'}
-                </Button>
-                <Button variant="outlined" size="small" disabled={!instruction || !!busy}
-                  onClick={() => setInstruction('')}
-                  sx={{ whiteSpace: 'nowrap' }}>Clear</Button>
-              </Box>
-            </Box>
-            {/* The CAM Prompt — its own picker, above the documents: a dropdown when
-                several prompt versions are on record; the chosen one goes to Claude
-                with every Ask. */}
-            {prompts.length > 0 && (
-              <Box sx={{ mt: 1.2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <TextField select size="small" label="CAM Prompt" value={promptId}
-                  onChange={(e) => setPromptId(e.target.value)} sx={{ minWidth: 280 }}>
-                  <MenuItem value="">None — ask without the prompt</MenuItem>
-                  {prompts.map((p) => (
-                    <MenuItem key={p.id} value={p.id}>{p.title}</MenuItem>
-                  ))}
-                </TextField>
-                {committee && renamingTitle === null && (
-                  <>
-                    {promptId && (
-                      <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
-                        onClick={() => setRenamingTitle(
-                          prompts.find((p) => p.id === promptId)?.title || '')}>
-                        Rename…
-                      </Button>
-                    )}
-                    <Button size="small" component="label" variant="outlined" disabled={tplBusy}
-                      sx={{ textTransform: 'none' }}
-                      title="File a new prompt version — it becomes the default, shown under the file's name (or rename it after)">
-                      {tplBusy ? 'Working…' : 'Update prompt…'}
-                      <input hidden type="file" accept=".docx,.md,.txt,.pdf"
-                        onChange={(e) => {
-                          void uploadPrompt(e.target.files?.[0] || null);
-                          e.target.value = '';
-                        }} />
-                    </Button>
-                  </>
-                )}
-                {committee && renamingTitle !== null && (
-                  <>
-                    <TextField size="small" label="New name" value={renamingTitle}
-                      onChange={(e) => setRenamingTitle(e.target.value)}
-                      sx={{ minWidth: 240 }} />
-                    <Button size="small" variant="contained"
-                      disabled={tplBusy || !renamingTitle.trim()}
-                      onClick={() => void renamePrompt()} sx={{ textTransform: 'none' }}>
-                      Save name
-                    </Button>
-                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
-                      onClick={() => setRenamingTitle(null)}>Cancel</Button>
-                  </>
-                )}
-                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                  {promptId ? 'Goes with every Ask, along with the ticked documents.'
-                    : 'No prompt — asks go with the ticked documents only.'}
+            {/* The prompt choice: default / custom / none. Exactly one rides. */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap',
+              border: `1px solid ${tokens.line}`, borderRadius: 1, px: 1, py: 0.3, mb: 1 }}>
+              <FormControlLabel sx={{ mr: 1.5, '& .MuiTypography-root': { fontSize: 12.5 } }}
+                control={<Checkbox size="small" checked={promptUse === 'default'}
+                  disabled={!defaults.prompt} onChange={() => pickPrompt('default')} />}
+                label={defaults.prompt
+                  ? `Use default prompt — ${defaults.prompt.title}`
+                  : 'Use default prompt (none on record)'} />
+              <FormControlLabel sx={{ mr: 0.5, '& .MuiTypography-root': { fontSize: 12.5 } }}
+                control={<Checkbox size="small" checked={promptUse === 'custom'}
+                  disabled={!customPrompt} onChange={() => pickPrompt('custom')} />}
+                label={customPrompt
+                  ? `Use custom prompt — ${customPrompt.title}`
+                  : 'Use custom prompt'} />
+              <Button size="small" component="label" disabled={tplBusy || !!busy}
+                sx={{ textTransform: 'none', fontSize: 11.5 }}
+                title="File a case-specific prompt on this line — it rides instead of the default">
+                {tplBusy ? 'Uploading…' : 'Upload custom prompt…'}
+                <input hidden type="file" accept=".docx,.md,.txt,.pdf"
+                  onChange={(e) => { void uploadCustomPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </Button>
+              <Box sx={{ flex: 1 }} />
+              {promptUse === 'none' && (
+                <Typography sx={{ fontSize: 11, color: tokens.muted }}>
+                  No prompt — questions go with the ticked documents only.
                 </Typography>
-              </Box>
-            )}
-            {/* Documents — folded until wanted. */}
+              )}
+              {/* The tenant-wide default stays credit-desk authority. */}
+              {committee && renamingTitle === null && (
+                <>
+                  {defaults.prompt && (
+                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none', fontSize: 11 }}
+                      onClick={() => setRenamingTitle(defaults.prompt?.title || '')}>
+                      Rename default…
+                    </Button>
+                  )}
+                  <Button size="small" component="label" disabled={tplBusy}
+                    sx={{ textTransform: 'none', fontSize: 11 }}
+                    title="File a new tenant-wide default prompt version — newest wins">
+                    Update default…
+                    <input hidden type="file" accept=".docx,.md,.txt,.pdf"
+                      onChange={(e) => { void uploadDefaultPrompt(e.target.files?.[0] || null); e.target.value = ''; }} />
+                  </Button>
+                </>
+              )}
+              {committee && renamingTitle !== null && (
+                <>
+                  <TextField size="small" label="New name" value={renamingTitle}
+                    onChange={(e) => setRenamingTitle(e.target.value)} sx={{ minWidth: 200 }} />
+                  <Button size="small" variant="contained" disabled={tplBusy || !renamingTitle.trim()}
+                    onClick={() => void renameDefaultPrompt()} sx={{ textTransform: 'none' }}>
+                    Save name
+                  </Button>
+                  <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
+                    onClick={() => setRenamingTitle(null)}>Cancel</Button>
+                </>
+              )}
+            </Box>
+
+            {/* Documents — folded until wanted; ticked ones ride with the next Send /
+                Summarise / Generate, then untick. */}
             {sources.length > 0 && (
-              <Box sx={{ mt: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
+              <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
                 <Box onClick={() => setDocsOpen((v) => !v)}
                   sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.6, cursor: 'pointer',
                     '&:hover': { bgcolor: '#FAFBFC' } }}>
                   <Typography sx={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
                     {docsOpen ? '▾' : '▸'} Documents ({sources.length})
-                    {sel.size > 0 && ` — ${sel.size} will ride with the next Ask/Summarise`}
+                    {sel.size > 0 && ` — ${sel.size} will ride with the next question / Generate`}
                   </Typography>
                   <Button size="small" variant="outlined" disabled={!sel.size || !!busy}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!sel.size) { setDocsOpen(true); return; }
-                      void ask(SUMMARY_BRIEF);
+                      send(SUMMARY_BRIEF, `Summarise the ${sel.size} ticked document(s) — facts, figures, gaps.`);
                     }}
-                    title="The engine digests the ticked documents — facts, figures, gaps — and the summary appears as an answer"
+                    title="The engine digests the ticked documents — facts, figures, gaps — and the summary lands as an answer"
                     sx={{ textTransform: 'none', fontSize: 11.5, whiteSpace: 'nowrap' }}>
                     {busy === 'ask' ? 'Summarising…' : `Summarise selected (${sel.size})`}
                   </Button>
@@ -474,7 +534,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               </Box>
             )}
             {preview && (
-              <Box sx={{ mt: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+              <Box sx={{ mb: 1, border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 600, flex: 1 }}>
                     {preview.title}
@@ -495,6 +555,72 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 )}
               </Box>
             )}
+
+            {/* The conversation: answers above, the question box below. */}
+            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1.5 }}>
+              <Box sx={{ maxHeight: 340, minHeight: 120, overflowY: 'auto', p: 1.2 }}>
+                {!chat.length && !thinking && (
+                  <Typography sx={{ fontSize: 12, color: tokens.muted, textAlign: 'center', py: 3 }}>
+                    Ask about the documents, the figures, the risks — answers stack up here.
+                    Tick documents above to send them with a question. When the picture is
+                    complete, <b>Generate CAM</b> turns the whole conversation into the draft.
+                  </Typography>
+                )}
+                {chat.map((m, i) => (
+                  <Box key={i} sx={{ display: 'flex', mb: 0.8,
+                    justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <Box sx={{ maxWidth: '92%', px: 1.2, py: 0.7, borderRadius: 2,
+                      bgcolor: m.role === 'user' ? '#E7F3F0' : '#F6F8FA',
+                      border: `1px solid ${tokens.line}` }}>
+                      <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap',
+                        fontFamily: 'inherit', fontSize: 12.4, lineHeight: 1.5 }}>{m.text}</Box>
+                      {m.role === 'assistant' && !!m.text && (
+                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.3 }}>
+                          <Button size="small" sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, py: 0 }}
+                            onClick={() => void navigator.clipboard?.writeText(m.text)}>Copy</Button>
+                          <Button size="small" disabled={!!busy}
+                            sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, py: 0 }}
+                            title="Renders this answer as a styled Word file"
+                            onClick={() => void toWord(m.text)}>To Word</Button>
+                        </Box>
+                      )}
+                    </Box>
+                  </Box>
+                ))}
+                {thinking && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, py: 0.5 }}>
+                    <CircularProgress size={13} />
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                      {busy === 'generate' ? 'Drafting the CAM…' : 'Thinking…'}
+                    </Typography>
+                  </Box>
+                )}
+                <Box ref={chatEndRef} />
+              </Box>
+              {/* The question box — Enter sends, Shift+Enter for a new line. */}
+              <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-end', p: 0.8,
+                borderTop: `1px solid ${tokens.line}` }}>
+                <TextField fullWidth size="small" multiline maxRows={6}
+                  placeholder="Ask anything — Enter to send, Shift+Enter for a new line"
+                  value={question} onChange={(e) => setQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                  }}
+                  sx={{ '& textarea': { fontSize: 12.6, lineHeight: 1.5 } }} />
+                <Button variant="outlined" size="small" endIcon={<SendIcon sx={{ fontSize: 15 }} />}
+                  disabled={!question.trim() || !!busy} onClick={() => send()}
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
+                  {busy === 'ask' ? 'Asking…' : 'Send'}
+                </Button>
+                <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon sx={{ fontSize: 15 }} />}
+                  disabled={!!busy || (!chat.length && !sel.size && !question.trim())}
+                  onClick={() => generateCam()}
+                  title="Turns the whole conversation + the prompt + the ticked documents into the full CAM draft"
+                  sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
+                  {busy === 'generate' ? 'Drafting…' : 'Generate CAM'}
+                </Button>
+              </Box>
+            </Box>
 
             <Divider sx={{ my: 1.4 }} />
             {!!working?.draft_md && (
