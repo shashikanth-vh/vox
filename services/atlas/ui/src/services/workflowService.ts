@@ -148,8 +148,9 @@ export function isReturned(w: PendingWorkflow): boolean {
  * a closed run cleanly). The return machinery stays server-side for anything already
  * parked as returned — those runs still resolve through their resubmit surfaces. */
 export function actionsFor(w: PendingWorkflow): DecisionAction[] {
-  // A legacy RETURNED run is the maker's to-do, not the approver's.
-  if (isReturned(w)) return [];
+  // Legacy runs parked as "returned" (from before the two-verb model) offer the same
+  // two buttons: the approver clears them with a plain Reject — stage rolls back, the
+  // maker starts fresh. One flow for everything.
   const out: DecisionAction[] = [];
   if (w.decisionUrl || w.approveUrl) out.push('approve');
   if (w.rejectUrl || w.decisionUrl) out.push('reject');
