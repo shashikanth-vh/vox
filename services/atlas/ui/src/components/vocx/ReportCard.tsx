@@ -195,7 +195,14 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
     const r = await vocxService.captureTyped(transcript.trim(), rm, {}, captureId);
     setBusy('');
     if (!r.ok) { setErr(r.error); return; }
+    // The typed lane rebuilds the extraction from text — carry the recording's ref
+    // forward or the re-analysed report loses its audio player (and, autosaved, the
+    // stored draft loses it for good on an older server).
+    const prevRef = extRef.current?._meta?.transcript_ref;
     extRef.current = r.data.extraction || {};
+    if (prevRef && !extRef.current._meta?.transcript_ref) {
+      (extRef.current._meta = extRef.current._meta || {}).transcript_ref = prevRef;
+    }
     setTranscript(String(extRef.current.report?.transcript_english
       || extRef.current._meta?.transcript || transcript));
     redraw();
@@ -309,7 +316,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         </Box>
       )}
 
-      {(audioUrl || audioErr) && (
+      {(audioUrl || audioErr) ? (
         <>
           <Typography sx={microHeading}>Original audio</Typography>
           {audioUrl
@@ -319,6 +326,14 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
                 Recording unavailable — {audioErr}
               </Typography>}
         </>
+      ) : !ext._meta?.transcript_ref && (
+        /* Silence used to be the only signal here — "sometimes I can't listen" with
+           nothing to go on. Say WHY there is no player: this report simply carries no
+           archived recording (typed note, or the archive was off at capture time). */
+        <Typography sx={{ fontSize: 11.5, color: vx.mut, mt: 0.8 }}>
+          No recording attached — this note was typed, or the archive was unavailable
+          when it was captured.
+        </Typography>
       )}
 
       <Box sx={card}>

@@ -86,6 +86,17 @@ export const vocxService = {
     } catch (e) { return fail(vocxError(e, 'transcribe that recording')); }
   },
 
+  /** Where an in-flight audio capture is in the pipeline — polled while it runs.
+   *  Never throws: an unreachable poll answers 'unknown' and the UI keeps its
+   *  fallback wording. */
+  async captureStatus(captureId: string): Promise<string> {
+    try {
+      const r = await vocx.get<{ stage?: string }>('/v1/capture_status',
+        { capture_id: captureId });
+      return String(r?.stage || 'unknown');
+    } catch { return 'unknown'; }
+  },
+
   /**
    * A typed transcript -> the same structured preview. Also the RE-ANALYSE path: pass
    * the existing capture_id with an edited transcript and VocX rebuilds the report

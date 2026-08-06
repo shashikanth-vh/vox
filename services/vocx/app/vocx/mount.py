@@ -201,6 +201,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
     routes = [
         ("/v1/capture", ["POST"], "Preview a typed/inline-audio capture (never writes)"),
         ("/v1/capture_audio", ["POST"], "Raw audio → archive + STT → preview"),
+        ("/v1/capture_status", ["GET"], "Live pipeline stage of an in-flight capture (poll)"),
         ("/v1/commit", ["POST"], "Execute an approved capture (idempotent by capture_id)"),
         ("/v1/capabilities", ["GET"], "What this deployment can do right now"),
         ("/v1/interactions", ["GET"], "Search the interaction log"),
@@ -273,8 +274,15 @@ def build_vocx_router(settings: Any) -> APIRouter:
                 # that the caller asked with the right rm.
                 if route_path == "/v1/audio":
                     ref = (query.get("ref") or [""])[0]
-                    if ref and not identity.owns_audio_ref(ref, who):
-                        return _forbidden(b"That recording belongs to another user.")
+                    if ref:
+                        # A clip archived by an earlier build carries the OLD key in its
+                        # filename; the report that references it is listed via the same
+                        # aliases, so playback must accept them too or the list offers a
+                        # recording the player then refuses.
+                        keys = await run_in_threadpool(
+                            identity.aliases_for, email, settings) or [who]
+                        if not any(identity.owns_audio_ref(ref, k) for k in keys):
+                            return _forbidden(b"That recording belongs to another user.")
                 # Body-carried rm (capture / commit / reports.save) is rewritten too — a
                 # forged one there would file a capture under someone else\'s name.
                 if body:

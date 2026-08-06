@@ -333,6 +333,8 @@ class VocxApp:
             return self._auth_callback(query)
         if method == "POST" and path == "/v1/capture_audio":
             return self._capture_audio(query, body)
+        if method == "GET" and path == "/v1/capture_status":
+            return self._capture_status(query)
         if method == "POST" and path == "/v1/commit":
             return self._commit(body)
         if method == "GET" and path == "/v1/calendar/test":
@@ -471,9 +473,32 @@ class VocxApp:
         _stamp_capture_id(result.get("extraction"), data.get("capture_id"))
         if data.get("_transcription"):
             result["transcription"] = data["_transcription"]
+        self._preserve_audio_ref(result, rm)
         self._autosave_draft(result, rm)
         self._log_preview(result, rm)
         return 200, "application/json", _j({"ok": True, **result})
+
+    def _preserve_audio_ref(self, result: dict[str, Any], rm: str) -> None:
+        """A RE-ANALYSED capture keeps its recording. The typed lane rebuilds the
+        extraction from text alone, so the new extraction carries no transcript_ref —
+        and the draft then autosaves OVER the version that had one, losing the
+        report's audio for good. If the stored draft knows the ref and the fresh
+        extraction doesn't, it carries over."""
+        ext = result.get("extraction") or {}
+        meta = ext.setdefault("_meta", {})
+        if meta.get("transcript_ref"):
+            return
+        cid = meta.get("capture_id")
+        store = self.report_store()
+        if not cid or store is None:
+            return
+        from app.vocx import reports as reports_mod
+        if not reports_mod.valid_id(str(cid)):
+            return
+        old = ((store.get(rm, cid) or {}).get("report") or {}).get("extraction") or {}
+        ref = (old.get("_meta") or {}).get("transcript_ref")
+        if ref:
+            meta["transcript_ref"] = ref
 
     # ---- mobile: audio capture -> pipeline preview -------------------------
     def _capture_audio(self, query, body):
@@ -485,6 +510,8 @@ class VocxApp:
             return 400, "application/json", _j({"ok": False, "error": "empty audio body"})
         if len(body) > MAX_AUDIO_BYTES:
             return 413, "application/json", _j({"ok": False, "error": "audio too large"})
+        cid = (_one(query, "capture_id") or "").strip()[:80]
+        _set_capture_stage(cid, "received")
         ref = None
         astore = self.audio_store()
         if astore is not None:
@@ -496,11 +523,22 @@ class VocxApp:
             transcriber=self.transcriber(), store=self.store, config=self.config,
             execute=False,  # preview; the RM confirms via /commit
             stt_prompt=self.stt_prompt(),
+            on_stage=lambda s: _set_capture_stage(cid, s),
             meta_extra=_gps_meta(lambda k: _one(query, k)))
         _stamp_capture_id(result.get("extraction"), _one(query, "capture_id"))
         self._autosave_draft(result, rm)
         self._log_preview(result, rm)
+        _set_capture_stage(cid, "done")
         return 200, "application/json", _j({"ok": True, **result})
+
+    def _capture_status(self, query):
+        """Where an in-flight capture is in the pipeline — polled by the recorder UI
+        while /v1/capture_audio runs. Only a stage word leaks; unknown ids simply
+        answer 'unknown' (the poll starts before the upload lands)."""
+        cid = (_one(query, "capture_id") or "").strip()[:80]
+        entry = _CAPTURE_STAGES.get(cid) if cid else None
+        return 200, "application/json", _j(
+            {"ok": True, "stage": entry[0] if entry else "unknown"})
 
     # ---- mobile: commit an approved (possibly edited) capture --------------
     def _commit(self, body):
@@ -739,6 +777,26 @@ class VocxApp:
 # --- helpers ------------------------------------------------------------------
 def _j(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+# In-flight capture stages, keyed by the client-generated capture_id. In-memory on
+# purpose: the stage only matters while the /v1/capture_audio request is running in
+# this same process, and a restart mid-capture loses the request anyway. Entries
+# self-prune so an abandoned poll can never grow the map.
+_CAPTURE_STAGES: dict[str, tuple[str, float]] = {}
+_CAPTURE_STAGE_TTL_S = 900.0
+
+
+def _set_capture_stage(capture_id: str, stage: str) -> None:
+    if not capture_id:
+        return
+    import time as _time
+
+    now = _time.time()
+    for k in [k for k, (_, at) in _CAPTURE_STAGES.items()
+              if now - at > _CAPTURE_STAGE_TTL_S]:
+        _CAPTURE_STAGES.pop(k, None)
+    _CAPTURE_STAGES[capture_id] = (stage, now)
 
 
 def _one(query: dict[str, Any], key: str, default=None):

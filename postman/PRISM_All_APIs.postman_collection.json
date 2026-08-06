@@ -15855,7 +15855,7 @@
       ]
     },
     {
-      "name": "VocX  (21 requests \u00b7 {{baseUrl}}/vocx)",
+      "name": "VocX  (22 requests \u00b7 {{baseUrl}}/vocx)",
       "item": [
         {
           "name": "Touchpoints",
@@ -16193,6 +16193,41 @@
                     "vocx",
                     "v1",
                     "capture_audio"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/capture_status \u2014 Live pipeline stage of an in-flight capture (poll)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/capture_status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "capture_status"
                   ]
                 }
               }

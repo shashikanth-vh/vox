@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, TextField, Typography } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import StopIcon from '@mui/icons-material/Stop';
@@ -12,6 +12,25 @@ import { vx, pill, pillPrimary, input as inputSx } from './vocxStyles';
 /** m:ss */
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+/** The pipeline a clip walks after the mic stops — shown as a running strip while the
+ *  capture call is in flight. The stages are REAL: the recorder polls the capture's
+ *  live stage from VocX (keyed by a client-generated capture id), so the highlight
+ *  moves when the backend actually moves, not on a timer. */
+const PIPELINE: [string, string][] = [
+  ['uploading', 'Uploading'],
+  ['transcribing', 'Transcribing → English'],
+  ['structuring', 'Structuring the note'],
+];
+
+const stageIndex = (stage: string): number =>
+  stage === 'done' ? PIPELINE.length
+    : stage === 'received' || stage === 'transcribing' ? 1
+      : stage === 'structuring' ? 2 : 0;
+
+const newCaptureId = (): string =>
+  (globalThis.crypto as any)?.randomUUID?.()
+  || `cap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
 export default function RecordTab({ onFiled }: { onFiled: () => void }) {
   const rm = currentRm();
   const [preview, setPreview] = useState<VocxPreview | null>(null);
@@ -20,15 +39,36 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
   const [status, setStatus] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // '' = no audio pipeline running; else uploading/received/transcribing/structuring.
+  const [stage, setStage] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  useEffect(() => stopPoll, []);
 
   const send = useCallback(async (blob: Blob) => {
     setErr(''); setBusy(true);
+    setStage('uploading');
     setStatus('Transcribing — any language, filed in English…');
+    // The capture id is minted HERE so the progress poll and the capture speak about
+    // the same take; VocX reports the take's live stage against it while the call runs.
+    const cid = newCaptureId();
+    // If the backend never answers with a real stage (an older VocX without the
+    // status route), the strip must not sit on "Uploading" forever — after ~8s of
+    // silence it steps aside for the plain status line.
+    let heard = false;
+    let quietPolls = 0;
+    pollRef.current = setInterval(() => {
+      void vocxService.captureStatus(cid).then((s) => {
+        if (s !== 'unknown') { heard = true; setStage(s); return; }
+        if (!heard && ++quietPolls >= 12) { setStage(''); stopPoll(); }
+      });
+    }, 700);
     // Location rides along when the browser will give it, and is simply absent when it
     // will not. A capture must never wait on, or fail because of, geolocation.
     const gps = await currentPosition();
-    const r = await vocxService.captureAudio(blob, rm, gps);
-    setBusy(false); setStatus('');
+    const r = await vocxService.captureAudio(blob, rm, gps, cid);
+    stopPoll();
+    setBusy(false); setStatus(''); setStage('');
     if (!r.ok) { setErr(r.error); return; }
     setPreview(r.data);
   }, [rm]);
@@ -153,12 +193,46 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
         fontVariantNumeric: 'tabular-nums' }}>
         {recording ? clock(rec.seconds) : busy ? '' : 'Tap the mic and start speaking'}
       </Typography>
-      <Typography sx={{ fontSize: 15, color: vx.mut, minHeight: 22 }}>
-        {status
-          || (recording
-            ? `Tap again to stop · ${clock(Math.max(0, remaining))} left`
-            : rec.state === 'requesting' ? 'Waiting for the microphone…' : '')}
-      </Typography>
+      {busy && stage ? (
+        /* The pipeline strip: where THIS take is right now, moving on the backend's
+           own word. Dots walk left to right; done steps keep their tick. */
+        <Box aria-live="polite" sx={{ display: 'flex', alignItems: 'center',
+          justifyContent: 'center', gap: 0.9, minHeight: 22, flexWrap: 'wrap' }}>
+          {PIPELINE.map(([key, label], i) => {
+            const idx = stageIndex(stage);
+            const state = i < idx ? 'done' : i === idx ? 'active' : 'todo';
+            return (
+              <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 0.9 }}>
+                {i > 0 && (
+                  <Box aria-hidden sx={{ width: 16, height: 2, borderRadius: 1,
+                    bgcolor: state === 'todo' ? vx.line : vx.grn }} />
+                )}
+                <Box aria-hidden sx={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  bgcolor: state === 'done' ? vx.grn : state === 'active' ? vx.live : vx.line,
+                  '@keyframes vocxStagePulse': {
+                    '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.3 },
+                  },
+                  animation: state === 'active' ? 'vocxStagePulse 1.1s ease-in-out infinite' : 'none',
+                  '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+                }} />
+                <Typography sx={{ fontSize: 12.5,
+                  color: state === 'todo' ? vx.mut : state === 'active' ? vx.live : vx.grn2,
+                  fontWeight: state === 'active' ? 700 : 500 }}>
+                  {label}
+                </Typography>
+              </Box>
+            );
+          })}
+        </Box>
+      ) : (
+        <Typography sx={{ fontSize: 15, color: vx.mut, minHeight: 22 }}>
+          {status
+            || (recording
+              ? `Tap again to stop · ${clock(Math.max(0, remaining))} left`
+              : rec.state === 'requesting' ? 'Waiting for the microphone…' : '')}
+        </Typography>
+      )}
 
       {recording && (
         <Button size="small" onClick={rec.cancel} sx={{ textTransform: 'none', mt: 0.5,

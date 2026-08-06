@@ -114,9 +114,17 @@ def process_audio_capture(
     capture_ts = capture_ts or _dt.datetime.now().isoformat(timespec="seconds")
     transcriber = transcriber or vocx_stt.build_transcriber(config)
 
+    # Live stage reporting: the caller (the capture endpoint) records where this take
+    # is in the pipeline so a UI can show progress while the request runs. Optional
+    # and side-effect-only — a missing hook changes nothing.
+    on_stage = kwargs.pop("on_stage", None)
+    if on_stage:
+        on_stage("transcribing")
     tr = transcriber.transcribe(audio, language=language,
                                 prompt=kwargs.pop("stt_prompt", None))
     ref = kwargs.pop("transcript_ref", None) or vocx_stt.archive_audio(audio, capture_ts, rm, config)
+    if on_stage:
+        on_stage("structuring")
 
     # The STT-detected language rides into the interaction's `language` column unless
     # the client already asserted one.
