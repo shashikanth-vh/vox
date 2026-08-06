@@ -383,6 +383,39 @@ async def append_cam_turn(report_id: str, payload: CamTurnIn,
             "status": row.status}
 
 
+@router.post("/v1/internal/cam-reports/{report_id}/reset", tags=["Internal"],
+             summary="Start the workbench conversation afresh (turns + draft cleared)")
+async def reset_cam_report(report_id: str,
+                           ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The workbench's "refresh means fresh" verb: every recorded turn is removed and
+    the working draft cleared, so the engine — which rebuilds its memory from this
+    transcript on each question — genuinely starts from nothing. Same authority and
+    same states as writing a turn; the reset itself is audit-logged, so the register
+    still answers WHEN a conversation was wiped even though the turns are gone."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.authz.engine import enforce_operation
+
+    enforce_operation(ctx.user, "prepare_cpcs_checklist")
+    row = await _cam_or_404(ctx, report_id)
+    if row.status not in ("Draft", "Returned"):
+        raise ConflictError(
+            f"CAM v{row.report_version} is {row.status!r}; only a Draft (or a Returned "
+            "version being amended) can be reset.")
+    gone = (await ctx.session.execute(sa_delete(CamTurn).where(
+        CamTurn.tenant_id == ctx.tenant_id,
+        CamTurn.report_id == row.id))).rowcount or 0
+    row.draft_md = None
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="cam.reset",
+        resource_type="cam_reports", resource_id=str(row.id),
+        request_id=request_id_ctx.get(),
+        changes={"report_version": row.report_version, "turns_removed": gone}))
+    await ctx.session.flush()
+    return {"ok": True, "report_version": row.report_version, "turns_removed": gone}
+
+
 @router.post("/v1/internal/cam-reports/{report_id}/submit", tags=["Internal"],
              summary="Submit the CAM to the committee (maker)")
 async def submit_cam_report(report_id: str, payload: CamSubmitIn,

@@ -46,6 +46,13 @@ const TONE: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'>
 
 type ChatMsg = { role: 'user' | 'assistant'; text: string };
 
+// The engine re-reads the WHOLE transcript on every question, so an unbounded
+// conversation gets slower and costlier with each turn. Warn while there is still
+// room to finish the thought; at the ceiling, further questions stop until the
+// analyst clears (Generate CAM stays allowed — it is the payoff of what was built).
+const WARN_CHARS = 90_000;
+const MAX_CHARS = 140_000;
+
 /** The rail's tiny section heading — one rhythm for every section. */
 const railHead = {
   fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', color: tokens.muted,
@@ -200,6 +207,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const send = (text?: string, shownAs?: string) => {
     const q = (text ?? question).trim();
     if (!q || busy) return;
+    if (overMax) {
+      setErr('The conversation has reached its size limit — Generate CAM with what you have, or press refresh to clear and start fresh.');
+      return;
+    }
     setChat((c) => [...c, { role: 'user', text: shownAs || q }]);
     setQuestion('');
     void run('ask', async () => {
@@ -323,6 +334,24 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     return `CAM ${decision.toLowerCase()}.`;
   });
 
+  // Refresh means FRESH: wipe the register's transcript (the engine's only memory)
+  // and the working draft, then empty the view — the next question starts a brand-new
+  // conversation. Guarded so the seeding effect cannot re-pour the old turns back.
+  const startFresh = async () => {
+    setErr(''); setInfo('');
+    if (working?.id) {
+      setBusy('reset');
+      try {
+        await camService.resetConversation(working.id);
+        seededFor.current = working.id;
+        await load();
+      } catch (e: any) { setErr(e?.message || String(e)); setBusy(''); return; }
+      setBusy('');
+    }
+    setChat([]);
+    setInfo('Fresh start — the engine holds no memory of the earlier conversation.');
+  };
+
   const toggle = (id: string) => setSel((p) => {
     const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
@@ -332,6 +361,9 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     setPromptUse((p) => (p === kind ? 'none' : kind));
 
   const thinking = busy === 'ask' || busy === 'generate';
+  const chatChars = chat.reduce((n, m) => n + m.text.length, 0);
+  const overWarn = chatChars > WARN_CHARS;
+  const overMax = chatChars > MAX_CHARS;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
@@ -567,11 +599,11 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             {/* THE CONVERSATION — full height, question box at the bottom. */}
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0,
               minHeight: 240, position: 'relative' }}>
-              {/* Refresh CLEARS THE VIEW only — the register keeps the transcript, and
-                  the engine still sees the whole conversation on the next question. */}
+              {/* Refresh means FRESH: the recorded transcript is wiped server-side too,
+                  so the engine holds no memory of the exchange on the next question. */}
               {chat.length > 0 && (
-                <Tooltip title="Clear the conversation area (the recorded transcript is kept)">
-                  <IconButton size="small" onClick={() => setChat([])}
+                <Tooltip title="Clear everything and start fresh — the engine forgets this conversation">
+                  <IconButton size="small" disabled={!!busy} onClick={() => void startFresh()}
                     sx={{ position: 'absolute', top: 6, right: 14, zIndex: 1,
                       bgcolor: '#fff', border: `1px solid ${tokens.line}`,
                       '&:hover': { bgcolor: '#F6F8FA' } }}>
@@ -640,6 +672,22 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   )}
                 </Box>
               )}
+              {/* Size governor: warn while there is room, stop asks at the ceiling. */}
+              {overWarn && (
+                <Alert severity={overMax ? 'error' : 'warning'}
+                  sx={{ mx: 1, mb: 0.6, py: 0, fontSize: 12 }}
+                  action={
+                    <Button color="inherit" size="small" disabled={!!busy}
+                      onClick={() => void startFresh()}
+                      sx={{ textTransform: 'none', fontSize: 11.5 }}>
+                      Clear &amp; start fresh
+                    </Button>
+                  }>
+                  {overMax
+                    ? 'Conversation limit reached — no further questions. Generate CAM with what you have, or clear.'
+                    : 'This conversation is getting long — answers slow down. Wrap up with Generate CAM, or clear.'}
+                </Alert>
+              )}
               {/* The question box — Enter sends, Shift+Enter for a new line. */}
               <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-end', p: 1,
                 borderTop: `1px solid ${tokens.line}` }}>
@@ -652,7 +700,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   }}
                   sx={{ '& textarea': { fontSize: 12.8, lineHeight: 1.5 } }} />
                 <Button variant="outlined" size="small" endIcon={<SendIcon sx={{ fontSize: 15 }} />}
-                  disabled={!question.trim() || !!busy} onClick={() => send()}
+                  disabled={!question.trim() || !!busy || overMax} onClick={() => send()}
                   sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
                   {busy === 'ask' ? 'Asking…' : 'Send'}
                 </Button>

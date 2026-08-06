@@ -7929,6 +7929,49 @@
           }
         },
         {
+          "name": "POST /v1/internal/cam-reports/{{report_id}}/reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "internal",
+                "cam-reports",
+                "{{report_id}}",
+                "reset"
+              ]
+            }
+          }
+        },
+        {
           "name": "POST /v1/internal/cam-reports/{{report_id}}/submit",
           "request": {
             "method": "POST",

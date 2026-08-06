@@ -149,6 +149,40 @@ async def test_cam_lifecycle_is_maker_checker_with_an_amend_loop(client: AsyncCl
     assert v2.status_code == 201 and v2.json()["report_version"] == 2
 
 
+async def test_refresh_means_fresh_wipes_the_conversation(client: AsyncClient):
+    """The workbench's reset: turns and draft go (the engine's memory is this
+    transcript), numbering restarts at 1, the version row survives — and a CAM already
+    with the committee cannot be wiped."""
+    _, lid = await _lending(client)
+    rid = (await client.post("/v1/internal/cam-reports", json={"lending_id": lid},
+                             headers=ANALYST)).json()["id"]
+    for role, content, draft in (("user", "how are you", None),
+                                 ("assistant", "ready to help", "# CAM\nHalf a draft.")):
+        r = await client.post(f"/v1/internal/cam-reports/{rid}/turns",
+                              json={"role": role, "content": content,
+                                    **({"draft_md": draft} if draft else {})},
+                              headers=ANALYST)
+        assert r.status_code == 201, r.text
+
+    wiped = await client.post(f"/v1/internal/cam-reports/{rid}/reset", headers=ANALYST)
+    assert wiped.status_code == 200, wiped.text
+    assert wiped.json()["turns_removed"] == 2
+    full = (await client.get(f"/v1/internal/cam-reports/{rid}", headers=ANALYST)).json()
+    assert full["turns"] == [] and full["draft_md"] is None
+
+    # The next question opens a brand-new conversation — turn 1 again.
+    again = await client.post(f"/v1/internal/cam-reports/{rid}/turns",
+                              json={"role": "user", "content": "fresh start",
+                                    "draft_md": "# CAM\nNew draft."}, headers=ANALYST)
+    assert again.status_code == 201 and again.json()["turn_no"] == 1
+
+    # Submitted = the committee's record now; wiping it is refused.
+    assert (await client.post(f"/v1/internal/cam-reports/{rid}/submit", json={},
+                              headers=ANALYST)).status_code == 200
+    assert (await client.post(f"/v1/internal/cam-reports/{rid}/reset",
+                              headers=ANALYST)).status_code == 409
+
+
 async def test_a_cam_preparer_with_authority_still_may_not_decide_their_own(
         client: AsyncClient):
     """Four-eyes at EQUAL authority: a Credit Head who drafted the CAM cannot also be

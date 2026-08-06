@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (267 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (268 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -7110,6 +7110,44 @@
                     }
                   }
                 }
+              }
+            },
+            {
+              "name": "POST /v1/internal/cam-reports/{report_id}/reset \u2014 Start the workbench conversation afresh (turns + draft cleared)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/internal/cam-reports/{{report_id}}/reset",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "internal",
+                    "cam-reports",
+                    "{{report_id}}",
+                    "reset"
+                  ]
+                },
+                "description": "The workbench's \"refresh means fresh\" verb: every recorded turn is removed and\nthe working draft cleared, so the engine \u2014 which rebuilds its memory from this\ntranscript on each question \u2014 genuinely starts from nothing. Same authority and\nsame states as writing a turn; the reset itself is audit-logged, so the register\nstill answers WHEN a conversation was wiped even though the turns are gone."
               }
             },
             {

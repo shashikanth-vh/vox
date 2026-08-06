@@ -193,6 +193,17 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, 'save the edited draft')); }
   },
 
+  /**
+   * Refresh means FRESH: wipe the recorded conversation and the working draft, so the
+   * engine — which rebuilds its memory from the transcript on every question — starts
+   * from nothing. The reset itself stays in the audit log.
+   */
+  async resetConversation(reportId: string): Promise<void> {
+    try {
+      await api.post(`/internal/cam-reports/${reportId}/reset`);
+    } catch (e) { throw new Error(msg(e, 'reset the conversation')); }
+  },
+
   /** The tenant's default template of one kind (cam_prompt, cam_example, …) — null
    *  when the deployment ships none and nobody uploaded one. */
   async template(docType: string): Promise<{ id: string; title: string } | null> {
