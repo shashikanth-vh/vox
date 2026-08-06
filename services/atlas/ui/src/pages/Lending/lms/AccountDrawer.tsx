@@ -213,12 +213,6 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
         </Typography>
         {row?.code && <CodeText code={row.code} />}
         {acct && <StatusChip label={acct.status} />}
-        {row?.code && (
-          <Button size="small" variant="outlined" onClick={() => setDataRegOpen(true)}
-            sx={{ textTransform: 'none', fontSize: 11.5, py: 0.2 }}>
-            📁 Data register
-          </Button>
-        )}
         <IconButton onClick={close}><CloseIcon fontSize="small" /></IconButton>
       </Box>
 
@@ -574,6 +568,19 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
             the ledger is frozen.
           </Alert>
         )}
+      </Box>
+
+      {/* Footer action bar — the same shell as the LOS company drawer, so the two
+          drawers read as one product: Data Register bottom-left, Done bottom-right. */}
+      <Divider />
+      <Box sx={{ p: 2, display: 'flex', gap: 1, flexWrap: 'wrap', flexShrink: 0 }}>
+        {row?.code && (
+          <Button variant="outlined" onClick={() => setDataRegOpen(true)}>
+            📁 Data Register
+          </Button>
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button variant="outlined" onClick={close}>Done</Button>
       </Box>
 
       {row?.code && (
