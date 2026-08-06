@@ -551,6 +551,26 @@ async def test_report_print_view(stub_register, tmp_path, monkeypatch):
     assert missing.status_code == 404
 
 
+async def test_report_pdf_download(stub_register, tmp_path, monkeypatch):
+    """/v1/reports/pdf hands back an actual PDF file — the UI's Download button saves
+    it to the device instead of opening a print tab. The ₹ proves the unicode path
+    (the engine's built-in fonts are latin-1 only)."""
+    monkeypatch.setenv("VOCX_TOKENS_DIR", str(tmp_path / "vox"))
+    get_settings.cache_clear()
+    app = create_app()
+    async with await _client(app) as c:
+        prev = await c.post("/v1/capture", json={
+            "rm": "Priya", "offline": True,
+            "transcript": "Met EcoSoch Solar about a ₹40 Cr term loan."})
+        cid = prev.json()["extraction"]["_meta"]["capture_id"]
+        r = await c.get(f"/v1/reports/pdf?rm=Priya&id={cid}")
+        missing = await c.get("/v1/reports/pdf?rm=Priya&id=nope-123")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert r.content.startswith(b"%PDF-")
+    assert missing.status_code == 404
+
+
 async def test_committed_interaction_lands_in_structured_columns(stub_register):
     """The VOM card's chips/fields land in the Register's STRUCTURED interaction
     columns — transcript, key_intel, next_steps, attendees, next_meeting_date, GPS,

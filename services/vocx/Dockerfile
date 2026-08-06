@@ -24,6 +24,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
 # and the system user's home does not exist. Without this the FIRST model download dies
 # with 'Permission denied (os error 13)'.
 ENV HF_HOME=/data/vocx/hf
+# DejaVu backs /v1/reports/pdf: the PDF engine's built-in fonts are latin-1 only and a
+# ₹ in the deal facts would fail the render. Slim images ship no fonts at all.
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r vocx && useradd -r -g vocx vocx && mkdir -p /app /data/vocx \
     && chown vocx:vocx /app /data/vocx
 COPY --from=builder /opt/venv /opt/venv

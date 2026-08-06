@@ -177,7 +177,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
     # purpose — Google calls it back with no ATLAS identity, carrying the rm in `state`.
     _OWNED = {
         "/v1/capture", "/v1/capture_audio", "/v1/commit",
-        "/v1/reports", "/v1/reports/get", "/v1/reports/print",
+        "/v1/reports", "/v1/reports/get", "/v1/reports/print", "/v1/reports/pdf",
         "/v1/reports/save", "/v1/reports/delete",
         "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test",
         "/v1/suggest", "/v1/template_fill",
@@ -214,6 +214,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
         ("/v1/reports", ["GET"], "The RM's report list (drafts → ready → committed)"),
         ("/v1/reports/get", ["GET"], "One report document"),
         ("/v1/reports/print", ["GET"], "Print-ready HTML of a report (browser print → PDF)"),
+        ("/v1/reports/pdf", ["GET"], "The report as a PDF file (direct download)"),
         ("/v1/reports/save", ["POST"], "Save/update a pending report"),
         ("/v1/reports/delete", ["POST"], "Delete a report"),
         ("/v1/auth/status", ["GET"], "Is this RM's Google connected?"),
@@ -253,7 +254,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
                 # or a person's own past work is either invisible or — worse — listed and
                 # then unopenable.
                 if route_path in ("/v1/reports", "/v1/reports/get", "/v1/reports/print",
-                                  "/v1/reports/delete"):
+                                  "/v1/reports/pdf", "/v1/reports/delete"):
                     keys = await run_in_threadpool(identity.aliases_for, email, settings)
                     if len(keys) > 1:
                         app = _app()

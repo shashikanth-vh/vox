@@ -217,26 +217,25 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
   };
 
   /**
-   * The print view, opened the only way it can be: fetched, then written into a window
-   * this click already opened.
-   *
-   * Linking straight at the print URL was a plain navigation with no bearer token, so
-   * the edge answered "Authentication required" and the user got JSON where a report
-   * should have been. The blank tab is opened SYNCHRONOUSLY inside the click — a
-   * `window.open` after an await is a pop-up, and browsers block it.
+   * Download PDF means a DOWNLOAD: the service renders the file, the browser saves it.
+   * Fetched with the bearer (a plain link carries no token and the edge answers 401),
+   * then handed to an anchor click — no new tab, no pop-up rules, no print dialog,
+   * and the same path works on mobile.
    */
-  const openPrintView = async () => {
-    // The handle must be minted synchronously in the click (pop-up rules) and WITHOUT
-    // 'noopener' — that flag makes window.open return NULL by spec, which read as
-    // "pop-ups blocked" on every browser, every time. The blob URL replaces
-    // document.write, which mobile Chrome silently drops in fresh tabs.
-    const w = window.open('about:blank', '_blank');
-    if (!w) { setErr('Allow pop-ups for this site to open the print view.'); return; }
-    setErr('');
-    const r = await vocxService.printable(rm, captureId);
-    if (!r.ok) { w.close(); setErr(r.error); return; }
-    const url = URL.createObjectURL(new Blob([r.data], { type: 'text/html' }));
-    w.location.href = url;
+  const downloadPdf = async () => {
+    setErr(''); setBusy('Preparing PDF…');
+    const r = await vocxService.pdf(rm, captureId);
+    setBusy('');
+    if (!r.ok) { setErr(r.error); return; }
+    const stem = String(rep.title || match.canonical_name || 'field-report')
+      .replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'field-report';
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `VOX-${stem}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
@@ -302,9 +301,9 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         <Button disabled={!!busy || committed}
           onClick={() => setAskApprove(true)} sx={pillPrimary}>Approve</Button>
         <Button disabled={!!busy || committed} onClick={saveDraft} sx={pill}>Save changes</Button>
-        <Tooltip title="Opens the print view — use your browser's Save as PDF">
+        <Tooltip title="Saves this report as a PDF file">
           <Button startIcon={<DownloadIcon sx={{ fontSize: 17 }} />}
-            disabled={!!busy || !captureId} onClick={openPrintView}
+            disabled={!!busy || !captureId} onClick={downloadPdf}
             sx={pill}>Download PDF</Button>
         </Tooltip>
         <Box sx={{ flex: 1 }} />

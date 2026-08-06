@@ -20,6 +20,8 @@ dependencies = [
     "google-api-python-client>=2.140",
     "google-auth-oauthlib>=1.2",
     "boto3==1.35.99",            # MinIO/S3 — recorded-audio bytes (same pin as the Register)
+    "fpdf2==2.8.7",              # /v1/reports/pdf — the Download button's actual file
+
 ]
 
 [project.optional-dependencies]

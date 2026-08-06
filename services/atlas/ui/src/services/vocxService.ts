@@ -157,6 +157,12 @@ export const vocxService = {
     } catch (e) { return fail(vocxError(e, 'open the print view')); }
   },
 
+  /** The report as an actual PDF file — what "Download PDF" saves to the device. */
+  async pdf(rm: string, captureId: string): Promise<Result<Blob>> {
+    try { return ok(await vocx.blob('/v1/reports/pdf', { rm, id: captureId })); }
+    catch (e) { return fail(vocxError(e, 'download the PDF')); }
+  },
+
   /** Keep an edited draft without filing it. */
   async saveDraft(rm: string, captureId: string, report: VocxPreview,
                   status = 'ready'): Promise<Result<true>> {

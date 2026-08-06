@@ -242,23 +242,12 @@ def build_report_store(settings: Any) -> S3ReportStore | LocalReportStore | None
 
 
 # --- print view ----------------------------------------------------------------
-def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None) -> str:
-    """The report as print-ready HTML — the PoC's "Download PDF" is the browser printing
-    exactly this kind of view, so parity means serving it, not bundling a PDF engine."""
-    import html as _html
-
-    def esc(v: Any) -> str:
-        return _html.escape(str(v)) if v not in (None, "") else ""
-
-    ext = (doc.get("report") or {}).get("extraction") or {}
-    rep = ext.get("report") or {}
-    meta = ext.get("_meta") or {}
+def _details_rows(ext: dict[str, Any], rep: dict[str, Any],
+                  config: dict[str, Any] | None) -> list[tuple[str, Any]]:
+    """The DETAILS table both renderers share: client/follow-up + the deal facts +
+    labeled template extras. One assembly, so a field added here shows up in the
+    print view AND the downloaded PDF without anyone remembering to do it twice."""
     nm = ext.get("next_meeting") or {}
-    title = rep.get("title") or (ext.get("entity_match") or {}).get("canonical_name") \
-        or ext.get("company_mentioned") or "Field report"
-    ts = (meta.get("capture_ts") or doc.get("updated_at") or "")[:16].replace("T", " ")
-
-    # DETAILS rows: client/follow-up + the deal facts + labeled template extras.
     rows: list[tuple[str, Any]] = [("Client", rep.get("title") or ext.get("company_mentioned"))]
     if nm.get("date"):
         follow = str(nm["date"]) + (f" {nm['time']}" if nm.get("time") else "") \
@@ -283,6 +272,24 @@ def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None)
     for k, v in (rep.get("extra") or {}).items():
         if v not in (None, "", []):
             rows.append((labels.get(k, k), v))
+    return [(lbl, v) for lbl, v in rows if v not in (None, "")]
+
+
+def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None) -> str:
+    """The report as print-ready HTML — the PoC's "Download PDF" is the browser printing
+    exactly this kind of view, so parity means serving it, not bundling a PDF engine."""
+    import html as _html
+
+    def esc(v: Any) -> str:
+        return _html.escape(str(v)) if v not in (None, "") else ""
+
+    ext = (doc.get("report") or {}).get("extraction") or {}
+    rep = ext.get("report") or {}
+    meta = ext.get("_meta") or {}
+    title = rep.get("title") or (ext.get("entity_match") or {}).get("canonical_name") \
+        or ext.get("company_mentioned") or "Field report"
+    ts = (meta.get("capture_ts") or doc.get("updated_at") or "")[:16].replace("T", " ")
+    rows = _details_rows(ext, rep, config)
 
     def section(name: str, body: str) -> str:
         return f'<h2>{esc(name)}</h2>\n{body}' if body.strip() else ""
@@ -332,3 +339,113 @@ def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None)
 {section("Attendees", f"<p>{attendees}</p>" if attendees else "")}
 {section("Full transcript (English)", f"<p>{esc(transcript)}</p>" if transcript else "")}
 </body></html>"""
+
+
+# --- pdf download ---------------------------------------------------------------
+_DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
+
+
+def render_pdf(doc: dict[str, Any], config: dict[str, Any] | None = None) -> bytes:
+    """The report as an actual PDF FILE. The print view answers "let me print this";
+    this answers what the button says — Download PDF saves a file to the device, no
+    tab and no print dialog. Same content as the print view, drawn with fpdf2.
+
+    DejaVu ships in the image (fonts-dejavu-core) because the built-in Helvetica is
+    latin-1 only and a ₹ in "Ticket size" would crash the render; on a bare checkout
+    without the font, fall back to Helvetica and substitute what latin-1 cannot say.
+    """
+    from fpdf import FPDF
+
+    ext = (doc.get("report") or {}).get("extraction") or {}
+    rep = ext.get("report") or {}
+    meta = ext.get("_meta") or {}
+    title = rep.get("title") or (ext.get("entity_match") or {}).get("canonical_name") \
+        or ext.get("company_mentioned") or "Field report"
+    ts = (meta.get("capture_ts") or doc.get("updated_at") or "")[:16].replace("T", " ")
+    status = (doc.get("status") or "draft").upper()
+
+    pdf = FPDF(format="A4")
+    pdf.set_margins(18, 16, 18)
+    pdf.set_auto_page_break(auto=True, margin=18)
+    uni = os.path.isfile(os.path.join(_DEJAVU_DIR, "DejaVuSans.ttf"))
+    if uni:
+        pdf.add_font("Deja", "", os.path.join(_DEJAVU_DIR, "DejaVuSans.ttf"))
+        pdf.add_font("Deja", "B", os.path.join(_DEJAVU_DIR, "DejaVuSans-Bold.ttf"))
+    face = "Deja" if uni else "helvetica"
+
+    def txt(v: Any) -> str:
+        s = str(v) if v not in (None, "") else ""
+        return s if uni else s.encode("latin-1", "replace").decode("latin-1")
+
+    teal, grey, ink = (14, 122, 122), (102, 102, 102), (17, 17, 17)
+
+    def h2(name: str) -> None:
+        pdf.ln(4)
+        pdf.set_font(face, "B", 9.5)
+        pdf.set_text_color(*teal)
+        pdf.cell(0, 5, txt(name.upper()), new_x="LMARGIN", new_y="NEXT")
+        y = pdf.get_y()
+        pdf.set_draw_color(221, 221, 221)
+        pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
+        pdf.ln(2)
+        pdf.set_text_color(*ink)
+
+    def para(s: Any) -> None:
+        pdf.set_font(face, "", 10)
+        pdf.multi_cell(0, 5, txt(s), new_x="LMARGIN", new_y="NEXT")
+
+    def bullets(items: list[str]) -> None:
+        pdf.set_font(face, "", 10)
+        for it in items:
+            pdf.multi_cell(0, 5, txt(("• " if uni else "- ") + str(it)),
+                           new_x="LMARGIN", new_y="NEXT")
+
+    pdf.add_page()
+    pdf.set_font(face, "B", 8)
+    pdf.set_text_color(*teal)
+    pdf.cell(0, 4, txt(f"VOCX · EVAM FIELD INTEL · {status}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(face, "B", 19)
+    pdf.set_text_color(*ink)
+    pdf.multi_cell(0, 9, txt(title), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(face, "", 9.5)
+    pdf.set_text_color(*grey)
+    pdf.cell(0, 5, txt(ts), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(*ink)
+
+    if rep.get("summary"):
+        h2("Summary")
+        para(rep["summary"])
+    intel = [k for k in rep.get("key_intel") or [] if k]
+    if intel:
+        h2("Key intel")
+        bullets(intel)
+    rows = _details_rows(ext, rep, config)
+    if rows:
+        h2("Details")
+        for lbl, v in rows:
+            pdf.set_font(face, "", 10)
+            pdf.set_text_color(*grey)
+            pdf.cell(48, 5, txt(lbl))
+            pdf.set_text_color(*ink)
+            pdf.multi_cell(0, 5, txt(v), new_x="LMARGIN", new_y="NEXT")
+    steps = [s for s in rep.get("next_steps") or [] if s.get("action")]
+    if steps:
+        h2("Next steps")
+        bullets([(f"{s['owner']}: " if s.get("owner") else "") + str(s.get("action") or "")
+                 + (f" — due {s['date']}" if s.get("date") else "") for s in steps])
+    nuances = [n for n in rep.get("nuances") or [] if n]
+    if nuances:
+        h2("Nuances")
+        bullets(nuances)
+    attendees = " · ".join(
+        " ".join(x for x in (str(a.get("name") or ""),
+                             f"({a['role']})" if a.get("role") else "",
+                             f"— {a['company']}" if a.get("company") else "") if x)
+        for a in rep.get("attendees") or [] if a.get("name"))
+    if attendees:
+        h2("Attendees")
+        para(attendees)
+    if rep.get("transcript_english"):
+        h2("Full transcript (English)")
+        para(rep["transcript_english"])
+    return bytes(pdf.output())

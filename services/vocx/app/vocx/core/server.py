@@ -181,6 +181,21 @@ class VocxApp:
         html = reports_mod.render_print_html(doc, self.config)
         return 200, "text/html; charset=utf-8", html.encode("utf-8")
 
+    def _reports_pdf(self, query):
+        """The report as an actual PDF file — the Download button saves this straight
+        to the device. Same lookup rules as /v1/reports/print."""
+        from app.vocx import reports as reports_mod
+        rm, cid = _one(query, "rm"), _one(query, "id")
+        store = self.report_store()
+        if not rm or not reports_mod.valid_id(cid or ""):
+            return 400, "application/json", _j({"ok": False, "error": "rm and valid id required"})
+        if store is None:
+            return 404, "application/json", _j({"ok": False, "error": "report_store_off"})
+        doc = store.get(rm, cid)
+        if doc is None:
+            return 404, "application/json", _j({"ok": False, "error": "not found"})
+        return 200, "application/pdf", reports_mod.render_pdf(doc, self.config)
+
     def _reports_save(self, body):
         from app.vocx import reports as reports_mod
         if len(body) > reports_mod.MAX_REPORT_BYTES:
@@ -347,6 +362,8 @@ class VocxApp:
             return self._reports_get(query)
         if method == "GET" and path == "/v1/reports/print":
             return self._reports_print(query)
+        if method == "GET" and path == "/v1/reports/pdf":
+            return self._reports_pdf(query)
         if method == "POST" and path == "/v1/reports/save":
             return self._reports_save(body)
         if method == "POST" and path == "/v1/reports/delete":

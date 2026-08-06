@@ -15990,7 +15990,7 @@
       ]
     },
     {
-      "name": "VocX  (22 requests \u00b7 {{baseUrl}}/vocx)",
+      "name": "VocX  (23 requests \u00b7 {{baseUrl}}/vocx)",
       "item": [
         {
           "name": "Touchpoints",
@@ -16645,6 +16645,42 @@
                     "v1",
                     "reports",
                     "get"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /vocx/v1/reports/pdf \u2014 The report as a PDF file (direct download)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/vocx/v1/reports/pdf",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "vocx",
+                    "v1",
+                    "reports",
+                    "pdf"
                   ]
                 }
               }
