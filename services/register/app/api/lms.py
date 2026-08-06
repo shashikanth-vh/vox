@@ -352,7 +352,9 @@ async def set_account_terms(lending_id: str, payload: AccountTermsIn,
     missing recomputes and STAMPS the EMI for the term-loan family."""
     _authorizer(ctx)
     await _line_scoped(ctx, lending_id)
-    acct = await _account(ctx, lending_id)
+    # Locked: two checkers filling the same gap concurrently must serialize, so the
+    # already-recorded check cannot be raced past.
+    acct = await _account(ctx, lending_id, lock=True)
     if acct.status == "Closed" or acct.closed_on:
         raise ConflictError("This loan account is closed.")
     filled: dict[str, Any] = {}

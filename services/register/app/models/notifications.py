@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +33,14 @@ class Notification(RegisterBase):
     """One notification for one recipient (the in-app inbox row)."""
 
     __tablename__ = "notifications"
+    __table_args__ = (
+        # The inbox read path: every signed-in client polls its unread rows (the
+        # header bell, every ~45s). At a thousand users that poll must be an index
+        # hit, not a table scan — (tenant, recipient, read_at) over live rows serves
+        # both the unread list and the unread count.
+        Index("ix_notifications_recipient_unread", "tenant_id", "recipient", "read_at",
+              postgresql_where=text("deleted_at IS NULL")),
+    )
 
     recipient: Mapped[str] = mapped_column(String(200), nullable=False)   # e-mail
     recipient_role: Mapped[str | None] = mapped_column(String(60))        # context only
