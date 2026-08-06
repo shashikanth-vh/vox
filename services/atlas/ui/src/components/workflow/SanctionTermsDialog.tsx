@@ -248,6 +248,14 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   const save = async () => {
     setErr('');
     const num = (k: string) => (f[k]?.trim() ? Number(f[k]) : undefined);
+    // An EMI schedule amortises over its tenor — without rate + tenure the LMS can
+    // never compute the EMI, and the account opens with a dash where the figure
+    // should be. Catch it HERE, while the letter is still in hand.
+    if ((f.schedule_kind || 'EMI') === 'EMI' && (!num('rate_pct') || !num('tenor_months'))) {
+      setErr('An EMI schedule needs Rate % and Tenor (months) — the EMI is computed '
+        + 'from them. Fill both, or pick Bullet/Custom as the schedule.');
+      return;
+    }
     const covenants = covs.filter((c) => c.name.trim());
     // No first-due date is FINE: the covenant defers, and its schedule stamps itself
     // one cycle after the first confirmed disbursement tranche.

@@ -101,6 +101,18 @@ export const lmsService = {
     } catch (e) { throw new Error(msg(e, 'record the ledger entry')); }
   },
 
+  /** FILL a missing repayment term (tenure/rate) — the repair lane for an account
+   *  that opened before its terms were complete; the EMI recomputes on the spot.
+   *  Recorded values cannot be changed here (that is an amendment). */
+  async setAccountTerms(lendingId: string, input: {
+    tenor_months?: number; rate_pct?: number; repayment_start?: string;
+  }): Promise<LoanAccount> {
+    try {
+      const r = await api.post<any>(`/lending/${lendingId}/loan-account/terms`, input);
+      return r.account;
+    } catch (e) { throw new Error(msg(e, 'set the repayment terms')); }
+  },
+
   /** Classification / provisioning / closure — the AUTHORIZER's verbs. */
   async patchAccount(lendingId: string, input: Partial<{
     status: string; overdue_position: string; provisioning_amount: number;

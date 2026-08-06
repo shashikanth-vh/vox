@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (266 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (267 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -9689,6 +9689,57 @@
                       "disabled": false
                     }
                   ]
+                }
+              }
+            },
+            {
+              "name": "POST /v1/lending/{lending_id}/loan-account/terms \u2014 FILL a missing repayment term (tenure / rate) \u2014 LMS Management",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/lending/{{lending_id}}/loan-account/terms",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "lending",
+                    "{{lending_id}}",
+                    "loan-account",
+                    "terms"
+                  ]
+                },
+                "description": "The repair lane for an account that opened before its terms were complete \u2014\ne.g. sanction terms saved without a tenure, so the EMI could never compute. Only\nMISSING fields may be filled: a value already on the account is a recorded term,\nand changing one goes through an amendment, not this route. Filling what was\nmissing recomputes and STAMPS the EMI for the term-loan family.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tenor_months\": 1,\n  \"rate_pct\": 1.0,\n  \"repayment_start\": \"2026-01-31\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 }
               }
             },

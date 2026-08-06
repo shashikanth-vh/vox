@@ -86,6 +86,10 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   // Interest: pick a date → the register COMPUTES (preview shows the formula) → post.
   const [accrueTo, setAccrueTo] = useState('');
   const [preview, setPreview] = useState<any | null>(null);
+  // Repair lane: an account opened with rate/tenure missing from its terms — the
+  // checker fills the gap here and the EMI computes on the spot.
+  const [fixTenure, setFixTenure] = useState('');
+  const [fixRate, setFixRate] = useState('');
   const [entry, setEntry] = useState({ entry_date: '', kind: 'EMI', amount: '', particulars: '' });
   const [cls, setCls] = useState({ status: '', overdue_position: '', provisioning_amount: '', closed_on: '', note: '' });
   const [tr, setTr] = useState({ amount: '', disbursed_on: '', ref: '' });
@@ -125,6 +129,19 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   };
 
   const close = () => { if (touched) onChanged?.(); onClose(); };
+
+  const fillTerms = () => run('terms', async () => {
+    if (!row) throw new Error('No line.');
+    const input: { tenor_months?: number; rate_pct?: number } = {};
+    if (acct?.tenor_months == null && fixTenure.trim()) input.tenor_months = Number(fixTenure);
+    if (acct?.rate_pct == null && fixRate.trim()) input.rate_pct = Number(fixRate);
+    if (!Object.keys(input).length) throw new Error('Enter the missing figure(s) first.');
+    const updated = await lmsService.setAccountTerms(row.id, input);
+    setFixTenure(''); setFixRate('');
+    return updated.emi_amount != null
+      ? `Terms filled — EMI computed: ₹ ${rs(updated.emi_amount)}.`
+      : 'Terms filled.';
+  });
 
   const doPreview = () => run('preview', async () => {
     if (!row || !accrueTo) throw new Error('Pick the date to accrue to.');
@@ -243,6 +260,44 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                 </Box>
               ))}
             </Box>
+            {/* An EMI showing "—" on a term loan means the sanction terms reached the
+                account incomplete (usually no tenure). Say WHY, and let the checker
+                fill the missing figure right here — the EMI computes on the spot. */}
+            {!closed && acct.emi_amount == null
+              && /term/i.test(acct.facility_type || '') && (
+              acct.tenor_months == null || acct.rate_pct == null ? (
+                authorize ? (
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1,
+                    flexWrap: 'wrap' }}>
+                    <Typography sx={{ fontSize: 11.8, color: tokens.muted }}>
+                      EMI needs {[acct.rate_pct == null && 'rate',
+                        acct.tenor_months == null && 'tenure'].filter(Boolean).join(' + ')} —
+                      missing from the sanction terms at opening. Fill to compute:
+                    </Typography>
+                    {acct.rate_pct == null && (
+                      <TextField size="small" type="number" label="Rate %" value={fixRate}
+                        onChange={(e) => setFixRate(e.target.value)} sx={{ width: 110 }} />
+                    )}
+                    {acct.tenor_months == null && (
+                      <TextField size="small" type="number" label="Tenure (months)"
+                        value={fixTenure} onChange={(e) => setFixTenure(e.target.value)}
+                        sx={{ width: 150 }} />
+                    )}
+                    <Button size="small" variant="outlined" disabled={!!busy}
+                      onClick={() => void fillTerms()} sx={{ textTransform: 'none' }}>
+                      {busy === 'terms' ? 'Saving…' : 'Set & compute EMI'}
+                    </Button>
+                  </Box>
+                ) : (
+                  <Typography sx={{ fontSize: 11.8, color: tokens.muted, mt: 1 }}>
+                    EMI needs {[acct.rate_pct == null && 'rate',
+                      acct.tenor_months == null && 'tenure'].filter(Boolean).join(' + ')} —
+                    missing from the sanction terms at opening;{' '}
+                    {whoCan('lmsAuthorize')} can fill it here.
+                  </Typography>
+                )
+              ) : null
+            )}
           </DrawerSection>
         )}
 

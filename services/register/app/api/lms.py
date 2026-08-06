@@ -71,6 +71,17 @@ def interest_amount(balance: float, rate_pct: float, days: int, day_count: str) 
     return _round_rupee(balance * (rate_pct / 100.0) * (days / base))
 
 
+def _display_emi(row: LoanAccount) -> float | None:
+    """READ-TIME fallback: an account whose EMI was never stamped (the terms lacked
+    rate or tenure at opening) still shows the computed figure the moment both are on
+    the account — display only, nothing is written."""
+    if (row.rate_pct and row.tenor_months and row.amount
+            and "term" in str(row.facility_type or "").lower()):
+        return computed_emi(float(row.amount), float(row.rate_pct),
+                            int(row.tenor_months)) or None
+    return None
+
+
 def _acct_out(row: LoanAccount) -> dict[str, Any]:
     return {
         "id": str(row.id), "lending_id": row.lending_id, "account_no": row.account_no,
@@ -80,7 +91,8 @@ def _acct_out(row: LoanAccount) -> dict[str, Any]:
         "rate_kind": row.rate_kind,
         "rate_pct": float(row.rate_pct) if row.rate_pct is not None else None,
         "tenor_months": row.tenor_months,
-        "emi_amount": float(row.emi_amount) if row.emi_amount is not None else None,
+        "emi_amount": (float(row.emi_amount) if row.emi_amount is not None
+                       else _display_emi(row)),
         "repayment_start": row.repayment_start.isoformat() if row.repayment_start else None,
         "day_count": row.day_count, "status": row.status,
         "overdue_position": row.overdue_position,
@@ -320,6 +332,56 @@ async def get_loan_account(lending_id: str,
     acct = await _account(ctx, lending_id)
     return {"account": _acct_out(acct),
             "entries": [_entry_out(e) for e in await _entries(ctx, acct.id)]}
+
+
+class AccountTermsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tenor_months: int | None = Field(default=None, ge=1, le=600)
+    rate_pct: float | None = Field(default=None, gt=0, le=99)
+    repayment_start: date | None = None
+
+
+@router.post("/v1/lending/{lending_id}/loan-account/terms", tags=["Lending"],
+             summary="FILL a missing repayment term (tenure / rate) — LMS Management")
+async def set_account_terms(lending_id: str, payload: AccountTermsIn,
+                            ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The repair lane for an account that opened before its terms were complete —
+    e.g. sanction terms saved without a tenure, so the EMI could never compute. Only
+    MISSING fields may be filled: a value already on the account is a recorded term,
+    and changing one goes through an amendment, not this route. Filling what was
+    missing recomputes and STAMPS the EMI for the term-loan family."""
+    _authorizer(ctx)
+    await _line_scoped(ctx, lending_id)
+    acct = await _account(ctx, lending_id)
+    if acct.status == "Closed" or acct.closed_on:
+        raise ConflictError("This loan account is closed.")
+    filled: dict[str, Any] = {}
+    for field in ("tenor_months", "rate_pct", "repayment_start"):
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        if getattr(acct, field) is not None:
+            raise ConflictError(
+                f"{field} is already recorded on this account — changes to recorded "
+                "terms go through an amendment, not a second entry.")
+        setattr(acct, field, value)
+        filled[field] = value.isoformat() if isinstance(value, date) else value
+    if not filled:
+        raise ValidationAppError("Nothing to fill — send the missing term(s).")
+    if (acct.emi_amount is None and acct.rate_pct and acct.tenor_months
+            and "term" in str(acct.facility_type or "").lower()):
+        acct.emi_amount = computed_emi(float(acct.amount), float(acct.rate_pct),
+                                       int(acct.tenor_months)) or None
+        if acct.emi_amount is not None:
+            filled["emi_amount"] = float(acct.emi_amount)
+    acct.updated_by = ctx.actor
+    await ctx.session.flush()
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=ctx.actor, action="lms.terms",
+        resource_type="loan_accounts", resource_id=str(acct.id),
+        request_id=request_id_ctx.get(),
+        changes={"lending_id": lending_id, **filled}))
+    return {"account": _acct_out(acct)}
 
 
 def _accrual_window(acct: LoanAccount, rows: list[LoanLedgerEntry],

@@ -178,3 +178,51 @@ async def test_lms_roles_split_the_maker_from_the_checker(client, monkeypatch):
                            params={"entity_id": eid}, headers=OPERATOR)
     assert obs.status_code == 200, obs.text
     assert obs.json()["items"] == []
+
+
+async def test_missing_tenure_is_repairable_and_the_emi_computes(client, monkeypatch):
+    """The demo's dash: sanction terms saved WITHOUT a tenor open an account whose EMI
+    can never compute. The account says so instead of showing a silent dash, and LMS
+    Management fills the missing figure right on the account — the EMI stamps on the
+    spot. Recorded values stay immutable (a change is an amendment, not this lane),
+    and the maker's key cannot use the repair lane."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "service_api_keys", {"trn-key": "svc_workflows"})
+    lid = await _accepted_line(client, monkeypatch)
+    t = await client.post("/v1/internal/sanction-terms", json={
+        "lending_id": lid, "amount_cr": 2.0, "rate_kind": "Fixed", "rate_pct": 14.0,
+        "day_count": "365"}, headers=ADMIN)              # no tenor, no EMI — the gap
+    assert t.status_code == 201, t.text
+    r = await client.post(f"/v1/internal/lending/{lid}/tranches",
+                          json={"tranche_ref": "T1", "amount": 2.0,
+                                "disbursed_on": "2026-08-06"}, headers=SVC)
+    assert r.status_code == 201, r.text
+
+    acct = (await client.get(f"/v1/lending/{lid}/loan-account",
+                             headers=ADMIN)).json()["account"]
+    assert acct["tenor_months"] is None and acct["emi_amount"] is None
+
+    operator = {"X-User-Email": "ops@evamfinance.com", "X-User-Roles": "LMS Operator"}
+    authorizer = {"X-User-Email": "authz@evamfinance.com",
+                  "X-User-Roles": "LMS Management"}
+    no = await client.post(f"/v1/lending/{lid}/loan-account/terms",
+                           json={"tenor_months": 24}, headers=operator)
+    assert no.status_code == 403
+
+    ok = await client.post(f"/v1/lending/{lid}/loan-account/terms",
+                           json={"tenor_months": 24}, headers=authorizer)
+    assert ok.status_code == 200, ok.text
+    fixed = ok.json()["account"]
+    assert fixed["tenor_months"] == 24
+    # ₹2 Cr, 24m @ 14% → EMI ₹9,60,258 (± a few rupees of rounding).
+    assert fixed["emi_amount"] is not None
+    assert abs(fixed["emi_amount"] * 1e7 - 960258) <= 5
+
+    # A recorded term is immutable through this lane.
+    again = await client.post(f"/v1/lending/{lid}/loan-account/terms",
+                              json={"tenor_months": 36}, headers=authorizer)
+    assert again.status_code == 409
+    rate = await client.post(f"/v1/lending/{lid}/loan-account/terms",
+                             json={"rate_pct": 12.0}, headers=authorizer)
+    assert rate.status_code == 409
