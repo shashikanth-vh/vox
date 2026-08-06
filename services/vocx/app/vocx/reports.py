@@ -332,7 +332,7 @@ def render_print_html(doc: dict[str, Any], config: dict[str, Any] | None = None)
 <h1>{esc(title)}</h1>
 <div class="ts">{esc(ts)}</div>
 {section("Summary", f"<p>{esc(rep.get('summary'))}</p>" if rep.get("summary") else "")}
-{section("Key intel", f"<ul>{bullets}</ul>" if bullets else "")}
+{section("Key intelligence", f"<ul>{bullets}</ul>" if bullets else "")}
 {section("Details", f"<table>{detail_rows}</table>" if detail_rows else "")}
 {section("Next steps", f"<ul>{steps}</ul>" if steps else "")}
 {section("Nuances", f"<ul>{nuances}</ul>" if nuances else "")}
@@ -417,7 +417,7 @@ def render_pdf(doc: dict[str, Any], config: dict[str, Any] | None = None) -> byt
         para(rep["summary"])
     intel = [k for k in rep.get("key_intel") or [] if k]
     if intel:
-        h2("Key intel")
+        h2("Key intelligence")
         bullets(intel)
     rows = _details_rows(ext, rep, config)
     if rows:

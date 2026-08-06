@@ -296,26 +296,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         </>
       )}
 
-      {/* Actions */}
-      <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mt: 1.2 }}>
-        <Button disabled={!!busy || committed}
-          onClick={() => setAskApprove(true)} sx={pillPrimary}>Approve</Button>
-        <Button disabled={!!busy || committed} onClick={saveDraft} sx={pill}>Save changes</Button>
-        <Tooltip title="Saves this report as a PDF file">
-          <Button startIcon={<DownloadIcon sx={{ fontSize: 17 }} />}
-            disabled={!!busy || !captureId} onClick={downloadPdf}
-            sx={pill}>Download PDF</Button>
-        </Tooltip>
-        <Box sx={{ flex: 1 }} />
-        <IconButton onClick={remove} disabled={!!busy} aria-label="Delete this report"
-          sx={{ ...pillDanger, px: 1.4 }}><DeleteOutlineIcon sx={{ fontSize: 19 }} /></IconButton>
-      </Box>
-      {busy && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mt: 0.8 }}>
-          <CircularProgress size={13} sx={{ color: vx.grn }} />
-          <Typography sx={{ fontSize: 11.5, color: vx.grn }}>{busy}</Typography>
-        </Box>
-      )}
+      {/* Actions moved to the FOOT of the card (field feedback): read first, sign last. */}
 
       {(audioUrl || audioErr) ? (
         <>
@@ -347,7 +328,7 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       </Box>
 
       <Box sx={card}>
-        <BulletList title="Key intell" rows={listOf('key_intel')} disabled={committed}
+        <BulletList title="Key intelligence" rows={listOf('key_intel')} disabled={committed}
           anchor={(el) => { focusRef.current.key_intel = el; }}
           onChange={redraw} addLabel="Add bullet" />
         <Box sx={{ mt: 2 }}>
@@ -569,6 +550,27 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
         </AccordionDetails>
       </Accordion>
 
+      {/* Actions — LAST, after the reviewer has seen everything they are signing. */}
+      <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mt: 1.6 }}>
+        <Button disabled={!!busy || committed}
+          onClick={() => setAskApprove(true)} sx={pillPrimary}>Approve</Button>
+        <Button disabled={!!busy || committed} onClick={saveDraft} sx={pill}>Save changes</Button>
+        <Tooltip title="Saves this report as a PDF file">
+          <Button startIcon={<DownloadIcon sx={{ fontSize: 17 }} />}
+            disabled={!!busy || !captureId} onClick={downloadPdf}
+            sx={pill}>Download PDF</Button>
+        </Tooltip>
+        <Box sx={{ flex: 1 }} />
+        <IconButton onClick={remove} disabled={!!busy} aria-label="Delete this report"
+          sx={{ ...pillDanger, px: 1.4 }}><DeleteOutlineIcon sx={{ fontSize: 19 }} /></IconButton>
+      </Box>
+      {busy && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mt: 0.8 }}>
+          <CircularProgress size={13} sx={{ color: vx.grn }} />
+          <Typography sx={{ fontSize: 11.5, color: vx.grn }}>{busy}</Typography>
+        </Box>
+      )}
+
       <ApproveDialog
         open={askApprove} state={state} busy={!!busy}
         onFill={jumpTo} onFile={doApprove} onClose={() => setAskApprove(false)} />
@@ -601,9 +603,12 @@ function BulletList({ title, rows, disabled, addLabel, onChange, anchor }: {
     <>
       {title && <Typography sx={heading}>{title}</Typography>}
       {rows.map((v, i) => (
-        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.8 }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: vx.grn, flexShrink: 0 }} />
-          <TextField size="small" fullWidth sx={field} disabled={disabled}
+        <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 0.8 }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: vx.grn,
+                     flexShrink: 0, mt: 1.6 }} />
+          {/* multiline: a bullet WRAPS instead of clipping — on a phone half of
+              "₹1.5 Cr funding requirement…" used to be hidden past the field's edge. */}
+          <TextField size="small" fullWidth multiline sx={field} disabled={disabled}
             inputRef={i === 0 ? anchor : undefined}
             value={v} onChange={(e) => { rows[i] = e.target.value; onChange(); }} />
           <IconButton size="small" disabled={disabled} aria-label={`Remove from ${title}`}

@@ -65,11 +65,18 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose, recording]);
 
+  // On a phone the panel IS the screen (field feedback: the 85vh sheet left a sliver
+  // of dashboard peeking through that was only good for mis-taps) — except when rolled
+  // up, where it returns to a bottom-docked title bar so the page is usable behind it.
+  // On a laptop it stays the floating, draggable surface it has always been.
   const placement = useMemo(() => (mobile
-    ? { left: 0, right: 0, bottom: 0, top: 'auto' as const,
-        width: '100%', maxHeight: '85vh', borderRadius: '14px 14px 0 0' }
+    ? (rolled
+        ? { left: 0, right: 0, bottom: 0, top: 'auto' as const,
+            width: '100%', borderRadius: '14px 14px 0 0' }
+        : { left: 0, right: 0, top: 0, bottom: 0,
+            width: '100%', height: '100%', borderRadius: 0 })
     : { left: drag.pos.x, top: drag.pos.y, width: PANEL_W, borderRadius: '12px' }
-  ), [mobile, drag.pos.x, drag.pos.y]);
+  ), [mobile, rolled, drag.pos.x, drag.pos.y]);
 
   if (!open) return null;
 
@@ -180,7 +187,9 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
               wide now wraps or truncates inside the panel instead. */}
           <Box sx={{ flex: 1, minHeight: 0, minWidth: 0,
                      overflowY: 'auto', overflowX: 'hidden',
-                     maxHeight: mobile ? 'calc(85vh - 88px)' : PANEL_H - 88 }}>
+                     // Full-screen mobile: the Paper's own edges bound the body, so flex
+                     // does the sizing; the fixed cap is the desktop panel's.
+                     maxHeight: mobile ? 'none' : PANEL_H - 88 }}>
             <Box role="tabpanel" id="vocx-panel-record" aria-labelledby="vocx-tab-record"
                  hidden={tab !== 0} sx={{ display: tab === 0 ? 'block' : 'none' }}>
               <RecordTab onFiled={() => { setReportsEpoch((n) => n + 1); setTab(1); }} />
