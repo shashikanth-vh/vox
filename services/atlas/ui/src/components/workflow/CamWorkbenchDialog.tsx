@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
   IconButton, TextField, Alert, Chip, Checkbox, CircularProgress,
-  FormControlLabel,
+  FormControlLabel, Tooltip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import SendIcon from '@mui/icons-material/Send';
 import { camService, type CamReport, type EntityDoc } from '../../services/camService';
 import { documentsService } from '../../services/documentsService';
@@ -241,12 +242,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       return 'CAM generated and downloaded as Word — verify it, make any updates, then upload the completed CAM.';
     });
   };
-
-  const toWord = (markdown: string) => run('to-word', async () => {
-    await camService.exportDocx(subjectId, markdown,
-      title.trim() || `CAM v${working?.report_version ?? 1}`);
-    return 'Word file downloaded — review it in Word, then upload it as the completed CAM.';
-  });
 
   // ---- the Word lane: download the template, fill it OUTSIDE, upload the result ----
   const asEntry = (id: string, name: string) =>
@@ -557,7 +552,20 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
             </Box>
 
             {/* THE CONVERSATION — full height, question box at the bottom. */}
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 240 }}>
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0,
+              minHeight: 240, position: 'relative' }}>
+              {/* Refresh CLEARS THE VIEW only — the register keeps the transcript, and
+                  the engine still sees the whole conversation on the next question. */}
+              {chat.length > 0 && (
+                <Tooltip title="Clear the conversation area (the recorded transcript is kept)">
+                  <IconButton size="small" onClick={() => setChat([])}
+                    sx={{ position: 'absolute', top: 6, right: 14, zIndex: 1,
+                      bgcolor: '#fff', border: `1px solid ${tokens.line}`,
+                      '&:hover': { bgcolor: '#F6F8FA' } }}>
+                    <RefreshIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
               {working?.status === 'Returned' && (
                 <Alert severity="warning" sx={{ py: 0, fontSize: 12, m: 1, mb: 0 }}>
                   Returned by the committee{working?.decision_note ? ` — “${working.decision_note}”` : ''}.
@@ -582,16 +590,6 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                       border: `1px solid ${tokens.line}` }}>
                       <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap',
                         fontFamily: 'inherit', fontSize: 12.6, lineHeight: 1.55 }}>{m.text}</Box>
-                      {m.role === 'assistant' && !!m.text && (
-                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.3 }}>
-                          <Button size="small" sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, py: 0 }}
-                            onClick={() => void navigator.clipboard?.writeText(m.text)}>Copy</Button>
-                          <Button size="small" disabled={!!busy}
-                            sx={{ textTransform: 'none', fontSize: 10.5, minWidth: 0, py: 0 }}
-                            title="Renders this answer as a styled Word file"
-                            onClick={() => void toWord(m.text)}>To Word</Button>
-                        </Box>
-                      )}
                     </Box>
                   </Box>
                 ))}
