@@ -95,9 +95,18 @@ function signIn(email) {
 
 // One sign-in per identity for the whole run — like a browser session. Tokens are
 // short-lived; a run longer than the Dex TTL (default 24h) would need re-auth.
+// Each identity then fires ONE warm-up request: an identity's first-ever request
+// pays a one-time cost (token verification, role-resolution caches) that a real
+// user pays at sign-in — without this, a low-rate scenario like `bookings`
+// (4 samples in a 2-minute smoke) reports that warm-up AS its p95.
 export function setup() {
   const tokens = {};
-  for (const email of EVERYONE) tokens[email] = signIn(email);
+  for (const email of EVERYONE) {
+    tokens[email] = signIn(email);
+    http.get(`${BASE}/v1/notifications?unread_only=true&limit=1`,
+      { headers: { Authorization: `Bearer ${tokens[email]}` },
+        tags: { kind: 'warmup' } });
+  }
   // One entity id for the write mix, read as a real user would (typeahead → first hit).
   const h = { Authorization: `Bearer ${tokens[EVERYONE[0]]}` };
   const ents = http.get(`${BASE}/v1/entities?limit=5`, { headers: h });
