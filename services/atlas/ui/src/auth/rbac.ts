@@ -166,7 +166,9 @@ const OPS: Record<Op, Role[]> = {
   backupRestore:      ['Admin'],
   newsScan:           ALL,
   lmsOperate:         ['Admin', 'Management', 'Credit Head', 'Deal Analyst', 'LMS Operator', 'LMS Management'],
-  lmsAuthorize:       ['Admin', 'Management', 'Credit Head', 'LMS Management'],
+  // v3.8: booking approval is the SERVICING desk's check — the credit desk records
+  // the attestation but never settles it (Admin/Management keep the override).
+  lmsAuthorize:       ['Admin', 'Management', 'LMS Management'],
 };
 
 /**

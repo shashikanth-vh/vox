@@ -183,6 +183,36 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     if (!out.ok) setErr(out.error || 'The prompt download failed.');
   };
 
+  // The prompt is the credit team's OWN document — updating it is an upload here
+  // (never a deploy), and the picker shows the new version under the file's name.
+  const [tplBusy, setTplBusy] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState<string | null>(null);
+  const tplErr = (e: any) =>
+    setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+
+  const uploadPrompt = async (file: File | null) => {
+    if (!file) return;
+    setErr(''); setTplBusy(true);
+    try {
+      const created = await camService.uploadTemplate('cam_prompt', file);
+      await load();
+      setPromptId(created.id);
+    } catch (e: any) { tplErr(e); }
+    setTplBusy(false);
+  };
+
+  const renamePrompt = async () => {
+    const t = (renamingTitle || '').trim();
+    if (!t || !promptId) { setRenamingTitle(null); return; }
+    setErr(''); setTplBusy(true);
+    try {
+      await camService.renameTemplate(promptId, t);
+      await load();
+      setRenamingTitle(null);
+    } catch (e: any) { tplErr(e); }
+    setTplBusy(false);
+  };
+
   // The completed CAM (a filled .docx, usually) is FILED on the line and attached to
   // the working version — nothing goes to any approver from here. The committee request
   // is the drawer's own "Send to credit committee" step, which carries this document.
@@ -363,6 +393,41 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                     <MenuItem key={p.id} value={p.id}>{p.title}</MenuItem>
                   ))}
                 </TextField>
+                {committee && renamingTitle === null && (
+                  <>
+                    {promptId && (
+                      <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
+                        onClick={() => setRenamingTitle(
+                          prompts.find((p) => p.id === promptId)?.title || '')}>
+                        Rename…
+                      </Button>
+                    )}
+                    <Button size="small" component="label" variant="outlined" disabled={tplBusy}
+                      sx={{ textTransform: 'none' }}
+                      title="File a new prompt version — it becomes the default, shown under the file's name (or rename it after)">
+                      {tplBusy ? 'Working…' : 'Update prompt…'}
+                      <input hidden type="file" accept=".docx,.md,.txt,.pdf"
+                        onChange={(e) => {
+                          void uploadPrompt(e.target.files?.[0] || null);
+                          e.target.value = '';
+                        }} />
+                    </Button>
+                  </>
+                )}
+                {committee && renamingTitle !== null && (
+                  <>
+                    <TextField size="small" label="New name" value={renamingTitle}
+                      onChange={(e) => setRenamingTitle(e.target.value)}
+                      sx={{ minWidth: 240 }} />
+                    <Button size="small" variant="contained"
+                      disabled={tplBusy || !renamingTitle.trim()}
+                      onClick={() => void renamePrompt()} sx={{ textTransform: 'none' }}>
+                      Save name
+                    </Button>
+                    <Button size="small" disabled={tplBusy} sx={{ textTransform: 'none' }}
+                      onClick={() => setRenamingTitle(null)}>Cancel</Button>
+                  </>
+                )}
                 <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
                   {promptId ? 'Goes with every Ask, along with the ticked documents.'
                     : 'No prompt — asks go with the ticked documents only.'}

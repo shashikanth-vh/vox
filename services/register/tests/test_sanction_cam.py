@@ -546,3 +546,42 @@ async def test_a_row_naming_you_is_your_book_everywhere(client: AsyncClient):
     assert other["id"]  # (readable via company connection — intended)
     denied = await client.get(f"/v1/leads/{foreign['id']}", headers=PRIYA)
     assert denied.status_code == 403, denied.text
+
+
+async def test_template_upload_and_rename_are_credit_desk_acts(client: AsyncClient):
+    """The seed's promise made real: replacing the CAM prompt is an UPLOAD (never a
+    deploy), the new version becomes the picker's newest entry under its own name,
+    and a rename shows up wherever the pickers read the title. An analyst without
+    credit-desk authority is refused, and an invented template kind is not a lane
+    into the document store."""
+    files = {"file": ("EVAM_CAM_prompt_2026.md", b"# CAM prompt v3\nWrite the CAM.",
+                      "text/markdown")}
+
+    refused = await client.post("/v1/templates/cam_prompt", files=files, headers=ANALYST)
+    assert refused.status_code == 403
+
+    unknown = await client.post("/v1/templates/not-a-kind", files=files, headers=HEAD)
+    assert unknown.status_code == 422
+
+    up = await client.post("/v1/templates/cam_prompt", files=files, headers=HEAD)
+    assert up.status_code == 201, up.text
+    body = up.json()
+    # No typed title → the FILE's own name (extension dropped) is the picker label.
+    assert body["title"] == "EVAM_CAM_prompt_2026"
+
+    rows = (await client.get("/v1/templates/cam_prompt/all", headers=HEAD)).json()
+    assert rows and rows[0]["id"] == body["id"]          # newest first = the default
+    default = (await client.get("/v1/templates/cam_prompt", headers=HEAD)).json()
+    assert default["id"] == body["id"]
+
+    ren = await client.patch(f"/v1/templates/{body['id']}",
+                             json={"title": "CAM master prompt — EVAM default (v3)"},
+                             headers=HEAD)
+    assert ren.status_code == 200, ren.text
+    assert ren.json()["title"] == "CAM master prompt — EVAM default (v3)"
+    again = (await client.get("/v1/templates/cam_prompt/all", headers=HEAD)).json()
+    assert again[0]["title"] == "CAM master prompt — EVAM default (v3)"
+
+    no_ren = await client.patch(f"/v1/templates/{body['id']}",
+                                json={"title": "sneaky"}, headers=ANALYST)
+    assert no_ren.status_code == 403

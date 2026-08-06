@@ -97,11 +97,11 @@ async def test_booking_gate_pending_four_eyes_approve(client):
     mine = next(i for i in q["items"] if i["id"] == tid)
     assert mine["stage"] == "Ready for Disbursement" and mine["entity_id"]
 
-    # FOUR-EYES: the credit head recorded it — even holding the authorize authority,
-    # they cannot settle their own booking.
+    # THE SEAM (v3.8): the credit desk RECORDS the attestation but holds no booking
+    # authority at all — origination must not both create and book the exposure.
     own = await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
                             json={"action": "approve"}, headers=CREDIT_HEAD)
-    assert own.status_code == 422 and "four-eyes" in own.text.lower()
+    assert own.status_code == 403
 
     ok = await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
                            json={"action": "approve", "note": "UTR verified."},
@@ -121,6 +121,23 @@ async def test_booking_gate_pending_four_eyes_approve(client):
                               json={"action": "reject", "note": "x"},
                               headers=AUTHORIZER)
     assert again.status_code == 409
+
+    # FOUR-EYES inside the servicing desk: an authorizer who RECORDED a tranche
+    # (the maker lane) still cannot settle their own booking — a colleague must.
+    t2 = await client.post(f"/v1/lending/{lid}/tranches",
+                           json={"tranche_ref": "T-FE1", "amount": 2.0,
+                                 "disbursed_on": "2026-08-04"},
+                           headers=AUTHORIZER)
+    assert t2.status_code == 201, t2.text
+    t2id = t2.json()["id"]
+    self_settle = await client.post(f"/v1/lending/{lid}/tranches/{t2id}/book",
+                                    json={"action": "approve"}, headers=AUTHORIZER)
+    assert self_settle.status_code == 422 and "four-eyes" in self_settle.text.lower()
+    colleague = {"X-User-Email": "suresh.kumar@evamfinance.com",
+                 "X-User-Roles": "LMS Management"}
+    ok2 = await client.post(f"/v1/lending/{lid}/tranches/{t2id}/book",
+                            json={"action": "approve"}, headers=colleague)
+    assert ok2.status_code == 200, ok2.text
 
 
 async def test_booking_rejection_needs_reason_and_frees_headroom(client):

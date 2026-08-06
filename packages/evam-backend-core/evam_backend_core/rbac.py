@@ -177,8 +177,12 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     # LMS servicing (maker/checker): the OPERATOR posts routine ledger events (EMI
     # receipts, computed interest accruals, charges); the AUTHORIZER holds the
     # hard-to-reverse verbs — classification (Standard/SMA/NPA), provisioning, closure.
+    # v3.8: booking APPROVAL is the SERVICING desk's check, not credit's. The Credit
+    # Head still RECORDS the manual attestation (the maker side of the seam) but can no
+    # longer settle a booking — origination must not both create and book the exposure.
+    # Admin/Management keep the oversight override.
     "record_ledger_entry":            _row("F F - - F S - - - - F F"),
-    "authorize_loan_account":         _row("F F - - F - - - - - - F"),
+    "authorize_loan_account":         _row("F F - - - - - - - - - F"),
     # EWS cases: the credit desk owns surveillance (Credit Head FULL); every RM desk can
     # OPEN and work a case on its own book (scoped) — a field RM spotting distress must
     # never be blocked from raising the flag.

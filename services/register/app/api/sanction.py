@@ -30,12 +30,12 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import Depends, Query
+from fastapi import Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.core.errors import ConflictError, NotFoundError, ValidationAppError
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -515,6 +515,104 @@ async def list_templates(doc_type: str,
     return [{"id": str(r.id), "doc_type": r.doc_type, "title": r.title,
              "content_type": r.content_type, "size_bytes": r.size_bytes,
              "checksum": r.checksum} for r in rows]
+
+
+# Templates belong to the DEPLOYMENT, so changing one is a leadership/credit-desk act.
+# The known kinds are an allowlist on purpose: this is the credit team's own shelf, not
+# a generic document store reachable by inventing a doc_type.
+_TEMPLATE_KINDS = {"sanction_template": "Sanction", "cam_prompt": "CAM",
+                   "cam_example": "CAM"}
+_TEMPLATE_AUTHORITY = {"Admin", "Management", "Credit Head"}
+
+
+def _require_template_authority(ctx: RequestContext) -> None:
+    from app.core.config import get_settings
+
+    if ctx.user is not None and not (ctx.user.roles & _TEMPLATE_AUTHORITY):
+        raise ForbiddenError("Templates belong to the deployment — updating them takes "
+                             "Credit Head / Management / Admin authority.")
+    if ctx.user is None and get_settings().enforce_rbac:
+        raise ForbiddenError("Template changes require a user context (X-User-Email).")
+
+
+def _template_out(row: Any) -> dict[str, Any]:
+    return {"id": str(row.id), "doc_type": row.doc_type, "title": row.title,
+            "content_type": row.content_type, "size_bytes": row.size_bytes,
+            "checksum": row.checksum}
+
+
+@router.post("/v1/templates/{doc_type}", status_code=201, tags=["Reference"],
+             summary="File a NEW default template version (newest wins)")
+async def upload_template(doc_type: str,
+                          file: UploadFile = File(...),
+                          title: str | None = Form(default=None),
+                          ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The upload lane the seed always promised: replacing the shipped CAM prompt /
+    sanction template / example CAM is an upload by the credit desk, never a deploy.
+    The new version becomes the default (newest first) and the workbench pickers show
+    it under the TITLE given here — or the file's own name when none is typed. Bytes
+    stay inline: a template must survive object storage being down."""
+    import hashlib
+    import re as _re
+    from datetime import UTC, datetime
+
+    from app.core.config import get_settings
+    from app.models.documents import Document
+
+    if doc_type not in _TEMPLATE_KINDS:
+        raise ValidationAppError(
+            f"Unknown template kind {doc_type!r}. One of: "
+            f"{', '.join(sorted(_TEMPLATE_KINDS))}.")
+    _require_template_authority(ctx)
+    payload = await file.read()
+    if not payload:
+        raise ValidationAppError("The uploaded template file is empty.")
+    limit = get_settings().documents_inline_max_bytes
+    if len(payload) > limit:
+        raise ValidationAppError(
+            f"The template is {len(payload)} bytes, over the {limit}-byte inline "
+            "limit — templates are kept inline so they survive object storage being "
+            "down. Trim the file (it is a prompt/template, not an archive).")
+    name = ((title or "").strip()
+            or _re.sub(r"\.[A-Za-z0-9]+$", "", file.filename or "").strip()
+            or doc_type)
+    row = Document(
+        tenant_id=ctx.tenant_id, subject_type="Template", subject_id=ctx.tenant_id,
+        section=_TEMPLATE_KINDS[doc_type], doc_type=doc_type, title=name[:300],
+        status="On File", storage_backend="inline",
+        content_type=file.content_type, size_bytes=len(payload),
+        checksum=hashlib.sha256(payload).hexdigest(),
+        original_filename=file.filename, inline_content=payload,
+        uploaded_by=ctx.actor, uploaded_at=datetime.now(UTC),
+        created_by=ctx.actor, updated_by=ctx.actor)
+    ctx.session.add(row)
+    await ctx.session.flush()
+    return _template_out(row)
+
+
+class TemplateRenameIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=300)
+
+
+@router.patch("/v1/templates/{template_id}", tags=["Reference"],
+              summary="Rename a template document — the pickers show this name")
+async def rename_template(template_id: uuid.UUID, payload: TemplateRenameIn,
+                          ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    from app.models.documents import Document
+
+    _require_template_authority(ctx)
+    row = (await ctx.session.execute(select(Document).where(
+        Document.tenant_id == ctx.tenant_id,
+        Document.id == template_id,
+        Document.subject_type == "Template",
+        Document.deleted_at.is_(None)))).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No template document {template_id}.")
+    row.title = payload.title.strip()
+    row.updated_by = ctx.actor
+    await ctx.session.flush()
+    return _template_out(row)
 
 
 @router.get("/v1/internal/cam-reports/{report_id}", tags=["Internal"],

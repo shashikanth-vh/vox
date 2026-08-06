@@ -234,6 +234,21 @@ export const camService = {
     }
   },
 
+  /** File a NEW default template version (credit-desk authority) — it becomes the
+   *  picker's newest entry under the given title (or the file's own name). */
+  async uploadTemplate(docType: string, file: File,
+                       title?: string): Promise<{ id: string; title: string }> {
+    const form = new FormData();
+    form.append('file', file);
+    if (title?.trim()) form.append('title', title.trim());
+    return await api.post<any>(`/templates/${docType}`, form);
+  },
+
+  /** Rename a template document — the pickers show this name. */
+  async renameTemplate(id: string, title: string): Promise<{ id: string; title: string }> {
+    return await api.patch<any>(`/templates/${id}`, { title });
+  },
+
   /** Engine-read the sanction letter (plus the committee's credit note when given):
    *  CP / CS / covenant lists AND the numeric terms, as data for the forms to pre-fill.
    *  The analyst reviews before anything is seeded. */

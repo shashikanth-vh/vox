@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (264 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (266 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -11094,6 +11094,42 @@
               }
             },
             {
+              "name": "POST /v1/templates/{doc_type} \u2014 File a NEW default template version (newest wins)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/templates/{{doc_type}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "templates",
+                    "{{doc_type}}"
+                  ]
+                },
+                "description": "The upload lane the seed always promised: replacing the shipped CAM prompt /\nsanction template / example CAM is an upload by the credit desk, never a deploy.\nThe new version becomes the default (newest first) and the workbench pickers show\nit under the TITLE given here \u2014 or the file's own name when none is typed. Bytes\nstay inline: a template must survive object storage being down."
+              }
+            },
+            {
               "name": "GET /v1/templates/{doc_type}/all \u2014 EVERY tenant default template of one kind, newest first",
               "request": {
                 "method": "GET",
@@ -11128,6 +11164,54 @@
                   ]
                 },
                 "description": "All tenant-level Template documents of this doc_type, newest first \u2014 the\nworkbench's prompt PICKER: when several prompt versions are on record (the shipped\ndefault plus later uploads), the analyst chooses which one rides with an ask."
+              }
+            },
+            {
+              "name": "PATCH /v1/templates/{template_id} \u2014 Rename a template document \u2014 the pickers show this name",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/templates/{{template_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "templates",
+                    "{{template_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"sample\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               }
             }
           ]
