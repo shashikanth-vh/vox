@@ -13,9 +13,9 @@ import { documentsService } from '../../services/documentsService';
 import DataRegisterDialog from '../Deals/DataRegisterDialog';
 import { tokens } from '../../theme';
 
-// Per-verb copy. Return is the middle verb of the triad: NON-terminal — it goes back
-// to the maker/requester for revision and comes round again, so it must never read like
-// a refusal.
+// Per-verb copy. TWO verbs by design (field decision): Approve or Reject with a note —
+// the maker amends from the note and raises a fresh request. ('return' copy remains
+// only for type completeness; actionsFor never offers it.)
 const TITLE: Record<DecisionAction, string> = {
   approve: 'Approve', return: 'Return for revision', reject: 'Reject',
 };
@@ -93,9 +93,7 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
 
   const submit = async (action: DecisionAction) => {
     if (noteRequired(action) && !note.trim()) {
-      setErr(action === 'return'
-        ? 'A return needs the note — the maker corrects from your words.'
-        : 'A rejection needs the note — say why it is refused.');
+      setErr('A rejection needs the note — the maker amends from your words.');
       return;
     }
     setBusy(true); setErr('');
@@ -175,7 +173,7 @@ export default function WorkflowDecisionDialog({ w, verbs, onClose, onDone }: {
         )}
         <Box sx={{ mt: 1.2 }}>
           <TextFld label="Note" value={note} onChange={setNote} multiline
-            placeholder="Your decision note — required for Return and Reject" />
+            placeholder="Your decision note — required to Reject" />
         </Box>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
           Your decision is recorded in the audit trail under{' '}
