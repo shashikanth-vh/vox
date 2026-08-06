@@ -1034,11 +1034,19 @@ def create_app() -> FastAPI:
         browsers/clients treat everything after it as a fragment, so the generated approval and
         decision-lookup URLs silently dropped the suffix and addressed the wrong workflow.)
         ``memo`` records the initiator + tenant for subject-level status scoping."""
+        from temporalio.common import WorkflowIDReusePolicy
+
         client: Client = request.app.state.temporal
+        # REJECT_DUPLICATE is what makes the -rN machinery real. Temporal's DEFAULT
+        # policy quietly REUSES a closed workflow's id for the next attempt — and the
+        # single-winner records keyed by workflow id (the durable decision, above all)
+        # then bleed across attempts: a re-raise after a rejection could never be
+        # decided ("a different decision has already been recorded"). With reuse
+        # rejected, every attempt gets its own id and its own decision lane.
         try:
             return await client.start_workflow(
                 workflow_cls.run, arg, id=workflow_id, task_queue=settings.task_queue,
-                memo=memo)
+                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE, memo=memo)
         except TemporalError as exc:
             if "already started" not in str(exc).lower():
                 raise
@@ -1055,7 +1063,9 @@ def create_app() -> FastAPI:
                 try:
                     return await client.start_workflow(
                         workflow_cls.run, arg, id=retry_id,
-                        task_queue=settings.task_queue, memo=memo)
+                        task_queue=settings.task_queue,
+                        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                        memo=memo)
                 except TemporalError as exc2:
                     if "already started" not in str(exc2).lower():
                         raise
