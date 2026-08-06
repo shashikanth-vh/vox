@@ -35,7 +35,11 @@ export async function renderGoogleButton(
   await loadGis();
   gis().initialize({
     client_id: clientId,
-    auto_select: true,
+    // NEVER auto-select at sign-in: a browser already signed into some personal
+    // Gmail would silently become the session and be refused as unauthorized.
+    // The picker makes the account an explicit choice; only the silent hourly
+    // refresh auto-selects, pinned to the session's own account via login_hint.
+    auto_select: false,
     callback: (r: any) => onCredential(String(r?.credential || '')),
   });
   gis().renderButton(el, { theme: 'outline', size: 'large', width: 320, text: 'continue_with' });
@@ -43,7 +47,8 @@ export async function renderGoogleButton(
 
 /** A fresh id_token with no user interaction (auto-select), or null if Google wants a
  *  click — the caller then simply lets the next 401 route back to the login screen. */
-export async function silentReauth(clientId: string): Promise<string | null> {
+export async function silentReauth(clientId: string,
+                                   loginHint?: string): Promise<string | null> {
   try {
     await loadGis();
   } catch {
@@ -56,6 +61,7 @@ export async function silentReauth(clientId: string): Promise<string | null> {
     gis().initialize({
       client_id: clientId,
       auto_select: true,
+      ...(loginHint ? { login_hint: loginHint } : {}),
       callback: (r: any) => { clearTimeout(timer); done(String(r?.credential || '') || null); },
     });
     gis().prompt((n: any) => {

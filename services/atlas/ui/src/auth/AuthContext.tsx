@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const left = g.tokenSecondsLeft(session.idToken);
       if (left == null) return;
       const timer = setTimeout(async () => {
-        const fresh = await g.silentReauth(GOOGLE_SSO_CLIENT_ID);
+        const fresh = await g.silentReauth(GOOGLE_SSO_CLIENT_ID, session.email);
         if (!alive || !fresh) return;
         try {
           const s = await authService.signInWithGoogleCredential(fresh);
