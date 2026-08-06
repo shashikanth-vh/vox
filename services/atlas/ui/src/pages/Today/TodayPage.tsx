@@ -132,6 +132,16 @@ export default function TodayPage() {
     await notificationsService.markRead(n.id);
     await refetchInbox();
   };
+  // Good news needs no acknowledgement forever: an APPROVED (info) row ages off the
+  // strip after a week even if never clicked. Returns/rejections (warning+) stay
+  // until read — those demand an action from the maker.
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const inboxRows = inbox.items.filter((n) => n.severity !== 'info'
+    || !n.created_at || Date.parse(n.created_at) >= weekAgo);
+  const readAll = async () => {
+    await Promise.all(inboxRows.map((n) => notificationsService.markRead(n.id)));
+    await refetchInbox();
+  };
   const todayISO = new Date().toISOString().slice(0, 10);
   const overdueOf = (t: TrancheItem) =>
     (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < todayISO).length;
@@ -211,7 +221,7 @@ export default function TodayPage() {
 
   const empty = !data.due.length && !data.contactRed.length && !data.contactAmber.length && !data.stageRed.length && !data.stageAmber.length
     && !wfActionable.length && !wfMine.length && !wfReminders.length && !bookings.length
-    && !inbox.items.length;
+    && !inboxRows.length;
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto' }}>
@@ -225,9 +235,15 @@ export default function TodayPage() {
       {bookErr && <Alert severity="warning" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookErr('')}>{bookErr}</Alert>}
       {bookFlash && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }} onClose={() => setBookFlash('')}>{bookFlash}</Alert>}
 
-      {inbox.items.length > 0 && (
-        <Section title="Decisions on your work" count={inbox.items.length} defaultOpen>
-          {inbox.items.map((n) => (
+      {inboxRows.length > 0 && (
+        <Section title="Decisions on your work" count={inboxRows.length} defaultOpen>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.3 }}>
+            <Button size="small" onClick={() => void readAll()}
+              sx={{ fontSize: 11, color: tokens.muted, minWidth: 0 }}>
+              ✓ Mark all read
+            </Button>
+          </Box>
+          {inboxRows.map((n) => (
             <ChLine key={n.id}>
               <Box component="span" aria-hidden sx={{ width: 8, height: 8, borderRadius: '50%',
                 flexShrink: 0,
