@@ -54,6 +54,10 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
 
   useEffect(() => {
     if (!lead) return;
+    // Self-heal the dropdowns: the boot-time /v1/ref hydration is fail-soft, so if it
+    // was missed (register briefly unreachable at login) this dialog's selects would
+    // stay empty for the whole session. One cheap re-pull per open fixes that.
+    void referenceService.hydrate();
     // The register owns the answer, so it is awaited; the dialog opens on the minted code
     // and corrects itself if the company turns out to be on the register already.
     setExistingCode(null); setCode(mintCode(lead.company));
@@ -164,7 +168,9 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
         <ProductBox on={flags.syn} onToggle={toggle('syn')} flag="S" color={tokens.synd} title="Platform Deals">
           <FieldGrid>
             <TextFld label="Ask ₹ Cr" required type="number" value={syn.amt || ''} onChange={(v) => setSyn((p) => ({ ...p, amt: v }))} placeholder="required — no default" />
-            <SelectFld label="Platform Deals type" required value={syn.synType} onChange={(v) => setSyn((p) => ({ ...p, synType: v }))} options={ref.getRefSync('Platform Deals Type')} />
+            {/* Display says "Platform Deals"; the register's vocabulary category is
+                still 'Syndication Type' — the v19 rename changed labels, not keys. */}
+            <SelectFld label="Platform Deals type" required value={syn.synType} onChange={(v) => setSyn((p) => ({ ...p, synType: v }))} options={ref.getRefSync('Syndication Type')} />
             {syn.synType === 'Fee will be paid by customer' && <SelectFld label="Mandate status" value={syn.mstat3} onChange={(v) => setSyn((p) => ({ ...p, mstat3: v }))} options={ref.getRefSync('Mandate Status 3')} />}
             <SelectFld label="Status" required value={syn.status} onChange={(v) => setSyn((p) => ({ ...p, status: v }))} options={ref.getRefSync('Status of Proposal')} />
             <TextFld label="Facility type" value={syn.fac} onChange={(v) => setSyn((p) => ({ ...p, fac: v }))} placeholder="Term Loan / WC / Leasing…" />

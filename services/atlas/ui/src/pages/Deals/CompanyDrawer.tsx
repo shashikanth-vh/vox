@@ -185,7 +185,8 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               {/* Amt is mandatory to move past Deal Sourced and LOCKS on Sanctioned (Admin/Mgmt only after). */}
               <TextFld label="Amt (₹ Cr)" required type="number" value={r.amt} disabled={roSyn || (SYN_SANCTIONED.includes(r.status) && !adminOverride)} onChange={(v) => updS(r.id, 'amt', v)} />
               {/* Syndication type LOCKS once the mandate is Executed. */}
-              <SelectFld label="Platform Deals type" required value={r.synType} disabled={roSyn || (r.mstat3 === 'Executed' && !adminOverride)} onChange={(v) => updS(r.id, 'synType', v)} options={ref.getRefSync('Platform Deals Type')} blank />
+              {/* The register's category is 'Syndication Type' (v19 renamed the label only). */}
+              <SelectFld label="Platform Deals type" required value={r.synType} disabled={roSyn || (r.mstat3 === 'Executed' && !adminOverride)} onChange={(v) => updS(r.id, 'synType', v)} options={ref.getRefSync('Syndication Type')} blank />
               {/* Mandate status sits right after Platform Deals type. It uses the full
                   Mandate Status workflow list. Not required. Locks once Executed. */}
               <SelectFld label="Mandate status"
