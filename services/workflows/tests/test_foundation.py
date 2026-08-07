@@ -176,7 +176,9 @@ def test_decision_awaiting_inputs_carry_the_approver_list():
                 t.AssetMonetisationInput(asset_mon_id="A1", deal_id="D1",
                                          requested_by="rm@x")):
         assert inp.approver_notify == []                # default: notify the requester
-        assert inp.schema_version == 2, type(inp).__name__
+        # v3 (conversion only): + the AM opening facts from the Push-to-Deals dialog.
+        expected = 3 if isinstance(inp, t.LeadConversionInput) else 2
+        assert inp.schema_version == expected, type(inp).__name__
 
 
 # ---------------------------------------------------------------------------------------- #

@@ -13805,7 +13805,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amount_cr\": 1.0,\n  \"analyst\": \"sample analyst\",\n  \"analyst_id\": \"{{id}}\",\n  \"approved_by\": \"sample approved_by\",\n  \"is_asset_mon\": false,\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"note\": \"sample note\",\n  \"product_type\": \"sample product_type\",\n  \"rm\": \"sample rm\",\n  \"rm_id\": \"{{id}}\"\n}",
+              "raw": "{\n  \"am_deal_type\": \"sample am_deal_type\",\n  \"am_size_mw\": 1.0,\n  \"am_status\": \"sample am_status\",\n  \"am_value_cr\": 1.0,\n  \"amount_cr\": 1.0,\n  \"analyst\": \"sample analyst\",\n  \"analyst_id\": \"{{id}}\",\n  \"approved_by\": \"sample approved_by\",\n  \"is_asset_mon\": false,\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"note\": \"sample note\",\n  \"product_type\": \"sample product_type\",\n  \"rm\": \"sample rm\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

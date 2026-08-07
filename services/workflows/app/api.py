@@ -546,6 +546,12 @@ class LeadConversionIn(BaseModel):
     rm_id: str | None = None
     analyst_id: str | None = None
     note: str | None = None
+    # Asset-monetisation opening facts (Push-to-Deals dialog) — forwarded into the
+    # conversion input verbatim so the AM row is born carrying what the RM typed.
+    am_value_cr: float | None = Field(default=None, ge=0)
+    am_size_mw: float | None = Field(default=None, ge=0)
+    am_deal_type: str | None = Field(default=None, max_length=80)
+    am_status: str | None = Field(default=None, max_length=40)
     approval_timeout_hours: int = Field(default=24 * 7, ge=1, le=24 * 90)
     # THE CLIENT, when the lead has not been linked to one yet. The Push-to-Deals dialog
     # collects these ("One save: client + deal + product rows"), and a deal cannot exist

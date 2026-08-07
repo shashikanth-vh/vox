@@ -231,6 +231,10 @@ class AsyncRegisterClient:
                            rm: str | None = None, analyst: str | None = None,
                            rm_id: str | None = None, analyst_id: str | None = None,
                            note: str | None = None,
+                           am_value_cr: float | None = None,
+                           am_size_mw: float | None = None,
+                           am_deal_type: str | None = None,
+                           am_status: str | None = None,
                            approved_by: str | None = None,
                            idempotency_key: str | None = None,
                            request_id: str | None = None) -> dict:
@@ -245,6 +249,8 @@ class AsyncRegisterClient:
                    "is_asset_mon": is_asset_mon, "product_type": product_type,
                    "amount_cr": amount_cr, "rm": rm, "analyst": analyst,
                    "rm_id": rm_id, "analyst_id": analyst_id, "note": note,
+                   "am_value_cr": am_value_cr, "am_size_mw": am_size_mw,
+                   "am_deal_type": am_deal_type, "am_status": am_status,
                    "approved_by": approved_by}
         return await self._send(_Plan(
             "POST", f"/v1/leads/{lead_id}/convert",

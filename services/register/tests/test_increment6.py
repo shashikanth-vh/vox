@@ -42,7 +42,12 @@ async def test_am_decision_kind_is_authority_and_subject_bound(wf_client):  # no
     assert stats["pending"] == 0                             # no conversion-delivery row
 
 
-async def test_closure_gate_requires_verified_am_evidence(client):
+async def test_am_mandate_closes_by_direct_update(client):
+    """Desk review decision: the AM book is a plain update surface — no workflow, no
+    approval ceremony. The transition graph still applies (forward one, back one,
+    Dropped), Closed is an ordinary move from SPA / Documentation, and the terminals
+    stay final. Evidence-verification infra is untouched: an invented decision_ref on
+    an am_closure_approval attachment is still refused."""
     code = "AMC" + uuid.uuid4().hex[:6].upper()
     eid = (await client.post("/v1/entities",
                              json={"code": code, "legal_name": "AM Co",
@@ -50,48 +55,61 @@ async def test_closure_gate_requires_verified_am_evidence(client):
     mid = (await client.post("/v1/asset-monetisation",
                              json={"entity_id": eid,
                                    "status": "Teaser Prepared"})).json()["id"]
+
+    # Jumping the pipeline is still not a move.
+    r = await client.patch(f"/v1/asset-monetisation/{mid}", json={"status": "Closed"})
+    assert r.status_code == 422, r.text
+
     for st in ("Teaser Shared", "In Discussion", "NBO Received", "BO Received",
                "SPA / Documentation"):
         r = await client.patch(f"/v1/asset-monetisation/{mid}", json={"status": st})
         assert r.status_code == 200, f"{st}: {r.text}"
 
-    # No evidence → 'Closed' is refused; an invented decision ref is refused too.
+    # From SPA / Documentation, Closed is a plain edit — no evidence demanded.
     r = await client.patch(f"/v1/asset-monetisation/{mid}", json={"status": "Closed"})
-    assert r.status_code == 422 and "evidence" in r.text.lower()
+    assert r.status_code == 200, r.text
+
+    # Terminal is terminal.
+    r = await client.patch(f"/v1/asset-monetisation/{mid}",
+                           json={"status": "Teaser Prepared"})
+    assert r.status_code == 422, r.text
+
+    # The evidence store's decision verification is unchanged by the gate removal.
     bad = await client.post("/v1/evidence", json={
         "subject_type": "AssetMonetisation", "subject_id": mid,
         "evidence_kind": "am_closure_approval", "reference": "am/1",
         "sha256": "a" * 64, "decision_ref": "invented"}, headers=AM_HEAD)
     assert bad.status_code == 422, bad.text
 
-    from sqlalchemy import text
 
-    from app.db.session import get_sessionmaker
-    wf = f"amon-{uuid.uuid4().hex[:12]}"
-    async with get_sessionmaker()() as s:
-        await s.execute(text(
-            "INSERT INTO workflow_decisions (workflow_id, decision, subject_type, "
-            "subject_id, run_id, decided_by, decided_by_id, roles, tenant_id) "
-            "SELECT :wf, 'Approved', 'AssetMonetisation', CAST(:mid AS varchar), 'run-1', "
-            "'ah@evamfinance.com', 'u-7', CAST('[\"AM Head\"]' AS jsonb), tenant_id "  # noqa: S608
-            "FROM asset_monetisation WHERE id = CAST(:mid AS uuid)"),
-            {"wf": wf, "mid": mid})
-        await s.commit()
-    ev = await client.post("/v1/evidence", json={
-        "subject_type": "AssetMonetisation", "subject_id": mid,
-        "evidence_kind": "am_closure_approval", "reference": "am/1",
-        "sha256": "a" * 64, "decision_ref": wf}, headers=AM_HEAD)
-    assert ev.status_code == 201, ev.text
-    r = await client.patch(f"/v1/asset-monetisation/{mid}", json={"status": "Closed"})
+async def test_convert_carries_the_am_opening_facts(client):
+    """Push-to-Deals with Asset Monetisation ticked births the AM row CARRYING what
+    the RM typed — value, MW, deal type, status, ownership — because the AM book is a
+    plain update surface with no later ceremony to fill them in."""
+    for name, full in (("Kiran Rao", "Kiran Rao"), ("Dev Mehta", "Dev Mehta")):
+        await client.post("/v1/people",
+                          json={"name": name, "full_name": full, "role": "RM"})
+    eid = (await client.post("/v1/entities",
+                             json={"code": "AMF" + uuid.uuid4().hex[:6].upper(),
+                                   "legal_name": "AM Facts Co"})).json()["id"]
+    lead = (await client.post("/v1/leads",
+                              json={"company": "AM Facts Co",
+                                    "entity_id": eid})).json()
+    r = await client.post(
+        f"/v1/leads/{lead['id']}/convert",
+        json={"is_asset_mon": True, "rm": "Kiran Rao", "analyst": "Dev Mehta",
+              "am_value_cr": 120, "am_size_mw": 45.5,
+              "am_deal_type": "Capital Market", "am_status": "Teaser Prepared"},
+        headers={"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"})
     assert r.status_code == 200, r.text
-    # The teaser / NDA / offer artefacts file cleanly under AM authority.
-    for kind, ref in (("teaser_document", "teaser/T-1"), ("am_nda", "nda/1"),
-                      ("am_offer", "offer/1")):
-        r = await client.post("/v1/evidence", json={
-            "subject_type": "AssetMonetisation", "subject_id": mid,
-            "evidence_kind": kind, "reference": ref,
-            "workflow_id": wf, "run_id": "run-1"}, headers=AM_HEAD)
-        assert r.status_code == 201, f"{kind}: {r.text}"
+    am_id = r.json()["asset_mon_id"]
+    assert am_id, r.text
+    row = (await client.get(f"/v1/asset-monetisation/{am_id}")).json()
+    assert float(row["indicative_value_cr"]) == 120
+    assert float(row["size_mw"]) == 45.5
+    assert row["deal_type"] == "Capital Market"
+    assert row["status"] == "Teaser Prepared"
+    assert (row["rm"], row["analyst"]) == ("Kiran Rao", "Dev Mehta")
 
 
 async def test_am_tracker_carries_its_own_rm_and_analyst(client):

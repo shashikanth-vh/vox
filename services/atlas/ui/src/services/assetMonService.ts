@@ -13,17 +13,16 @@ const AM_PATH = '/asset-monetisation';
 
 // Client mirror of the register's _AM_PIPELINE transition graph (forward one step,
 // back one step for rework, Dropped from any live state) so the status dropdowns
-// offer only moves the register will accept. 'Closed' is deliberately NOT offered
-// even where the graph allows it: the register's evidence gate accepts Closed only
-// once the AM closure APPROVAL is on file — the workflow records that decision and
-// closes the mandate itself. The two terminals are final.
+// offer only moves the register will accept. The AM book is a plain update surface
+// (desk review decision): no workflow, no approval — Closed is an ordinary move
+// from SPA / Documentation. The two terminals are final.
 export const AM_NEXT: Record<string, string[]> = {
   'Teaser Prepared': ['Teaser Shared', 'Dropped'],
   'Teaser Shared': ['In Discussion', 'Teaser Prepared', 'Dropped'],
   'In Discussion': ['NBO Received', 'Teaser Shared', 'Dropped'],
   'NBO Received': ['BO Received', 'In Discussion', 'Dropped'],
   'BO Received': ['SPA / Documentation', 'NBO Received', 'Dropped'],
-  'SPA / Documentation': ['BO Received', 'Dropped'],
+  'SPA / Documentation': ['Closed', 'BO Received', 'Dropped'],
   'Closed': [],
   'Dropped': [],
 };

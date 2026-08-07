@@ -186,6 +186,12 @@ export const conversionService = {
           is_lending: p.flags.lend,
           is_syndication: p.flags.syn,
           is_asset_mon: p.flags.am,
+          // AM opening facts: the AM book is a plain update surface (no workflow),
+          // so the row must be born carrying what this dialog collected.
+          am_value_cr: p.flags.am && p.am?.val ? Number(p.am.val) : undefined,
+          am_size_mw: p.flags.am && p.am?.mw ? Number(p.am.mw) : undefined,
+          am_deal_type: (p.flags.am && p.am?.dtype) || undefined,
+          am_status: (p.flags.am && p.am?.status) || undefined,
           product_type: productType(p),
           amount_cr: amountCr(p),
           rm: lead.rm,

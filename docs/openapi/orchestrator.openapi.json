@@ -1367,6 +1367,54 @@
             ],
             "title": "About"
           },
+          "am_deal_type": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Am Deal Type"
+          },
+          "am_size_mw": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Am Size Mw"
+          },
+          "am_status": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Am Status"
+          },
+          "am_value_cr": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Am Value Cr"
+          },
           "amount_cr": {
             "anyOf": [
               {

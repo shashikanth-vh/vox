@@ -584,7 +584,12 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         _assign("Syndication", row.id, "Syn RM", payload.rm_id)
     if payload.is_asset_mon:
         row = await _Repo(AssetMonetisation).create(ctx.session, ctx.tenant_id, ctx.actor, {
-            "entity_id": str(entity_id), "deal_id": str(deal.id), "status": "Teaser Prepared"})
+            "entity_id": str(entity_id), "deal_id": str(deal.id),
+            "rm": payload.rm, "analyst": payload.analyst,
+            "indicative_value_cr": payload.am_value_cr,
+            "size_mw": payload.am_size_mw,
+            "deal_type": payload.am_deal_type,
+            "status": payload.am_status or "Teaser Prepared"})
         line_ids["asset_mon_id"] = row.id
         _assign("AssetMonetisation", row.id, "AM RM", payload.rm_id)
 

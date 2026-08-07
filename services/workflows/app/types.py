@@ -171,6 +171,12 @@ class LeadConversionInput:
     rm_id: str | None = None
     analyst_id: str | None = None
     note: str | None = None
+    # Asset-monetisation opening facts from the Push-to-Deals dialog — the AM book is
+    # a plain update surface, so the row must be born carrying what the RM typed.
+    am_value_cr: float | None = None
+    am_size_mw: float | None = None
+    am_deal_type: str | None = None
+    am_status: str | None = None
     # The tenant + human this conversion acts for (set by the orchestrator from the request).
     caller: CallerContext = field(default_factory=CallerContext)
     # WHO to notify when the run parks awaiting this decision — the deployment's
@@ -178,7 +184,7 @@ class LeadConversionInput:
     approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 2   # v2: + approver_notify
+    schema_version: int = 3   # v3: + AM opening facts (am_value_cr / mw / type / status)
     # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
     # SLA reminders while the run waits on a human: every N hours an operational event
     # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"

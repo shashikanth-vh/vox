@@ -143,11 +143,11 @@ EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
     "Syndication": {
         "Sanctioned": ["syndication_sanction"],
     },
-    # An asset-monetisation mandate may not CLOSE until the recorded closure approval's
-    # evidence is on file — the sale of an asset is a senior decision, never a typed word.
-    "AssetMonetisation": {
-        "Closed": ["am_closure_approval"],
-    },
+    # AssetMonetisation carries NO evidence gate (desk review decision): the AM book is
+    # a plain update surface — the row is born at Push-to-Deals and the desk walks the
+    # status pipeline by direct edits, Closed included. The transition graph still
+    # applies (forward one, back one, Dropped), and the dormant AM workflow's evidence
+    # kinds remain available should governance ever be switched back on.
 }
 
 

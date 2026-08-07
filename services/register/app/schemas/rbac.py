@@ -79,6 +79,13 @@ class LeadConvertRequest(CreateModel):
     rm_id: uuid.UUID | None = None
     analyst_id: uuid.UUID | None = None
     note: str | None = None
+    # Asset-monetisation opening facts captured in the Push-to-Deals dialog. The AM
+    # book is a plain update surface (no workflow), so what the RM typed at push time
+    # must land ON the row — there is no later ceremony to carry it.
+    am_value_cr: float | None = Field(default=None, ge=0)
+    am_size_mw: float | None = Field(default=None, ge=0)
+    am_deal_type: str | None = Field(default=None, max_length=80)
+    am_status: str | None = Field(default=None, max_length=40)
     # The human who approved the conversion (from the orchestrator's verified decision).
     # Recorded as provenance in the conversion trail — a service key never becomes the
     # audit actor, so this is data, not identity.

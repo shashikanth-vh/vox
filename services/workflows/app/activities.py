@@ -459,6 +459,8 @@ async def convert_lead_txn(inp: LeadConversionInput, idempotency_key: str,
             is_asset_mon=inp.is_asset_mon, product_type=inp.product_type,
             amount_cr=inp.amount_cr, rm=inp.rm, analyst=inp.analyst,
             rm_id=inp.rm_id, analyst_id=inp.analyst_id, note=inp.note,
+            am_value_cr=inp.am_value_cr, am_size_mw=inp.am_size_mw,
+            am_deal_type=inp.am_deal_type, am_status=inp.am_status,
             approved_by=provenance,
             idempotency_key=idempotency_key, request_id=activity.info().workflow_id)
 
