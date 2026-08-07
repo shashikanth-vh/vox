@@ -49,7 +49,8 @@ cp /dev/null deploy/compose/.env          # start empty, then fill from the temp
 ```
 
 Put this in `deploy/compose/.env` and **replace every CHANGE-ME** (long random strings:
-`openssl rand -hex 24`):
+`openssl rand -hex 24` — hex output also sidesteps shell-quoting surprises; any
+character is supported, including `@`):
 
 ```bash
 # ---- core secrets (MANDATORY to change for production) ----------------------

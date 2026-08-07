@@ -74,8 +74,14 @@ class BaseServiceSettings(BaseSettings):
             return dsn.replace("postgresql+psycopg", "postgresql").replace(
                 "postgresql://", "postgresql+asyncpg://", 1
             )
+        # URL-encode the credentials: a password containing '@' (or ':', '/', '%')
+        # otherwise corrupts the URL — the parser reads everything after the first '@'
+        # as the HOST and dies with "Name or service not known", which reads like a
+        # network problem and cost a real deployment an evening.
+        from urllib.parse import quote
         return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
+            f"postgresql+asyncpg://{quote(self.db_user, safe='')}:"
+            f"{quote(self.db_password, safe='')}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 
