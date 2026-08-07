@@ -75,7 +75,9 @@ export default function StageChangeDialog({ open, code, presetLine, refId, curre
           {/* Asset Monetisation is deliberately absent: the AM book has no approval
               lane — its status is a direct edit for AM roles. */}
           <SelectFld label="Line" required value={line} disabled={!!presetLine} onChange={(v) => { setLine(v as StageLine); setTarget(''); }} options={['Lending', 'Syndication']} />
-          <SelectFld label="Target stage" required value={target} onChange={setTarget} options={referenceService.getRefSync(LINE_STAGE_REF[line])} blank />
+          <SelectFld label="Target stage" required value={target} onChange={setTarget}
+            options={LINE_NEXT[line]?.[(currentStage || '').trim()]
+              ?? referenceService.getRefSync(LINE_STAGE_REF[line])} blank />
         </FieldGrid>
         <Box sx={{ mt: 1.2 }}><TextFld label="Reason for change" required value={reason} onChange={setReason} multiline /></Box>
         {currentStage && <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>Current: <b>{currentStage}</b>. An approver (Admin, Management or the vertical Head) will review this request.</Typography>}
