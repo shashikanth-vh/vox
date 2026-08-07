@@ -79,11 +79,19 @@ export default function LoginPage() {
     </svg>
   );
 
-  // The e-in-a-ring wordmark, shared by both halves.
+  // The PRISM glyph: a beam refracting through a prism into the desk spectrum.
   const Mark = ({ size = 54 }: { size?: number }) => (
-    <Box sx={{ width: size, height: size, borderRadius: '26%', bgcolor: tokens.teal, color: '#fff', fontWeight: 800,
-      fontSize: size * 0.52, display: 'flex', alignItems: 'center', justifyContent: 'center', letterSpacing: '-1px',
-      boxShadow: '0 10px 30px rgba(13,115,119,.45)' }}>e</Box>
+    <Box sx={{ width: size, height: size, borderRadius: '26%', bgcolor: 'rgba(255,255,255,.07)',
+      border: '1px solid rgba(143,227,207,.3)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      backdropFilter: 'blur(6px)' }}>
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 48 48" aria-hidden>
+        <path d="M24 7 L42 38 L6 38 Z" fill="none" stroke="#8FE3CF" strokeWidth="2.6" strokeLinejoin="round" />
+        <line x1="2" y1="25" x2="17.5" y2="25" stroke="#DFF7EE" strokeWidth="2" />
+        <line x1="30" y1="27" x2="46" y2="19" stroke="#3ED6A9" strokeWidth="2" />
+        <line x1="31" y1="30" x2="46" y2="27" stroke="#2AA7A0" strokeWidth="2" />
+        <line x1="31.5" y1="33" x2="46" y2="35" stroke="#1D5F8A" strokeWidth="2" />
+      </svg>
+    </Box>
   );
 
   return (
@@ -108,23 +116,22 @@ export default function LoginPage() {
         <Box sx={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 1.4 }}>
           <Mark size={44} />
           <Box>
-            <Typography sx={{ fontWeight: 800, fontSize: 17, letterSpacing: '.4px', lineHeight: 1.1 }}>EVAM FINANCE</Typography>
-            <Typography sx={{ fontSize: 11, opacity: 0.68, letterSpacing: '2.4px', fontWeight: 600 }}>PRISM · ATLAS</Typography>
+            <Typography sx={{ fontWeight: 800, fontSize: 19, letterSpacing: '3px', lineHeight: 1.1 }}>PRISM</Typography>
+            <Typography sx={{ fontSize: 10.5, opacity: 0.68, letterSpacing: '1.6px', fontWeight: 600 }}>BY EVAM FINANCE</Typography>
           </Box>
         </Box>
 
         <Box sx={{ position: 'relative', zIndex: 1, my: { xs: 3, md: 0 }, maxWidth: 560 }}>
           <Typography sx={{ fontWeight: 800, fontSize: { xs: 26, md: 40 }, lineHeight: 1.12, letterSpacing: '-0.5px' }}>
-            Financing India&apos;s<br />
+            Climate finance,<br />
             <Box component="span" sx={{
               background: 'linear-gradient(90deg,#3ED6A9,#8FE3CF)',
               WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
-            }}>climate transition</Box>
+            }}>run on one platform</Box>
           </Typography>
           <Typography sx={{ mt: 1.8, fontSize: { xs: 13, md: 15 }, lineHeight: 1.65, opacity: 0.82, maxWidth: 470 }}>
-            Debt, syndication and asset monetisation for clean-energy businesses —
-            and this console is where that book runs: every lead, every lender,
-            every sanction, one register.
+            PRISM powers Evam Finance&apos;s book end to end — every lead, lender,
+            sanction and monetisation in a single governed register.
           </Typography>
           <Box sx={{ mt: 3, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {DESKS.map((d) => (
@@ -138,7 +145,7 @@ export default function LoginPage() {
         </Box>
 
         <Typography sx={{ position: 'relative', zIndex: 1, fontSize: 11.5, opacity: 0.55, display: { xs: 'none', md: 'block' } }}>
-          © {new Date().getFullYear()} Evam Finance · secured with verified sign-in
+          PRISM · a technology of Evam Finance · © {new Date().getFullYear()}
         </Typography>
       </Box>
 
@@ -149,8 +156,8 @@ export default function LoginPage() {
       }}>
         <Paper elevation={0} sx={{ borderRadius: 4, p: '36px 38px 32px', width: '100%', maxWidth: 400, textAlign: 'center',
           border: `1px solid ${tokens.line}`, boxShadow: '0 18px 50px rgba(10,26,47,.10)' }}>
-          <Typography sx={{ fontSize: 21, color: tokens.navy, fontWeight: 800, letterSpacing: '-0.3px' }}>Welcome back</Typography>
-          <Typography sx={{ color: tokens.muted, fontSize: 12.6, mt: 0.6, mb: 2.6 }}>Sign in to your deal flow &amp; pipeline console</Typography>
+          <Typography sx={{ fontSize: 21, color: tokens.navy, fontWeight: 800, letterSpacing: '-0.3px' }}>Welcome to PRISM</Typography>
+          <Typography sx={{ color: tokens.muted, fontSize: 12.6, mt: 0.6, mb: 2.6 }}>Evam Finance &middot; deal flow &amp; pipeline console</Typography>
 
           <Box sx={{ mb: 1.2 }}>
             <Lbl>Username or email</Lbl>
