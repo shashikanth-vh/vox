@@ -16,7 +16,7 @@ import { notesService } from '../../services/notesService';
 import LogInteractionDialog from './LogInteractionDialog';
 import DataRegisterDialog from './DataRegisterDialog';
 import StageChangeDialog from './StageChangeDialog';
-import type { StageLine } from '../../services/stageRequestService';
+import { canRequestLine, type StageLine } from '../../services/stageRequestService';
 import { useAuth } from '../../auth/AuthContext';
 import { USE_REAL_API, isRegisterId } from '../../api/http';
 import { db } from '../../api/atlasStore';
@@ -46,8 +46,11 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   const canNote = can(user.roles, 'addNote');
   const canInteract = can(user.roles, 'logInteraction');
   const canProduct = can(user.roles, 'addProduct');
-  // Requesters (can't directly edit a line) raise a stage-change request instead.
+  // Requesters (can't directly edit a line) raise a stage-change request instead —
+  // scoped PER LINE: a desk asks about its own line only (an AM RM never requests a
+  // lending stage move; review feedback).
   const canRequest = can(user.roles, 'requestStageChange');
+  const canRequestFor = (line: StageLine) => canRequest && canRequestLine(user.roles, line);
   // Assigning the Deal Analyst is Credit Head's action (Admin/Mgmt override) — not the
   // BD Head who owns the rest of the Ownership section.
   const canAssign = can(user.roles, 'assignAnalystLending');
@@ -179,7 +182,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
 
         {syn.map((r, i) => (
           <DrawerSection key={r.id} title={`Platform Deals${syn.length > 1 ? ' · ask ' + (i + 1) : ''} — ${r.status}`}
-            action={canRequest && roSyn ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Syndication', refId: r.id, current: r.status })}>⟳ Request stage change</Button> : undefined}>
+            action={canRequestFor('Syndication') && roSyn ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Syndication', refId: r.id, current: r.status })}>⟳ Request stage change</Button> : undefined}>
             <FieldGrid>
               <SelectFld label="Status of proposal" required value={r.status} disabled={roSyn} onChange={(v) => updS(r.id, 'status', v)} options={ref.getRefSync('Status of Proposal')} />
               {/* Amt is mandatory to move past Deal Sourced and LOCKS on Sanctioned (Admin/Mgmt only after). */}
@@ -214,7 +217,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
 
         {lend.map((r) => (
           <DrawerSection key={r.id} title={`Lending — ${r.stage}`}
-            action={canRequest && roLend ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Lending', refId: r.id, current: r.stage })}>⟳ Request stage change</Button> : undefined}>
+            action={canRequestFor('Lending') && roLend ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Lending', refId: r.id, current: r.stage })}>⟳ Request stage change</Button> : undefined}>
             <FieldGrid>
               {/* Amount is mandatory past Data Awaited and LOCKS on Sanctioned (Admin/Mgmt only after). */}
               <TextFld label="Amount (₹ Cr)" required type="number" value={r.amt} disabled={roLend || (LEND_GREEN.includes(r.stage) && !adminOverride)} onChange={(v) => updL(r.id, 'amt', v)} />

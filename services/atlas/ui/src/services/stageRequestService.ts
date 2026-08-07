@@ -41,6 +41,19 @@ export function canApproveLine(roles: Role[], line: StageLine): boolean {
   return false;
 }
 
+// REQUEST rights are per line too: a requester asks about THEIR OWN desk's line, not
+// another desk's — an AM RM browsing a company never requests a LENDING stage move
+// (review feedback). Asset Monetisation has no request lane at all: the AM book is a
+// plain update surface, its status a direct edit for AM roles.
+const REQUEST_LINE_ROLES: Record<StageLine, Role[]> = {
+  Lending: ['BD Head', 'BDRM', 'Deal Analyst'],
+  Syndication: ['BD Head', 'BDRM', 'Syn RM'],
+  'Asset Monetisation': [],
+};
+export function canRequestLine(roles: Role[], line: StageLine): boolean {
+  return roles.some((r) => REQUEST_LINE_ROLES[line].includes(r));
+}
+
 export const stageRequestService = {
   all(): StageRequest[] { return [...bag()]; },
   pending(): StageRequest[] { return bag().filter((r) => r.status === 'Pending'); },
