@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Box, Paper, Typography, Button, Collapse } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,11 +13,16 @@ import BookingReviewDialog from './BookingReviewDialog';
 import CovenantResultDialog from './CovenantResultDialog';
 import { computeToday, park, unpark } from './compute';
 import { stageRequestService, canApproveLine } from '../../services/stageRequestService';
-import { workflowService, kindLabel, since, pendingKey, actionsFor, isReturned,
+import { workflowService, kindLabel, kindChip, subjectName, personName, businessStage,
+  since, pendingKey, actionsFor, isReturned,
   type PendingWorkflow, type DecisionAction } from '../../services/workflowService';
 import { lmsService, type TrancheItem } from '../../services/lmsService';
 import { notificationsService, type InboxItem } from '../../services/notificationsService';
 import { clientsService } from '../../services/clientsService';
+import { leadsService } from '../../services/leadsService';
+import { dealsService } from '../../services/dealsService';
+import { syndicationService } from '../../services/syndicationService';
+import { assetMonService } from '../../services/assetMonService';
 import { fmt } from '../../utils/format';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import type { AttnRow, ContactRow, DueRow } from './compute';
@@ -79,6 +84,20 @@ export default function TodayPage() {
   const [addProd, setAddProd] = useState<string | null>(null);
   const data = computeToday(person);
   const refresh = () => { qc.invalidateQueries(); force((n) => n + 1); };
+
+  // The approval rows name their COMPANY by looking the run's subject up in the local
+  // stores — hydrate them once on entry so Today works standalone (a user who lands
+  // here first, before visiting Leads/Deals, would otherwise see nameless rows).
+  // Fail-soft: a failed pull just leaves the fallback text.
+  useEffect(() => {
+    const q = { pageIndex: 0, pageSize: 500, globalFilter: '', sorting: [], columnFilters: [] } as any;
+    void Promise.allSettled([
+      leadsService.list(q, null, { includeConverted: true }),
+      dealsService.list(q),
+      syndicationService.hydrate(),
+      assetMonService.list(q),
+    ]).then(() => force((n) => n + 1));
+  }, []);
 
   // Stage-change requests: approvers see pending items they can decide; requesters see
   // their own submissions awaiting approval.
@@ -183,7 +202,7 @@ export default function TodayPage() {
     [...data.contactRed, ...data.contactAmber].forEach((a) => rows.push([`Contact ${a.sev}`, a.co, `no touch ${a.days}d · with ${a.owner}`, a.code]));
     [...data.stageRed, ...data.stageAmber].forEach((a) => rows.push([`Stage ${a.sev}`, a.isLead || data.nameOf(a.code), `${a.rule} · ${a.why} · with ${a.owner}`, a.code]));
     [...reqActionable, ...reqMine].forEach((r) => rows.push(['Stage-change request', coName(r.code), `${r.line}: ${r.currentStage || '—'} → ${r.targetStage}`, r.status]));
-    [...wfActionable, ...wfMine].forEach((w) => rows.push(['Workflow approval', kindLabel(w.kind), `${w.stage} · raised by ${w.requestedBy} ${since(w.startedAt)}`, w.workflowId]));
+    [...wfActionable, ...wfMine].forEach((w) => rows.push(['Approval', kindChip(w.kind), `${subjectName(w) || w.stage} · requested by ${personName(w.requestedBy)} ${since(w.startedAt)}`, w.workflowId]));
     wfReminders.forEach((w) => rows.push(['Reminder', REMINDER_KINDS[w.kind] || kindLabel(w.kind), w.stage, w.subjectId]));
     data.snoozed.forEach((s) => rows.push(['Parked', s.label, `parked ${s.when}${s.by ? ' · by ' + s.by : ''}`, '']));
     saveCsv(toCsv(['Item', 'Name', 'Detail', 'Ref'], rows), 'atlas_today');
@@ -285,20 +304,21 @@ export default function TodayPage() {
         </Section>
       )}
 
-      {(wfActionable.length > 0 || wfMine.length > 0) && (
-        <Section title="Workflow approvals" count={wfActionable.length + wfMine.length} defaultOpen>
+      {wfActionable.length > 0 && (
+        <Section title="Approvals waiting on you" count={wfActionable.length} defaultOpen>
           {wfActionable.map((w) => {
             const verbs = actionsFor(w);
+            const co = subjectName(w);
+            const stage = businessStage(w.stage);
             return (
               <ChLine key={pendingKey(w)}>
-                <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDE7F6', color: '#5B3FA8', whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
-                <Box component="b" sx={{ color: tokens.ink }}>{w.stage || 'Awaiting a decision'}</Box>
-                {hint(`${w.status} · by ${w.requestedBy} · ${since(w.startedAt)}`
+                <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDE7F6', color: '#5B3FA8', whiteSpace: 'nowrap' }}>{kindChip(w.kind)}</Box>
+                <Box component="b" sx={{ color: tokens.ink }}>{co || stage || 'For your decision'}</Box>
+                {hint(`${co && stage ? stage + ' · ' : ''}requested by ${personName(w.requestedBy)} · ${since(w.startedAt)}`
                   + (w.checklistVersion ? ` · v${w.checklistVersion}` : ''))}
                 <Box sx={{ flex: 1 }} />
                 {/* One door in: REVIEW the content first — the dialog shows what is
-                    being decided and carries the whole triad (approve / return /
-                    reject), only the verbs this item actually offers. */}
+                    being decided and carries only the verbs this item offers. */}
                 <Button size="small" variant="contained"
                   onClick={() => setWfDecide({ w, verbs })} sx={{ minWidth: 0 }}>
                   Review…
@@ -306,21 +326,28 @@ export default function TodayPage() {
               </ChLine>
             );
           })}
-          {wfMine.map((w) => (
-            <ChLine key={pendingKey(w)}>
-              <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700,
-                bgcolor: isReturned(w) ? '#FFF3E0' : '#EDF1F3',
-                color: isReturned(w) ? '#9A6A00' : tokens.muted, whiteSpace: 'nowrap' }}>{kindLabel(w.kind)}</Box>
-              <Box component="b" sx={{ color: tokens.ink }}>
-                {isReturned(w) ? 'Returned for revision' : (w.stage || 'Awaiting a decision')}
-              </Box>
-              {isReturned(w)
-                ? hint(w.kind === 'lead-conversion'
-                    ? 'returned to you — open the lead\'s "Push to Deals": Resubmit or Withdraw'
-                    : 'returned to you — open the deal: "File a revised credit note", then "Send back for decision"')
-                : hint(`raised ${since(w.startedAt)} · awaiting a decision`)}
-            </ChLine>
-          ))}
+        </Section>
+      )}
+      {wfMine.length > 0 && (
+        <Section title="My requests — with the approver" count={wfMine.length} defaultOpen>
+          {wfMine.map((w) => {
+            const co = subjectName(w);
+            return (
+              <ChLine key={pendingKey(w)}>
+                <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700,
+                  bgcolor: isReturned(w) ? '#FFF3E0' : '#EDF1F3',
+                  color: isReturned(w) ? '#9A6A00' : tokens.muted, whiteSpace: 'nowrap' }}>{kindChip(w.kind)}</Box>
+                <Box component="b" sx={{ color: tokens.ink }}>
+                  {isReturned(w) ? `${co ? co + ' — ' : ''}returned to you` : (co || 'Raised by you')}
+                </Box>
+                {isReturned(w)
+                  ? hint(w.kind === 'lead-conversion'
+                      ? 'open the lead\'s "Push to Deals": Resubmit or Withdraw'
+                      : 'open the deal: "File a revised credit note", then "Send back for decision"')
+                  : hint(`raised ${since(w.startedAt)} · with the approver`)}
+              </ChLine>
+            );
+          })}
         </Section>
       )}
 

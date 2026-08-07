@@ -1,6 +1,8 @@
 import { api, errText, USE_REAL_API } from '../api/http';
 import { orchestrator } from '../api/orchestratorClient';
 import { ORCHESTRATOR_URL } from '../api/axiosClient';
+import { db } from '../api/atlasStore';
+import { clientsService } from './clientsService';
 import { runSuffix } from './entitiesService';
 import { settled } from './workflowRun';
 
@@ -93,6 +95,59 @@ export function kindLabel(kind: string): string {
   const s = kind.replace(/[-_]+/g, ' ').trim();
   return s ? s[0].toUpperCase() + s.slice(1) : 'Workflow';
 }
+
+// The approver's queue speaks the DESK's language, not the engine's: the run kinds are
+// internal identifiers, so each gets its business name. In the house process the CAM is
+// sent to the Credit Committee, and the committee's outcome is the Credit note — hence
+// a deal-structuring decision is chip-labelled by WHO decides it.
+const KIND_CHIP: Record<string, string> = {
+  'lead-conversion': 'Push to Deals',
+  'deal-structuring': 'Credit committee',
+  'cam-report': 'CAM report',
+  'cpcs-checklist': 'CP/CS checklist',
+  'syndication': 'Platform Deals mandate',
+  'asset-monetisation': 'Asset closure',
+  'advaya-handover': 'Disbursement handover',
+  'cs-followup': 'CS chase',
+  'covenant-due': 'Covenant',
+};
+export const kindChip = (kind: string): string => KIND_CHIP[kind] || kindLabel(kind);
+
+/** The COMPANY a queue item is about, resolved from whichever store row carries the
+ *  subject — the first thing an approver scans for. Fail-soft: an unhydrated store
+ *  simply yields '' and the row falls back to its stage text. */
+export function subjectName(w: PendingWorkflow): string {
+  const sid = w.subjectId;
+  if (!sid) return '';
+  const lead = (db().leads || []).find((l: any) => l.apiId === sid || l.id === sid);
+  if (lead?.company) return lead.company;
+  for (const key of ['deals', 'syn', 'lending', 'am'] as const) {
+    const row = (db()[key] || []).find((r: any) => r.apiId === sid || r.id === sid);
+    if (row) return row._name || clientsService.get(row.code).name || row.code || '';
+  }
+  return '';
+}
+
+/** A person's display name for 'requested by' lines — the roster's short handle when
+ *  the email is on record, else the email's name part, title-cased. Nobody should have
+ *  to read priya.nair@evamfinance.com in a work queue. */
+export function personName(email: string): string {
+  const e = (email || '').trim();
+  if (!e) return '';
+  const p = (db().people || []).find(
+    (x: any) => (x.email || '').toLowerCase() === e.toLowerCase());
+  if (p?.name || p?.full) return p.name || p.full;
+  if (!e.includes('@')) return e;
+  return e.split('@')[0].replace(/[._-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Engine states ('Pending', 'RUNNING') teach the user nothing — being listed already
+ *  means "waiting". A stage is shown only when it says something businessful. */
+export const businessStage = (stage: string | undefined): string => {
+  const s = (stage || '').trim();
+  return /^(pending|running|started|starting|completed)$/i.test(s) ? '' : s;
+};
 
 /** How long the run has been waiting — "3h ago", "2d ago". */
 export function since(iso: string): string {
