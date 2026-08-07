@@ -100,7 +100,7 @@ function VelocityChart({ rows }: { rows: VelRow[] }) {
 }
 
 function BankChart({ rows }: { rows: BankRow[] }) {
-  const d = rows.map((b) => ({ name: b.name, Pursued: b.pursued, Sanctioned: b.sanc, Declined: b.decl }));
+  const d = rows.map((b) => ({ name: b.name, Pursued: b.pursued, Approved: b.sanc, Declined: b.decl }));
   // v17: vertical columns — banks on the X axis, counts on the Y axis.
   return (
     <ResponsiveContainer width="100%" height={320}>
@@ -110,7 +110,7 @@ function BankChart({ rows }: { rows: BankRow[] }) {
         <RTooltip />
         <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="Pursued" fill={tokens.navy} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="Sanctioned" fill="#059669" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="Approved" fill="#059669" radius={[3, 3, 0, 0]} />
         <Bar dataKey="Declined" fill="#dc2626" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
@@ -212,7 +212,7 @@ export default function DashboardPage() {
     sec('LENDING FUNNEL', ['Stage', 'Rows', 'Value Cr'], data.lendingFunnel.map((s) => [s.status, s.rows, s.amt]));
     sec('RM ORIGINATION', ['RM', 'Sourced', 'Active leads', 'Hot', 'Converted', 'Pipeline', 'Closed'], data.rm.map((e) => [e.name, e.sourced, e.activeLeads, e.hotLeads, e.converted, e.pipeline, e.closed]));
     sec('ANALYST THROUGHPUT', ['Analyst', 'Active lend', 'Active syn', 'Active AM', 'Closed', 'Rejected'], data.analyst.map((e) => [e.name, e.activeLend, e.activeSyn, e.activeAM, e.closed, e.rejected]));
-    sec('BANK ENGAGEMENT', ['Bank', 'Pursued', 'Live', 'Sanctioned', 'Declined'], data.bank.map((b) => [b.name, b.pursued, b.live, b.sanc, b.decl]));
+    sec('BANK ENGAGEMENT', ['Bank', 'Pursued', 'Live', 'Approved', 'Declined'], data.bank.map((b) => [b.name, b.pursued, b.live, b.sanc, b.decl]));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([out.join('\n')], { type: 'text/csv' }));
     a.download = 'atlas_dashboard.csv'; a.click();
@@ -535,7 +535,7 @@ export default function DashboardPage() {
           <Box sx={twoCol}>
             <Card>
               <DataTable
-                head={["Bank", "Pursued", "Live", "Sanctioned", "Declined"]}
+                head={["Bank", "Pursued", "Live", "Approved", "Declined"]}
                 rows={data.bank.map((b) => [
                   b.name,
                   b.pursued,
@@ -554,7 +554,7 @@ export default function DashboardPage() {
                   rows={data.bank.map((b) => ({
                     label: b.name,
                     value: b.pursued,
-                    note: `pursued · ${b.sanc} sanctioned`,
+                    note: `pursued · ${b.sanc} approved`,
                   }))}
                 />
               )}

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
-import { syndicationService, LSTATE_COLOR, type BankRow } from '../../services/syndicationService';
+import { syndicationService, LSTATE_COLOR, lenderLabel, type BankRow } from '../../services/syndicationService';
 import { fmt } from '../../utils/format';
 import { tokens } from '../../theme';
 
@@ -23,13 +23,13 @@ export default function SynRegisterView({ onOpenBank }: { onOpenBank: (name: str
       Cell: ({ row }) => (
         <Box sx={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center' }}>
           {row.original.dots.map((st, i) => (
-            <Box key={i} component="span" title={st}
+            <Box key={i} component="span" title={lenderLabel(st)}
               sx={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', mr: '2px', bgcolor: LSTATE_COLOR[st] || '#94a3b8' }} />
           ))}
         </Box>
       ) },
     num('pursued', '# Pursued'),
-    num('sanc', 'Sanctioned', 110),
+    num('sanc', 'Approved', 110),
     num('ip', 'IP Rec', 90),
     num('queries', 'Queries', 90),
     num('imCirc', 'IM Circ', 90),

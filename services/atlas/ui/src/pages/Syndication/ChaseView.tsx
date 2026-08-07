@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Autocomplete, Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, LSTATE_COLOR } from '../../services/syndicationService';
+import { syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
 import { db } from '../../api/atlasStore';
 import { daysSince, fmt } from '../../utils/format';
@@ -34,7 +34,7 @@ const LSel = ({ value, disabled, onChange }: { value: string; disabled: boolean;
     <Select size="small" value={value} disabled={disabled || opts.length <= 1} onClick={(e) => e.stopPropagation()}
       onChange={(e) => onChange(e.target.value)}
       sx={{ fontSize: '12px', minWidth: 150, borderRadius: '4px', '& .MuiSelect-select': { py: '3px', px: '6px' }, '& fieldset': { borderColor: tokens.line } }}>
-      {opts.map((s) => <MenuItem key={s} value={s} sx={{ fontSize: 12 }}>{s}</MenuItem>)}
+      {opts.map((s) => <MenuItem key={s} value={s} sx={{ fontSize: 12 }}>{lenderLabel(s)}</MenuItem>)}
     </Select>
   );
 };
@@ -178,7 +178,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
           else if (l.st === 'IM Circulated') c.im++; else if (l.st === 'Declined') c.d++; else if (l.st === 'Identified') c.id++;
         });
         const bits: React.ReactNode[] = [];
-        if (c.s) bits.push(<span key="s" style={{ color: LSTATE_COLOR['Sanctioned'] }}>{c.s} sanctioned</span>);
+        if (c.s) bits.push(<span key="s" style={{ color: LSTATE_COLOR['Sanctioned'] }}>{c.s} approved</span>);
         if (c.ip) bits.push(<span key="ip" style={{ color: LSTATE_COLOR['IP Received'] }}>{c.ip} IP</span>);
         if (c.q) bits.push(<span key="q" style={{ color: LSTATE_COLOR['Queries Received'] }}>{c.q} queries</span>);
         if (c.im) bits.push(<span key="im" style={{ color: LSTATE_COLOR['IM Circulated'] }}>{c.im} IM circ</span>);
@@ -198,7 +198,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                 {outreach.length ? outreach.map((l, i) => {
                   const rd = daysSince(l.resp);
                   const silent = l.st === 'IM Circulated' && rd != null && rd > th.lenderSilent;
-                  return <Box key={i} title={`${l.name}: ${l.st || '—'}`} sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: silent ? '#dc2626' : dotColor(l.st) }} />;
+                  return <Box key={i} title={`${l.name}: ${lenderLabel(l.st || '') || '—'}`} sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: silent ? '#dc2626' : dotColor(l.st) }} />;
                 }) : <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>no lenders yet</Typography>}
               </Box>
               <Box sx={{ flex: 1 }} />
@@ -278,11 +278,11 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
       {/* Sanction / decline outcome capture */}
       <Dialog open={!!outDlg} onClose={() => setOutDlg(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ color: outDlg ? LSTATE_COLOR[outDlg.st] : undefined }}>
-          {outDlg?.st === 'Sanctioned' ? 'Sanction' : 'Decline'}{outDlg ? ` — ${outDlg.name}` : ''}
+          {outDlg?.st === 'Sanctioned' ? 'Approve' : 'Decline'}{outDlg ? ` — ${outDlg.name}` : ''}
         </DialogTitle>
         <DialogContent>
           {outDlg?.st === 'Sanctioned' && (
-            <TextField autoFocus fullWidth type="number" sx={{ mt: 1 }} label="Sanctioned amount (₹ Cr)"
+            <TextField autoFocus fullWidth type="number" sx={{ mt: 1 }} label="Approved amount (₹ Cr)"
               value={outAmt} onChange={(e) => setOutAmt(e.target.value)} inputProps={{ min: 0, step: 0.5 }} />
           )}
           <TextField fullWidth multiline minRows={2} sx={{ mt: 1.5 }}
@@ -294,7 +294,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
         <DialogActions>
           <Button onClick={() => setOutDlg(null)}>Cancel</Button>
           <Button variant="contained" disabled={!outOk} onClick={submitOut}>
-            Confirm {outDlg?.st?.toLowerCase()}
+            {outDlg?.st === 'Sanctioned' ? 'Confirm approval' : 'Confirm decline'}
           </Button>
         </DialogActions>
       </Dialog>

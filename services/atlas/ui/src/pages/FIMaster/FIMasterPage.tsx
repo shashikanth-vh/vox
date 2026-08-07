@@ -41,7 +41,7 @@ export default function FIMasterPage({ mode: modeProp, onModeChange }: { mode?: 
   const exportCsv = async () => {
     const res = await fiService.list({ pageIndex: 0, pageSize: 100000, globalFilter: '', sorting: [], columnFilters: [] });
     const rows = res.rows.map((r: FiRow) => [r.name, r.inactive ? 'Inactive' : 'Active', r.type || '', r.preferredSectors || r.sectors || '', r.pursued || 0, r.live || 0, r.ip || 0, r.sanc || 0, r.decl || 0, r.notes || '']);
-    saveCsv(toCsv(['Bank', 'Status', 'Type', 'Preferred sectors', '# Pursued', 'Live', 'IP', 'Sanctioned', 'Declined', 'Notes'], rows), 'atlas_fi_master');
+    saveCsv(toCsv(['Bank', 'Status', 'Type', 'Preferred sectors', '# Pursued', 'Live', 'IP', 'Approved', 'Declined', 'Notes'], rows), 'atlas_fi_master');
   };
 
   // Right-aligned count column, "—" when zero (v12 renders the em dash for 0).
@@ -65,7 +65,7 @@ export default function FIMasterPage({ mode: modeProp, onModeChange }: { mode?: 
     num('pursued', '# Pursued'),
     num('live', 'Live', 80),
     num('ip', 'IP', 80),
-    num('sanc', 'Sanctioned', 110),
+    num('sanc', 'Approved', 110),
     num('decl', 'Declined', 100),
     { accessorKey: 'notes', header: 'Notes', size: 260,
       Cell: ({ cell }) => {

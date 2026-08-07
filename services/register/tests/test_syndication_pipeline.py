@@ -108,15 +108,17 @@ async def test_terminal_outcome_notifies_the_mandate_rm(client: AsyncClient):
 
     inbox = (await client.get("/v1/notifications", params={"unread_only": "true"},
                               headers=RM)).json()
-    mine = [n for n in inbox["items"] if n["event"] == "lender.sanctioned"]
+    mine = [n for n in inbox["items"] if n["event"] == "lender.approved"]
     assert mine, inbox
+    # The desk's word is "Approved" (stored status stays 'Sanctioned').
+    assert "Approved" in mine[0]["title"]
     assert "Kotak Mahindra" in mine[0]["title"] and "SYN-NOTI-1" in mine[0]["title"]
     assert "4" in mine[0]["title"]  # the allocation travels in the headline
 
     # The same outcome does not double-send (dedupe key is lender+outcome).
     # A second PATCH is a terminal-state 422 anyway — the ledger holds one row.
     again = (await client.get("/v1/notifications", headers=RM)).json()
-    assert len([n for n in again["items"] if n["event"] == "lender.sanctioned"]) == 1
+    assert len([n for n in again["items"] if n["event"] == "lender.approved"]) == 1
 
 
 async def test_fi_master_seed_is_idempotent_and_respects_deletes(client: AsyncClient):

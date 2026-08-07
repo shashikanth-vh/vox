@@ -282,11 +282,13 @@ async def _notify_syn_outcome(ctx: RequestContext, syn: Any, lender: Any,
         Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
         or_(Person.name.in_(names), Person.full_name.in_(names))))).scalars().all()
     amt = f" · ₹{float(lender.amount_cr):g} Cr" if lender.amount_cr is not None else ""
+    # The stored status stays 'Sanctioned' (canonical); the desk's word is "Approved".
+    label = "Approved" if outcome == "Sanctioned" else outcome
     for p in rows:
         await notify_maker(
             ctx, recipient=(p.email or "").strip() or None,
-            event=f"lender.{outcome.lower()}",
-            title=f"{lender.lender_name} {outcome}{amt} — {syn.tracker_no or 'mandate'}",
+            event=f"lender.{label.lower()}",
+            title=f"{lender.lender_name} {label}{amt} — {syn.tracker_no or 'mandate'}",
             body=(lender.note or None),
             severity="info" if outcome == "Sanctioned" else "warning",
             subject_type="Syndication", subject_id=str(syn.id),
@@ -330,7 +332,7 @@ async def update_syndication_lender(
         if new_status == "Sanctioned" and data.get("amount_cr") is None \
                 and row.amount_cr is None:
             raise ValidationAppError(
-                "A sanction records the bank's allocation — supply amount_cr (₹ Cr).")
+                "An approval records the bank's allocation — supply amount_cr (₹ Cr).")
     obj = await _synlender_repo.update(
         ctx.session, ctx.tenant_id, lender_id, ctx.actor, data)
     if new_status in ("Sanctioned", "Declined"):

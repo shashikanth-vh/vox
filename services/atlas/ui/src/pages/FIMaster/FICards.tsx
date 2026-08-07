@@ -44,7 +44,7 @@ export default function FICards({ openName, onEdit, onOpenCompany }: {
               </Typography>
               <Box sx={{ flex: 1 }} />
               <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                pursued {l.pursued} · live {l.live} · IP {l.ip} · sanctioned {l.sanc} · declined {l.decl}
+                pursued {l.pursued} · live {l.live} · IP {l.ip} · approved {l.sanc} · declined {l.decl}
               </Typography>
               {/* Edit action — the card view's equivalent of the table's action column.
                   No View here: expanding the card already shows the full record. */}

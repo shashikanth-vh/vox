@@ -321,12 +321,18 @@ export interface BankRow {
 
 // Lender chase workflow states + colours (mirrors template LSTATES / ST_COLOR)
 export const LSTATES = ['Identified', 'IM Circulated', 'Docs Pending', 'Queries Received', 'IP Received', 'Sanctioned', 'Declined'];
+
+/** Display name for a lender status. The STORED value stays 'Sanctioned' (one
+ *  canonical term across history, transitions and the mandate-level statuses);
+ *  every human-facing surface says "Approved" — the desk's word for a bank
+ *  saying yes. Map here, never at call sites, so the rename is one line. */
+export const lenderLabel = (st: string): string => (st === 'Sanctioned' ? 'Approved' : st);
 export const LSTATE_COLOR: Record<string, string> = {
   Identified: '#94a3b8', 'IM Circulated': '#64748b', 'Docs Pending': '#0891b2',
   'Queries Received': '#2563eb', 'IP Received': '#d97706', Sanctioned: '#059669', Declined: '#dc2626',
 };
 
-export const MATRIX_LABELS = ['Not in play', 'Identified — to showcase', 'IM submitted', 'Queries received', 'Approval track', 'Sanctioned', 'Declined'];
+export const MATRIX_LABELS = ['Not in play', 'Identified — to showcase', 'IM submitted', 'Queries received', 'Approval track', 'Approved', 'Declined'];
 // state -> colour: yellow / orange / blue / purple (approval track) / green / red
 export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B'];
 
@@ -335,7 +341,7 @@ export const MATRIX_PRESETS = [
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
   { id: 'ballus', label: 'Ball with us ≥5d', states: [3], dwell: 5, scope: 'Live' as const },
   { id: 'appr', label: 'Approval track', states: [4], dwell: '', scope: 'Live' as const },
-  { id: 'sanc', label: 'Sanctioned', states: [5], dwell: '', scope: 'All' as const },
+  { id: 'sanc', label: 'Approved', states: [5], dwell: '', scope: 'All' as const },
   { id: 'decl', label: 'Declined', states: [6], dwell: '', scope: 'All' as const },
   { id: 'noout', label: 'No outreach yet', states: [] as number[], dwell: '', scope: 'Live' as const, noout: true },
 ];

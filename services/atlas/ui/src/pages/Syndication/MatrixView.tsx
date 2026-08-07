@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
 import {
-  syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT,
+  syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
 } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
@@ -92,7 +92,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
       note: note.trim() || undefined,
       amountCr: st === 'Sanctioned' && amount ? +amount : undefined,
     });
-    setMsg(`${pop.l} → ${st}${st === 'Sanctioned' && amount ? ` · ₹${amount} Cr` : ''}`);
+    setMsg(`${pop.l} → ${lenderLabel(st)}${st === 'Sanctioned' && amount ? ` · ₹${amount} Cr` : ''}`);
     closePop(); force((n) => n + 1);
   };
   // A next-step click: outcomes pause for their substance, plain moves apply at once.
@@ -196,7 +196,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                     const dim = dimOn && !!s && !cellHit(c, l);
                     return (
                       <td key={l} style={{ textAlign: 'center', padding: '5px 3px', borderBottom: `1px solid #EFF2F4` }}>
-                        <Tooltip title={`${l} · ${cellObj(c, l)?.st || MATRIX_LABELS[s]}${d != null && s ? ' · ' + d + 'd' : ''} · click for details`} arrow>
+                        <Tooltip title={`${l} · ${lenderLabel(cellObj(c, l)?.st || '') || MATRIX_LABELS[s]}${d != null && s ? ' · ' + d + 'd' : ''} · click for details`} arrow>
                           <span style={dotStyle(s, dim)} onClick={(e) => openPop(e, c, l)}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.transform = 'scale(1.22)')}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.transform = 'none')} />
@@ -228,7 +228,9 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           // History rows arrive in two shapes: the register appends {from,to,at,by},
           // local echoes push {st,t,by} — render either, newest first.
           const hist = (row?.h || []).slice(-4).reverse().map((x: any) => ({
-            what: x.to != null ? `${x.from || '—'} → ${x.to}` : (x.st || '—'),
+            what: x.to != null
+              ? `${lenderLabel(x.from || '') || '—'} → ${lenderLabel(x.to)}`
+              : (lenderLabel(x.st || '') || '—'),
             when: (x.at || x.t || '').slice(0, 10), who: x.by || '',
           }));
           return (
@@ -237,11 +239,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               <Typography sx={{ fontSize: 11.4, color: tokens.muted, mb: 1 }}>{clientsService.get(pop.c).name}</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mb: 0.6 }}>
                 <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s ? MATRIX_COLORS[s] : '#fff', border: `1.4px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}` }} />
-                <Typography sx={{ fontSize: 12.4, fontWeight: 600 }}>{st || 'Not in play'}</Typography>
+                <Typography sx={{ fontSize: 12.4, fontWeight: 600 }}>{lenderLabel(st) || 'Not in play'}</Typography>
                 {d != null && st && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>· {d}d in state</Typography>}
               </Box>
               {row?.amt != null && (
-                <Typography sx={{ fontSize: 12, color: MATRIX_COLORS[5], fontWeight: 600, mb: 0.4 }}>Sanctioned ₹{fmt(row.amt, 1)} Cr</Typography>
+                <Typography sx={{ fontSize: 12, color: MATRIX_COLORS[5], fontWeight: 600, mb: 0.4 }}>Approved ₹{fmt(row.amt, 1)} Cr</Typography>
               )}
               {row?.note && <Typography sx={{ fontSize: 11.6, color: tokens.muted, mb: 0.4, whiteSpace: 'pre-wrap' }}>{row.note}</Typography>}
               {hist.length > 0 && (
@@ -264,7 +266,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                     <Button key={n} size="small" variant="outlined" onClick={() => pick(n)}
                       sx={{ borderRadius: 999, px: 1.3, py: 0.2, fontSize: 11.6, textTransform: 'none',
                         color: MATRIX_COLORS[ST2DOT[n] || 1], borderColor: MATRIX_COLORS[ST2DOT[n] || 1] }}>
-                      {n}
+                      {lenderLabel(n)}
                     </Button>
                   ))}
                 </Box>
@@ -272,10 +274,10 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               {!ro && target && (
                 <Box sx={{ borderTop: `1px solid ${tokens.line}`, mt: 0.8, pt: 1 }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.8, color: MATRIX_COLORS[ST2DOT[target] || 1] }}>
-                    {target === 'Sanctioned' ? 'Sanction — record the allocation' : 'Decline — record the reason'}
+                    {target === 'Sanctioned' ? 'Approve — record the allocation' : 'Decline — record the reason'}
                   </Typography>
                   {target === 'Sanctioned' && (
-                    <TextField size="small" fullWidth type="number" label="Sanctioned amount (₹ Cr)" value={amount}
+                    <TextField size="small" fullWidth type="number" label="Approved amount (₹ Cr)" value={amount}
                       onChange={(e) => setAmount(e.target.value)} sx={{ mb: 0.8 }} autoFocus
                       inputProps={{ min: 0, step: 0.5 }} />
                   )}
@@ -286,7 +288,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                     <Button size="small" onClick={() => setTarget('')}>Back</Button>
                     <Button size="small" variant="contained" disabled={!canConfirm} onClick={() => commit(target)}
                       sx={{ bgcolor: MATRIX_COLORS[ST2DOT[target] || 1] }}>
-                      Confirm {target}
+                      {target === 'Sanctioned' ? 'Confirm approval' : 'Confirm decline'}
                     </Button>
                   </Box>
                 </Box>
