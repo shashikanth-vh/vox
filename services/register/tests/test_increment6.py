@@ -91,7 +91,8 @@ async def test_convert_carries_the_am_opening_facts(client):
                           json={"name": name, "full_name": full, "role": "RM"})
     eid = (await client.post("/v1/entities",
                              json={"code": "AMF" + uuid.uuid4().hex[:6].upper(),
-                                   "legal_name": "AM Facts Co"})).json()["id"]
+                                   "legal_name": "AM Facts Co",
+                                   "state": "Karnataka"})).json()["id"]
     lead = (await client.post("/v1/leads",
                               json={"company": "AM Facts Co",
                                     "entity_id": eid})).json()
@@ -110,6 +111,9 @@ async def test_convert_carries_the_am_opening_facts(client):
     assert row["deal_type"] == "Capital Market"
     assert row["status"] == "Teaser Prepared"
     assert (row["rm"], row["analyst"]) == ("Kiran Rao", "Dev Mehta")
+    # Defaults the desk should not retype: State from the company, Nature = Seller.
+    assert row["state"] == "Karnataka"
+    assert row["nature"] == "Seller"
 
 
 async def test_am_tracker_carries_its_own_rm_and_analyst(client):

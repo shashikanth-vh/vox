@@ -433,7 +433,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
 
     import orjson
 
-    from app.models import AssetMonetisation, Deal, LendingTracker, SyndicationTracker
+    from app.models import AssetMonetisation, Deal, Entity, LendingTracker, SyndicationTracker
     from app.models import Lead as _Lead
     from app.models.users import LineAssignment
     from app.repositories.crud import CRUDRepository as _Repo
@@ -583,9 +583,17 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         line_ids["syndication_id"] = row.id
         _assign("Syndication", row.id, "Syn RM", payload.rm_id)
     if payload.is_asset_mon:
+        # Defaults the desk should not have to retype: the mandate's State comes from
+        # the company (the push dialog collects it as a mandatory client field), and a
+        # fresh monetisation mandate is always the client SELLING the asset.
+        ent_state = (await ctx.session.execute(
+            select(Entity.state).where(Entity.id == entity_id,
+                                       Entity.tenant_id == ctx.tenant_id))
+        ).scalar_one_or_none()
         row = await _Repo(AssetMonetisation).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
             "rm": payload.rm, "analyst": payload.analyst,
+            "state": ent_state, "nature": "Seller",
             "indicative_value_cr": payload.am_value_cr,
             "size_mw": payload.am_size_mw,
             "deal_type": payload.am_deal_type,
