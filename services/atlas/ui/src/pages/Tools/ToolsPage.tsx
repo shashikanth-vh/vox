@@ -4,11 +4,13 @@ import { tokens } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { backupService } from '../../services/backupService';
+import { ledgerService } from '../../services/ledgerService';
 import { newsService } from '../../services/newsService';
 import ExportBar from '../../components/common/ExportBar';
 import NewsRadar from './NewsRadar';
 import MailIntakeDialog from './MailIntakeDialog';
 import ApplicationDialog from './ApplicationDialog';
+import LedgerDialog from './LedgerDialog';
 
 // Port of v12 AUGMENT 16 — the Tools tab. Visible to every role, per the template.
 function ToolCard({ icon, title, sub, on, onClick }: {
@@ -30,6 +32,15 @@ export default function ToolsPage() {
   const { user } = useAuth();
   const [mail, setMail] = useState(false);
   const [app, setApp] = useState(false);
+  const [ledger, setLedger] = useState(false);
+
+  const onLedgerExport = async () => {
+    try {
+      await ledgerService.exportLedger();
+    } catch (e: any) {
+      window.alert(e?.response?.data?.detail || e?.message || 'Export failed');
+    }
+  };
   const fileRef = useRef<HTMLInputElement>(null);
   const [, force] = useState(0);
 
@@ -61,6 +72,9 @@ export default function ToolsPage() {
         {/* Backup / restore is Admin-only (RBAC: restore can wipe the book). */}
         {can(user.roles, 'backupRestore') && <ToolCard icon="💾" title="Backup" sub="download all data (JSON)" onClick={() => backupService.backup(user.full)} />}
         {can(user.roles, 'backupRestore') && <ToolCard icon="♻️" title="Restore" sub="import a backup file" onClick={() => fileRef.current?.click()} />}
+        {/* The desk's Excel ledger, in and out — Admin-only (the server enforces it too). */}
+        {can(user.roles, 'backupRestore') && <ToolCard icon="📥" title="Import ledger" sub="bring the Excel ledger into PRISM" onClick={() => setLedger(true)} />}
+        {can(user.roles, 'backupRestore') && <ToolCard icon="📤" title="Export ledger" sub="the register as the Excel ledger" onClick={onLedgerExport} />}
       </Box>
       <input ref={fileRef} type="file" accept=".json" style={{ display: 'none' }} onChange={onRestore} />
 
@@ -68,6 +82,7 @@ export default function ToolsPage() {
 
       <MailIntakeDialog open={mail} onClose={() => setMail(false)} />
       <ApplicationDialog open={app} onClose={() => setApp(false)} />
+      <LedgerDialog open={ledger} onClose={() => setLedger(false)} />
     </>
   );
 }

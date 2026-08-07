@@ -20,7 +20,7 @@
   ],
   "item": [
     {
-      "name": "Register  (268 requests \u00b7 {{baseUrl}}/)",
+      "name": "Register  (269 requests \u00b7 {{baseUrl}}/)",
       "item": [
         {
           "name": "Advaya",
@@ -5189,6 +5189,41 @@
                       "value": "False",
                       "disabled": true
                     }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /v1/export/ledger-xlsx \u2014 Export the register as the desk's ledger workbook (governed)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/export/ledger-xlsx",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "export",
+                    "ledger-xlsx"
                   ]
                 }
               }

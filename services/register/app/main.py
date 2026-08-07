@@ -22,6 +22,7 @@ from app.api.documents_lifecycle import router as documents_lifecycle_router
 from app.api.evidence import router as evidence_router
 from app.api.ews import router as ews_router
 from app.api.export import router as export_router
+from app.api.export_ledger import router as export_ledger_router
 from app.api.followups import router as followups_router
 from app.api.handover import router as handover_router
 from app.api.imports import router as import_router
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
         tenants_router,
         rbac_router,
         export_router,
+        export_ledger_router,
         import_router,
         custom_router,
         decisions_router,

@@ -46,6 +46,19 @@ from app.models import (
 )
 from app.models.system import RefValue
 from app.seed.refdata import REF_VALUES
+from app.seed.ledger_xlsx import (
+    LEAD_STATUS_CANON as _LEAD_STATUS_CANON,
+    LENDER_RANK as _LENDER_RANK,
+    LENDER_VOCAB as _LENDER_VOCAB,
+    SYN_RANK as _SYN_RANK,
+    canon_lender_status as _canon_lender_status,
+    canon_temp as _canon_temp,
+    extras_note as _extras_note,
+    join_notes as _join_notes,
+    ledger_syn_rows as _ledger_syn_rows,
+    parse_field_tags as _parse_field_tags,
+    sheet_rows as _sheet,
+)
 
 log = get_logger(__name__)
 
@@ -118,6 +131,8 @@ _WORDING_ALIASES: dict[str, dict[str, str]] = {
         "im under preparation": "IM in Prep",
         "im sent": "IM Circulated",
         "final sanction received": "Sanctioned",
+        # Ledger deal-level derivations ("Most Advanced Stage") that reach us via rows.
+        "all rejected": "Rejected",
     },
 }
 
@@ -153,7 +168,6 @@ def _canon_funnel(value: str | None) -> str | None:
             return canonical
     return None
 
-
 # Corporate suffix words peeled from the tail of a company name so that legal-form
 # variants collapse to ONE entity. Without this, "EcoSoch Solar Private Limited",
 # "EcoSoch Solar Pvt Ltd" and "EcoSoch Solar Ltd" seed three separate companies
@@ -176,23 +190,6 @@ def _key(name: str) -> str:
     while tokens and tokens[-1] in _SUFFIX_WORDS:
         tokens.pop()
     return " ".join(tokens) or s
-
-
-def _sheet(wb, title: str) -> list[dict]:
-    """Return a sheet as a list of {header: value} dicts (non-empty rows only)."""
-    if title not in wb.sheetnames:
-        return []
-    ws = wb[title]
-    rows = list(ws.iter_rows(values_only=True))
-    if not rows:
-        return []
-    header = [str(h).strip() if h is not None else f"col{i}" for i, h in enumerate(rows[0])]
-    out = []
-    for r in rows[1:]:
-        if not any(c not in (None, "") for c in r):
-            continue
-        out.append({header[i]: r[i] for i in range(min(len(header), len(r)))})
-    return out
 
 
 class _CodeGen:
@@ -362,13 +359,40 @@ async def import_workbook(
     leads = _sheet(wb, "Leads")
     deals = _sheet(wb, "Deals")
     lending = _sheet(wb, "Lending Tracker")
-    syn = _sheet(wb, "Syndication")
-    am = _sheet(wb, "Asset Mon")
+    # Two workbook generations: the v4 'Syndication' flat sheet, or the live ledger's
+    # two-section 'Syndication Tracker' (lender-level rows are the authoritative part).
+    syn = _sheet(wb, "Syndication") or _ledger_syn_rows(wb)
+    am = _sheet(wb, "Asset Mon") or _sheet(wb, "Asset Mon Tracker")
     mandate = _sheet(wb, "Mandate Tracker")
+    partnership = _sheet(wb, "Partnership Tracker")
+    client_master = _sheet(wb, "Client Master")
+    lender_master = _sheet(wb, "Lender Master")
+    people_master = _sheet(wb, "People Master")
 
     # --- entities: every distinct company across all sheets -------------
     def company_of(row: dict) -> str | None:
         return _s(row.get("Company Name"))
+
+    # The ledger's join key: tracker rows may carry only the Client ID (a company cell
+    # can be blank) — resolve the company through the Deals sheet so no row is orphaned.
+    cid_company: dict[str, str] = {}
+    for r in deals:
+        cid, nm = _s(r.get("Client ID")), company_of(r)
+        if cid and nm:
+            cid_company[cid] = nm
+    for sheet_rows in (leads, lending, syn, am, mandate, partnership):
+        for r in sheet_rows:
+            cid = _s(r.get("Client ID"))
+            if not company_of(r) and cid and cid in cid_company:
+                r["Company Name"] = cid_company[cid]
+
+    # Client Master: the canonical company registry (Group Code / legal name / default
+    # sector / PAN / notes) — consulted at entity creation so codes match the ledger.
+    cm_by_key: dict[str, dict] = {}
+    for r in client_master:
+        nm = _s(r.get("Company Legal Name"))
+        if nm:
+            cm_by_key.setdefault(_key(nm), r)
 
     # enrichment lookups (first non-empty wins), keyed by normalized name
     sector_by, lens_by, state_by = {}, {}, {}
@@ -376,6 +400,7 @@ async def import_workbook(
         k = _key(company_of(r) or "")
         sector_by.setdefault(k, _s(r.get("Sector")))
         lens_by.setdefault(k, _s(r.get("Mitigation / Adaptation")))
+        state_by.setdefault(k, _s(r.get("Location")))
     for r in deals:
         k = _key(company_of(r) or "")
         sector_by.setdefault(k, _s(r.get("Sector")))
@@ -385,11 +410,13 @@ async def import_workbook(
         state_by.setdefault(k, _s(r.get("State")))
 
     names: dict[str, str] = {}  # key -> original display name
-    for sheet in (leads, deals, lending, syn, am, mandate):
+    for sheet in (leads, deals, lending, syn, am, mandate, partnership):
         for r in sheet:
             nm = company_of(r)
             if nm:
                 names.setdefault(_key(nm), nm)
+    for k, r in cm_by_key.items():
+        names.setdefault(k, _s(r.get("Company Legal Name")))
 
     # Existing entities for THIS tenant, keyed canonically → merge reuses them (a real
     # upsert) instead of inserting a second EcoSoch every import.
@@ -412,10 +439,22 @@ async def import_workbook(
     n_new, n_updated = 0, 0
     for k, nm in names.items():
         ent = existing_by_key.get(k)
+        cm = cm_by_key.get(k) or {}
+        cm_code = _s(cm.get("Group Code"))
+        cm_notes = _join_notes(
+            _s(cm.get("Group Notes")),
+            f"[PAN: {_s(cm.get('PAN (optional)'))}]" if _s(cm.get("PAN (optional)")) else None)
         if ent is None:
+            # The ledger's own Group Code is the entity code whenever the Client Master
+            # names one (round-trip identity); a collision or a company the master does
+            # not know falls back to the generated code.
+            code = cm_code if cm_code and cm_code not in codegen.used else codegen.make(nm)
+            codegen.used.add(code)
             ent = Entity(
-                tenant_id=tenant_id, code=codegen.make(nm), legal_name=nm,
-                sector=sector_by.get(k), lens=lens_by.get(k), state=state_by.get(k),
+                tenant_id=tenant_id, code=code, legal_name=nm,
+                sector=sector_by.get(k) or _s(cm.get("Sector (default)")),
+                lens=lens_by.get(k), state=state_by.get(k),
+                pan=_s(cm.get("PAN (optional)")), notes=_s(cm.get("Group Notes")),
                 register_status="Pipeline", created_by="xlsx-import",
                 updated_by="xlsx-import")
             session.add(ent)
@@ -423,12 +462,16 @@ async def import_workbook(
             n_new += 1
         else:
             # Enrich only empty fields — never clobber curated data on a merge.
-            if not ent.sector and sector_by.get(k):
-                ent.sector = sector_by[k]
+            if not ent.sector and (sector_by.get(k) or _s(cm.get("Sector (default)"))):
+                ent.sector = sector_by.get(k) or _s(cm.get("Sector (default)"))
             if not ent.lens and lens_by.get(k):
                 ent.lens = lens_by[k]
             if not ent.state and state_by.get(k):
                 ent.state = state_by[k]
+            if not ent.pan and _s(cm.get("PAN (optional)")):
+                ent.pan = _s(cm.get("PAN (optional)"))
+            if not ent.notes and cm_notes:
+                ent.notes = _s(cm.get("Group Notes"))
             ent.updated_by = "xlsx-import"
             n_updated += 1
         entity_id_by[k] = ent.id
@@ -448,7 +491,35 @@ async def import_workbook(
                                   Person.deleted_at.is_(None)))
     ).scalars().all()
     people_seen: set[str] = {_key(p.full_name or "") for p in existing_people if p.full_name}
-    n_people = 0
+    person_by_full = {_key(p.full_name or ""): p for p in existing_people if p.full_name}
+    n_people = n_pm = 0
+
+    # People Master FIRST — the ledger's authoritative team directory (Role / Initials /
+    # Full Name). It creates or enriches by full name; the initials become the short
+    # handle. Names harvested from RM/analyst cells afterwards only fill the gaps.
+    for r in people_master:
+        full = _s(r.get("Full Name"))
+        if not full:
+            continue
+        initials, role = _s(r.get("Initials")), _s(r.get("Role"))
+        pnotes = _s(r.get("Notes"))
+        p = person_by_full.get(_key(full))
+        if p is None:
+            p = Person(tenant_id=tenant_id, name=initials or full.split()[0],
+                       full_name=full, role=role or "RM", notes=pnotes,
+                       created_by="xlsx-import", updated_by="xlsx-import")
+            session.add(p)
+            people_seen.add(_key(full))
+            person_by_full[_key(full)] = p
+            n_pm += 1
+        else:
+            if role:
+                p.role = role
+            if initials and (not p.name or p.name == (p.full_name or "").split()[0]):
+                p.name = initials
+            if pnotes and not p.notes:
+                p.notes = pnotes
+            p.updated_by = "xlsx-import"
 
     def add_person(nm, role):
         nonlocal n_people
@@ -464,12 +535,15 @@ async def import_workbook(
         n_people += 1
     for r in leads:
         add_person(r.get("RM Owner"), "RM")
-    for r in deals + lending + am + mandate:
+    for r in deals + lending + am + mandate + partnership:
         add_person(r.get("RM"), "RM")
     for r in lending:
         add_person(r.get("Credit Analyst"), "Analyst")
+    for r in syn:
+        add_person(r.get("Credit Analyst"), "Analyst")
     await session.flush()
     counts["people"] = n_people
+    counts["people_master_applied"] = n_pm
 
     # --- counterparties: distinct banks (upsert by name) ----------------
     # Seed the id map from counterparties already in this tenant so a re-import reuses
@@ -480,16 +554,47 @@ async def import_workbook(
                                         Counterparty.deleted_at.is_(None)))
     ).scalars().all()
     cp_id_by: dict[str, uuid.UUID] = {c.name.lower(): c.id for c in existing_cps if c.name}
+    cp_obj_by: dict[str, Counterparty] = {c.name.lower(): c for c in existing_cps if c.name}
     n_cp = 0
-    for r in syn:
-        bank = _s(r.get("Bank"))
-        if bank and bank.lower() not in cp_id_by:
-            cp = Counterparty(tenant_id=tenant_id, name=bank, created_by="xlsx-import",
-                              updated_by="xlsx-import")
+
+    async def add_counterparty(name: str | None, **extra) -> None:
+        nonlocal n_cp
+        name = _s(name)
+        if not name:
+            return
+        cp = cp_obj_by.get(name.lower())
+        if cp is None:
+            cp = Counterparty(tenant_id=tenant_id, name=name, created_by="xlsx-import",
+                              updated_by="xlsx-import",
+                              **{k: v for k, v in extra.items() if v is not None})
             session.add(cp)
             await session.flush()
-            cp_id_by[bank.lower()] = cp.id
+            cp_id_by[name.lower()] = cp.id
+            cp_obj_by[name.lower()] = cp
             n_cp += 1
+        else:
+            for k, v in extra.items():
+                if v is None:
+                    continue
+                # The master's active flag is authoritative; other fields only fill gaps.
+                if k == "is_active" or getattr(cp, k, None) in (None, ""):
+                    setattr(cp, k, v)
+            cp.updated_by = "xlsx-import"
+
+    # Lender Master FIRST (type / short name / active flag / preferred sectors / notes
+    # — the derived engagement counts are recomputed by PRISM, never imported), then
+    # any lender named only on a tracker row.
+    for r in lender_master:
+        active = _s(r.get("Active?"))
+        await add_counterparty(
+            r.get("Lender Name"),
+            counterparty_type=_s(r.get("Type")), short_name=_s(r.get("Short Name")),
+            is_active=None if active is None else active.lower() in ("yes", "y", "true"),
+            sectors=_s(r.get("Preferred Sectors")), notes=_s(r.get("Notes")))
+    for r in syn:
+        await add_counterparty(r.get("Bank"))
+    for r in partnership:
+        await add_counterparty(r.get("Partner Lender"))
     counts["counterparties"] = n_cp
 
     # --- leads (upsert by entity) ---------------------------------------
@@ -519,36 +624,88 @@ async def import_workbook(
                 return candidate
 
     n_new = n_upd = 0
+    _LEADS_USED = {"Lead ID", "Company Name", "Sector", "Mitigation / Adaptation",
+                   "Source", "Source Detail", "RM Owner", "Status", "Status#2",
+                   "Contact Person", "Designation", "Contact Phone", "Location",
+                   "Last Interaction Date", "Next Action", "Next Action Date", "Notes"}
+    # Leads whose ledger lifecycle says Converted — linked to their deal AFTER the
+    # deals pass (the deal may not exist yet at this point of the run).
+    converted_leads: list = []
+    # Entities whose lead was CREATED this run — a later row for the same company is a
+    # within-file duplicate whose merge is reported, not silently absorbed.
+    lead_new_entities: set[uuid.UUID] = set()
     for r in leads:
         nm = company_of(r)
         if not nm:
+            # A row with no company cannot become a lead — but it is not silently
+            # dropped either: it lands in the report with its content preserved.
+            content = _extras_note(r, set()) or ""
+            quarantined.append({"sheet": "Leads", "company": None, "field": "company",
+                                "value": content[:500] or None,
+                                "reason": "row has no company name",
+                                "batch_id": batch_id})
             continue
         entity = eid(nm)
         existing = lead_by_entity.get(entity) if entity is not None else None
+        # The ledger's Leads sheet carries TWO Status columns: lifecycle first
+        # (Active / Converted to Deal / Dropped), temperature second. The v4 sheet has
+        # only the temperature one. Typos in the live data canonicalise with a record.
+        dual = "Status#2" in r
+        temp_raw = _s(r.get("Status#2")) if dual else _s(r.get("Status"))
+        temp, changed = _canon_temp(temp_raw)
+        if changed:
+            translated.append({"sheet": "Leads", "company": nm, "field": "temperature",
+                               "from": temp_raw, "to": temp, "batch_id": batch_id})
+        life_raw = _s(r.get("Status")) if dual else None
+        life = _LEAD_STATUS_CANON.get(" ".join((life_raw or "").split()).lower())
+        if life_raw and life and life != life_raw:
+            translated.append({"sheet": "Leads", "company": nm, "field": "status",
+                               "from": life_raw, "to": life, "batch_id": batch_id})
         fields = {
             "company": nm, "sector": _s(r.get("Sector")),
             "lens": _s(r.get("Mitigation / Adaptation")), "source": _s(r.get("Source")),
             "source_name": _s(r.get("Source Detail")), "rm": _s(r.get("RM Owner")),
-            "temperature": _s(r.get("Status")), "contact": _s(r.get("Contact Person")),
+            "temperature": temp, "contact": _s(r.get("Contact Person")),
             "designation": _s(r.get("Designation")), "phone": _s(r.get("Contact Phone")),
             "last_interaction_date": _date(r.get("Last Interaction Date")),
             "next_action": _s(r.get("Next Action")),
-            "next_action_date": _date(r.get("Next Action Date")), "notes": _s(r.get("Notes")),
+            "next_action_date": _date(r.get("Next Action Date")),
+            "notes": _join_notes(_s(r.get("Notes")), _extras_note(r, _LEADS_USED)),
         }
         if existing is None:
-            lead = Lead(tenant_id=tenant_id, lead_no=_next_lead_no(), entity_id=entity,
-                        status="Active", created_by="xlsx-import", updated_by="xlsx-import",
-                        **fields)
+            # The ledger's own Lead ID is the lead number when it is free — round-trip
+            # identity; a clash or a blank falls back to the generated sequence.
+            ledger_no = _s(r.get("Lead ID"))
+            lead_no = ledger_no if ledger_no and ledger_no not in used_lead_nos \
+                else _next_lead_no()
+            used_lead_nos.add(lead_no)
+            lead = Lead(tenant_id=tenant_id, lead_no=lead_no, entity_id=entity,
+                        status=life or "Active", created_by="xlsx-import",
+                        updated_by="xlsx-import", **fields)
             session.add(lead)
             if entity is not None:
                 lead_by_entity[entity] = lead
+                lead_new_entities.add(entity)
             n_new += 1
+            if life == "Converted" and entity is not None:
+                converted_leads.append((lead, entity))
         else:
+            if entity is not None and entity in lead_new_entities:
+                # A SECOND row for the same company inside one file: PRISM keeps one
+                # lead per company, so the rows merge (non-blank cells win) — recorded,
+                # because "one row disappeared" must never be a surprise.
+                derived.append({"sheet": "Leads", "company": nm, "batch_id": batch_id,
+                                "note": "second row for the same company merged onto "
+                                        "its lead (one lead per company)"})
             # Authoritative MIS re-import: overwrite with the sheet's value when present,
             # keep the curated value when the sheet cell is blank.
             for key, val in fields.items():
                 if val is not None:
                     setattr(existing, key, val)
+            if life and existing.status != "Converted":
+                existing.status = life
+                if life == "Converted" and entity is not None:
+                    converted_leads.append((existing, entity))
             existing.updated_by = "xlsx-import"
             n_upd += 1
     await session.flush()
@@ -583,12 +740,39 @@ async def import_workbook(
         if funnel is not None and funnel != raw_stage:
             translated.append({"sheet": "Deals", "company": nm,
                                "from": raw_stage, "to": funnel, "batch_id": batch_id})
+        temp_raw = _s(r.get("Status"))
+        temp, t_changed = _canon_temp(temp_raw)
+        if t_changed:
+            translated.append({"sheet": "Deals", "company": nm, "field": "temperature",
+                               "from": temp_raw, "to": temp, "batch_id": batch_id})
+        # The ledger's fourth product flag: a Partnership (co-lending) engagement lives
+        # on the platform-deals plane, so it raises is_syndication too — recorded as a
+        # derivation, with the original flag preserved on the remarks.
+        part_flag = _yes(r.get("Partnership?"))
+        if part_flag and not _yes(r.get("Syndication?")):
+            derived.append({"sheet": "Deals", "company": nm, "batch_id": batch_id,
+                            "note": "Partnership? = Yes → is_syndication (partnership "
+                                    "tracker rides the platform-deals plane)"})
+        _DEALS_USED = {"Client ID", "Group Code", "Company Name", "Sector", "Location",
+                       "Source", "Source Detail", "Status", "RM", "Lending?",
+                       "Syndication?", "Partnership?", "Asset Mon?", "Stage",
+                       "Date Received", "Remarks"}
         fields = {
-            "is_lending": _yes(r.get("Lending?")), "is_syndication": _yes(r.get("Syndication?")),
+            "is_lending": _yes(r.get("Lending?")),
+            "is_syndication": _yes(r.get("Syndication?")) or part_flag,
             "is_asset_mon": _yes(r.get("Asset Mon?")), "rm": _s(r.get("RM")),
-            "stage": funnel, "temperature": _s(r.get("Status")),
+            "stage": funnel, "temperature": temp,
             "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),
-            "date_received": _date(r.get("Date Received")), "remarks": _s(r.get("Remarks")),
+            "date_received": _date(r.get("Date Received")),
+            # ATLAS quotes a deal by its client's code — the ledger's Group Code.
+            "code": _s(r.get("Group Code")),
+            "remarks": _join_notes(
+                _s(r.get("Remarks")),
+                # Tag once — a re-imported export already carries it in Remarks.
+                "[Partnership: Yes]"
+                if part_flag and "[Partnership: Yes]" not in (_s(r.get("Remarks")) or "")
+                else None,
+                _extras_note(r, _DEALS_USED)),
         }
         # _screen against STAGE_VOCAB["Deal"] (the funnel): a canonical funnel value passes;
         # anything else (e.g. a credit-lifecycle word) quarantines by name.
@@ -598,7 +782,7 @@ async def import_workbook(
             continue
         existing = deal_obj_by_entity.get(entity)
         if existing is None:
-            deal = Deal(tenant_id=tenant_id, deal_no=None, entity_id=entity, code=None,
+            deal = Deal(tenant_id=tenant_id, deal_no=None, entity_id=entity,
                         created_by="xlsx-import", updated_by="xlsx-import", **fields)
             _note_stage_change(deal, "stage_history", "stage", None, fields["stage"], "Deals")
             session.add(deal)
@@ -623,6 +807,12 @@ async def import_workbook(
 
     # entity id → its deal id, so trackers link back (existing + just-created).
     deal_by_entity: dict = {ent: d.id for ent, d in deal_obj_by_entity.items()}
+
+    # Ledger leads marked 'Converted to Deal' link to their company's deal now that
+    # the deals exist — the lead keeps its history instead of dangling.
+    for lead, entity in converted_leads:
+        if getattr(lead, "converted_deal_id", None) is None and deal_by_entity.get(entity):
+            lead.converted_deal_id = deal_by_entity[entity]
 
     async def _tracker_no_pool(model, prefix: str) -> tuple[set[str], Callable[[], str]]:
         """Reserve every tracker_no already used by ``model`` in this tenant, and return a
@@ -698,16 +888,24 @@ async def import_workbook(
                                     "field": "proposed_disbursement_date",
                                     "from_column": "Stage Updated", "value": dt.isoformat(),
                                     "batch_id": batch_id})
+        _LENDING_USED = {"Client ID", "Company Name", "Lending Amount (₹ Cr)", "RM",
+                         "Credit Analyst", "Stage", "Stage Updated", "Pending With",
+                         "Sanction Date", "Date Sanctioned",
+                         "Proposed Disbursement Amount (₹ Cr)",
+                         "Proposed Disbursement Date", "Disbursed Amount (₹ Cr)",
+                         "Disbursement Date", "Remarks"}
         fields = {
             "deal_id": deal_by_entity.get(entity),
             "amount_cr": _float(r.get("Lending Amount (₹ Cr)")), "rm": _s(r.get("RM")),
             "analyst": _s(r.get("Credit Analyst")),
             "stage": _map_credit_stage(_c("Lending", "Lending Tracker", nm, raw_stage)),
             "stage_updated_at": _date(r.get("Stage Updated")),
-            "sanction_date": _date(r.get("Sanction Date")),
+            "pending_with": _s(r.get("Pending With")),
+            # v4 says "Sanction Date"; the live ledger says "Date Sanctioned".
+            "sanction_date": _date(r.get("Sanction Date")) or _date(r.get("Date Sanctioned")),
             "proposed_disbursement_amount": prop_amt, "proposed_disbursement_date": prop_date,
             "disbursed_amount": disb_amt, "disbursement_date": disb_date,
-            "remarks": _s(r.get("Remarks")),
+            "remarks": _join_notes(_s(r.get("Remarks")), _extras_note(r, _LENDING_USED)),
         }
         # force_retain: a facility the sheet says is DISBURSED is a real exposure — if the
         # mandatory drawdown data cannot even be derived, it imports FLAGGED for
@@ -758,20 +956,77 @@ async def import_workbook(
     ).scalars().all()
     syn_by_entity: dict[uuid.UUID, SyndicationTracker] = {}
     syn_tracker_by: dict[str, SyndicationTracker] = {}
+    partnership_by_entity: dict[uuid.UUID, SyndicationTracker] = {}
     for tr in existing_syn:
-        if tr.entity_id is not None:
+        if tr.entity_id is None:
+            continue
+        # Partnership (co-lending) trackers live on the same table, flagged by line —
+        # they must never absorb a company's SYNDICATION rows, nor vice versa.
+        if (tr.line or "") == "Partnership":
+            partnership_by_entity.setdefault(tr.entity_id, tr)
+        else:
             syn_by_entity.setdefault(tr.entity_id, tr)
     lender_seen: set[tuple[uuid.UUID, str]] = set()
+    # This run's lender objects, so a DUPLICATE ledger row (the same bank listed twice
+    # on one company — real in the live file, e.g. two facilities) MERGES its substance
+    # onto the existing row instead of silently vanishing (zero loss).
+    lender_obj_by: dict[tuple[uuid.UUID, str], SyndicationLender] = {}
     if existing_syn:
-        for lender in (
+        for lrow in (
             await session.execute(
-                select(SyndicationLender.syndication_id, SyndicationLender.lender_name)
+                select(SyndicationLender)
                 .where(SyndicationLender.tenant_id == tenant_id,
                        SyndicationLender.deleted_at.is_(None)))
-        ).all():
-            lender_seen.add((lender[0], (lender[1] or "").lower()))
+        ).scalars().all():
+            lender_seen.add((lrow.syndication_id, (lrow.lender_name or "").lower()))
+            lender_obj_by[(lrow.syndication_id, (lrow.lender_name or "").lower())] = lrow
+    # Keys CREATED this run — a repeat of one of these is a within-file duplicate
+    # (reported as a merge); a repeat of a preloaded key is a re-import update (silent).
+    lender_new: set[tuple[uuid.UUID, str]] = set()
+
+    def _merge_lender(lk, status, since, response, ticket, note, sheet, nm, bank) -> None:
+        """A SECOND row for the same bank on the same tracker (real in the live ledger —
+        e.g. two facilities with one lender) MERGES instead of vanishing: the pipeline
+        position only moves forward, blank dates fill and later dates win, a differing
+        ticket and every unseen note fragment are appended as tags. Re-importing an
+        identical file is therefore a no-op — nothing duplicates, nothing is lost."""
+        obj = lender_obj_by.get(lk)
+        if obj is None:
+            return
+        if status and _LENDER_RANK.get(status, 0) > _LENDER_RANK.get(obj.status or "", 0):
+            obj.status = status
+        if since is not None and (obj.since is None or since > obj.since):
+            obj.since = since
+        if response is not None and (obj.response_date is None
+                                     or response > obj.response_date):
+            obj.response_date = response
+        if ticket is not None:
+            if obj.amount_cr is None:
+                obj.amount_cr = ticket
+            elif float(obj.amount_cr) != float(ticket):
+                also = f"[Also ticket: {ticket} Cr]"
+                if not obj.note or also not in obj.note:
+                    obj.note = _join_notes(obj.note, also)
+        if note and (not obj.note or note not in obj.note):
+            obj.note = _join_notes(obj.note, note)
+        obj.updated_by = "xlsx-import"
+        if lk in lender_new:
+            derived.append({"sheet": sheet, "company": nm, "batch_id": batch_id,
+                            "note": f"duplicate row for lender '{bank}' merged onto "
+                                    "its existing row (zero loss)"})
+
     _, next_syn_no = await _tracker_no_pool(SyndicationTracker, "S")
     n_syn = n_lender = 0
+    # Rows sorted so each company's MOST ADVANCED status is processed last — the
+    # tracker's status update-per-row therefore lands on the best rank, matching the
+    # ledger's own derived "Most Advanced Stage" (Rejected ranks lowest, so a mandate
+    # is Rejected only when every bank declined).
+    syn.sort(key=lambda r: (
+        _key(_s(r.get("Company Name")) or ""),
+        # A PRISM-export CARRIER row (it names the tracker's own status) sorts LAST so
+        # its exact status/ask land after — and therefore over — the lender-derived ones.
+        99 if _s(r.get("Tracker Status")) or _float(r.get("Tracker Ask (₹ Cr)")) is not None
+        else _SYN_RANK.get(_canon_value("Syndication", _s(r.get("Status"))) or "", 0)))
     for r in syn:
         nm = company_of(r)
         entity = eid(nm)
@@ -784,13 +1039,28 @@ async def import_workbook(
         # Dropped → Dropped, Closed → Disbursed (syndication's completed terminal). A
         # live deal with no per-bank status enters at Deal Sourced.
         deal_status_raw = _s(r.get("Deal Status"))
-        bank_status = _c("Syndication", "Syndication", nm, _s(r.get("Status")))
+        raw_bank_status = _s(r.get("Status"))
+        # A PRISM lender-pipeline word the mandate vocabulary doesn't know
+        # ('Identified', 'Declined') is NOT an unknown value: it just doesn't move the
+        # tracker — the lender row below still carries it.
+        _lw, _ = _canon_lender_status(raw_bank_status)
+        _, _syn_vocab = STAGE_VOCAB["Syndication"]
+        _probe = _canon_value("Syndication", raw_bank_status)
+        if _probe is not None and _probe not in _syn_vocab and _lw in _LENDER_VOCAB:
+            bank_status = None
+        else:
+            bank_status = _c("Syndication", "Syndication", nm, raw_bank_status)
         overlay_key = " ".join((deal_status_raw or "").split()).lower()
         overlay = {"deal dropped": "Dropped", "deal closed": "Disbursed"}.get(overlay_key)
         if overlay:
             translated.append({"sheet": "Syndication", "company": nm,
                                "from": deal_status_raw, "to": overlay, "batch_id": batch_id})
-        syn_status = overlay or bank_status or ("Deal Sourced" if deal_status_raw else None)
+        # A PRISM-export carrier row names the tracker's OWN status/ask outright —
+        # it wins over anything derived from lender rows (the sort runs it last).
+        explicit_status = _c("Syndication", "Syndication", nm, _s(r.get("Tracker Status")))
+        explicit_ask = _float(r.get("Tracker Ask (₹ Cr)"))
+        syn_status = (overlay or explicit_status or bank_status
+                      or ("Deal Sourced" if deal_status_raw else None))
         verdict, missing = _screen("Syndication", syn_status, "Syndication", nm, {})
         if verdict == "skip":
             continue
@@ -801,34 +1071,224 @@ async def import_workbook(
                 tenant_id=tenant_id, tracker_no=next_syn_no(), entity_id=entity,
                 deal_id=deal_by_entity.get(entity),
                 status=syn_status, amount_cr=_float(r.get("Amount (₹ Cr)")),
+                rm=_s(r.get("RM")), analyst=_s(r.get("Credit Analyst")),
                 created_by="xlsx-import", updated_by="xlsx-import",
             )
             _note_stage_change(tr, "status_history", "status", None, syn_status, "Syndication")
             session.add(tr)
             await session.flush()
             n_syn += 1
-        elif syn_status is not None and tr.status != syn_status:
-            # A merge that moves an existing syndication's status records the transition too.
-            _note_stage_change(tr, "status_history", "status", tr.status, syn_status,
-                               "Syndication")
-            tr.status = syn_status
+        else:
+            if syn_status is not None and tr.status != syn_status:
+                # A merge that moves an existing syndication's status records the transition too.
+                _note_stage_change(tr, "status_history", "status", tr.status, syn_status,
+                                   "Syndication")
+                tr.status = syn_status
+            # Ledger rows carry the ask / RM / analyst on every lender line — fill gaps.
+            if tr.amount_cr is None and _float(r.get("Amount (₹ Cr)")) is not None:
+                tr.amount_cr = _float(r.get("Amount (₹ Cr)"))
+            if not tr.rm and _s(r.get("RM")):
+                tr.rm = _s(r.get("RM"))
+            if not tr.analyst and _s(r.get("Credit Analyst")):
+                tr.analyst = _s(r.get("Credit Analyst"))
+        if explicit_ask is not None:
+            tr.amount_cr = explicit_ask          # the tracker's own ask, exact
         syn_tracker_by[k] = tr
         syn_by_entity[entity] = tr
         bank = _s(r.get("Bank"))
-        if bank and (tr.id, bank.lower()) not in lender_seen:
-            lender_seen.add((tr.id, bank.lower()))
+        if bank:
+            lk = (tr.id, bank.lower())
+            # The per-LENDER status speaks PRISM's lender vocabulary (Rejected →
+            # Declined; a lender-level Disbursed lands Sanctioned with the original
+            # word preserved) — every change is reported as a translation.
+            raw_lender = _s(r.get("Status"))
+            lender_status, l_changed = _canon_lender_status(raw_lender)
+            if l_changed:
+                translated.append({"sheet": "Syndication", "company": nm,
+                                   "field": "lender_status", "from": raw_lender,
+                                   "to": lender_status, "batch_id": batch_id})
+            d_data = _date(r.get("Date Data Received"))
+            d_im = _date(r.get("Date IM Circulated"))
+            d_ip = _date(r.get("Date In-Principle"))
+            d_sanc = _date(r.get("Date Sanctioned"))
+            # since = when the CURRENT state began (the latest milestone date on file);
+            # response_date = the bank's latest substantive reply. Milestone dates that
+            # neither field can carry are preserved as note tags — zero loss.
+            since = d_sanc or d_ip or d_im or d_data
+            response = d_sanc or d_ip
+            date_tags = [f"[{label}: {d.isoformat()}]" for label, d in (
+                ("Data received", d_data), ("IM circulated", d_im),
+                ("In-principle", d_ip), ("Sanctioned", d_sanc))
+                if d is not None and d not in (since, response)]
             accepted = _s(r.get("Accepted by Client"))
-            note = _s(r.get("Remarks"))
-            if accepted:
-                note = f"[Accepted by client: {accepted}] " + (note or "")
-            session.add(SyndicationLender(
-                tenant_id=tenant_id, syndication_id=tr.id, lender_name=bank,
-                counterparty_id=cp_id_by.get(bank.lower()), status=bank_status,
-                note=note, created_by="xlsx-import", updated_by="xlsx-import",
-            ))
-            n_lender += 1
+            note = _join_notes(
+                f"[Accepted by client: {accepted}]" if accepted else None,
+                "[Ledger status: Disbursed]"
+                if (raw_lender or "").strip().lower() == "disbursed" else None,
+                " ".join(date_tags) or None,
+                _s(r.get("Remarks")))
+            # The ledger's per-lender ask (absent from v4 rows, where the amount column
+            # is the deal-level figure and stays off the lender row).
+            ticket = _float(r.get("Ticket Size (₹ Cr)"))
+            if lk not in lender_seen:
+                lender_seen.add(lk)
+                lrow = SyndicationLender(
+                    tenant_id=tenant_id, syndication_id=tr.id, lender_name=bank,
+                    counterparty_id=cp_id_by.get(bank.lower()), status=lender_status,
+                    since=since, response_date=response, amount_cr=ticket,
+                    note=note, created_by="xlsx-import", updated_by="xlsx-import",
+                )
+                session.add(lrow)
+                lender_obj_by[lk] = lrow
+                lender_new.add(lk)
+                n_lender += 1
+            else:
+                _merge_lender(lk, lender_status, since, response, ticket, note,
+                              "Syndication", nm, bank)
+        else:
+            # A detailed-section row with NO lender named yet (the desk logged the
+            # company's position before shortlisting a bank — 16 such rows in the live
+            # file), or a PRISM-export carrier row. Field tags a PRISM export wrote
+            # ([Facility: …], [Tenor: …]) are lifted back into their tracker fields;
+            # the rest (dates, remarks) lands on the tracker's remarks so nothing is
+            # dropped — and re-importing the same file appends nothing twice.
+            tag_fields, rest_remarks = _parse_field_tags(_s(r.get("Remarks")))
+            for f, v in tag_fields.items():
+                setattr(tr, f, v)
+            all_dates = " ".join(
+                f"[{label}: {d.isoformat()}]" for label, d in (
+                    ("Data received", _date(r.get("Date Data Received"))),
+                    ("IM circulated", _date(r.get("Date IM Circulated"))),
+                    ("In-principle", _date(r.get("Date In-Principle"))),
+                    ("Sanctioned", _date(r.get("Date Sanctioned"))))
+                if d is not None) or None
+            accepted = _s(r.get("Accepted by Client"))
+            row_note = _join_notes(
+                f"[Accepted by client: {accepted}]" if accepted else None,
+                all_dates, rest_remarks)
+            if row_note and (not tr.remarks or row_note not in tr.remarks):
+                tr.remarks = _join_notes(tr.remarks, row_note)
     counts["syndication_tracker"] = n_syn
     counts["syndication_lenders"] = n_lender
+
+    # --- partnership (co-lending) tracker: one platform-deals row per company -------
+    # The ledger tracks a FOURTH product line — co-lending partnerships, one sheet row
+    # per PARTNER LENDER. PRISM models it on the platform-deals plane: one
+    # SyndicationTracker per company flagged line='Partnership' (kept apart from the
+    # company's syndication mandate), each partner a lender row. The partner's stage
+    # speaks the shared lender vocabulary; a sanctioned amount lands on the lender's
+    # allocation; the rejection reason and every unmapped column survive on the note.
+    _PART_USED = {"Client ID", "Company Name", "RM", "Partner Lender", "Stage",
+                  "Stage Updated", "Pending With", "Sanctioned Amount (₹ Cr)",
+                  "Rejection Reason", "Remarks"}
+    partnership.sort(key=lambda r: (
+        _key(_s(r.get("Company Name")) or ""),
+        _SYN_RANK.get(_canon_value("Syndication", _s(r.get("Stage"))) or "", 0)))
+    n_part = n_part_lender = 0
+    for r in partnership:
+        nm = company_of(r)
+        entity = eid(nm)
+        if entity is None:
+            continue
+        raw_stage = _s(r.get("Stage"))
+        # A partnership row's Stage may speak either vocabulary: the mandate pipeline
+        # (Docs Pending / IM Circulated / … — it then positions the tracker too) or the
+        # PER-LENDER pipeline ('Identified', 'Declined' — a PRISM export writes these
+        # for shortlisted partners). A lender-vocabulary word is NOT an unknown value:
+        # it simply doesn't move the tracker; the partner row below still carries it.
+        part_status = _c("Syndication", "Partnership Tracker", nm, raw_stage)
+        _lw, _ = _canon_lender_status(raw_stage)
+        lender_word = _lw in _LENDER_VOCAB if _lw else False
+        _, _syn_vocab = STAGE_VOCAB["Syndication"]
+        if part_status is not None and part_status not in _syn_vocab:
+            if not lender_word:
+                verdict, _missing = _screen("Syndication", part_status,
+                                            "Partnership Tracker", nm, {})
+                if verdict == "skip":
+                    continue
+            part_status = None      # lender-vocabulary word: tracker keeps its status
+        tr = partnership_by_entity.get(entity)
+        if tr is None:
+            tr = SyndicationTracker(
+                tenant_id=tenant_id, tracker_no=next_syn_no(), entity_id=entity,
+                deal_id=deal_by_entity.get(entity), line="Partnership",
+                status=part_status or "Deal Sourced", rm=_s(r.get("RM")),
+                pending_with=_s(r.get("Pending With")),
+                created_by="xlsx-import", updated_by="xlsx-import")
+            _note_stage_change(tr, "status_history", "status", None, tr.status,
+                               "Partnership Tracker")
+            session.add(tr)
+            await session.flush()
+            partnership_by_entity[entity] = tr
+            n_part += 1
+        else:
+            if part_status is not None and tr.status != part_status:
+                _note_stage_change(tr, "status_history", "status", tr.status, part_status,
+                                   "Partnership Tracker")
+                tr.status = part_status
+            if not tr.rm and _s(r.get("RM")):
+                tr.rm = _s(r.get("RM"))
+            if not tr.pending_with and _s(r.get("Pending With")):
+                tr.pending_with = _s(r.get("Pending With"))
+        # A live partnership engagement puts the company on the platform-deals plane
+        # even when its Deals row forgot the flag — reconciled here (and recorded), so
+        # the flag always agrees with the tracker and a re-import converges.
+        d = deal_obj_by_entity.get(entity)
+        if d is not None and not d.is_syndication:
+            d.is_syndication = True
+            derived.append({"sheet": "Partnership Tracker", "company": nm,
+                            "batch_id": batch_id,
+                            "note": "partnership engagement raises the deal's platform "
+                                    "flag (is_syndication)"})
+        partner = _s(r.get("Partner Lender"))
+        reason = _s(r.get("Rejection Reason"))
+        p_note = _join_notes(f"[Rejection reason: {reason}]" if reason else None,
+                             _s(r.get("Remarks")),
+                             _extras_note(r, _PART_USED))
+        if partner:
+            lk = (tr.id, partner.lower())
+            raw_p = raw_stage
+            p_status, p_changed = _canon_lender_status(raw_p)
+            if p_changed:
+                translated.append({"sheet": "Partnership Tracker", "company": nm,
+                                   "field": "lender_status", "from": raw_p,
+                                   "to": p_status, "batch_id": batch_id})
+            p_since = _date(r.get("Stage Updated"))
+            p_amount = _float(r.get("Sanctioned Amount (₹ Cr)"))
+            if lk not in lender_seen:
+                lender_seen.add(lk)
+                lrow = SyndicationLender(
+                    tenant_id=tenant_id, syndication_id=tr.id, lender_name=partner,
+                    counterparty_id=cp_id_by.get(partner.lower()),
+                    status=p_status or "Identified",
+                    since=p_since, amount_cr=p_amount, note=p_note,
+                    created_by="xlsx-import", updated_by="xlsx-import")
+                session.add(lrow)
+                lender_obj_by[lk] = lrow
+                lender_new.add(lk)
+                n_part_lender += 1
+            else:
+                _merge_lender(lk, p_status, p_since, None, p_amount, p_note,
+                              "Partnership Tracker", nm, partner)
+        else:
+            # A partnership row with NO partner named yet (the desk logged the company
+            # before shortlisting a lender), or a PRISM-export carrier row. Field tags
+            # go back into their tracker fields; the row's dates/remarks/extras land on
+            # the tracker's remarks so nothing is dropped — and re-importing the same
+            # file appends nothing twice.
+            tag_fields, rest_note = _parse_field_tags(p_note)
+            for f, v in tag_fields.items():
+                setattr(tr, f, v)
+            row_note = _join_notes(
+                f"[Stage updated: {_date(r.get('Stage Updated')).isoformat()}]"
+                if _date(r.get("Stage Updated")) else None,
+                f"[Sanctioned amount: {_float(r.get('Sanctioned Amount (₹ Cr)'))} Cr]"
+                if _float(r.get("Sanctioned Amount (₹ Cr)")) is not None else None,
+                rest_note)
+            if row_note and (not tr.remarks or row_note not in tr.remarks):
+                tr.remarks = _join_notes(tr.remarks, row_note)
+    counts["partnership_tracker"] = n_part
+    counts["partnership_lenders"] = n_part_lender
 
     # --- asset monetisation (one row PER MANDATE) -----------------------
     # A company may be selling SEVERAL assets at once (the MIS lists e.g. a 58MW
@@ -854,7 +1314,13 @@ async def import_workbook(
         entity = eid(nm)
         if entity is None:
             continue
-        notes = " | ".join(x for x in [_s(r.get("Notes")), _s(r.get("Updated Remarks 19 July 2026"))] if x)
+        _AM_USED = {"Client ID", "Company Name", "RM", "State",
+                    "Indicative Value (₹ Cr)", "Size (MW)", "Nature", "Deal Type",
+                    "Investor", "Investor Type", "Status", "Date Teaser Shared",
+                    "Notes", "Analyst", "Updated Remarks 19 July 2026"}
+        notes = _join_notes(_s(r.get("Notes")),
+                            _s(r.get("Updated Remarks 19 July 2026")),
+                            _extras_note(r, _AM_USED))
         fields = {
             "deal_id": deal_by_entity.get(entity), "state": _s(r.get("State")),
             "indicative_value_cr": _float(r.get("Indicative Value (₹ Cr)")),
@@ -907,6 +1373,11 @@ async def import_workbook(
         sent = _s(r.get("Mandate Sent/Not Sent"))
         signed = _s(r.get("Signed/Pending"))
         mand = " - ".join(x for x in [sent, signed] if x)
+        # The ledger's per-mandate product flags survive on the mandate status itself.
+        flags = ", ".join(f"{f}: {_s(r.get(f))}" for f in ("Syndication", "Partnership")
+                          if _s(r.get(f)))
+        if flags:
+            mand = _join_notes(mand, f"[{flags}]") or mand
         k = _key(nm or "")
         tr = syn_tracker_by.get(k) or syn_by_entity.get(entity)
         if tr is None:
