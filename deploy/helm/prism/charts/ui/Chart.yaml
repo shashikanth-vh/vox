@@ -1,0 +1,9 @@
+apiVersion: v2
+name: ui
+description: >-
+  The ATLAS UI (React SPA) — static files served by nginx under /ui, built from
+  deploy/ui-image/Dockerfile. Holds no credentials and no data; every API call goes to
+  the gateway on the same origin. Routed via the gateway ingress's /ui path.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

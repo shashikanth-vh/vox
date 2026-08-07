@@ -25,6 +25,26 @@ spec:
       {{- end }}
       http:
         paths:
+          {{- if .Values.ingress.uiService }}
+          # The ATLAS UI (static SPA) at /ui. The EXACT / route also goes to the UI
+          # container, whose nginx answers `/ → 302 /ui/` — so users type just
+          # https://<host>/ and land on the app. Every API path falls through to the
+          # gateway below (Exact beats Prefix in ingress path matching).
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Values.ingress.uiService }}
+                port:
+                  number: 80
+          - path: /ui
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.ingress.uiService }}
+                port:
+                  number: 80
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:

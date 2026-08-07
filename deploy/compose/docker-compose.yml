@@ -34,7 +34,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: prism
-      POSTGRES_PASSWORD: prism
+      POSTGRES_PASSWORD: "${PRISM_DB_PASSWORD:-prism}"
       POSTGRES_DB: register
     ports:
       - "5432:5432"
@@ -49,6 +49,7 @@ services:
       retries: 10
     # Cap connections so pool_size * replicas stays well under the ceiling.
     command: ["postgres", "-c", "max_connections=200"]
+    restart: unless-stopped
 
   # Object storage for document bytes (S3-compatible). The Register stores references;
   # the actual PDFs/XLSX land here. Console UI: http://localhost:9001 (prism / prism-secret).
@@ -56,8 +57,8 @@ services:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: prism
-      MINIO_ROOT_PASSWORD: prism-secret
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-prism}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-prism-secret}"
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # web console
@@ -86,7 +87,7 @@ services:
       REGISTER_DB_HOST: postgres
       REGISTER_DB_PORT: "5432"
       REGISTER_DB_USER: prism
-      REGISTER_DB_PASSWORD: prism
+      REGISTER_DB_PASSWORD: "${PRISM_DB_PASSWORD:-prism}"
       REGISTER_DB_NAME: register
       REGISTER_API_KEYS: "dev-local-key"
       # Named service principals — the production least-privilege trust model, demonstrated
@@ -114,8 +115,8 @@ services:
       # browser touches arrives on :8443, nothing internal.
       REGISTER_S3_STREAM_THROUGH_API: "true"
       REGISTER_S3_BUCKET: "prism-documents"
-      REGISTER_S3_ACCESS_KEY_ID: "prism"
-      REGISTER_S3_SECRET_ACCESS_KEY: "prism-secret"
+      REGISTER_S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-prism}"
+      REGISTER_S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-prism-secret}"
       REGISTER_S3_USE_SSL: "false"
       REGISTER_S3_PATH_STYLE: "true"
       # Trust identity headers only when stamped by the gateway (three-service RBAC).
@@ -154,7 +155,7 @@ services:
       ACCESS_DB_HOST: postgres
       ACCESS_DB_PORT: "5432"
       ACCESS_DB_USER: prism
-      ACCESS_DB_PASSWORD: prism
+      ACCESS_DB_PASSWORD: "${PRISM_DB_PASSWORD:-prism}"
       ACCESS_DB_NAME: access
       ACCESS_API_KEYS: "dev-local-key"
       ACCESS_LOG_JSON: "true"
@@ -356,6 +357,9 @@ services:
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     volumes:
       - ./dex/config.yaml:/etc/dex/config.yaml:ro
+      # Durable token-signing keys + sessions (see storage: sqlite3 in the config) — a
+      # dex restart no longer invalidates every already-issued sign-in.
+      - dexdata:/var/dex
     ports:
       - "5556:5556"
     restart: unless-stopped
@@ -398,8 +402,14 @@ services:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro
     ports:
-      - "8080:80"     # HTTP → 301 redirect to HTTPS (+ /healthz, /readyz)
-      - "8443:443"    # HTTPS — the real front door
+      # Standard web ports, so users type just https://<domain>/ (the edge redirects
+      # / → /ui/ and the app lands on Today). Override the host ports via .env if 80/443
+      # are taken on this machine (EDGE_HTTP_PORT / EDGE_HTTPS_PORT).
+      - "${EDGE_HTTP_PORT:-80}:80"
+      - "${EDGE_HTTPS_PORT:-443}:443"
+      # Legacy mappings — existing :8080/:8443 bookmarks keep working.
+      - "8080:80"
+      - "8443:443"
     restart: unless-stopped
 
   # ------------------------------------------------------------------------- #
@@ -420,7 +430,7 @@ services:
       DB: postgres12
       DB_PORT: "5432"
       POSTGRES_USER: prism
-      POSTGRES_PWD: prism
+      POSTGRES_PWD: "${PRISM_DB_PASSWORD:-prism}"
       POSTGRES_SEEDS: postgres
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
@@ -595,7 +605,39 @@ services:
     # (edge → /orchestrator/...), so workflow starts pass the RBAC gate first.
     restart: unless-stopped
 
+  # ---- Nightly database backups (opt-in) ---------------------------------- #
+  # A tiny sidecar that pg_dumps EVERY database on the shared server once a day into
+  # its own volume, keeping PGBACKUP_KEEP days (default 14). Enable with
+  # `--profile backup`; restore with psql/pg_restore from /backups (see
+  # docs/PRODUCTION_DEPLOYMENT.md → "Backups & restore").
+  pgbackup:
+    image: postgres:16-alpine
+    profiles: ["backup"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: prism
+      PGPASSWORD: "${PRISM_DB_PASSWORD:-prism}"
+      KEEP_DAYS: "${PGBACKUP_KEEP:-14}"
+    volumes:
+      - pgbackups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d-%H%M%S)
+          echo "[pgbackup] $$ts dumping all databases..."
+          pg_dumpall --clean --if-exists | gzip > "/backups/prism-$$ts.sql.gz"             && echo "[pgbackup] wrote /backups/prism-$$ts.sql.gz"             || echo "[pgbackup] DUMP FAILED"
+          find /backups -name 'prism-*.sql.gz' -mtime "+$$KEEP_DAYS" -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:
   vocx_state:
+  dexdata:
+  pgbackups:

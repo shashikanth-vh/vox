@@ -46,3 +46,6 @@ dependencies:
   - name: workflows
     version: "0.1.0"
     condition: workflows.enabled
+  - name: ui
+    version: "0.1.0"
+    condition: ui.enabled

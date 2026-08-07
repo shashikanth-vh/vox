@@ -122,6 +122,17 @@ gateway:
     host: ""
     annotations: {}
     tls: []
+    # Name of the ATLAS UI service (the `ui` subchart below): routes /ui there and
+    # sends the bare / to its redirect, so https://<host>/ opens the app directly.
+    uiService: "prism-ui"
+
+# ---- The ATLAS UI — static SPA, served under /ui via the gateway ingress --------
+ui:
+  enabled: true
+  fullnameOverride: prism-ui
+  image:
+    repository: ghcr.io/evam/prism-ui
+    tag: "0.1.0"
 
 # ---- VocX — voice touchpoint capture (individually deployable) -----------------
 vocx:

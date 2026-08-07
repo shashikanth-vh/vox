@@ -104,6 +104,8 @@ ingress:
   host: ""
   annotations: {}
   tls: []
+  # ATLAS UI service name — set to route /ui (and the bare /) to the SPA container.
+  uiService: ""
 
 # Verified identity (SSO). Set issuer to your IdP to REQUIRE bearer tokens and ignore
 # X-User-Email. requireAuth refuses anonymous even without OIDC (a no-anonymous mesh).

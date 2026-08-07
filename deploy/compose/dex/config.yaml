@@ -3,8 +3,13 @@
 # Then the gateway validates bearer tokens issued here; obtain one with the
 # password grant (see docs/DEPLOYMENT.md → "Turning on SSO locally").
 issuer: http://dex:5556/dex
+# sqlite3 on the compose-managed `dexdata` volume: token-signing keys and sessions
+# survive a restart, so already-issued sign-ins stay valid (memory storage minted new
+# keys every start and silently invalidated everyone's session).
 storage:
-  type: memory
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
 web:
   http: 0.0.0.0:5556
 oauth2:

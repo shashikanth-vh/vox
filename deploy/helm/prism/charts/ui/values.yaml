@@ -1,0 +1,26 @@
+# The ATLAS UI image — build with:
+#   docker build -f deploy/ui-image/Dockerfile . -t <registry>/prism-ui:<tag>
+# The image compiles the SPA for the platform posture (same-origin APIs, /ui base) and
+# serves it with nginx (immutable hashed assets, no-cache index.html).
+image:
+  repository: ghcr.io/evam/prism-ui
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2          # stateless static files — scale freely
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { cpu: 200m, memory: 128Mi }
+
+podSecurityContext: {}
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities: { drop: [ALL], add: [NET_BIND_SERVICE] }
+
+nameOverride: ""
+fullnameOverride: ""

@@ -41,6 +41,21 @@ _credentials:
 # strips the client's key and injects the scoped per-upstream credential below. Each
 # injected key MUST equal that upstream's own inbound key (anchors keep them in lockstep).
 gateway:
+  # The production front door: ONE host, TLS via cert-manager (or a pre-created Secret),
+  # the SPA at /ui and the bare / redirecting into it — users type just
+  # https://prism-evamfinance.com and land on the app. Adjust host/issuer per environment.
+  ingress:
+    enabled: true
+    className: nginx
+    host: prism-evamfinance.com
+    annotations:
+      # cert-manager issues + renews the certificate automatically. Delete this
+      # annotation and pre-create the Secret yourself if you bring corporate certs.
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    tls:
+      - secretName: prism-edge-tls
+        hosts: [prism-evamfinance.com]
+    uiService: "prism-ui"
   oidc:
     # issuer: set via --set / your values; MUST be non-empty in prod. For Google Workspace:
     #   --set gateway.oidc.issuer=https://accounts.google.com \
