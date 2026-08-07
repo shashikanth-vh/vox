@@ -285,13 +285,19 @@ export const syndicationService = {
   },
   /** Merge the FI master (db().lenders — hydrated by fiService) into the matrix
    *  column order, so a FRESH mandate faces the whole market as clickable columns
-   *  instead of a blank grid. Existing order is preserved; only newcomers append;
-   *  inactive lenders that never entered a deal stay out of the way. */
+   *  instead of a blank grid. Existing order is preserved; newcomers append in a
+   *  deterministic reading order — banks, then small finance banks, then NBFCs,
+   *  alphabetical within each group (the register lists by created_at, which ties
+   *  for a bulk seed and would scramble the grid). Inactive lenders that never
+   *  entered a deal stay out of the way; drag-to-reorder still wins afterwards. */
   ensureLenderColumns() {
     const order = db().lenderOrder;
-    (db().lenders || []).forEach((f: any) => {
-      if (f?.name && !f.inactive && !order.includes(f.name)) order.push(f.name);
-    });
+    const rank: Record<string, number> = { 'Bank': 0, 'Small Finance Bank': 1, 'NBFC': 2 };
+    (db().lenders || [])
+      .filter((f: any) => f?.name && !f.inactive && !order.includes(f.name))
+      .sort((a: any, b: any) =>
+        (rank[a.type] ?? 3) - (rank[b.type] ?? 3) || a.name.localeCompare(b.name))
+      .forEach((f: any) => order.push(f.name));
   },
 };
 
