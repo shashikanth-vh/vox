@@ -35,13 +35,13 @@ async def _move(client: AsyncClient, syn_id: str, lender_id: str, **body):
 
 
 async def test_lender_walks_the_whole_pipeline(client: AsyncClient):
-    """Identified → IM Circulated → Docs Pending → Queries Received → IP Received →
-    Sanctioned, each hop legal, the sanction carrying its allocation, and the
-    server-side status_history recording every hop."""
+    """Identified → IM Circulated → Queries Received → IP Received → Sanctioned,
+    each hop legal, the sanction carrying its allocation, and the server-side
+    status_history recording every hop."""
     syn_id = await _mandate(client)
     lid = (await _lender(client, syn_id))["id"]
 
-    for st in ("IM Circulated", "Docs Pending", "Queries Received", "IP Received"):
+    for st in ("IM Circulated", "Queries Received", "IP Received"):
         r = await _move(client, syn_id, lid, status=st)
         assert r.status_code == 200, f"{st}: {r.text}"
 
@@ -62,6 +62,16 @@ async def test_lender_cannot_skip_stages(client: AsyncClient):
     r = await _move(client, syn_id, lid, status="Sanctioned", amount_cr=4)
     assert r.status_code == 422, r.text
     assert "IM Circulated" in r.text
+
+
+async def test_lender_never_moves_backwards(client: AsyncClient):
+    """Forward-only (review decision): once the IM is out, a bank cannot fall back
+    to Identified; once queries landed, it cannot un-receive them."""
+    syn_id = await _mandate(client, code="BACK")
+    lid = (await _lender(client, syn_id, status="Queries Received"))["id"]
+    for st in ("Identified", "IM Circulated"):
+        r = await _move(client, syn_id, lid, status=st)
+        assert r.status_code == 422, f"{st}: {r.text}"
 
 
 async def test_decline_requires_a_reason_and_is_terminal(client: AsyncClient):

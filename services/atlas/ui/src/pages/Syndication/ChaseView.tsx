@@ -227,6 +227,10 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                     {rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}
                     {l.st === 'Sanctioned' && l.amt != null ? <b style={{ color: LSTATE_COLOR['Sanctioned'] }}> · ₹{fmt(l.amt, 1)} Cr</b> : ''}
                   </Typography>
+                  {l.note && <Typography component="span" title={l.note}
+                    sx={{ fontSize: 11.4, color: tokens.ink, fontStyle: 'italic', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    “{l.note}”
+                  </Typography>}
                   <Box sx={{ flex: 1 }} />
                   {!ro && <><MiniBtn onClick={() => chase(r.code, l.name)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name)}>Log reply</MiniBtn></>}
                 </Box>

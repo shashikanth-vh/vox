@@ -250,17 +250,21 @@ async def add_syndication_lender(
     return s.SyndicationLenderRead.model_validate(obj)
 
 
-# The lender pipeline's ORDERED transitions (Platform Deals matrix). A dot never
-# jumps from Identified straight to Sanctioned, and the two terminal outcomes are
-# final — the same discipline as the lending stages, enforced where every write
-# lands so neither the matrix popover nor the chase list nor Postman can skip it.
+# The lender pipeline's ordered, FORWARD-ONLY transitions (Platform Deals matrix):
+# Identified → IM Circulated → Queries Received → IP Received → Sanctioned/Declined.
+# Review decision: a dot never moves backwards — the manual tracker never regresses
+# a bank (a fresh round of queries stays at Queries Received) — and never skips the
+# IM. Decline is allowed from any live state; both outcomes are final. Enforced
+# where every write lands so neither the matrix popover nor the chase list nor
+# Postman can bend it. "Docs Pending" is legacy (imports may carry it); it too can
+# only move forward.
 _LENDER_TRANSITIONS: dict[str, set[str]] = {
     "": {"Identified"},
     "Identified": {"IM Circulated", "Declined"},
-    "IM Circulated": {"Docs Pending", "Queries Received", "IP Received", "Declined"},
-    "Docs Pending": {"IM Circulated", "Queries Received", "IP Received", "Declined"},
-    "Queries Received": {"Docs Pending", "IP Received", "Declined"},
-    "IP Received": {"Queries Received", "Sanctioned", "Declined"},
+    "IM Circulated": {"Queries Received", "IP Received", "Declined"},
+    "Docs Pending": {"Queries Received", "IP Received", "Declined"},
+    "Queries Received": {"IP Received", "Declined"},
+    "IP Received": {"Sanctioned", "Declined"},
     "Sanctioned": set(),
     "Declined": set(),
 }

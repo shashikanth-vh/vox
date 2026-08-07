@@ -20,14 +20,16 @@ export const ST2DOT: Record<string, number> = {
 
 // The legal next steps per lender status — the client-side mirror of the register's
 // _LENDER_TRANSITIONS map, so the matrix popover and the chase list only OFFER moves
-// the server will accept. '' (not in play) can only be Identified.
+// the server will accept. FORWARD-ONLY (review decision): a bank never regresses —
+// a fresh round of queries stays at Queries Received, remarks carry the nuance.
+// 'Docs Pending' is legacy (imports); it can only move forward too.
 export const LENDER_NEXT: Record<string, string[]> = {
   '': ['Identified'],
   'Identified': ['IM Circulated', 'Declined'],
-  'IM Circulated': ['Docs Pending', 'Queries Received', 'IP Received', 'Declined'],
-  'Docs Pending': ['IM Circulated', 'Queries Received', 'IP Received', 'Declined'],
-  'Queries Received': ['Docs Pending', 'IP Received', 'Declined'],
-  'IP Received': ['Queries Received', 'Sanctioned', 'Declined'],
+  'IM Circulated': ['Queries Received', 'IP Received', 'Declined'],
+  'Docs Pending': ['Queries Received', 'IP Received', 'Declined'],
+  'Queries Received': ['IP Received', 'Declined'],
+  'IP Received': ['Sanctioned', 'Declined'],
   'Sanctioned': [],
   'Declined': [],
 };
@@ -188,6 +190,16 @@ export const syndicationService = {
   lenderRow(code: string, name: string): SynLender | undefined {
     return db().syn.find((x: SynRow) => x.code === code)?.lenders?.find((l: any) => l.name === name);
   },
+  /** Update ONLY the remark on a lender row — the manual tracker's Remarks column
+   *  ("Reply awaited", "No update", "call with promoters Monday") lives at every
+   *  stage, not just the outcomes, so it gets its own status-free write. */
+  setLenderNote(code: string, name: string, note: string, by: string) {
+    const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
+    if (!e) return;
+    if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, { note });
+    e.note = note;
+    writeAudit(by, 'Lender note', code, `${name}: ${note.slice(0, 80)}`);
+  },
   logChase(code: string, name: string, note: string, by: string) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
@@ -332,12 +344,11 @@ export const LSTATE_COLOR: Record<string, string> = {
   'Queries Received': '#2563eb', 'IP Received': '#d97706', Sanctioned: '#059669', Declined: '#dc2626',
 };
 
-export const MATRIX_LABELS = ['Not in play', 'Identified — to showcase', 'IM submitted', 'Queries received', 'Approval track', 'Approved', 'Declined'];
+export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM submitted', 'Queries received', 'Approval track', 'Approved', 'Declined'];
 // state -> colour: yellow / orange / blue / purple (approval track) / green / red
 export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B'];
 
 export const MATRIX_PRESETS = [
-  { id: 'show', label: 'To showcase', states: [1], dwell: '', scope: 'Live' as const },
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
   { id: 'ballus', label: 'Ball with us ≥5d', states: [3], dwell: 5, scope: 'Live' as const },
   { id: 'appr', label: 'Approval track', states: [4], dwell: '', scope: 'Live' as const },

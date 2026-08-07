@@ -32,6 +32,8 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const [target, setTarget] = useState('');
   const [note, setNote] = useState('');
   const [amount, setAmount] = useState('');
+  // Status-free remark editing (the manual tracker's Remarks column); null = closed.
+  const [remark, setRemark] = useState<string | null>(null);
 
   const match = (name: string, code: string) => {
     const q = search.trim().toLowerCase();
@@ -52,7 +54,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
 
   const anyFilter = () => mf.noout || mf.states.length > 0 || (mf.dwell !== '' && mf.dwell != null);
   const cellHit = (c: string, l: string) => {
-    const o = cellObj(c, l); if (!o) return false;
+    const o = cellObj(c, l);
+    // State 0 = Un-Assigned: the bank is on the grid but not in play on this
+    // mandate. It matches only the explicit Un-Assigned chip (dwell is meaningless
+    // for a cell with no clock running).
+    if (!o) return mf.states.includes(0);
     if (mf.states.length && !mf.states.includes(o.s)) return false;
     if (mf.dwell !== '' && mf.dwell != null && (daysSince(o.since) ?? 0) < +mf.dwell) return false;
     return mf.states.length > 0 || mf.dwell !== '';
@@ -64,9 +70,10 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   if (scope === 'Live') codes = codes.filter(live);
   if (scope === 'Closed') codes = codes.filter(closed);
 
-  // state counts within scope (before state filtering)
+  // state counts within scope (before state filtering); index 0 counts the
+  // Un-Assigned cells — FI-master banks not yet in play on that mandate.
   const cnt = [0, 0, 0, 0, 0, 0, 0];
-  codes.forEach((c) => order.forEach((l) => { const s = cellS(c, l); if (s) cnt[s]++; }));
+  codes.forEach((c) => order.forEach((l) => { const s = cellS(c, l); if (s) cnt[s]++; else cnt[0]++; }));
 
   if (mf.noout) codes = codes.filter((c) => live(c) && order.every((l) => !cellS(c, l)));
   else if (anyFilter()) codes = codes.filter((c) => order.some((l) => cellHit(c, l)));
@@ -80,10 +87,10 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   // register's transition map), with Sanctioned capturing the allocation and
   // Declined the reason — the server rejects both without their substance.
   const openPop = (e: React.MouseEvent<HTMLElement>, c: string, l: string) => {
-    setTarget(''); setNote(''); setAmount('');
+    setTarget(''); setNote(''); setAmount(''); setRemark(null);
     setPop({ c, l, el: e.currentTarget });
   };
-  const closePop = () => { setPop(null); setTarget(''); setNote(''); setAmount(''); };
+  const closePop = () => { setPop(null); setTarget(''); setNote(''); setAmount(''); setRemark(null); };
   const commit = (st: string) => {
     if (!pop) return;
     const row = syndicationService.lenderRow(pop.c, pop.l);
@@ -140,12 +147,14 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
 
       {/* filter bar */}
       <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.2, mb: 1.2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-        {[1, 2, 3, 4, 5, 6].map((s) => (
+        {[1, 0, 2, 3, 4, 5, 6].map((s) => (
           <Box key={s} onClick={() => togState(s)}
             sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.8, border: `1.4px solid ${mf.states.includes(s) ? tokens.navy : tokens.line}`,
               bgcolor: mf.states.includes(s) ? '#F2F6F5' : '#fff', borderRadius: 999, px: 1.2, py: 0.5, fontSize: 12, cursor: 'pointer',
               color: mf.states.includes(s) ? tokens.ink : tokens.muted, fontWeight: mf.states.includes(s) ? 600 : 400 }}>
-            <Box sx={{ width: 13, height: 13, borderRadius: '50%', bgcolor: MATRIX_COLORS[s], border: `1.4px solid ${MATRIX_COLORS[s]}` }} />
+            <Box sx={{ width: 13, height: 13, borderRadius: '50%',
+              bgcolor: s ? MATRIX_COLORS[s] : '#fff',
+              border: `1.4px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}` }} />
             {MATRIX_LABELS[s]} <b style={{ fontVariantNumeric: 'tabular-nums' }}>{cnt[s]}</b>
           </Box>
         ))}
@@ -239,7 +248,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               <Typography sx={{ fontSize: 11.4, color: tokens.muted, mb: 1 }}>{clientsService.get(pop.c).name}</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mb: 0.6 }}>
                 <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s ? MATRIX_COLORS[s] : '#fff', border: `1.4px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}` }} />
-                <Typography sx={{ fontSize: 12.4, fontWeight: 600 }}>{lenderLabel(st) || 'Not in play'}</Typography>
+                <Typography sx={{ fontSize: 12.4, fontWeight: 600 }}>{lenderLabel(st) || 'Un-Assigned'}</Typography>
                 {d != null && st && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>· {d}d in state</Typography>}
               </Box>
               {row?.amt != null && (
@@ -255,6 +264,26 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                   ))}
                 </Box>
               )}
+              {/* The manual tracker's Remarks column: editable at ANY stage, status
+                  untouched — "Reply awaited", "No update", "call with promoters". */}
+              {!ro && row && (remark == null ? (
+                <Button size="small" sx={{ mt: 0.4, px: 0.5, fontSize: 11.4, textTransform: 'none' }}
+                  onClick={() => setRemark(row.note || '')}>
+                  {row.note ? 'Edit remark' : 'Add remark'}
+                </Button>
+              ) : (
+                <Box sx={{ mt: 0.8 }}>
+                  <TextField size="small" fullWidth multiline minRows={2} label="Remark" autoFocus
+                    value={remark} onChange={(e) => setRemark(e.target.value)} />
+                  <Box sx={{ display: 'flex', gap: 0.8, mt: 0.8, justifyContent: 'flex-end' }}>
+                    <Button size="small" onClick={() => setRemark(null)}>Cancel</Button>
+                    <Button size="small" variant="contained" onClick={() => {
+                      syndicationService.setLenderNote(pop.c, pop.l, remark.trim(), user.full);
+                      setRemark(null); force((n) => n + 1);
+                    }}>Save remark</Button>
+                  </Box>
+                </Box>
+              ))}
               {!ro && !row && (
                 <Button fullWidth size="small" variant="contained" sx={{ mt: 1 }} onClick={() => commit('Identified')}>
                   Identify — put this bank in play
