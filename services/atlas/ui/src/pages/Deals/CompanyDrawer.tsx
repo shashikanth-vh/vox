@@ -245,9 +245,10 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
           </DrawerSection>
         ))}
 
+        {/* No stage-change REQUEST lane for AM (desk review decision): the AM book is
+            a plain update surface — editAM roles move the status directly. */}
         {am.map((r) => (
-          <DrawerSection key={r.id} title={`Asset Monetisation — ${r.status}`}
-            action={canRequest && roAM ? <Button size="small" variant="outlined" onClick={() => setStageReq({ line: 'Asset Monetisation', refId: r.id, current: r.status })}>⟳ Request stage change</Button> : undefined}>
+          <DrawerSection key={r.id} title={`Asset Monetisation — ${r.status}`}>
             <FieldGrid>
               <TextFld label="State" value={r.state} disabled={roAM} onChange={(v) => updA(r.id, 'state', v)} />
               <TextFld label="Indicative value (₹ Cr)" required type="number" value={r.val} disabled={roAM} onChange={(v) => updA(r.id, 'val', v)} />

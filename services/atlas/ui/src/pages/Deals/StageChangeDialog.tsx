@@ -13,6 +13,39 @@ const LINE_STAGE_REF: Record<StageLine, string> = {
   Lending: 'Lending Stage', Syndication: 'Status of Proposal', 'Asset Monetisation': 'Asset Mon Status',
 };
 
+// Legal next stages per line and CURRENT stage — the client mirror of the register's
+// transition graphs, so the request only OFFERS moves an approval can actually apply
+// (the full vocabulary let an approver approve a jump the register then refused).
+// Gated stages (e.g. Sanctioned needs committee evidence) may still be refused at
+// approval time with the policy's own message — the graph is the first filter.
+const LINE_NEXT: Partial<Record<StageLine, Record<string, string[]>>> = {
+  Lending: {
+    'Data Awaited': ['Diligence', 'On Hold', 'Rejected'],
+    'Diligence': ['Note Circulated', 'Data Awaited', 'On Hold', 'Rejected'],
+    'Note Circulated': ['Sanctioned', 'Diligence', 'On Hold', 'Rejected'],
+    'Sanctioned': ['CP/CS Completed', 'Note Circulated', 'On Hold'],
+    'CP/CS Completed': ['Ready for Disbursement', 'Sanctioned', 'On Hold'],
+    'Ready for Disbursement': ['Disbursed', 'CP/CS Completed', 'On Hold'],
+    'Disbursed': ['On Hold'],
+    'On Hold': ['Data Awaited', 'Diligence', 'Note Circulated', 'Sanctioned',
+      'CP/CS Completed', 'Ready for Disbursement', 'Disbursed'],
+    'Rejected': ['Data Awaited', 'Diligence'],
+  },
+  Syndication: {
+    'Deal Sourced': ['Docs Pending', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'Docs Pending': ['IM in Prep', 'Deal Sourced', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'IM in Prep': ['IM Circulated', 'Docs Pending', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'IM Circulated': ['Queries Received', 'IM in Prep', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'Queries Received': ['IP Received', 'IM Circulated', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'IP Received': ['Sanctioned', 'Queries Received', 'On Hold', 'Withdrawn', 'Rejected', 'Dropped'],
+    'Sanctioned': ['Disbursed', 'On Hold'],
+    'Disbursed': ['On Hold'],
+    'On Hold': ['Deal Sourced', 'Docs Pending', 'IM in Prep', 'IM Circulated',
+      'Queries Received', 'IP Received', 'Sanctioned'],
+    'Withdrawn': [], 'Rejected': [], 'Dropped': [],
+  },
+};
+
 export default function StageChangeDialog({ open, code, presetLine, refId, currentStage, onClose, onDone }: {
   open: boolean; code: string; presetLine?: StageLine; refId?: string; currentStage?: string; onClose: () => void; onDone: () => void;
 }) {
@@ -39,7 +72,9 @@ export default function StageChangeDialog({ open, code, presetLine, refId, curre
       </DialogTitle>
       <DialogContent dividers>
         <FieldGrid>
-          <SelectFld label="Line" required value={line} disabled={!!presetLine} onChange={(v) => { setLine(v as StageLine); setTarget(''); }} options={['Lending', 'Syndication', 'Asset Monetisation']} />
+          {/* Asset Monetisation is deliberately absent: the AM book has no approval
+              lane — its status is a direct edit for AM roles. */}
+          <SelectFld label="Line" required value={line} disabled={!!presetLine} onChange={(v) => { setLine(v as StageLine); setTarget(''); }} options={['Lending', 'Syndication']} />
           <SelectFld label="Target stage" required value={target} onChange={setTarget} options={referenceService.getRefSync(LINE_STAGE_REF[line])} blank />
         </FieldGrid>
         <Box sx={{ mt: 1.2 }}><TextFld label="Reason for change" required value={reason} onChange={setReason} multiline /></Box>

@@ -52,10 +52,11 @@ _request_repo = CRUDRepository(ChangeRequest,
                                            "requested_by"])
 
 # Which field a change request may target per line, and the tracker model behind it.
+# AssetMonetisation is deliberately absent (desk review decision): the AM book is a
+# plain update surface with no approval lane — its status is a direct edit.
 _REQUESTABLE_FIELDS: dict[str, set[str]] = {
     "Lending": {"stage"},
     "Syndication": {"status"},
-    "AssetMonetisation": {"status"},
     "Lead": {"status"},
     "Deal": {"stage"},
 }
