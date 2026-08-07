@@ -162,6 +162,17 @@ Watch disk health occasionally: `df -h /var/lib/docker` and `docker system df`.
 Reclaim space from old images after upgrades with `docker image prune -af` (safe — it
 removes only unused images; volumes are never touched).
 
+## 5c. Network exposure — only the edge faces the world
+
+Dev/debug ports (Postgres 5432, register 8000, gateway 8001, access 8002, MinIO
+9000/9001, Dex 5556, Temporal UI 8088) now bind to **127.0.0.1** by default — on an
+internet-facing VM only the edge (80/443 + legacy 8080/8443) answers the world.
+Reach a dev port remotely through an SSH tunnel
+(`ssh -L 5432:localhost:5432 user@vm`), or set `DEV_PORTS_BIND=0.0.0.0` in `.env`
+on a trusted private network. On any cloud host, ALSO restrict the firewall/security
+group to 443, 80, and SSH from your own IP — defence in depth, and it covers
+anything Docker ever publishes.
+
 ## 6. Sign-in hardening (recap)
 
 Production runs the prod-posture overlay: OIDC everywhere, RBAC + RLS enforced,

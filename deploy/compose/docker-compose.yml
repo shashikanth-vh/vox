@@ -48,7 +48,11 @@ services:
       POSTGRES_PASSWORD: "${PRISM_DB_PASSWORD:-prism}"
       POSTGRES_DB: register
     ports:
-      - "5432:5432"
+      # Dev/debug ports bind to LOCALHOST by default — on an internet-facing VM the
+      # database must never answer the world (scanners find it within minutes).
+      # Reach it remotely via an SSH tunnel, or set DEV_PORTS_BIND=0.0.0.0 in .env
+      # on a trusted private network.
+      - "${DEV_PORTS_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # First-init only: creates the Access service's database on the shared server.
@@ -72,8 +76,8 @@ services:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-prism}"
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-prism-secret}"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "${DEV_PORTS_BIND:-127.0.0.1}:9000:9000"   # S3 API
+      - "${DEV_PORTS_BIND:-127.0.0.1}:9001:9001"   # web console
     volumes:
       - miniodata:/data
     healthcheck:
@@ -152,7 +156,7 @@ services:
     #   docker compose exec register python -m app.seed
     command: ["migrate-bootstrap-serve"]
     ports:
-      - "8000:8000"    # direct access for dev; production traffic goes through NGINX
+      - "${DEV_PORTS_BIND:-127.0.0.1}:8000:8000"    # direct access for dev; production traffic goes through NGINX
     restart: unless-stopped
 
   # User management & access-control facts — users, roles, the admin-editable matrix.
@@ -176,7 +180,7 @@ services:
     # Migrate, seed (tenant + spec matrix + admin@evamfinance.com), serve.
     command: ["migrate-seed-serve"]
     ports:
-      - "8002:8000"   # direct access for dev/governance UIs
+      - "${DEV_PORTS_BIND:-127.0.0.1}:8002:8000"   # direct access for dev/governance UIs
     restart: unless-stopped
 
   # The REST-API service — cached binary RBAC gate + routing; the future home of
@@ -225,7 +229,7 @@ services:
       GATEWAY_REQUIRE_AUTH: "${GATEWAY_REQUIRE_AUTH:-false}"
       GATEWAY_LOG_JSON: "true"
     ports:
-      - "8001:8000"   # direct gateway access for dev
+      - "${DEV_PORTS_BIND:-127.0.0.1}:8001:8000"   # direct gateway access for dev
     restart: unless-stopped
 
   # STT — the dedicated speech-to-text service (faster-whisper behind an
@@ -381,7 +385,7 @@ services:
       # dex restart no longer invalidates every already-issued sign-in.
       - dexdata:/var/dex
     ports:
-      - "5556:5556"
+      - "${DEV_PORTS_BIND:-127.0.0.1}:5556:5556"
     restart: unless-stopped
 
   # Edge reverse proxy — TLS (prod), routing, load-balancing, edge rate-limit, correlation id.
@@ -476,7 +480,7 @@ services:
     environment:
       TEMPORAL_ADDRESS: temporal:7233
     ports:
-      - "8088:8080"
+      - "${DEV_PORTS_BIND:-127.0.0.1}:8088:8080"
     restart: unless-stopped
 
   # PRISM worker — runs workflows/activities; activities write the Register via the SDK.
