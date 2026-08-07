@@ -79,6 +79,24 @@ class LeadConvertRequest(CreateModel):
     rm_id: uuid.UUID | None = None
     analyst_id: uuid.UUID | None = None
     note: str | None = None
+    # Deal + product-line opening facts from the Push-to-Deals dialog. The dialog
+    # collects a figure and a stage/status PER ticked line — the single amount_cr
+    # above is the committee-facing total and must not overload every line (it used
+    # to land verbatim on lending AND syndication, so both showed the combined sum).
+    temperature: str | None = Field(default=None, max_length=10)
+    lending_amount_cr: float | None = Field(default=None, ge=0)
+    lending_stage: str | None = Field(default=None, max_length=40)
+    syn_amount_cr: float | None = Field(default=None, ge=0)
+    syn_type: str | None = Field(default=None, max_length=80)
+    syn_mandate_status3: str | None = Field(default=None, max_length=40)
+    syn_status: str | None = Field(default=None, max_length=40)
+    syn_facility: str | None = Field(default=None, max_length=2000)
+    syn_tenor: str | None = Field(default=None, max_length=20)
+    syn_priority: str | None = Field(default=None, max_length=10)
+    syn_im_status: str | None = Field(default=None, max_length=40)
+    syn_potential: str | None = Field(default=None, max_length=4000)
+    syn_existing: str | None = Field(default=None, max_length=4000)
+    syn_price: str | None = Field(default=None, max_length=2000)
     # Asset-monetisation opening facts captured in the Push-to-Deals dialog. The AM
     # book is a plain update surface (no workflow), so what the RM typed at push time
     # must land ON the row — there is no later ceremony to carry it.

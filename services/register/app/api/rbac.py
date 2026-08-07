@@ -553,6 +553,28 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     source_detail = f"Converted from lead {lead_id}"
     if approver:
         source_detail += f" (approved by {approver})"
+
+    # A supplied line status must be a legal BIRTH state — the same allowlist creation
+    # obeys — so a push cannot mint a row deep in governance (a lending line born
+    # 'Sanctioned' would skip the committee entirely).
+    from evam_backend_core.lifecycle import initial_status_error
+    for subject, field, value in (("Lending", "stage", payload.lending_stage),
+                                  ("Syndication", "status", payload.syn_status),
+                                  ("AssetMonetisation", "status", payload.am_status)):
+        if value:
+            err = initial_status_error(subject, {field: value})
+            if err:
+                raise ValidationAppError(err)
+
+    # The company facts the lines inherit (fetched once): State — the dialog collects
+    # it as a mandatory client field; toi — the "type of industry" the pre-flight
+    # stored on the entity.
+    ent = (await ctx.session.execute(
+        select(Entity.state, Entity.toi).where(Entity.id == entity_id,
+                                               Entity.tenant_id == ctx.tenant_id))
+    ).one_or_none()
+    ent_state, ent_toi = (ent[0], ent[1]) if ent else (None, None)
+
     deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
         "entity_id": str(entity_id),
         "product_type": payload.product_type,
@@ -560,6 +582,7 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "is_syndication": payload.is_syndication,
         "is_asset_mon": payload.is_asset_mon,
         "rm": payload.rm, "analyst": payload.analyst,
+        "temperature": payload.temperature,
         # An approved conversion is a committed opportunity with live product lines — it enters
         # the COMMERCIAL funnel at 'In Pipeline'. Credit execution starts on the lending line
         # (created below at 'Data Awaited'), never on the deal.
@@ -571,25 +594,31 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     if payload.is_lending:
         row = await _Repo(LendingTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
-            "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
-            "stage": "Data Awaited"})
+            "amount_cr": payload.lending_amount_cr
+            if payload.lending_amount_cr is not None else payload.amount_cr,
+            "rm": payload.rm, "analyst": payload.analyst,
+            "stage": payload.lending_stage or "Data Awaited"})
         line_ids["lending_id"] = row.id
         _assign("Lending", row.id, "Deal Analyst", payload.analyst_id)
     if payload.is_syndication:
         row = await _Repo(SyndicationTracker).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
-            "amount_cr": payload.amount_cr, "rm": payload.rm, "analyst": payload.analyst,
-            "status": "Deal Sourced"})
+            "amount_cr": payload.syn_amount_cr
+            if payload.syn_amount_cr is not None else payload.amount_cr,
+            "rm": payload.rm, "analyst": payload.analyst,
+            "status": payload.syn_status or "Deal Sourced",
+            "syndication_type": payload.syn_type,
+            "mandate_status3": payload.syn_mandate_status3,
+            "facility": payload.syn_facility, "tenor": payload.syn_tenor,
+            "priority": payload.syn_priority, "im_status": payload.syn_im_status,
+            "potential": payload.syn_potential, "existing": payload.syn_existing,
+            "price": payload.syn_price, "toi": ent_toi})
         line_ids["syndication_id"] = row.id
         _assign("Syndication", row.id, "Syn RM", payload.rm_id)
     if payload.is_asset_mon:
         # Defaults the desk should not have to retype: the mandate's State comes from
-        # the company (the push dialog collects it as a mandatory client field), and a
-        # fresh monetisation mandate is always the client SELLING the asset.
-        ent_state = (await ctx.session.execute(
-            select(Entity.state).where(Entity.id == entity_id,
-                                       Entity.tenant_id == ctx.tenant_id))
-        ).scalar_one_or_none()
+        # the company, and a fresh monetisation mandate is always the client SELLING
+        # the asset.
         row = await _Repo(AssetMonetisation).create(ctx.session, ctx.tenant_id, ctx.actor, {
             "entity_id": str(entity_id), "deal_id": str(deal.id),
             "rm": payload.rm, "analyst": payload.analyst,

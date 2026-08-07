@@ -171,8 +171,24 @@ class LeadConversionInput:
     rm_id: str | None = None
     analyst_id: str | None = None
     note: str | None = None
-    # Asset-monetisation opening facts from the Push-to-Deals dialog — the AM book is
-    # a plain update surface, so the row must be born carrying what the RM typed.
+    # Deal + product-line opening facts from the Push-to-Deals dialog. Every ticked
+    # line carries ITS OWN figure and stage/status (amount_cr above stays the
+    # committee-facing total); the AM book is a plain update surface, so its row must
+    # be born carrying what the RM typed.
+    temperature: str | None = None
+    lending_amount_cr: float | None = None
+    lending_stage: str | None = None
+    syn_amount_cr: float | None = None
+    syn_type: str | None = None
+    syn_mandate_status3: str | None = None
+    syn_status: str | None = None
+    syn_facility: str | None = None
+    syn_tenor: str | None = None
+    syn_priority: str | None = None
+    syn_im_status: str | None = None
+    syn_potential: str | None = None
+    syn_existing: str | None = None
+    syn_price: str | None = None
     am_value_cr: float | None = None
     am_size_mw: float | None = None
     am_deal_type: str | None = None
@@ -184,7 +200,7 @@ class LeadConversionInput:
     approver_notify: list[str] = field(default_factory=list)
     # Input-contract version — bump when this dataclass changes shape, so running
     # workflows and new workers can tell which contract an input was written under.
-    schema_version: int = 3   # v3: + AM opening facts (am_value_cr / mw / type / status)
+    schema_version: int = 4   # v4: per-line opening facts (temperature / lending_* / syn_* / am_*)
     # ---- Release-1 foundation knobs (all optional; 0 disables a timer) ----------------
     # SLA reminders while the run waits on a human: every N hours an operational event
     # ("sla_reminder") is emitted; after the escalation window a one-time "sla_escalation"

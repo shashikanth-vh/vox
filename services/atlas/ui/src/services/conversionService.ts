@@ -186,8 +186,24 @@ export const conversionService = {
           is_lending: p.flags.lend,
           is_syndication: p.flags.syn,
           is_asset_mon: p.flags.am,
-          // AM opening facts: the AM book is a plain update surface (no workflow),
-          // so the row must be born carrying what this dialog collected.
+          // Per-line opening facts: every ticked line carries ITS OWN figure and
+          // stage/status (amount_cr below stays the committee-facing total — it used
+          // to land verbatim on both the lending and syndication rows).
+          temperature: p.deal.temp || undefined,
+          lending_amount_cr: p.flags.lend && p.lending?.amt ? Number(p.lending.amt) : undefined,
+          lending_stage: (p.flags.lend && p.lending?.stage) || undefined,
+          syn_amount_cr: p.flags.syn && p.syndication?.amt ? Number(p.syndication.amt) : undefined,
+          syn_type: (p.flags.syn && p.syndication?.synType) || undefined,
+          syn_mandate_status3: (p.flags.syn && p.syndication?.synType === 'Fee will be paid by customer'
+            && p.syndication?.mstat3) || undefined,
+          syn_status: (p.flags.syn && p.syndication?.status) || undefined,
+          syn_facility: (p.flags.syn && p.syndication?.fac) || undefined,
+          syn_tenor: (p.flags.syn && p.syndication?.tenor) || undefined,
+          syn_priority: (p.flags.syn && p.syndication?.pri) || undefined,
+          syn_im_status: (p.flags.syn && p.syndication?.im) || undefined,
+          syn_potential: (p.flags.syn && p.syndication?.pot) || undefined,
+          syn_existing: (p.flags.syn && p.syndication?.exist) || undefined,
+          syn_price: (p.flags.syn && p.syndication?.price) || undefined,
           am_value_cr: p.flags.am && p.am?.val ? Number(p.am.val) : undefined,
           am_size_mw: p.flags.am && p.am?.mw ? Number(p.am.mw) : undefined,
           am_deal_type: (p.flags.am && p.am?.dtype) || undefined,

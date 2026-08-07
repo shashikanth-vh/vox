@@ -116,6 +116,66 @@ async def test_convert_carries_the_am_opening_facts(client):
     assert row["nature"] == "Seller"
 
 
+async def test_convert_carries_every_line_fact(client):
+    """The full carry-forward audit, pinned: a three-line push lands each line's OWN
+    figure and stage/status (not the combined total), the deal's temperature, and the
+    syndication opening facts — while a governance-deep birth stage is refused."""
+    for name in ("Asha Verma", "Rohit Jain"):
+        await client.post("/v1/people",
+                          json={"name": name, "full_name": name, "role": "RM"})
+    eid = (await client.post("/v1/entities",
+                             json={"code": "ALL" + uuid.uuid4().hex[:6].upper(),
+                                   "legal_name": "Every Fact Co", "state": "Gujarat",
+                                   "toi": "EPC"})).json()["id"]
+    lead = (await client.post("/v1/leads",
+                              json={"company": "Every Fact Co",
+                                    "entity_id": eid})).json()
+    admin = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+
+    # A birth stage deep in governance is refused outright.
+    bad = await client.post(f"/v1/leads/{lead['id']}/convert",
+                            json={"is_lending": True, "lending_amount_cr": 10,
+                                  "lending_stage": "Sanctioned"}, headers=admin)
+    assert bad.status_code == 422, bad.text
+
+    r = await client.post(
+        f"/v1/leads/{lead['id']}/convert",
+        json={"is_lending": True, "is_syndication": True, "is_asset_mon": True,
+              "rm": "Asha Verma", "analyst": "Rohit Jain",
+              "amount_cr": 82, "temperature": "Hot",
+              "lending_amount_cr": 10, "lending_stage": "Data Awaited",
+              "syn_amount_cr": 52, "syn_type": "Fee will be paid by customer",
+              "syn_mandate_status3": "Under discussion", "syn_status": "Deal Sourced",
+              "syn_facility": "Term Loan", "syn_tenor": "24-36m",
+              "syn_priority": "High", "syn_im_status": "In prep",
+              "syn_potential": "Kotak, HDFC", "syn_existing": "SBI",
+              "syn_price": "11-12%",
+              "am_value_cr": 20, "am_deal_type": "Project Advisory"},
+        headers=admin)
+    assert r.status_code == 200, r.text
+    ids = r.json()
+
+    deal = (await client.get(f"/v1/deals/{ids['deal_id']}")).json()
+    assert deal["temperature"] == "Hot"
+
+    lend = (await client.get(f"/v1/lending/{ids['lending_id']}")).json()
+    assert float(lend["amount_cr"]) == 10 and lend["stage"] == "Data Awaited"
+
+    syn = (await client.get(f"/v1/syndication/{ids['syndication_id']}")).json()
+    assert float(syn["amount_cr"]) == 52          # NOT the 82 combined total
+    assert syn["syndication_type"] == "Fee will be paid by customer"
+    assert syn["mandate_status3"] == "Under discussion"
+    assert syn["status"] == "Deal Sourced" and syn["facility"] == "Term Loan"
+    assert syn["tenor"] == "24-36m" and syn["priority"] == "High"
+    assert syn["im_status"] == "In prep" and syn["potential"] == "Kotak, HDFC"
+    assert syn["existing"] == "SBI" and syn["price"] == "11-12%"
+    assert syn["toi"] == "EPC"                    # inherited from the company
+
+    am = (await client.get(f"/v1/asset-monetisation/{ids['asset_mon_id']}")).json()
+    assert float(am["indicative_value_cr"]) == 20
+    assert am["deal_type"] == "Project Advisory" and am["state"] == "Gujarat"
+
+
 async def test_am_tracker_carries_its_own_rm_and_analyst(client):
     """ATLAS v19 parity: the AM desk's ownership lives ON the mandate row (like the
     lending/syndication trackers) — team scoping, scorecards, and book rollups key on

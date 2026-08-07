@@ -546,8 +546,23 @@ class LeadConversionIn(BaseModel):
     rm_id: str | None = None
     analyst_id: str | None = None
     note: str | None = None
-    # Asset-monetisation opening facts (Push-to-Deals dialog) — forwarded into the
-    # conversion input verbatim so the AM row is born carrying what the RM typed.
+    # Deal + product-line opening facts (Push-to-Deals dialog) — forwarded into the
+    # conversion input verbatim so every ticked line is born carrying its OWN figure
+    # and stage/status instead of a combined total and hardcoded defaults.
+    temperature: str | None = Field(default=None, max_length=10)
+    lending_amount_cr: float | None = Field(default=None, ge=0)
+    lending_stage: str | None = Field(default=None, max_length=40)
+    syn_amount_cr: float | None = Field(default=None, ge=0)
+    syn_type: str | None = Field(default=None, max_length=80)
+    syn_mandate_status3: str | None = Field(default=None, max_length=40)
+    syn_status: str | None = Field(default=None, max_length=40)
+    syn_facility: str | None = Field(default=None, max_length=2000)
+    syn_tenor: str | None = Field(default=None, max_length=20)
+    syn_priority: str | None = Field(default=None, max_length=10)
+    syn_im_status: str | None = Field(default=None, max_length=40)
+    syn_potential: str | None = Field(default=None, max_length=4000)
+    syn_existing: str | None = Field(default=None, max_length=4000)
+    syn_price: str | None = Field(default=None, max_length=2000)
     am_value_cr: float | None = Field(default=None, ge=0)
     am_size_mw: float | None = Field(default=None, ge=0)
     am_deal_type: str | None = Field(default=None, max_length=80)
