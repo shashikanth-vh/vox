@@ -24,7 +24,12 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const [mf, setMf] = useState<MF>({ states: [], dwell: '', preset: '', noout: false });
   const [, force] = useState(0);
   const [msg, setMsg] = useState('');
-  const drag = useRef<number | null>(null);
+  const drag = useRef<string | null>(null);
+  // In-context company search (the navbar search also applies; this one lives next
+  // to the grid) and the column collapse: with 37 FI columns and most cells
+  // Un-Assigned, the daily read is the banks actually in play.
+  const [q, setQ] = useState('');
+  const [inPlayOnly, setInPlayOnly] = useState(true);
   // The cell popover: read-only roles get the story (status, dwell, note, history);
   // advanceMatrix roles also get the LEGAL next steps — Sanctioned captures the
   // allocation (₹ Cr), Declined the reason, exactly what the register demands.
@@ -36,8 +41,9 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const [remark, setRemark] = useState<string | null>(null);
 
   const match = (name: string, code: string) => {
-    const q = search.trim().toLowerCase();
-    return !q || name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
+    const g = search.trim().toLowerCase(); const lq = q.trim().toLowerCase();
+    const hit = (t: string) => name.toLowerCase().includes(t) || code.toLowerCase().includes(t);
+    return (!g || hit(g)) && (!lq || hit(lq));
   };
 
   const order = syndicationService.lenderOrder();
@@ -79,6 +85,13 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   else if (anyFilter()) codes = codes.filter((c) => order.some((l) => cellHit(c, l)));
   codes.sort((a, b) => syndicationService.offLive(b) - syndicationService.offLive(a));
 
+  // Visible columns: the banks in play across the visible companies. Falls back to
+  // the whole market when nothing is in play yet (a fresh book needs banks to
+  // click), and the Un-Assigned chip force-expands — it highlights exactly the
+  // cells the collapse would hide.
+  const inPlay = order.filter((l) => codes.some((c) => cellObj(c, l)));
+  const cols = inPlayOnly && !mf.states.includes(0) && inPlay.length ? inPlay : order;
+
   const dimOn = anyFilter() && !mf.noout;
 
   // Any role can OPEN a cell — the popover is the management story ("what exactly is
@@ -115,11 +128,19 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
     setMf({ states: pr.states.slice(), dwell: pr.dwell as any, preset: id, noout: !!(pr as any).noout });
     setScope(pr.scope);
   };
-  const drop = (to: number) => { if (drag.current == null || drag.current === to) return; syndicationService.reorderLenders(drag.current, to); drag.current = null; force((n) => n + 1); };
+  // Drag-reorder works by NAME (the visible columns may be a filtered subset, so
+  // visual indices no longer address the master order).
+  const drop = (name: string) => {
+    if (!drag.current || drag.current === name) return;
+    const o = syndicationService.lenderOrder();
+    const from = o.indexOf(drag.current); const to = o.indexOf(name);
+    if (from > -1 && to > -1) syndicationService.reorderLenders(from, to);
+    drag.current = null; force((n) => n + 1);
+  };
 
   const exportCsv = () => {
     const rows = [['Company', 'Group Code', 'Lender', 'State', 'Since', 'Days', 'Live ask Cr']];
-    codes.forEach((c) => order.forEach((l) => {
+    codes.forEach((c) => cols.forEach((l) => {
       const o = cellObj(c, l); if (!o) return;
       if (anyFilter() && !mf.noout && !cellHit(c, l)) return;
       rows.push([clientsService.get(c).name, c, l, MATRIX_LABELS[o.s], o.since || '', String(daysSince(o.since) ?? ''), String(syndicationService.offLive(c))]);
@@ -142,6 +163,14 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           <Button key={f} onClick={() => setScope(f)} size="small"
             variant={scope === f ? 'contained' : 'outlined'} sx={{ borderRadius: 999, minWidth: 0, px: 1.5, py: 0.2 }}>{f}</Button>
         ))}
+        <TextField size="small" value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Find company or code…"
+          sx={{ width: 195, '& .MuiInputBase-input': { py: 0.55, fontSize: 12.4 } }} />
+        <Button onClick={() => setInPlayOnly((v) => !v)} size="small"
+          variant={inPlayOnly ? 'contained' : 'outlined'}
+          sx={{ borderRadius: 999, minWidth: 0, px: 1.5, py: 0.2, textTransform: 'none' }}>
+          {inPlayOnly ? `Banks in play (${inPlay.length})` : `All banks (${order.length})`}
+        </Button>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, ml: 1 }}>{ro ? 'Click a dot for the full story (mirrors the Chase List). ' : 'Click a dot for the story and the next steps (writes to the Chase List). '}Drag lender columns to reorder · click a company for the profile</Typography>
       </Box>
 
@@ -177,12 +206,12 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
         <table style={{ borderCollapse: 'collapse', width: 'auto', fontSize: 12.6 }}>
           <thead>
             <tr>
-              <th style={{ position: 'sticky', left: 0, top: 0, zIndex: 8, background: '#F7F9FA', minWidth: 210, maxWidth: 250, textAlign: 'left', padding: '8px 9px', borderRight: `1px solid ${tokens.line}`, borderBottom: `1px solid ${tokens.line}` }}>Company</th>
-              {order.map((l, i) => (
+              <th style={{ position: 'sticky', left: 0, top: 0, zIndex: 8, background: '#F7F9FA', minWidth: 210, maxWidth: 250, textAlign: 'left', padding: '8px 9px', borderRight: `1px solid ${tokens.line}`, borderBottom: `1px solid ${tokens.line}` }}>Company · {codes.length}</th>
+              {cols.map((l) => (
                 <th key={l} draggable={!ro} title={`${l} — drag to reorder`}
-                  onDragStart={() => (drag.current = i)}
+                  onDragStart={() => (drag.current = l)}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => drop(i)}
+                  onDrop={() => drop(l)}
                   style={{ height: 118, verticalAlign: 'bottom', padding: '6px 3px', cursor: ro ? 'default' : 'grab', minWidth: 36, position: 'sticky', top: 0, background: '#F7F9FA', borderBottom: `1px solid ${tokens.line}` }}>
                   <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10.2, display: 'inline-block', maxHeight: 108, overflow: 'hidden' }}>{l}</span>
                 </th>
@@ -200,7 +229,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                     <b style={{ cursor: 'pointer' }} onClick={() => onOpenCompany(c)}>{cl.name}</b>
                     <div style={{ fontSize: 10.8, color: tokens.muted }}>₹{fmt(syndicationService.offLive(c), 1)} Cr · {top}</div>
                   </td>
-                  {order.map((l) => {
+                  {cols.map((l) => {
                     const s = cellS(c, l); const d = cellDays(c, l);
                     const dim = dimOn && !!s && !cellHit(c, l);
                     return (
