@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { syndicationService } from '../../services/syndicationService';
+import { fiService } from '../../services/fiService';
 import { Box, Typography, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
 import GridOnIcon from '@mui/icons-material/GridOn';
@@ -27,14 +28,18 @@ export default function SyndicationPage() {
   const refresh = () => qc.invalidateQueries();
 
   // Platform build: the three views read the local store synchronously, so pull the
-  // register's rows (with their lenders) into it once on entry, then re-render.
+  // register's rows AND the FI master into it once on entry, then re-render. The FI
+  // master supplies the matrix columns + add-lender choices for a fresh mandate.
   useEffect(() => {
     let alive = true;
-    syndicationService.hydrate().then(() => { if (alive) force((n) => n + 1); });
+    fiService.hydrate().then(() => {
+      syndicationService.ensureLenderColumns();
+      if (alive) force((n) => n + 1);
+    });
     return () => { alive = false; };
   }, []);
 
-  const hint = mode === 'matrix' ? 'Matrix is read-only — it renders the Chase List state'
+  const hint = mode === 'matrix' ? 'Click a dot to see that bank’s story and take the next step — it writes to the Chase List'
     : mode === 'reg' ? 'Click a bank for its full deal ledger'
       : 'Lender-wise Platform Deals chase list. Log chases and replies; advance each lender’s status.';
 

@@ -16,6 +16,23 @@ function Flag({ label, color }: { label: string; color: string }) {
   return <Box component="span" sx={{ display: 'inline-block', borderRadius: '5px', px: '7px', py: '2px', fontSize: 10.4, fontWeight: 700, color: '#fff', bgcolor: color, mr: 0.8 }}>{label}</Box>;
 }
 
+// v17 prodbox: dimmed + non-interactive when its checkbox is off. MODULE-scope on
+// purpose: defined inside the dialog it would get a fresh component identity every
+// keystroke, so React would remount the subtree — the field lost focus after one
+// character and the dialog scrolled back to the top.
+function ProductBox({ on, onToggle, flag, color, title, children }: {
+  on: boolean; onToggle: (v: boolean) => void;
+  flag: string; color: string; title: string; children: React.ReactNode;
+}) {
+  return (
+    <Box sx={{ border: `1px solid ${on ? color : tokens.line}`, borderRadius: 2, p: 1.3, my: 1, opacity: on ? 1 : 0.5, transition: 'opacity .15s ease' }}>
+      <FormControlLabel sx={{ m: 0 }} control={<Checkbox sx={{ p: 0.5, mr: 0.5 }} checked={on} onChange={(e) => onToggle(e.target.checked)} />}
+        label={<Typography sx={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center' }}><Flag label={flag} color={color} />{title}</Typography>} />
+      <Box sx={{ mt: 1, pointerEvents: on ? 'auto' : 'none' }}>{children}</Box>
+    </Box>
+  );
+}
+
 export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lead | null; onClose: () => void; onDone: () => void }) {
   const { user } = useAuth();
   const ref = referenceService;
@@ -102,17 +119,7 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
     onDone(); onClose();
   };
 
-  // v17 prodbox: dimmed + non-interactive when its checkbox is off.
-  const ProductBox = ({ k, flag, color, title, children }: { k: 'lend' | 'syn' | 'am'; flag: string; color: string; title: string; children: React.ReactNode }) => {
-    const on = flags[k];
-    return (
-      <Box sx={{ border: `1px solid ${on ? color : tokens.line}`, borderRadius: 2, p: 1.3, my: 1, opacity: on ? 1 : 0.5, transition: 'opacity .15s ease' }}>
-        <FormControlLabel sx={{ m: 0 }} control={<Checkbox sx={{ p: 0.5, mr: 0.5 }} checked={on} onChange={(e) => setFlags((p) => ({ ...p, [k]: e.target.checked }))} />}
-          label={<Typography sx={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center' }}><Flag label={flag} color={color} />{title}</Typography>} />
-        <Box sx={{ mt: 1, pointerEvents: on ? 'auto' : 'none' }}>{children}</Box>
-      </Box>
-    );
-  };
+  const toggle = (k: 'lend' | 'syn' | 'am') => (v: boolean) => setFlags((p) => ({ ...p, [k]: v }));
 
   const sect = (t: string) => (
     <Typography sx={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.teal, fontWeight: 800, mt: 2, mb: 1 }}>{t}</Typography>
@@ -148,13 +155,13 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
         <Box sx={{ mt: 1 }}><TextFld label="About the company" value={cl.about} onChange={(v) => setCl((p) => ({ ...p, about: v }))} placeholder="3–4 lines: what they do, scale, why it fits Evam" multiline /></Box>
 
         {sect('Products')}
-        <ProductBox k="lend" flag="L" color={tokens.lend} title="Lending (own book)">
+        <ProductBox on={flags.lend} onToggle={toggle('lend')} flag="L" color={tokens.lend} title="Lending (own book)">
           <FieldGrid>
             <TextFld label="Amount ₹ Cr" required type="number" value={lend.amt || ''} onChange={(v) => setLend((p) => ({ ...p, amt: v }))} placeholder="required — no default" />
             <SelectFld label="Stage" required value={lend.stage} onChange={(v) => setLend((p) => ({ ...p, stage: v }))} options={ref.getRefSync('Lending Stage')} />
           </FieldGrid>
         </ProductBox>
-        <ProductBox k="syn" flag="S" color={tokens.synd} title="Platform Deals">
+        <ProductBox on={flags.syn} onToggle={toggle('syn')} flag="S" color={tokens.synd} title="Platform Deals">
           <FieldGrid>
             <TextFld label="Ask ₹ Cr" required type="number" value={syn.amt || ''} onChange={(v) => setSyn((p) => ({ ...p, amt: v }))} placeholder="required — no default" />
             <SelectFld label="Platform Deals type" required value={syn.synType} onChange={(v) => setSyn((p) => ({ ...p, synType: v }))} options={ref.getRefSync('Platform Deals Type')} />
@@ -171,7 +178,7 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
             <Box sx={{ mt: 1 }}><TextFld label="Pricing expectation" value={syn.price} onChange={(v) => setSyn((p) => ({ ...p, price: v }))} placeholder="e.g. 11–12%" /></Box>
           </Box>
         </ProductBox>
-        <ProductBox k="am" flag="AM" color={tokens.am} title="Asset Monetisation">
+        <ProductBox on={flags.am} onToggle={toggle('am')} flag="AM" color={tokens.am} title="Asset Monetisation">
           <FieldGrid>
             <TextFld label="Indicative value ₹ Cr" required type="number" value={am.val || ''} onChange={(v) => setAm((p) => ({ ...p, val: v }))} />
             <TextFld label="Size MW" type="number" value={am.mw || ''} onChange={(v) => setAm((p) => ({ ...p, mw: v }))} />

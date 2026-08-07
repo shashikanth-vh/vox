@@ -283,6 +283,16 @@ export const syndicationService = {
     const o = db().lenderOrder;
     const [x] = o.splice(from, 1); o.splice(to, 0, x);
   },
+  /** Merge the FI master (db().lenders — hydrated by fiService) into the matrix
+   *  column order, so a FRESH mandate faces the whole market as clickable columns
+   *  instead of a blank grid. Existing order is preserved; only newcomers append;
+   *  inactive lenders that never entered a deal stay out of the way. */
+  ensureLenderColumns() {
+    const order = db().lenderOrder;
+    (db().lenders || []).forEach((f: any) => {
+      if (f?.name && !f.inactive && !order.includes(f.name)) order.push(f.name);
+    });
+  },
 };
 
 // UI row key → register column, for PATCH /v1/syndication/{id}. Keys that have no

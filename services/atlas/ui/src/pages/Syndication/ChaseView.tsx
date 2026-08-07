@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
+import { Autocomplete, Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, LSTATE_COLOR } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
@@ -111,7 +111,12 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
     else syndicationService.logResp(logDlg.code, logDlg.name, note, user.full);
     setLogDlg(null); bump();
   };
-  const add = (code: string) => { if (ro) return; const v = (newL[code] || '').trim(); if (!v) return; syndicationService.addLender(code, v, user.full); setNewL((p) => ({ ...p, [code]: '' })); bump(); };
+  const add = (code: string, name?: string) => {
+    if (ro) return;
+    const v = (name ?? newL[code] ?? '').trim(); if (!v) return;
+    syndicationService.addLender(code, v, user.full);
+    setNewL((p) => ({ ...p, [code]: '' })); bump();
+  };
 
   const exportCsv = () => {
     const rows: (string | number)[][] = [];
@@ -228,12 +233,22 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               );
             }) : <Box sx={{ ...CHLINE, bgcolor: '#fafbfc', color: tokens.muted, fontSize: '11.6px' }}>No lenders yet. Add one below.</Box>}
 
-            {/* add lender (v12 `.chco > .addl`) */}
+            {/* add lender (v12 `.chco > .addl`) — picks from the FI master so one bank
+                is always ONE spelling across mandates; free typing still allowed for a
+                lender the master does not know yet. */}
             {!ro && (
               <Box sx={{ ...CHLINE, bgcolor: '#f8fafc' }}>
-                <TextField size="small" placeholder="Add lender (name)" value={newL[r.code] || ''} sx={{ flex: 1, minWidth: 140 }}
-                  onChange={(e) => setNewL((p) => ({ ...p, [r.code]: e.target.value }))}
-                  onKeyDown={(e) => e.key === 'Enter' && add(r.code)} />
+                <Autocomplete freeSolo size="small" sx={{ flex: 1, minWidth: 180 }}
+                  options={(db().lenders || [])
+                    .filter((f: any) => f?.name && !f.inactive
+                      && !(r.lenders || []).some((l: Lender) => l.name.toLowerCase() === f.name.toLowerCase()))
+                    .map((f: any) => f.name)}
+                  inputValue={newL[r.code] || ''}
+                  onInputChange={(_, v) => setNewL((p) => ({ ...p, [r.code]: v }))}
+                  onChange={(_, v) => v && add(r.code, String(v))}
+                  renderInput={(params) => (
+                    <TextField {...params} placeholder="Add lender — pick from FI master or type" />
+                  )} />
                 <MiniBtn onClick={() => add(r.code)}>+ Add</MiniBtn>
               </Box>
             )}
