@@ -26,10 +26,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const [msg, setMsg] = useState('');
   const drag = useRef<string | null>(null);
   // In-context company search (the navbar search also applies; this one lives next
-  // to the grid) and the column collapse: with 37 FI columns and most cells
-  // Un-Assigned, the daily read is the banks actually in play.
+  // to the grid) and the column collapse. Review decision: the full lender master is
+  // the DEFAULT view — narrowing to the engaged lenders is the user's explicit click,
+  // never automatic (an auto-collapsed grid hid the market and read as data loss).
   const [q, setQ] = useState('');
-  const [inPlayOnly, setInPlayOnly] = useState(true);
+  const [inPlayOnly, setInPlayOnly] = useState(false);
   // The cell popover: read-only roles get the story (status, dwell, note, history);
   // advanceMatrix roles also get the LEGAL next steps — Sanctioned captures the
   // allocation (₹ Cr), Declined the reason, exactly what the register demands.
@@ -168,8 +169,10 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           sx={{ width: 195, '& .MuiInputBase-input': { py: 0.55, fontSize: 12.4 } }} />
         <Button onClick={() => setInPlayOnly((v) => !v)} size="small"
           variant={inPlayOnly ? 'contained' : 'outlined'}
+          title={inPlayOnly ? 'Showing only the lenders engaged on these mandates — click for the full lender master'
+            : 'Showing the full lender master — click to narrow to the engaged lenders'}
           sx={{ borderRadius: 999, minWidth: 0, px: 1.5, py: 0.2, textTransform: 'none' }}>
-          {inPlayOnly ? `Banks in play (${inPlay.length})` : `All banks (${order.length})`}
+          {inPlayOnly ? `Engaged lenders (${inPlay.length})` : `All lenders (${order.length})`}
         </Button>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, ml: 1 }}>{ro ? 'Click a dot for the full story (mirrors the Chase List). ' : 'Click a dot for the story and the next steps (writes to the Chase List). '}Drag lender columns to reorder · click a company for the profile</Typography>
       </Box>
@@ -315,7 +318,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               ))}
               {!ro && !row && (
                 <Button fullWidth size="small" variant="contained" sx={{ mt: 1 }} onClick={() => commit('Identified')}>
-                  Identify — put this bank in play
+                  Identify this lender
                 </Button>
               )}
               {!ro && row && !target && nexts.length > 0 && (
