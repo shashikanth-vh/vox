@@ -21,6 +21,12 @@ async def test_seeded_matrix_and_admin(client: AsyncClient):
     assert body["views"]["audit"]["Management"] == "NONE"
     users = (await client.get("/v1/users")).json()
     assert any(u["email"] == "admin@evamfinance.com" for u in users)
+    # The deployment's own operator (ACCESS_EXTRA_ADMIN_EMAILS default) is a default
+    # Admin too — provisioned by the same seed, with the Admin role.
+    tech = next(u for u in users if u["email"] == "tech@evamfinance.com")
+    assert tech["full_name"] == "TechAdmin"
+    detail = (await client.get(f"/v1/users/{tech['id']}")).json()
+    assert "Admin" in (detail.get("roles") or [])
 
 
 async def test_user_governance_admin_only(client: AsyncClient):
@@ -217,6 +223,13 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
         cells = (await session.execute(text("SELECT count(*) FROM access_grants"))).scalar()
         assert (tenants, admins) == (1, 1) and cells > 0
         await session.execute(text("UPDATE tenants SET name = 'Renamed by operator'"))
+        # Simulate a default operator account added to config AFTER first boot: drop it
+        # so the next start has to provision it into the non-empty database.
+        await session.execute(text(
+            "DELETE FROM user_roles WHERE user_id IN "
+            "(SELECT id FROM users WHERE email = 'tech@evamfinance.com')"))
+        await session.execute(text(
+            "DELETE FROM users WHERE email = 'tech@evamfinance.com'"))
         await session.commit()
     await dispose_engine()
 
@@ -226,6 +239,14 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
     async with sm() as session:                       # the operator's edit SURVIVED
         name = (await session.execute(text("SELECT name FROM tenants"))).scalar()
         assert name == "Renamed by operator"
+        # ...while the missing DEFAULT admin user was provisioned additively.
+        tech = (await session.execute(text(
+            "SELECT count(*) FROM users WHERE email = 'tech@evamfinance.com'"))).scalar()
+        assert tech == 1
+        tech_roles = (await session.execute(text(
+            "SELECT role FROM user_roles WHERE user_id IN "
+            "(SELECT id FROM users WHERE email = 'tech@evamfinance.com')"))).scalars().all()
+        assert list(tech_roles) == ["Admin"]
         await session.execute(text("UPDATE tenants SET name = 'Evam Finance'"))
         await session.commit()
     await dispose_engine()

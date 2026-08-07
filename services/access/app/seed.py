@@ -45,24 +45,47 @@ async def ensure_tenant(session: AsyncSession, code: str, name: str) -> uuid.UUI
     return row.id
 
 
-async def ensure_admin_user(session: AsyncSession, tenant_id: uuid.UUID) -> bool:
-    email = f"admin@{get_settings().user_email_domain}"
-    existing = (
-        await session.execute(
-            select(User).where(User.tenant_id == tenant_id, User.email == email)
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return False
-    user = User(tenant_id=tenant_id, email=email, full_name="System Administrator",
-                short_name="Admin", created_by="seed", updated_by="seed")
-    session.add(user)
+def _default_admins() -> list[tuple[str, str, str, tuple[str, ...]]]:
+    """(email, full name, short name, roles) of every DEFAULT user: the system account
+    (Admin + Management) plus the deployment's own operators
+    (ACCESS_EXTRA_ADMIN_EMAILS — the Admin role). An entry names its display name
+    after a colon ("tech@evamfinance.com:TechAdmin"); without one, the name derives
+    from the mailbox."""
+    settings = get_settings()
+    out: list[tuple[str, str, str, tuple[str, ...]]] = [
+        (f"admin@{settings.user_email_domain}", "System Administrator", "Admin",
+         ("Admin", "Management"))]
+    for entry in settings.extra_admin_emails:
+        email, _, name = entry.partition(":")
+        email = email.strip()
+        name = name.strip() or email.split("@", 1)[0].replace(".", " ").title()
+        out.append((email, name, name.split()[0], ("Admin",)))
+    return out
+
+
+async def ensure_admin_user(session: AsyncSession, tenant_id: uuid.UUID) -> int:
+    """Provision every default user that is missing — idempotent, and it NEVER touches
+    a user that already exists (their name and grants stay whatever governance made
+    them). Returns how many users were created."""
+    created = 0
+    for email, full_name, short_name, roles in _default_admins():
+        existing = (
+            await session.execute(
+                select(User).where(User.tenant_id == tenant_id, User.email == email)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        user = User(tenant_id=tenant_id, email=email, full_name=full_name,
+                    short_name=short_name, created_by="seed", updated_by="seed")
+        session.add(user)
+        await session.flush()
+        for role in roles:
+            session.add(UserRole(tenant_id=tenant_id, user_id=user.id, role=role,
+                                 granted_by="seed", created_by="seed", updated_by="seed"))
+        created += 1
     await session.flush()
-    for role in ("Admin", "Management"):
-        session.add(UserRole(tenant_id=tenant_id, user_id=user.id, role=role,
-                             granted_by="seed", created_by="seed", updated_by="seed"))
-    await session.flush()
-    return True
+    return created
 
 
 async def run() -> int:
@@ -75,12 +98,13 @@ async def run() -> int:
     async with sm() as session:
         tenant_id = await ensure_tenant(session, settings.default_tenant_code, "Evam Finance")
         cells = await seed_matrix(session, tenant_id)
-        admin = await ensure_admin_user(session, tenant_id)
+        admins = await ensure_admin_user(session, tenant_id)
         await session.commit()
-    log.info("access seed complete: policy=%s fp=%s matrix_cells=+%d admin_created=%s",
-             POLICY_VERSION, policy_fingerprint()[:12], cells, admin)
+    log.info("access seed complete: policy=%s fp=%s matrix_cells=+%d admins_created=%d",
+             POLICY_VERSION, policy_fingerprint()[:12], cells, admins)
     print(f"Access seed complete (policy {POLICY_VERSION}, fingerprint "
-          f"{policy_fingerprint()[:12]}). Matrix cells added: {cells}, admin created: {admin}.")
+          f"{policy_fingerprint()[:12]}). Matrix cells added: {cells}, "
+          f"admin users created: {admins}.")
     await dispose_engine()
     return 0
 
@@ -114,8 +138,12 @@ async def bootstrap_if_empty() -> int:
     """First-boot bootstrap. An EMPTY Access database (no tenants at all) is a bricked
     platform, not a hardened one — nothing can authenticate against nothing — so it is
     seeded with the baseline (tenant + matrix + admin) in ANY posture. A database with
-    any tenant row is NEVER written on start: it gets the drift report, and every later
-    grant goes through the governed APIs."""
+    any tenant row is NEVER matrix-written on start: it gets the drift report, and every
+    later grant goes through the governed APIs. The one additive exception is the
+    DEFAULT ADMIN USER LIST (admin@<domain> + ACCESS_EXTRA_ADMIN_EMAILS): a user added
+    to that deployment configuration is provisioned on the next start — idempotently,
+    never modifying anyone who already exists — so the platform's own operators don't
+    need a live Admin session to be born."""
     settings = get_settings()
     configure_logging(settings.log_level, json_logs=False)
     init_engine(settings)
@@ -123,11 +151,22 @@ async def bootstrap_if_empty() -> int:
     async with sm() as session:
         empty = (await session.execute(select(Tenant.id).limit(1))).first() is None
         await session.rollback()
-    await dispose_engine()
     if empty:
+        await dispose_engine()
         print("Access database is EMPTY — first-boot bootstrap "
               "(tenant + baseline matrix + admin user).")
         return await run()
+    async with sm() as session:
+        row = (await session.execute(
+            select(Tenant).where(Tenant.code == settings.default_tenant_code)
+        )).scalar_one_or_none()
+        if row is not None:
+            admins = await ensure_admin_user(session, row.id)
+            await session.commit()
+            if admins:
+                log.info("default admin users provisioned on start: +%d", admins)
+                print(f"Default admin users provisioned: {admins}.")
+    await dispose_engine()
     return await check()
 
 

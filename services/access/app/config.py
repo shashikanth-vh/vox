@@ -29,6 +29,12 @@ class Settings(BaseServiceSettings):
     default_tenant_code: str = "EVAM"
     # Users' e-mail addresses must belong to this domain (spec: SSO integrity).
     user_email_domain: str = "evamfinance.com"
+    # DEFAULT Admin users beyond admin@<domain> (comma-separated), provisioned
+    # idempotently at startup with the Admin role — the platform's own operators.
+    # Each entry is "email" or "email:Display Name". Existing users are never
+    # modified; grants beyond these go through the governed Access APIs.
+    extra_admin_emails: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["tech@evamfinance.com:TechAdmin"])
     # When on, governance writes REQUIRE an Admin user context; off keeps
     # machine-to-machine flows working (requests that DO carry a user are always checked).
     enforce_rbac: bool = False
@@ -37,7 +43,7 @@ class Settings(BaseServiceSettings):
     # API-key holder cannot impersonate an Admin by asserting their e-mail.
     gateway_shared_secret: str = ""
 
-    @field_validator("api_keys", mode="before")
+    @field_validator("api_keys", "extra_admin_emails", mode="before")
     @classmethod
     def _split_api_keys(cls, v: object) -> object:
         if isinstance(v, str):

@@ -30,6 +30,12 @@ staticPasswords:
     hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
     username: chetan
     userID: chetan-uid
+  # The platform's own operator — a default Admin in Access (ACCESS_EXTRA_ADMIN_EMAILS).
+  # Password: "prism" (dev IdP only; production sign-in is the real IdP's job).
+  - email: tech@evamfinance.com
+    hash: "$2b$10$xFB0CaOcrCCuV/nK6bSRVu7KbBnUNUuh5Y2zisfBP.fRpXpCOf4ZW"
+    username: tech
+    userID: tech-uid
   # FIXED identities for the end-to-end journey. Maker-checker needs two DISTINCT verified
   # people, and a bearer token can only be issued for an identity that exists here — so the
   # E2E uses these stable e-mails rather than per-run generated ones. Password: "prism".
