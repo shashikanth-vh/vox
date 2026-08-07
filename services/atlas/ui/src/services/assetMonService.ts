@@ -11,6 +11,27 @@ import { inScope, type RowScope } from '../auth/rbac';
 /** The register's path — `asset-monetisation`, as the collection spells it. */
 const AM_PATH = '/asset-monetisation';
 
+// Client mirror of the register's _AM_PIPELINE transition graph (forward one step,
+// back one step for rework, Dropped from any live state) so the status dropdowns
+// offer only moves the register will accept. 'Closed' is deliberately NOT offered
+// even where the graph allows it: the register's evidence gate accepts Closed only
+// once the AM closure APPROVAL is on file — the workflow records that decision and
+// closes the mandate itself. The two terminals are final.
+export const AM_NEXT: Record<string, string[]> = {
+  'Teaser Prepared': ['Teaser Shared', 'Dropped'],
+  'Teaser Shared': ['In Discussion', 'Teaser Prepared', 'Dropped'],
+  'In Discussion': ['NBO Received', 'Teaser Shared', 'Dropped'],
+  'NBO Received': ['BO Received', 'In Discussion', 'Dropped'],
+  'BO Received': ['SPA / Documentation', 'NBO Received', 'Dropped'],
+  'SPA / Documentation': ['BO Received', 'Dropped'],
+  'Closed': [],
+  'Dropped': [],
+};
+
+/** The choices a status dropdown should offer from `current` (current first). */
+export const amStatusOptions = (current: string): string[] =>
+  [current, ...(AM_NEXT[current] ?? [])].filter((s, i, a) => s && a.indexOf(s) === i);
+
 /**
  * An API asset-monetisation line read back as the row the grid renders. The wire is
  * snake_case (value_cr, size_mw, investor_type); unmapped, the columns render blank.

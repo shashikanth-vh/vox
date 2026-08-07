@@ -7,8 +7,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
 import AmSummary from './AmSummary';
-import { assetMonService } from '../../services/assetMonService';
-import { referenceService } from '../../services/referenceService';
+import { assetMonService, amStatusOptions } from '../../services/assetMonService';
 import { fmt } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 import { can, scopeFor, whoCan } from '../../auth/rbac';
@@ -48,14 +47,24 @@ export default function AssetMonPage() {
     { accessorKey: 'itype', header: 'Investor Type', size: 140 },
     {
       accessorKey: 'status', header: 'Status', size: 160,
-      Cell: ({ row }) => (
-        <TextField select size="small" value={row.original.status} disabled={ro} variant="outlined"
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => { assetMonService.update(row.original.id, 'status', e.target.value, user.full); refresh(); }}
-          sx={{ minWidth: 140, '& .MuiOutlinedInput-input': { fontSize: 12, py: '5px' }, '& .MuiOutlinedInput-root': { borderRadius: '7px', bgcolor: '#fff' } }}>
-          {referenceService.getRefSync('Asset Mon Status').map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
-        </TextField>
-      ),
+      // Offers only the register's legal moves (forward one, back one, Dropped).
+      // 'Closed' is absent on purpose: it is recorded by the AM closure APPROVAL —
+      // open the company drawer and start the mandate run; the AM Head's decision
+      // in Today closes the mandate with its evidence on file.
+      Cell: ({ row }) => {
+        const opts = amStatusOptions(row.original.status);
+        return (
+          <TextField select size="small" value={row.original.status} variant="outlined"
+            disabled={ro || opts.length <= 1}
+            title={row.original.status === 'SPA / Documentation'
+              ? 'Closed is recorded by the AM closure approval (start the mandate run in the drawer)' : ''}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => { assetMonService.update(row.original.id, 'status', e.target.value, user.full); refresh(); }}
+            sx={{ minWidth: 140, '& .MuiOutlinedInput-input': { fontSize: 12, py: '5px' }, '& .MuiOutlinedInput-root': { borderRadius: '7px', bgcolor: '#fff' } }}>
+            {opts.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+          </TextField>
+        );
+      },
     },
     { accessorKey: 'teaser', header: 'Date Teaser Shared', size: 150, Cell: ({ cell }) => cell.getValue<string>() || '' },
     { accessorKey: 'notes', header: 'Notes', size: 200, ...truncCell(55) },

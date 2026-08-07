@@ -10,7 +10,7 @@ import { entitiesService } from '../../services/entitiesService';
 import { dealsService } from '../../services/dealsService';
 import { lendingService, LEND_GREEN } from '../../services/lendingService';
 import { syndicationService } from '../../services/syndicationService';
-import { assetMonService } from '../../services/assetMonService';
+import { assetMonService, amStatusOptions } from '../../services/assetMonService';
 import { interactionService } from '../../services/interactionService';
 import { notesService } from '../../services/notesService';
 import LogInteractionDialog from './LogInteractionDialog';
@@ -254,9 +254,17 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               <TextFld label="Nature" value={r.nature} disabled={roAM} onChange={(v) => updA(r.id, 'nature', v)} />
               <TextFld label="Deal type" value={r.dtype} disabled={roAM} onChange={(v) => updA(r.id, 'dtype', v)} />
               <TextFld label="Investor type" value={r.itype} disabled={roAM} onChange={(v) => updA(r.id, 'itype', v)} />
-              <SelectFld label="Status" required value={r.status} disabled={roAM} onChange={(v) => updA(r.id, 'status', v)} options={ref.getRefSync('Asset Mon Status')} />
+              {/* Legal moves only (forward one, back one, Dropped). 'Closed' comes
+                  from the AM closure APPROVAL below, never from this dropdown. */}
+              <SelectFld label="Status" required value={r.status} disabled={roAM || amStatusOptions(r.status).length <= 1} onChange={(v) => updA(r.id, 'status', v)} options={amStatusOptions(r.status)} />
               <TextFld label="Date teaser shared" type="date" value={r.teaser || ''} disabled={roAM} onChange={(v) => updA(r.id, 'teaser', v)} />
             </FieldGrid>
+            {r.status === 'SPA / Documentation' && (
+              <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 0.8 }}>
+                Closing this mandate needs the AM closure approval — start the mandate run
+                below; the decision in Today records the closure with its evidence.
+              </Typography>
+            )}
             {/* What the workflow plane says this user may do next on this
                 line — served, not guessed. */}
             <ActionsPanel subjectType="AssetMonetisation" subjectId={r.id} />
