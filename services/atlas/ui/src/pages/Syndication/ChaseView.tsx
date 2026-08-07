@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { syndicationService, SYN_TERM, SYN_CLOSED, LSTATES, LSTATE_COLOR } from '../../services/syndicationService';
+import { syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, LSTATE_COLOR } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
 import { db } from '../../api/atlasStore';
 import { daysSince, fmt } from '../../utils/format';
@@ -13,7 +13,7 @@ import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
 // density dot strip and inline lender rows (status select + log chase/reply).
-interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; }
+interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; amt?: number | null; }
 
 // Chase-list status → dot colour (v12 ST_COLOR == LSTATE_COLOR).
 const dotColor = (st?: string) => LSTATE_COLOR[st || 'Identified'] || '#94a3b8';
@@ -25,14 +25,19 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'grey'; children: Re
   return <Box component="span" sx={{ display: 'inline-block', borderRadius: 999, px: '8px', py: '2px', fontSize: 10.8, fontWeight: 700, bgcolor: bg, color: fg, whiteSpace: 'nowrap' }}>{children}</Box>;
 }
 
-// v12 `.chline .lsel`: 1px --line box, 4px radius, 12px, tight padding.
-const LSel = ({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) => (
-  <Select size="small" value={value} disabled={disabled} onClick={(e) => e.stopPropagation()}
-    onChange={(e) => onChange(e.target.value)}
-    sx={{ fontSize: '12px', minWidth: 150, borderRadius: '4px', '& .MuiSelect-select': { py: '3px', px: '6px' }, '& fieldset': { borderColor: tokens.line } }}>
-    {LSTATES.map((s) => <MenuItem key={s} value={s} sx={{ fontSize: 12 }}>{s}</MenuItem>)}
-  </Select>
-);
+// v12 `.chline .lsel`: 1px --line box, 4px radius, 12px, tight padding. Offers only
+// the CURRENT status plus its legal next steps — the register enforces the same
+// transition map, so a free-for-all list would just collect 422s.
+const LSel = ({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) => {
+  const opts = [value, ...(LENDER_NEXT[value] ?? [])].filter((s, i, a) => s && a.indexOf(s) === i);
+  return (
+    <Select size="small" value={value} disabled={disabled || opts.length <= 1} onClick={(e) => e.stopPropagation()}
+      onChange={(e) => onChange(e.target.value)}
+      sx={{ fontSize: '12px', minWidth: 150, borderRadius: '4px', '& .MuiSelect-select': { py: '3px', px: '6px' }, '& fieldset': { borderColor: tokens.line } }}>
+      {opts.map((s) => <MenuItem key={s} value={s} sx={{ fontSize: 12 }}>{s}</MenuItem>)}
+    </Select>
+  );
+};
 
 // v12 `.mini`: 11.5px, muted, 1px --line box, 8px radius, white, 5px/11px padding.
 const MiniBtn = ({ onClick, children }: { onClick: () => void; children: React.ReactNode }) => (
@@ -54,6 +59,11 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   // Log chase / Log reply note capture — MUI dialog in place of window.prompt.
   const [logDlg, setLogDlg] = useState<{ kind: 'chase' | 'reply'; code: string; name: string } | null>(null);
   const [logNote, setLogNote] = useState('');
+  // The two OUTCOMES carry substance the register insists on: a decline says why,
+  // a sanction says how much — captured here before the status write goes out.
+  const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' } | null>(null);
+  const [outNote, setOutNote] = useState('');
+  const [outAmt, setOutAmt] = useState('');
   const bump = () => force((n) => n + 1);
   const th = db().th || { lenderSilent: 7 };
 
@@ -77,7 +87,20 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   }));
   attention.sort((a, b) => (a.sev === 'red' ? 0 : 1) - (b.sev === 'red' ? 0 : 1) || b.age - a.age);
 
-  const setSt = (code: string, name: string, st: string) => { if (ro) return; syndicationService.setLenderStatus(code, name, st, user.full); bump(); };
+  const setSt = (code: string, name: string, st: string) => {
+    if (ro) return;
+    if (st === 'Sanctioned' || st === 'Declined') { setOutNote(''); setOutAmt(''); setOutDlg({ code, name, st }); return; }
+    syndicationService.setLenderStatus(code, name, st, user.full); bump();
+  };
+  const submitOut = () => {
+    if (!outDlg) return;
+    syndicationService.setLenderStatus(outDlg.code, outDlg.name, outDlg.st, user.full, {
+      note: outNote.trim() || undefined,
+      amountCr: outDlg.st === 'Sanctioned' && outAmt ? +outAmt : undefined,
+    });
+    setOutDlg(null); bump();
+  };
+  const outOk = outDlg?.st === 'Sanctioned' ? +outAmt > 0 : outNote.trim().length > 0;
   const chase = (code: string, name: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'chase', code, name }); };
   const reply = (code: string, name: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'reply', code, name }); };
   const closeLog = () => setLogDlg(null);
@@ -197,6 +220,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   <LSel value={l.st || 'Identified'} disabled={ro} onChange={(v) => setSt(r.code, l.name, v)} />
                   <Typography component="span" sx={{ fontSize: 11.6, color: tokens.muted }}>
                     {rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}
+                    {l.st === 'Sanctioned' && l.amt != null ? <b style={{ color: LSTATE_COLOR['Sanctioned'] }}> · ₹{fmt(l.amt, 1)} Cr</b> : ''}
                   </Typography>
                   <Box sx={{ flex: 1 }} />
                   {!ro && <><MiniBtn onClick={() => chase(r.code, l.name)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name)}>Log reply</MiniBtn></>}
@@ -233,6 +257,30 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
         <DialogActions>
           <Button onClick={closeLog}>Cancel</Button>
           <Button variant="contained" onClick={submitLog}>Save</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Sanction / decline outcome capture */}
+      <Dialog open={!!outDlg} onClose={() => setOutDlg(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ color: outDlg ? LSTATE_COLOR[outDlg.st] : undefined }}>
+          {outDlg?.st === 'Sanctioned' ? 'Sanction' : 'Decline'}{outDlg ? ` — ${outDlg.name}` : ''}
+        </DialogTitle>
+        <DialogContent>
+          {outDlg?.st === 'Sanctioned' && (
+            <TextField autoFocus fullWidth type="number" sx={{ mt: 1 }} label="Sanctioned amount (₹ Cr)"
+              value={outAmt} onChange={(e) => setOutAmt(e.target.value)} inputProps={{ min: 0, step: 0.5 }} />
+          )}
+          <TextField fullWidth multiline minRows={2} sx={{ mt: 1.5 }}
+            autoFocus={outDlg?.st === 'Declined'}
+            label={outDlg?.st === 'Declined' ? 'Why did they decline? (required)' : 'Note (optional)'}
+            placeholder={outDlg?.st === 'Declined' ? 'Sector cap, pricing, exposure, credit view…' : 'Terms, conditions, next step'}
+            value={outNote} onChange={(e) => setOutNote(e.target.value)} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOutDlg(null)}>Cancel</Button>
+          <Button variant="contained" disabled={!outOk} onClick={submitOut}>
+            Confirm {outDlg?.st?.toLowerCase()}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

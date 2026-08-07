@@ -149,6 +149,9 @@ class SyndicationLender(RegisterBase):
     lender_name: Mapped[str] = mapped_column(String(200), nullable=False)
     is_existing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     status: Mapped[str | None] = mapped_column(String(40))
+    # The bank's sanctioned allocation (₹ Cr) — recorded WITH the Sanctioned status;
+    # the mandate's ask vs. sum-of-allocations arithmetic reads from here.
+    amount_cr: Mapped[float | None] = mapped_column(Numeric(14, 2))
     since: Mapped[date | None] = mapped_column(Date)
     response_date: Mapped[date | None] = mapped_column(Date)
     chased_date: Mapped[date | None] = mapped_column(Date)

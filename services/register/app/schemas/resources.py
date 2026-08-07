@@ -495,6 +495,7 @@ class SyndicationLenderCreate(CreateModel):
     lender_name: str = Field(max_length=200)
     is_existing: bool = False
     status: str | None = Field(default=None, max_length=40)
+    amount_cr: float | None = Field(default=None, ge=0)
     since: date | None = None
     response_date: date | None = None
     chased_date: date | None = None
@@ -507,6 +508,7 @@ class SyndicationLenderUpdate(UpdateModel):
     lender_name: str | None = Field(default=None, max_length=200)
     is_existing: bool | None = None
     status: str | None = Field(default=None, max_length=40)
+    amount_cr: float | None = Field(default=None, ge=0)
     since: date | None = None
     response_date: date | None = None
     chased_date: date | None = None
@@ -520,6 +522,7 @@ class SyndicationLenderRead(ReadModel):
     lender_name: str
     is_existing: bool
     status: str | None
+    amount_cr: float | None
     since: date | None
     response_date: date | None
     chased_date: date | None

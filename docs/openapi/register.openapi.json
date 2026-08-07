@@ -13558,6 +13558,18 @@
       "SyndicationLenderCreate": {
         "additionalProperties": false,
         "properties": {
+          "amount_cr": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cr"
+          },
           "chased_date": {
             "anyOf": [
               {
@@ -13674,6 +13686,17 @@
       },
       "SyndicationLenderRead": {
         "properties": {
+          "amount_cr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cr"
+          },
           "chased_date": {
             "anyOf": [
               {
@@ -13841,6 +13864,7 @@
           "lender_name",
           "is_existing",
           "status",
+          "amount_cr",
           "since",
           "response_date",
           "chased_date",
@@ -13853,6 +13877,18 @@
       "SyndicationLenderUpdate": {
         "additionalProperties": false,
         "properties": {
+          "amount_cr": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cr"
+          },
           "chased_date": {
             "anyOf": [
               {

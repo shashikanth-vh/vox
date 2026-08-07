@@ -22,7 +22,7 @@ from sqlalchemy import func, or_, select
 from app import authz
 from app import storage as storage_mod
 from app.core.config import get_settings
-from app.core.errors import ForbiddenError, NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.db.base import AuditLog
@@ -250,6 +250,49 @@ async def add_syndication_lender(
     return s.SyndicationLenderRead.model_validate(obj)
 
 
+# The lender pipeline's ORDERED transitions (Platform Deals matrix). A dot never
+# jumps from Identified straight to Sanctioned, and the two terminal outcomes are
+# final — the same discipline as the lending stages, enforced where every write
+# lands so neither the matrix popover nor the chase list nor Postman can skip it.
+_LENDER_TRANSITIONS: dict[str, set[str]] = {
+    "": {"Identified"},
+    "Identified": {"IM Circulated", "Declined"},
+    "IM Circulated": {"Docs Pending", "Queries Received", "IP Received", "Declined"},
+    "Docs Pending": {"IM Circulated", "Queries Received", "IP Received", "Declined"},
+    "Queries Received": {"Docs Pending", "IP Received", "Declined"},
+    "IP Received": {"Queries Received", "Sanctioned", "Declined"},
+    "Sanctioned": set(),
+    "Declined": set(),
+}
+
+
+async def _notify_syn_outcome(ctx: RequestContext, syn: Any, lender: Any,
+                              outcome: str) -> None:
+    """A bank's Sanctioned/Declined is news the desk should not discover by staring at
+    the matrix: notify the mandate's RM and analyst (resolved to their register
+    e-mails; names without one are skipped silently)."""
+    from app.api.notify import notify_maker
+
+    names = {n for n in ((syn.rm or "").strip(), (syn.analyst or "").strip()) if n}
+    if not names:
+        return
+    # Trackers store people by name — sometimes the short handle, sometimes the
+    # full name — so match either column.
+    rows = (await ctx.session.execute(select(Person).where(
+        Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
+        or_(Person.name.in_(names), Person.full_name.in_(names))))).scalars().all()
+    amt = f" · ₹{float(lender.amount_cr):g} Cr" if lender.amount_cr is not None else ""
+    for p in rows:
+        await notify_maker(
+            ctx, recipient=(p.email or "").strip() or None,
+            event=f"lender.{outcome.lower()}",
+            title=f"{lender.lender_name} {outcome}{amt} — {syn.tracker_no or 'mandate'}",
+            body=(lender.note or None),
+            severity="info" if outcome == "Sanctioned" else "warning",
+            subject_type="Syndication", subject_id=str(syn.id),
+            dedupe_key=f"ntf:synlender:{lender.id}:{outcome}")
+
+
 @router.patch("/v1/syndication/{syndication_id}/lenders/{lender_id}",
               response_model=s.SyndicationLenderRead, tags=["Syndication Lenders"],
               summary="Update a lender row (chase status, dates, note)")
@@ -270,9 +313,31 @@ async def update_syndication_lender(
     if str(row.syndication_id) != str(syndication_id):
         raise NotFoundError(
             f"lender '{lender_id}' is not on syndication '{syndication_id}'.")
+    data = payload.model_dump(exclude_unset=True)
+    new_status = (data.get("status") or "").strip() if "status" in data else None
+    if new_status is not None and new_status != (row.status or ""):
+        allowed = _LENDER_TRANSITIONS.get(row.status or "", set())
+        if new_status not in allowed:
+            raise ValidationAppError(
+                f"A lender at {row.status or 'no status'!r} cannot move to "
+                f"{new_status!r} — next steps are: "
+                f"{', '.join(sorted(allowed)) or 'none (terminal)'}.")
+        # The two outcomes carry their substance: a decline says WHY, a sanction
+        # says HOW MUCH.
+        if new_status == "Declined" and not (data.get("note") or row.note or "").strip():
+            raise ValidationAppError(
+                "A decline must say why — the note reaches the RM and the record.")
+        if new_status == "Sanctioned" and data.get("amount_cr") is None \
+                and row.amount_cr is None:
+            raise ValidationAppError(
+                "A sanction records the bank's allocation — supply amount_cr (₹ Cr).")
     obj = await _synlender_repo.update(
-        ctx.session, ctx.tenant_id, lender_id, ctx.actor,
-        payload.model_dump(exclude_unset=True))
+        ctx.session, ctx.tenant_id, lender_id, ctx.actor, data)
+    if new_status in ("Sanctioned", "Declined"):
+        syn = await load_subject(ctx.session, ctx.tenant_id, "Syndication",
+                                 syndication_id)
+        if syn is not None:
+            await _notify_syn_outcome(ctx, syn, obj, new_status)
     return s.SyndicationLenderRead.model_validate(obj)
 
 

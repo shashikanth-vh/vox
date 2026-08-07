@@ -10,10 +10,26 @@ import type { SynRow, SynLender } from '../pages/Syndication/syndication.types';
 export const SYN_TERM = ['Dropped', 'Withdrawn', 'Rejected'];
 export const SYN_CLOSED = ['Sanctioned', 'Disbursed'];
 
-// v12 ST2DOT — maps a lender chase status to a matrix dot state (1..5).
+// ST2DOT — maps a lender chase status to a matrix dot state (1..6). Sanctioned is
+// its OWN state (green): the desk reads "who actually approved" straight off the
+// grid instead of sharing a colour with the approval track.
 export const ST2DOT: Record<string, number> = {
   'Identified': 1, 'IM Circulated': 2, 'Docs Pending': 2, 'Queries Received': 3,
-  'IP Received': 4, 'Sanctioned': 4, 'Declined': 5,
+  'IP Received': 4, 'Sanctioned': 5, 'Declined': 6,
+};
+
+// The legal next steps per lender status — the client-side mirror of the register's
+// _LENDER_TRANSITIONS map, so the matrix popover and the chase list only OFFER moves
+// the server will accept. '' (not in play) can only be Identified.
+export const LENDER_NEXT: Record<string, string[]> = {
+  '': ['Identified'],
+  'Identified': ['IM Circulated', 'Declined'],
+  'IM Circulated': ['Docs Pending', 'Queries Received', 'IP Received', 'Declined'],
+  'Docs Pending': ['IM Circulated', 'Queries Received', 'IP Received', 'Declined'],
+  'Queries Received': ['Docs Pending', 'IP Received', 'Declined'],
+  'IP Received': ['Queries Received', 'Sanctioned', 'Declined'],
+  'Sanctioned': [],
+  'Declined': [],
 };
 
 // ---------------------------------------------------------------------------
@@ -35,6 +51,7 @@ function toLender(l: any): SynLender {
     resp: l?.response_date || '',
     chased: l?.chased_date || null,
     note: l?.note || '',
+    amt: l?.amount_cr == null ? null : Number(l.amount_cr),
     h: l?.status_history || [],
   };
 }
@@ -147,13 +164,29 @@ export const syndicationService = {
     }
     writeAudit(by, 'Lender added', code, name);
   },
-  setLenderStatus(code: string, name: string, st: string, by: string) {
+  /** Move a lender's chase status. The two outcomes carry substance: a Declined move
+   *  should hand in the reason (note), a Sanctioned move the bank's allocation
+   *  (amountCr) — the register REQUIRES both, so callers capture them first. */
+  setLenderStatus(code: string, name: string, st: string, by: string,
+                  opts?: { note?: string; amountCr?: number | null }) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
-    if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, { status: st, since: today() });
+    const body: any = { status: st, since: today() };
+    if (opts?.note?.trim()) body.note = opts.note.trim();
+    if (opts?.amountCr != null) body.amount_cr = opts.amountCr;
+    if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, body);
     const before = e.st; e.st = st; e.since = today(); e.resp = today();
+    if (body.note) e.note = body.note;
+    if (body.amount_cr != null) e.amt = body.amount_cr;
     (e.h = e.h || []).push({ st, t: today(), by });
-    writeAudit(by, 'Lender status', code, `${name}: ${before || '—'} → ${st}`);
+    writeAudit(by, 'Lender status', code, `${name}: ${before || '—'} → ${st}`
+      + (body.amount_cr != null ? ` · ₹${body.amount_cr} Cr` : '')
+      + (body.note ? ` · ${String(body.note).slice(0, 60)}` : ''));
+  },
+  /** The live lender row behind a matrix cell (first mandate carrying that bank —
+   *  the same row setLenderStatus writes). */
+  lenderRow(code: string, name: string): SynLender | undefined {
+    return db().syn.find((x: SynRow) => x.code === code)?.lenders?.find((l: any) => l.name === name);
   },
   logChase(code: string, name: string, note: string, by: string) {
     const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
@@ -221,7 +254,7 @@ export const syndicationService = {
       const cell = mx[r.code] = mx[r.code] || {};
       (r.lenders || []).forEach((l: any) => {
         if (l.ex || !l.st) return;
-        cell[l.name] = { s: ST2DOT[l.st] || 1, since: l.since, h: l.h || [] };
+        cell[l.name] = { s: ST2DOT[l.st] || 1, st: l.st, since: l.since, h: l.h || [] };
       });
     });
     return mx;
@@ -262,7 +295,7 @@ const WIRE_FIELD: Record<string, string> = {
   pendingWith: 'pending_with', remarks: 'remarks',
 };
 
-export interface MatrixCell { s: number; since?: string; h?: { s: number; t: string; by: string }[]; }
+export interface MatrixCell { s: number; st?: string; since?: string; h?: any[]; }
 
 // One aggregated row of the by-bank register.
 export interface BankRow {
@@ -277,15 +310,16 @@ export const LSTATE_COLOR: Record<string, string> = {
   'Queries Received': '#2563eb', 'IP Received': '#d97706', Sanctioned: '#059669', Declined: '#dc2626',
 };
 
-export const MATRIX_LABELS = ['Not in play', 'Identified — to showcase', 'IM submitted', 'Queries received', 'Approval track', 'Declined'];
-// state -> colour (mirrors template --m1..--m5)
-export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#2E7D4F', '#B3432B'];
+export const MATRIX_LABELS = ['Not in play', 'Identified — to showcase', 'IM submitted', 'Queries received', 'Approval track', 'Sanctioned', 'Declined'];
+// state -> colour: yellow / orange / blue / purple (approval track) / green / red
+export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B'];
 
 export const MATRIX_PRESETS = [
   { id: 'show', label: 'To showcase', states: [1], dwell: '', scope: 'Live' as const },
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
   { id: 'ballus', label: 'Ball with us ≥5d', states: [3], dwell: 5, scope: 'Live' as const },
   { id: 'appr', label: 'Approval track', states: [4], dwell: '', scope: 'Live' as const },
-  { id: 'decl', label: 'Declined', states: [5], dwell: '', scope: 'All' as const },
+  { id: 'sanc', label: 'Sanctioned', states: [5], dwell: '', scope: 'All' as const },
+  { id: 'decl', label: 'Declined', states: [6], dwell: '', scope: 'All' as const },
   { id: 'noout', label: 'No outreach yet', states: [] as number[], dwell: '', scope: 'Live' as const, noout: true },
 ];

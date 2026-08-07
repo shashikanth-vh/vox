@@ -12910,7 +12910,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"chased_date\": \"2026-03-31\",\n  \"counterparty_id\": \"{{id}}\",\n  \"is_existing\": false,\n  \"lender_name\": \"sample lender_name\",\n  \"note\": \"sample note\",\n  \"response_date\": \"2026-03-31\",\n  \"since\": \"2026-03-31\",\n  \"status\": \"sample status\",\n  \"status_history\": [\n    {}\n  ],\n  \"syndication_id\": \"{{id}}\"\n}",
+              "raw": "{\n  \"amount_cr\": 1.0,\n  \"chased_date\": \"2026-03-31\",\n  \"counterparty_id\": \"{{id}}\",\n  \"is_existing\": false,\n  \"lender_name\": \"sample lender_name\",\n  \"note\": \"sample note\",\n  \"response_date\": \"2026-03-31\",\n  \"since\": \"2026-03-31\",\n  \"status\": \"sample status\",\n  \"status_history\": [\n    {}\n  ],\n  \"syndication_id\": \"{{id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12971,7 +12971,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"chased_date\": \"2026-03-31\",\n  \"counterparty_id\": \"{{id}}\",\n  \"is_existing\": false,\n  \"lender_name\": \"sample lender_name\",\n  \"note\": \"sample note\",\n  \"response_date\": \"2026-03-31\",\n  \"since\": \"2026-03-31\",\n  \"status\": \"sample status\",\n  \"status_history\": [\n    {}\n  ]\n}",
+              "raw": "{\n  \"amount_cr\": 1.0,\n  \"chased_date\": \"2026-03-31\",\n  \"counterparty_id\": \"{{id}}\",\n  \"is_existing\": false,\n  \"lender_name\": \"sample lender_name\",\n  \"note\": \"sample note\",\n  \"response_date\": \"2026-03-31\",\n  \"since\": \"2026-03-31\",\n  \"status\": \"sample status\",\n  \"status_history\": [\n    {}\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
