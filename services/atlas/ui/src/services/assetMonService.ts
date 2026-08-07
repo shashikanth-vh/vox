@@ -43,7 +43,9 @@ export function toAmRow(r: any): AmRow {
     code: r?.deal_no || r?.code || '',
     _name: r?.company || r?.entity_name || r?.display_name || '',
     state: r?.state || '',
-    val: Number(r?.value_cr ?? r?.amount_cr) || 0,
+    // The register's read field is indicative_value_cr (the update map below always
+    // knew this); the old value_cr key made every register row display ₹0.00.
+    val: Number(r?.indicative_value_cr ?? r?.value_cr ?? r?.amount_cr) || 0,
     mw: Number(r?.size_mw ?? r?.mw) || 0,
     nature: r?.nature || '',
     dtype: r?.deal_type || '',
