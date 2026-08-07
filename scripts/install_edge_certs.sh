@@ -14,7 +14,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CERT_DIR="$ROOT/deploy/nginx/certs"
 
 [[ $# -eq 2 ]] || { echo "usage: $0 <fullchain.pem> <privkey.pem>" >&2; exit 1; }
-[[ -f "$1" && -f "$2" ]] || { echo "cert or key file not found" >&2; exit 1; }
+if [[ ! -f "$1" || ! -f "$2" ]]; then
+  # /etc/letsencrypt/live is root-only: without sudo the files LOOK absent even when
+  # they exist. Distinguish the two failures instead of guessing.
+  if [[ $EUID -ne 0 && ( "$1" == /etc/letsencrypt/* || "$2" == /etc/letsencrypt/* ) ]]; then
+    echo "cert or key not readable — /etc/letsencrypt is root-only; re-run with sudo:" >&2
+    echo "  sudo $0 $1 $2" >&2
+  else
+    echo "cert or key file not found: check the paths (has certbot issued the cert yet?)" >&2
+  fi
+  exit 1
+fi
 
 # Sanity: the key must match the certificate, and the cert should not be expired.
 crt_mod="$(openssl x509 -noout -modulus -in "$1" | openssl md5)"
