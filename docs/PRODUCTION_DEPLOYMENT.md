@@ -139,6 +139,29 @@ docker compose start register access gateway workflows-worker temporal
 Documents: `miniodata` is plain files — back the volume up the same way. The in-app
 **Admin → Tools → Export ledger / Backup** flows add a business-level export on top.
 
+## 5b. Container logs — bounded, so a chatty service can't fill the disk
+
+Docker's default logging grows **without limit** — a verbose or error-looping container
+slowly fills `/var/lib/docker` until the disk is full, and a full disk stops Postgres,
+the stack, and Docker itself. The compose file now caps every service at
+**10 MB × 5 rotated files (50 MB per container, ~1 GB worst-case for the whole stack)**;
+`docker logs <svc>` works exactly as before within that window. The cap applies when a
+container is (re)created — the next `up -d --build` after this change does it.
+
+Belt-and-braces (optional): make the same limit the *host-wide* Docker default, so even
+containers started outside compose are covered — `/etc/docker/daemon.json`:
+
+```json
+{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "5" } }
+```
+
+then `sudo systemctl restart docker` (one-time; do it in a maintenance moment — it
+restarts every container).
+
+Watch disk health occasionally: `df -h /var/lib/docker` and `docker system df`.
+Reclaim space from old images after upgrades with `docker image prune -af` (safe — it
+removes only unused images; volumes are never touched).
+
 ## 6. Sign-in hardening (recap)
 
 Production runs the prod-posture overlay: OIDC everywhere, RBAC + RLS enforced,
