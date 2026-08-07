@@ -110,8 +110,8 @@ function BankChart({ rows }: { rows: BankRow[] }) {
         <RTooltip />
         <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="Pursued" fill={tokens.navy} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="Approved" fill="#059669" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="Declined" fill="#dc2626" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="Approved" fill="#2E7D4F" radius={[3, 3, 0, 0]} />
+        <Bar dataKey="Declined" fill="#B3432B" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );

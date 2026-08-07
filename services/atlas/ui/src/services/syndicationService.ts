@@ -339,14 +339,16 @@ export const LSTATES = ['Identified', 'IM Circulated', 'Docs Pending', 'Queries 
  *  every human-facing surface says "Approved" — the desk's word for a bank
  *  saying yes. Map here, never at call sites, so the rename is one line. */
 export const lenderLabel = (st: string): string => (st === 'Sanctioned' ? 'Approved' : st);
-export const LSTATE_COLOR: Record<string, string> = {
-  Identified: '#94a3b8', 'IM Circulated': '#64748b', 'Docs Pending': '#0891b2',
-  'Queries Received': '#2563eb', 'IP Received': '#d97706', Sanctioned: '#059669', Declined: '#dc2626',
-};
-
 export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM submitted', 'Queries received', 'Approval track', 'Approved', 'Declined'];
 // state -> colour: yellow / orange / blue / purple (approval track) / green / red
 export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B'];
+
+// ONE palette everywhere: a lender status colours identically in the chase list,
+// the matrix, the by-bank register and the dashboards — derived from the matrix
+// palette through ST2DOT so the two can never drift again.
+export const LSTATE_COLOR: Record<string, string> = Object.fromEntries(
+  Object.entries(ST2DOT).map(([st, s]) => [st, MATRIX_COLORS[s]]),
+);
 
 export const MATRIX_PRESETS = [
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
