@@ -27,9 +27,14 @@ if [[ ! -f "$1" || ! -f "$2" ]]; then
 fi
 
 # Sanity: the key must match the certificate, and the cert should not be expired.
-crt_mod="$(openssl x509 -noout -modulus -in "$1" | openssl md5)"
-key_mod="$(openssl rsa  -noout -modulus -in "$2" 2>/dev/null | openssl md5 || true)"
-if [[ -n "$key_mod" && "$crt_mod" != "$key_mod" ]]; then
+# Compare PUBLIC KEYS, not RSA moduli — Let's Encrypt issues ECDSA keys by default
+# now, and an RSA-only check refuses those perfectly valid pairs.
+crt_pub="$(openssl x509 -pubkey -noout -in "$1" 2>/dev/null | openssl md5)"
+key_pub="$(openssl pkey -pubout -in "$2" 2>/dev/null | openssl md5 || true)"
+if [[ -z "$crt_pub" ]]; then
+  echo "REFUSING: $1 does not parse as an X.509 certificate." >&2; exit 1
+fi
+if [[ -n "$key_pub" && "$crt_pub" != "$key_pub" ]]; then
   echo "REFUSING: that key does not match that certificate." >&2; exit 1
 fi
 openssl x509 -checkend 86400 -noout -in "$1" \
