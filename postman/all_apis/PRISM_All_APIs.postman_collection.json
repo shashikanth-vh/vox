@@ -1765,7 +1765,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"lens\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2011,7 +2011,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
+                  "raw": "{\n  \"expected_version\": 1,\n  \"deal_no\": \"sample\",\n  \"entity_id\": \"{{id}}\",\n  \"code\": \"sample\",\n  \"product_type\": \"sample\",\n  \"is_lending\": false,\n  \"is_syndication\": false,\n  \"is_asset_mon\": false,\n  \"rm\": \"sample\",\n  \"analyst\": \"sample\",\n  \"lens\": \"sample\",\n  \"stage\": \"New Inquiry\",\n  \"temperature\": \"sample\",\n  \"source\": \"sample\",\n  \"source_detail\": \"sample\",\n  \"source_name\": \"sample\",\n  \"date_received\": \"2026-01-31\",\n  \"ic_date\": \"2026-01-31\",\n  \"sanction_date\": \"2026-01-31\",\n  \"disbursement_date\": \"2026-01-31\",\n  \"exit_date\": \"2026-01-31\",\n  \"remarks\": \"sample\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

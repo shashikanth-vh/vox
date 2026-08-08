@@ -93,6 +93,9 @@ class Deal(RegisterBase):
 
     rm: Mapped[str | None] = mapped_column(String(120))
     analyst: Mapped[str | None] = mapped_column(String(120))
+    # The climate lens (Mitigation / Adaptation) at deal level — carried over from the
+    # lead at conversion and from the Leads sheet on import (0014).
+    lens: Mapped[str | None] = mapped_column(String(20))
     # THE deal stage — the ORIGINATION FUNNEL, verbatim MIS vocabulary (New Inquiry / In
     # Screening / In Pipeline / On Hold / Screened Out / Closed Won / Closed Lost; see rbac
     # DEAL_FUNNEL_STAGES). A deal carries no credit lifecycle: the bank/NBFC pipeline is

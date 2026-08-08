@@ -401,6 +401,14 @@ async def import_workbook(
         sector_by.setdefault(k, _s(r.get("Sector")))
         lens_by.setdefault(k, _s(r.get("Mitigation / Adaptation")))
         state_by.setdefault(k, _s(r.get("Location")))
+    # The company's credit analyst, from whichever tracker line names one first — the
+    # Deals grid shows it at deal level, but the ledger only carries it per line.
+    analyst_by: dict[str, str] = {}
+    for r in lending + syn:
+        k = _key(company_of(r) or "")
+        a = _s(r.get("Credit Analyst"))
+        if a and k not in analyst_by:
+            analyst_by[k] = a
     for r in deals:
         k = _key(company_of(r) or "")
         sector_by.setdefault(k, _s(r.get("Sector")))
@@ -761,6 +769,11 @@ async def import_workbook(
             "is_lending": _yes(r.get("Lending?")),
             "is_syndication": _yes(r.get("Syndication?")) or part_flag,
             "is_asset_mon": _yes(r.get("Asset Mon?")), "rm": _s(r.get("RM")),
+            # The Deals grid shows these at deal level; the ledger carries them on the
+            # LEADS sheet (Mitigation/Adaptation) and the TRACKER lines (Credit
+            # Analyst) — copy them across so the columns aren't born empty.
+            "lens": lens_by.get(_key(nm)),
+            "analyst": analyst_by.get(_key(nm)),
             "stage": funnel, "temperature": temp,
             "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),
             "date_received": _date(r.get("Date Received")),

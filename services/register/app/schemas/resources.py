@@ -262,6 +262,7 @@ class DealCreate(CreateModel):
     is_asset_mon: bool = False
     rm: str | None = Field(default=None, max_length=120)
     analyst: str | None = Field(default=None, max_length=120)
+    lens: str | None = Field(default=None, max_length=20)
     stage: DealFunnelStage | None = None
     temperature: str | None = Field(default=None, max_length=10)
     source: str | None = Field(default=None, max_length=40)
@@ -285,6 +286,7 @@ class DealUpdate(UpdateModel):
     is_asset_mon: bool | None = None
     rm: str | None = Field(default=None, max_length=120)
     analyst: str | None = Field(default=None, max_length=120)
+    lens: str | None = Field(default=None, max_length=20)
     stage: DealFunnelStage | None = None
     temperature: str | None = Field(default=None, max_length=10)
     source: str | None = Field(default=None, max_length=40)
@@ -308,6 +310,7 @@ class DealRead(ReadModel):
     is_asset_mon: bool
     rm: str | None
     analyst: str | None
+    lens: str | None = None
     stage: str | None
     stage_history: list[dict[str, Any]] | None = None
     reconciliation_status: str | None = None

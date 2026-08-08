@@ -584,6 +584,9 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         "is_asset_mon": payload.is_asset_mon,
         "rm": payload.rm, "analyst": payload.analyst,
         "temperature": payload.temperature,
+        # The climate lens travels with the company from its lead — the Deals grid
+        # shows it at deal level.
+        "lens": getattr(lead, "lens", None),
         # An approved conversion is a committed opportunity with live product lines — it enters
         # the COMMERCIAL funnel at 'In Pipeline'. Credit execution starts on the lending line
         # (created below at 'Data Awaited'), never on the deal.

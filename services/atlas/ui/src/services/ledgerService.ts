@@ -11,8 +11,24 @@ import axiosClient from '../api/axiosClient';
 //            workbook that re-imports with nothing lost (the round trip is the
 //            contract, covered by server tests).
 
+export interface LedgerBook {
+  entities: number;
+  leads: { total: number; by_status: Record<string, number> };
+  deals: { total: number; lending: number; syndication: number; asset_mon: number };
+  lending: { lines: number; amount_cr: number; by_stage: Record<string, number> };
+  syndication: {
+    trackers: number; ask_cr: number; partnership_trackers: number;
+    lenders: number; allocation_cr: number;
+    lenders_by_status: Record<string, number>; mandate_statuses: number;
+  };
+  asset_monetisation: { mandates: number; indicative_cr: number; size_mw: number };
+  counterparties: { total: number; active: number };
+}
+
 export interface LedgerImportResult {
   counts: Record<string, number>;
+  /** What the whole book holds AFTER this import — desk-language totals. */
+  book?: LedgerBook;
   report: {
     quarantined: any[]; quarantined_count: number;
     reconciliation: any[]; reconciliation_count: number;

@@ -4098,6 +4098,18 @@
             "title": "Is Syndication",
             "type": "boolean"
           },
+          "lens": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lens"
+          },
           "product_type": {
             "anyOf": [
               {
@@ -4352,6 +4364,17 @@
           "is_syndication": {
             "title": "Is Syndication",
             "type": "boolean"
+          },
+          "lens": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lens"
           },
           "product_type": {
             "anyOf": [
@@ -4676,6 +4699,18 @@
               }
             ],
             "title": "Is Syndication"
+          },
+          "lens": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lens"
           },
           "product_type": {
             "anyOf": [
