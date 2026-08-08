@@ -107,7 +107,10 @@ async function loadReal(): Promise<void> {
     if (!r.code) r.code = r.id;
     // The views name companies via clientsService.get(code) — seed that cache so a
     // register-born code resolves to the real company name, not to itself.
-    if (r.code && r._name && !db().clients[r.code]) db().clients[r.code] = { name: r._name };
+    // Name-lookup seed ONLY (drill rows resolve display names through the client
+    // store). _shadow marks it a lookup entry, NOT a registry row — the dashboard's
+    // "clients on register" must not count these (it read 416 with 340 real).
+    if (r.code && r._name && !db().clients[r.code]) db().clients[r.code] = { name: r._name, _shadow: true } as any;
     // Column order: append lender names the default order doesn't know yet.
     (r.lenders || []).forEach((l: any) => {
       if (l.name && !db().lenderOrder.includes(l.name)) db().lenderOrder.push(l.name);

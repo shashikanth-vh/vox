@@ -81,7 +81,9 @@ export function computeDashboard(person?: string): DashboardV11 {
   const hero = {
     closedAmt, closedN, pipeAmt, pipeN,
     conv: (closedN + pipeN) ? Math.round((closedN / (closedN + pipeN)) * 100) : 0,
-    clients: Object.keys(D.clients || {}).length,
+    // Registry rows only — hydration seeds _shadow name-lookup entries for tracker
+    // codes, which are not clients.
+    clients: Object.values(D.clients || {}).filter((c: any) => !c?._shadow).length,
     lenders: lenderSet.size,
     liveMandates: pipeSyn.length,
   };
