@@ -358,7 +358,7 @@ _LENDER_MASTER_HDR = ["Lender Name", "Type", "Short Name", "Active?",
                       "Active Submissions", "Sanctioned", "Rejected"]
 _CLIENT_MASTER_HDR = ["Group Code", "Company Legal Name", "Sector (default)",
                       "PAN (optional)", "Group Notes"]
-_PEOPLE_HDR = ["Role", "Initials", "Full Name", "Notes"]
+_PEOPLE_HDR = ["Role", "Initials", "Full Name", "Email", "Notes"]
 _MANDATE_HDR = ["Company", "RM", "Mandate Sent/Not Sent", "Signed/Pending",
                 "Syndication", "Partnership"]
 
@@ -591,7 +591,8 @@ def build_ledger_workbook(data: dict):
     # --- People Master -------------------------------------------------------
     ws = _sheet_with("People Master", "PEOPLE MASTER", _PEOPLE_HDR)
     for p in data.get("people") or []:
-        ws.append([p.get("role"), p.get("name"), p.get("full_name"), p.get("notes")])
+        ws.append([p.get("role"), p.get("name"), p.get("full_name"), p.get("email"),
+                   p.get("notes")])
 
     # --- Mandate Tracker (header in row 1, exactly like the ledger) ----------
     ws = wb.create_sheet("Mandate Tracker")

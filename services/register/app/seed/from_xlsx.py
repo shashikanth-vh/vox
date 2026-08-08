@@ -511,10 +511,14 @@ async def import_workbook(
             continue
         initials, role = _s(r.get("Initials")), _s(r.get("Role"))
         pnotes = _s(r.get("Notes"))
+        # Optional Email column: the join key between this roster row and the person's
+        # sign-in account (Access matches by email first) — fill it in the sheet and
+        # nobody stitches identities by hand in the UI.
+        pemail = _s(r.get("Email"))
         p = person_by_full.get(_key(full))
         if p is None:
             p = Person(tenant_id=tenant_id, name=initials or full.split()[0],
-                       full_name=full, role=role or "RM", notes=pnotes,
+                       full_name=full, role=role or "RM", notes=pnotes, email=pemail,
                        created_by="xlsx-import", updated_by="xlsx-import")
             session.add(p)
             people_seen.add(_key(full))
@@ -527,6 +531,8 @@ async def import_workbook(
                 p.name = initials
             if pnotes and not p.notes:
                 p.notes = pnotes
+            if pemail:
+                p.email = pemail
             p.updated_by = "xlsx-import"
 
     def add_person(nm, role):

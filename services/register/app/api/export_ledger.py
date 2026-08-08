@@ -115,7 +115,7 @@ async def export_ledger_xlsx(
         "counterparties": [_row(x, ("name", "counterparty_type", "short_name",
                                     "is_active", "sectors", "notes"))
                            for x in counterparties],
-        "people": [_row(x, ("role", "name", "full_name", "notes")) for x in people],
+        "people": [_row(x, ("role", "name", "full_name", "email", "notes")) for x in people],
     })
 
     actor = ctx.user.email if ctx.user is not None else ctx.actor
