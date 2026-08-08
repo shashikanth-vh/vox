@@ -41,6 +41,11 @@ HDR_ALIASES = {
     # The live ledger's Deals sheet spells the flag with a typo and a space.
     "partnerhship ?": "Partnership?",
     "partnership ?": "Partnership?",
+    # People Master's sign-in join key, in every spelling a desk sheet uses.
+    "email": "Email",
+    "email id": "Email",
+    "e-mail": "Email",
+    "mail id": "Email",
 }
 
 
