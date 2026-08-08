@@ -58,8 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const roles = parseRoles(p);
     return { name: p.name, full: p.full, roles, role: primaryRole(roles) };
   });
-  // Login always starts as Admin (Kannan) in mock mode.
-  const adminUser = users.find((u) => u.roles.includes('Admin')) ?? users[0];
+  // Login always starts as Admin (Kannan) in mock mode. A live build's store has no
+  // people until sign-in, so this must still yield a real AppUser — the context promises
+  // `user` is never undefined, and pre-login renders do read it.
+  const adminUser: AppUser = users.find((u) => u.roles.includes('Admin')) ?? users[0]
+    ?? { name: '', full: '', roles: ['BDRM'], role: 'BDRM' };
 
   // A session surviving in sessionStorage (same tab, e.g. a reload) signs straight back in.
   const restored = authService.isLive() ? getSession() : null;

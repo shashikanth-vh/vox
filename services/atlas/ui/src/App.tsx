@@ -65,14 +65,18 @@ export default function App() {
   //
   // Keyed off the false→true transition only: a reload with a live session is not a
   // sign-in, and rewriting the URL there would break every deep link into the app.
+  //
+  // These hooks run on every render — including the signed-OUT renders above the Login
+  // return — and in a live build with an empty store there is no user until sign-in, so
+  // every `user` read here must tolerate undefined.
   const wasAuthed = useRef(authed);
   useEffect(() => {
     if (authed && !wasAuthed.current) {
-      const first = NAV.find((n) => canSee(user.roles, n.tab));
+      const first = NAV.find((n) => canSee(user?.roles ?? [], n.tab));
       nav(first?.path ?? '/today', { replace: true });
     }
     wasAuthed.current = authed;
-  }, [authed, user.roles, nav]);
+  }, [authed, user?.roles, nav]);
 
   if (!authed) return <Login />;
   return (
