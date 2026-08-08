@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, isRegisterId, USE_REAL_API } from '../api/http';
+import { api, listAll, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, isRegisterId, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -65,6 +65,17 @@ function hydrate(rows: LendingRow[]): void {
 }
 
 export const lendingService = {
+  /** The WHOLE lending book into the store (live mode) — the dashboard must sum every
+   *  line, not just the grid pages this session happened to load. */
+  async hydrateAll(): Promise<void> {
+    if (!USE_REAL_API) return;
+    const rows = (await listAll('/lending', { key: 'lending' })).map(toLendingRow);
+    await fillFromDeal(rows);
+    const store = db().lending as LendingRow[];
+    store.length = 0;
+    store.push(...rows);
+  },
+
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<LendingRow>>(
       async () => {

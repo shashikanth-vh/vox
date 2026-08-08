@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { hydrateBook } from '../../services/bookHydration';
 import { Alert, Box, Paper, Typography, Button, Collapse } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -90,13 +91,9 @@ export default function TodayPage() {
   // here first, before visiting Leads/Deals, would otherwise see nameless rows).
   // Fail-soft: a failed pull just leaves the fallback text.
   useEffect(() => {
-    const q = { pageIndex: 0, pageSize: 500, globalFilter: '', sorting: [], columnFilters: [] } as any;
-    void Promise.allSettled([
-      leadsService.list(q, null, { includeConverted: true }),
-      dealsService.list(q),
-      syndicationService.hydrate(),
-      assetMonService.list(q),
-    ]).then(() => force((n) => n + 1));
+    // The register caps a single page at 200 rows — the old per-list pull silently
+    // truncated a real book. hydrateBook pulls every page of every resource.
+    void hydrateBook().then(() => force((n) => n + 1));
   }, []);
 
   // Stage-change requests: approvers see pending items they can decide; requesters see

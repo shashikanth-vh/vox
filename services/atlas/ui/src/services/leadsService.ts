@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, errText, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API } from '../api/http';
+import { api, withFallback, errText, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API, listAll } from '../api/http';
 import { writeAudit } from './auditService';
 import type { TableQuery, Paged } from './types';
 import type { Lead } from '../pages/Leads/lead.types';
@@ -163,6 +163,15 @@ async function leadTotal(): Promise<number> {
 }
 
 export const leadsService = {
+  /** The WHOLE lead book into the store (live mode) — converted leads included, so
+   *  the dashboard's RM-origination and funnel figures see every row. */
+  async hydrateAll(): Promise<void> {
+    if (!USE_REAL_API) return;
+    const rows = (await listAll('/leads', { key: 'leads' })).map(toLeadRow);
+    const store = db().leads as Lead[];
+    store.length = 0;
+    store.push(...rows);
+  },
   async list(q: TableQuery, scope?: RowScope | null,
              opts?: { includeConverted?: boolean }) {
     return withFallback<Paged<Lead>>(

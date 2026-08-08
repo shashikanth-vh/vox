@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId } from '../api/http';
+import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -96,6 +96,16 @@ function hydrateAm(rows: AmRow[]): void {
 }
 
 export const assetMonService = {
+  /** The WHOLE AM book into the store (live mode) — dashboard-grade completeness. */
+  async hydrateAll(): Promise<void> {
+    if (!USE_REAL_API) return;
+    const rows = (await listAll(AM_PATH, { key: 'asset_monetisation' })).map(toAmRow);
+    await fillFromDeal(rows);
+    const store = db().am as AmRow[];
+    store.length = 0;
+    store.push(...rows);
+  },
+
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<AmRow>>(
       async () => {

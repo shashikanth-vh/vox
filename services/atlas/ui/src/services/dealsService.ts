@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, errText, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API } from '../api/http';
+import { api, errText, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API, listAll } from '../api/http';
 import { fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -38,6 +38,16 @@ export function toDealRow(r: any): DealRow {
 }
 
 export const dealsService = {
+  /** The WHOLE deal book into the store (live mode) — the dashboard derives its
+   *  funnel and per-product splits from here, so partial pages must never feed it. */
+  async hydrateAll(): Promise<void> {
+    if (!USE_REAL_API) return;
+    const rows = (await listAll('/deals', { key: 'deals' })).map(toDealRow);
+    await fillCompanyFromEntity(rows);
+    const store = db().deals as Deal[];
+    store.length = 0;
+    store.push(...rows);
+  },
   async list(q: TableQuery, scope?: RowScope | null) {
     return withFallback<Paged<DealRow>>(
       async () => {

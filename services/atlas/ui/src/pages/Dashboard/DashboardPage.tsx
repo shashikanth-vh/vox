@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, Legend, CartesianGrid } from 'recharts';
 import { computeDashboard } from './compute';
+import { hydrateBook } from '../../services/bookHydration';
 import type { BarRow, DrillRow, LensRow, VelRow, BankRow } from './compute';
 import { useAuth } from '../../auth/AuthContext';
 import { viewAccess } from '../../auth/rbac';
@@ -185,7 +186,11 @@ export default function DashboardPage() {
   const [view, setView] = useState<'inv' | 'full'>(viewAccess(user.roles, 'dash') === 'full' ? 'full' : 'inv');
   const [chartMode, setChartMode] = useState<'table' | 'chart'>('table');
 
-  const { data } = useQuery({ queryKey: ['dashboard-v11', person], queryFn: () => computeDashboard(person) });
+  // The whole book first (every resource, every page) — a dashboard computed from
+  // whichever grid pages this session had cached showed different numbers to every
+  // user. staleTime matches the hydrator's TTL.
+  const { data } = useQuery({ queryKey: ['dashboard-v11', person], staleTime: 30_000,
+    queryFn: async () => { await hydrateBook(); return computeDashboard(person); } });
   const investor = view === 'inv';
 
   const twoCol = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5, '@media (max-width:760px)': { gridTemplateColumns: '1fr' } } as const;

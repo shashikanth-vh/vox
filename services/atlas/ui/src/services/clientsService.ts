@@ -21,6 +21,15 @@ function hydrate(rows: ClientRow[]) {
 }
 
 export const clientsService = {
+  /** The WHOLE client registry into the store (live mode), replacing stale keys — a
+   *  replace-mode import mid-session must not leave ghost companies in the tiles. */
+  async hydrateAll(): Promise<void> {
+    const rows = await entitiesService.list();
+    const store = db().clients as Record<string, any>;
+    Object.keys(store).forEach((k) => delete store[k]);
+    hydrate(rows);
+  },
+
   get(code: string): Client { return db().clients[code] ?? { name: code, sector: '', lens: '', state: '', about: '', toi: '' }; },
   // A client IS a Register entity, so the read is GET /v1/entities — there is no
   // /clients route. The Register neither pages nor sorts for us (its filtering is
