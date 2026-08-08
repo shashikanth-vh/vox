@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, createContext, useContext } from "react";
+import { useMemo, useState, useEffect, useRef, Fragment, createContext, useContext } from "react";
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -10,8 +10,14 @@ import {
   type MRT_SortingState,
   type MRT_PaginationState,
 } from "material-react-table";
-import { Box, IconButton, Tooltip, Stack, Popover } from "@mui/material";
+import {
+  Box, IconButton, Tooltip, Stack, Popover, Paper, Typography, InputBase, Drawer,
+  MenuItem, ListItemIcon, Divider, Badge, Button, useMediaQuery,
+} from "@mui/material";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import SearchIcon from "@mui/icons-material/Search";
+import TuneIcon from "@mui/icons-material/Tune";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -26,6 +32,27 @@ import type { Paged, TableQuery } from "../../services/types";
 
 // v12 `th` background (ATLAS_EVAM_v12.html line 97).
 const V12_HEAD_BG = "#F7F9FA";
+
+// Same phone breakpoint the navbar and bottom nav use.
+const MOBILE_QUERY = "(max-width:760px)";
+
+/**
+ * The headline of a phone card — what the row is, and its one number worth reading at a
+ * glance:
+ *
+ *   primary ................ value
+ *
+ * Underneath, the card lists EVERY column the grid has, so nothing is lost by being on a
+ * phone. These two slots only decide what gets promoted above that list.
+ *
+ * They take a render function rather than a column id so a page hands over the SAME node
+ * the grid cell renders — e.g. the clickable name that filters the Dashboard keeps its
+ * click.
+ */
+export interface MobileCardSpec<T> {
+  primary: (row: T) => React.ReactNode;
+  value?: (row: T) => React.ReactNode;
+}
 
 // A committed column filter is just the SET OF CHECKED VALUES. The popup's text box
 // only narrows which options are shown — it does not filter the table itself; ticking
@@ -280,6 +307,13 @@ interface CommonTableProps<T extends Record<string, any>> extends RowAction<T> {
   onRowClick?: (row: T) => void; // click a row body (not an action/link) to act on it
   rowSx?: (row: T) => object; // per-row cell styling (v12 gray/rowok/rowbad states)
   extraActions?: (row: T) => React.ReactNode; // extra icon(s) in the action column
+  /**
+   * What heads this table's card on a phone. Below 760px the grid is replaced by a list
+   * of cards, each carrying every column; this only names the one or two fields promoted
+   * to the card's title line. Desktop ignores it, and omitting it just falls back to the
+   * first column.
+   */
+  mobileCard?: MobileCardSpec<T>;
 }
 
 export default function CommonTable<T extends Record<string, any>>(
@@ -301,7 +335,11 @@ export default function CommonTable<T extends Record<string, any>>(
     onDelete,
     rowSx,
     extraActions,
+    mobileCard,
   } = props;
+
+  // Phone gets the card list; every width above 760px is the grid, untouched.
+  const isMobile = useMediaQuery(MOBILE_QUERY);
 
   // Size the actions column to how many icons this table actually renders (row-CSV is
   // always there; +View/+Edit/+Delete/+extra when supplied) so it stays snug rather than
@@ -311,10 +349,12 @@ export default function CommonTable<T extends Record<string, any>>(
   const actionsColSize = Math.max(64, actionCount * 24 + 10);
 
   const { search } = useSearch(); // requirement 15: navbar search drives the table
-  const [pagination, setPagination] = useState<MRT_PaginationState>({
+  const [pagination, setPagination] = useState<MRT_PaginationState>(() => ({
     pageIndex: 0,
-    pageSize: 10,
-  });
+    // The card list pulls a bigger page: the same server call, but fewer round trips to
+    // fill a screen the user is flicking through.
+    pageSize: isMobile ? 20 : 10,
+  }));
   const [sorting, setSorting] = useState<MRT_SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -353,11 +393,18 @@ export default function CommonTable<T extends Record<string, any>>(
   // cursors[0] is undefined — the first page is the one request that carries no cursor.
   const [cursors, setCursors] = useState<Record<number, string | undefined>>({});
 
+  // The card list keeps every page it has walked through, keyed by page index, so
+  // scrolling APPENDS instead of replacing. The fetch is unchanged — the same
+  // server-side paging the desktop pager drives, just not thrown away.
+  const [feedPages, setFeedPages] = useState<Record<number, T[]>>({});
+
   // reset to first page whenever a search term or filter changes. The cursor chain goes
-  // with it: cursors are only valid for the query that produced them.
+  // with it: cursors are only valid for the query that produced them, and so is the
+  // accumulated feed.
   useEffect(() => {
     setPagination((p) => ({ ...p, pageIndex: 0 }));
     setCursors({});
+    setFeedPages({});
   }, [search, globalFilter, colFilters, sorting, pagination.pageSize]);
 
   const cursor = cursors[pagination.pageIndex];
@@ -399,6 +446,48 @@ export default function CommonTable<T extends Record<string, any>>(
     const at = pagination.pageIndex + 1;
     setCursors((c) => (c[at] === nextCursor ? c : { ...c, [at]: nextCursor }));
   }, [nextCursor, pagination.pageIndex]);
+
+  // File each settled page into the feed. `placeholderData` keeps the PREVIOUS page's
+  // rows on screen while the next is in flight, so filing that would duplicate it —
+  // hence the isPlaceholderData guard.
+  useEffect(() => {
+    if (!query.data || query.isPlaceholderData) return;
+    const page = query.data.rows;
+    setFeedPages((p) => (p[pagination.pageIndex] === page
+      ? p
+      : { ...p, [pagination.pageIndex]: page }));
+  }, [query.data, query.isPlaceholderData, pagination.pageIndex]);
+
+  const feedRows = useMemo(
+    () => Object.keys(feedPages)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .flatMap((k) => feedPages[k]),
+    [feedPages],
+  );
+
+  // More to pull? A cursor source knows only whether ONE more page exists; a counted one
+  // compares against the total. Either way an empty page ends it — without that guard a
+  // total that overstates the rows would spin the observer forever.
+  const hasMore = cursorMode
+    ? !!nextCursor
+    : feedRows.length < total && rows.length > 0;
+
+  // Scrolling near the end asks for the next page. rootMargin fires it just BEFORE the
+  // sentinel is visible, so the list tends to already be longer by the time it's reached.
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const el = sentinel.current;
+    if (!el || !hasMore || query.isFetching) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setPagination((p) => ({ ...p, pageIndex: p.pageIndex + 1 }));
+      }
+    }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [isMobile, hasMore, query.isFetching]);
 
   // Column filters are multi-select checkboxes. The option list must cover the WHOLE
   // dataset, not just the current page, so fetch the full set once (unfiltered) and
@@ -450,6 +539,35 @@ export default function CommonTable<T extends Record<string, any>>(
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
       .slice(0, 45);
   };
+
+  // The phone has no column headers to hang a funnel on, so the same per-column filters
+  // gather into one sheet behind the search bar's tune icon — the filtering the grid
+  // offers is still reachable, just relocated. Built only on mobile: distinctValues walks
+  // the whole facet set and the grid already does that once.
+  const filterableCols = useMemo(
+    () => (isMobile
+      ? columns.filter(isFilterable).map((c) => ({
+          id: String(c.id ?? c.accessorKey),
+          label: String(c.header ?? ""),
+          options: distinctValues(c),
+        }))
+      : []),
+    [isMobile, columns, facetRows],
+  );
+
+  // The phone search box types into a draft and commits on a pause. MRT's own search
+  // field debounces before it calls onGlobalFilterChange; this one has to do the same, or
+  // every keystroke resets the feed and fires a fresh page-0 request.
+  const [searchDraft, setSearchDraft] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => setGlobalFilter(searchDraft), 300);
+    return () => window.clearTimeout(id);
+  }, [searchDraft]);
+
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetCol, setSheetCol] = useState<string | null>(null);
+  const closeSheet = () => { setSheetOpen(false); setSheetCol(null); };
+  const activeFilters = Object.keys(colFilters).length;
 
   // Exports cover every data column — keyed or computed — for the current page's rows.
   const exportCols = () =>
@@ -550,6 +668,62 @@ export default function CommonTable<T extends Record<string, any>>(
       }),
     // facetRows drives the option lists; recompute when they arrive.
     [columns, facetRows],
+  );
+
+  // The row's icon set — the grid's pinned Actions column and the phone card's footer
+  // render THIS, so Edit on a card is the same button, the same handler and the same
+  // permission gate as Edit in the grid. `justify` is the only thing that differs: the
+  // column centres its icons, the card pushes them to its trailing edge.
+  const rowActions = (row: T, index: number, justify: "center" | "flex-end" = "center") => (
+    <Stack
+      direction="row"
+      spacing={0}
+      justifyContent={justify}
+      alignItems="center"
+      sx={{
+        width: "100%",
+        // Icons are packed tight so up to four fit the "Actions"-width column,
+        // and the glyphs are shrunk a touch below MUI's "small" default.
+        "& .MuiIconButton-root": { p: "2px" },
+        "& .MuiSvgIcon-root": { fontSize: 16 },
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Page-supplied action(s) lead the row (e.g. Leads' Push to deal). */}
+      {extraActions?.(row)}
+      {onView && (
+        <Tooltip title="View">
+          <IconButton color="primary" onClick={() => onView(row)}>
+            <VisibilityIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {onEdit && (
+        // `editReason` means "offered, but not by you" — rendered disabled with the
+        // reason rather than vanishing, so a user can tell a permission apart from a
+        // bug. A disabled MUI button swallows pointer events, hence the span.
+        <Tooltip title={editReason || 'Edit'}>
+          <span>
+            <IconButton disabled={!!editReason}
+              onClick={() => !editReason && onEdit(row)}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      )}
+      <Tooltip title="Export row as CSV">
+        <IconButton onClick={() => downloadRowCsv(row, index)}>
+          <FileDownloadIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+      {onDelete && (
+        <Tooltip title="Delete">
+          <IconButton color="error" onClick={() => onDelete(row)}>
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
+    </Stack>
   );
 
   const table = useMaterialReactTable<T>({
@@ -814,65 +988,7 @@ export default function CommonTable<T extends Record<string, any>>(
     },
 
     renderRowActions: actionsEnabled
-      ? ({ row }) => (
-          <Stack
-            direction="row"
-            spacing={0}
-            justifyContent="center"
-            alignItems="center"
-            sx={{
-              width: "100%",
-              // Icons are packed tight so up to four fit the "Actions"-width column,
-              // and the glyphs are shrunk a touch below MUI's "small" default.
-              "& .MuiIconButton-root": { p: "2px" },
-              "& .MuiSvgIcon-root": { fontSize: 16 },
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Page-supplied action(s) lead the row (e.g. Leads' Push to deal). */}
-            {extraActions?.(row.original)}
-            {onView && (
-              <Tooltip title="View">
-                <IconButton
-                  color="primary"
-                  onClick={() => onView(row.original)}
-                >
-                  <VisibilityIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {onEdit && (
-              // `editReason` means "offered, but not by you" — rendered disabled with the
-              // reason rather than vanishing, so a user can tell a permission apart from a
-              // bug. A disabled MUI button swallows pointer events, hence the span.
-              <Tooltip title={editReason || 'Edit'}>
-                <span>
-                  <IconButton disabled={!!editReason}
-                    onClick={() => !editReason && onEdit(row.original)}>
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
-            <Tooltip title="Export row as CSV">
-              <IconButton
-                onClick={() => downloadRowCsv(row.original, row.index)}
-              >
-                <FileDownloadIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            {onDelete && (
-              <Tooltip title="Delete">
-                <IconButton
-                  color="error"
-                  onClick={() => onDelete(row.original)}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-          </Stack>
-        )
+      ? ({ row }) => rowActions(row.original, row.index)
       : undefined,
 
     // Toolbar: clear filters, global search toggle, columns toggle, fullscreen,
@@ -906,6 +1022,221 @@ export default function CommonTable<T extends Record<string, any>>(
 
     enableExpanding: enableExpand,
   });
+
+  // ---- Phone: the same rows, the same query, the same handlers — read as cards ----
+  if (isMobile) {
+    // A page that hasn't named a headline still gets one: its lead column.
+    const card: MobileCardSpec<T> = mobileCard ?? {
+      primary: (r) => String(columnValue(r, columns[0]) ?? ""),
+    };
+    const sheetColDef = filterableCols.find((c) => c.id === sheetCol);
+
+    // Every column, rendered by its OWN `Cell` so the card shows exactly what the grid
+    // cell shows — the coloured pill, the code chip, the live stage <select> — not a
+    // flattened string of it. MRT hands `Cell` a large context object; these tables read
+    // only getValue / row.original / row.index from it, so a stand-in carrying those
+    // renders them faithfully off-grid. (Called as a plain function, not mounted as a
+    // component: a `Cell` that used hooks would need a real component here.)
+    const cellNode = (r: T, c: MRT_ColumnDef<T>, index: number): React.ReactNode => {
+      const value = columnValue(r, c);
+      const Cell = c.Cell as any;
+      if (typeof Cell === "function") {
+        const id = String(c.id ?? c.accessorKey ?? "");
+        return Cell({
+          cell: { getValue: () => value, id, row: { original: r, index } },
+          row: { original: r, index, id: String(index) },
+          column: { id, columnDef: c },
+          table,
+          renderedCellValue: value ?? "",
+        });
+      }
+      return value === undefined || value === null ? "" : String(value);
+    };
+
+    return (
+      <FilterContext.Provider value={filterCtx}>
+        <Box sx={{ minWidth: 0, maxWidth: "100%", overflowX: "clip" }}>
+          {toolbarLeft && (
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center", mb: 1 }}>
+              {toolbarLeft}
+            </Box>
+          )}
+
+          <Paper elevation={0}
+            sx={{ display: "flex", alignItems: "center", gap: "8px", px: "12px", py: "8px",
+              border: `1px solid ${tokens.line}`, borderRadius: "14px", bgcolor: "#fff", mb: 1 }}>
+            <SearchIcon sx={{ fontSize: 20, color: tokens.muted }} />
+            <InputBase
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              placeholder="Search"
+              sx={{ flex: 1, fontSize: 14.5, minWidth: 0 }}
+            />
+            <Typography sx={{ fontSize: 13, color: tokens.muted, whiteSpace: "nowrap" }}>
+              {feedRows.length}{cursorMode || !total ? "" : `/${total}`}
+            </Typography>
+            <IconButton size="small" aria-label="Filters" onClick={() => setSheetOpen(true)}>
+              <Badge badgeContent={activeFilters} color="primary"
+                sx={{ "& .MuiBadge-badge": { fontSize: 9, height: 14, minWidth: 14 } }}>
+                <TuneIcon sx={{ fontSize: 20, color: activeFilters ? "#0D7377" : tokens.ink }} />
+              </Badge>
+            </IconButton>
+          </Paper>
+
+          {/* minmax(0,1fr): a bare `1fr` track floors at its content's min-content width,
+              so one long unbroken value would push the whole card wider than the screen. */}
+          <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1 }}>
+            {feedRows.map((r, i) => (
+              <Paper
+                key={String(r.id ?? r.code ?? i)}
+                variant="outlined"
+                onClick={onRowClick ? () => onRowClick(r) : undefined}
+                sx={{
+                  borderColor: tokens.line, borderRadius: "12px", px: 1.4, py: 1.2,
+                  minWidth: 0, maxWidth: "100%",
+                  cursor: onRowClick ? "pointer" : "default",
+                  "&:active": { bgcolor: "#F4FAF9" },
+                  // A page's row state (v12 gray/rowok/rowbad) tints the whole card here,
+                  // which is what it tints per-cell in the grid.
+                  ...(rowSx?.(r) ?? {}),
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "flex-start", gap: "10px", minWidth: 0 }}>
+                  {/* Title truncates rather than wraps — the untruncated value is in the
+                      field list directly below, so nothing is actually lost. */}
+                  <Box sx={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600,
+                    lineHeight: 1.3, color: tokens.ink,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {card.primary(r)}
+                  </Box>
+                  {card.value && (
+                    <Box sx={{ textAlign: "right", flexShrink: 1, maxWidth: "48%", minWidth: 0,
+                      fontSize: 15, lineHeight: 1.3, color: tokens.ink,
+                      overflowWrap: "anywhere" }}>
+                      {card.value(r)}
+                    </Box>
+                  )}
+                </Box>
+
+                {/* The whole row, field by field — the card carries everything the grid
+                    column set carries, so nothing is only-on-desktop. */}
+                <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${tokens.line}`,
+                  display: "grid", gridTemplateColumns: "minmax(76px, 34%) minmax(0, 1fr)",
+                  columnGap: 1.2, rowGap: 0.9, alignItems: "baseline" }}>
+                  {columns.map((c, ci) => (
+                    <Fragment key={String(c.id ?? c.accessorKey ?? ci)}>
+                      <Box sx={{ fontSize: 10.6, fontWeight: 700, textTransform: "uppercase",
+                        letterSpacing: ".5px", color: tokens.muted,
+                        minWidth: 0, overflowWrap: "anywhere" }}>
+                        {String(c.header ?? "")}
+                      </Box>
+                      <Box sx={{
+                        fontSize: 12.8, minWidth: 0, maxWidth: "100%",
+                        wordBreak: "break-word", overflowWrap: "anywhere",
+                        // Cells are the grid's own renderers, sized for a wide column: a
+                        // fixed-width <select>, a nowrap pill, a row of chips. Inside a
+                        // phone card they have to give way to the card, not the reverse.
+                        "& > *": { maxWidth: "100%" },
+                        "& .MuiTextField-root, & .MuiInputBase-root": {
+                          minWidth: 0, width: "100%", maxWidth: "100%",
+                        },
+                        "& .MuiStack-root": { flexWrap: "wrap" },
+                        "& .MuiChip-root": { maxWidth: "100%" },
+                      }}>
+                        {cellNode(r, c, i)}
+                      </Box>
+                    </Fragment>
+                  ))}
+                </Box>
+
+                {/* The grid's Actions column, on the card. Same buttons, same handlers —
+                    allowed to wrap here, where a page's extra actions can outrun the
+                    width the pinned column always had. */}
+                {actionsEnabled && (
+                  <Box sx={{ mt: 1, pt: 0.8, borderTop: `1px solid ${tokens.line}`,
+                    "& .MuiStack-root": { flexWrap: "wrap" } }}>
+                    {rowActions(r, i, "flex-end")}
+                  </Box>
+                )}
+              </Paper>
+            ))}
+          </Box>
+
+          {/* Tripwire for the next page, plus whatever the list is doing right now. */}
+          <Box ref={sentinel} sx={{ height: 1 }} />
+          <Box sx={{ py: 1.5, textAlign: "center", fontSize: 12.4, color: tokens.muted }}>
+            {query.isFetching
+              ? "Loading…"
+              : feedRows.length === 0
+                ? "No records"
+                : hasMore ? "" : "End of list"}
+          </Box>
+
+          <Drawer anchor="bottom" open={sheetOpen} onClose={closeSheet}
+            PaperProps={{ sx: { borderTopLeftRadius: 16, borderTopRightRadius: 16,
+              maxHeight: "72vh", pb: "env(safe-area-inset-bottom)" } }}>
+            {sheetColDef ? (
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, px: 1, py: 1,
+                  borderBottom: `1px solid ${tokens.line}` }}>
+                  <IconButton size="small" aria-label="Back" onClick={() => setSheetCol(null)}>
+                    <ArrowBackIcon fontSize="small" />
+                  </IconButton>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 700 }}>{sheetColDef.label}</Typography>
+                </Box>
+                <FilterBody
+                  value={colFilters[sheetColDef.id]}
+                  options={sheetColDef.options}
+                  onClose={() => setSheetCol(null)}
+                  onChange={(v) => filterCtx.set(sheetColDef.id, v)}
+                />
+              </Box>
+            ) : (
+              <Box>
+                <Box sx={{ display: "flex", alignItems: "center", px: 1.75, py: 1.25,
+                  borderBottom: `1px solid ${tokens.line}` }}>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 700, flex: 1 }}>Filters</Typography>
+                  {activeFilters > 0 && (
+                    <Button size="small" onClick={() => setColFilters({})}
+                      sx={{ fontSize: 12, textTransform: "none" }}>Clear all</Button>
+                  )}
+                </Box>
+                <Box sx={{ overflowY: "auto" }}>
+                  {filterableCols.length === 0 && (
+                    <Typography sx={{ px: 1.75, py: 1.5, fontSize: 12.5, color: tokens.muted }}>
+                      Nothing to filter on this table.
+                    </Typography>
+                  )}
+                  {filterableCols.map((c) => {
+                    const on = colFilters[c.id]?.length ?? 0;
+                    return (
+                      <MenuItem key={c.id} onClick={() => setSheetCol(c.id)}
+                        sx={{ py: 1.15, fontSize: 13.4 }}>
+                        <Box sx={{ flex: 1 }}>{c.label}</Box>
+                        {on > 0 && (
+                          <Box sx={{ fontSize: 11.5, fontWeight: 700, color: "#0D7377" }}>{on}</Box>
+                        )}
+                      </MenuItem>
+                    );
+                  })}
+                  {/* The toolbar's exports have no home on a phone; they live here. */}
+                  <Divider />
+                  <MenuItem onClick={() => { closeSheet(); downloadCsv(); }} sx={{ py: 1.15, fontSize: 13.4 }}>
+                    <ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>
+                    Download CSV
+                  </MenuItem>
+                  <MenuItem onClick={() => { closeSheet(); downloadPdf(); }} sx={{ py: 1.15, fontSize: 13.4 }}>
+                    <ListItemIcon><PictureAsPdfIcon fontSize="small" /></ListItemIcon>
+                    Download PDF
+                  </MenuItem>
+                </Box>
+              </Box>
+            )}
+          </Drawer>
+        </Box>
+      </FilterContext.Provider>
+    );
+  }
 
   // Provider so each header's funnel can read/write our column-filter state.
   return (

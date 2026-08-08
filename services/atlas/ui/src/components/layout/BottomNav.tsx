@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box, Drawer } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { NAV } from './navConfig';
+import { NAV, type NavItem } from './navConfig';
 import { useAuth } from '../../auth/AuthContext';
 import { canSee } from '../../auth/rbac';
 import { tokens } from '../../theme';
@@ -14,11 +14,25 @@ export default function BottomNav() {
   const loc = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
 
+  // Picking a tab out of the More sheet PROMOTES it onto the strip, so the place you
+  // just went to stays one thumb away instead of back behind ⋯. It takes the last of the
+  // four slots; whichever tab held that slot drops back into the sheet. Only one slot
+  // ever moves — the first three stay put, so the strip never reshuffles under you.
+  const [promoted, setPromoted] = useState<NavItem | null>(null);
+
   const visible = NAV.filter((n) => canSee(user.roles, n.tab));
-  const primary = visible.slice(0, 4);
-  const inMore = !primary.some((n) => n.path === loc.pathname);
+  const defaults = visible.slice(0, 4);
+  const strip = promoted ? [...defaults.slice(0, 3), promoted] : defaults;
+  const inMore = !strip.some((n) => n.path === loc.pathname);
 
   const go = (path: string) => { setMoreOpen(false); nav(path); };
+
+  // From the sheet: promote it, unless it is already on the strip (tapping one of the
+  // first three there shouldn't displace anything).
+  const goFromMore = (n: NavItem) => {
+    if (!strip.some((s) => s.path === n.path)) setPromoted(n);
+    go(n.path);
+  };
 
   const item = (icon: string, label: string, active: boolean, onClick: () => void, key: string) => (
     <Box component="button" key={key} onClick={onClick}
@@ -38,7 +52,7 @@ export default function BottomNav() {
           background: 'linear-gradient(180deg,#1E2F4F,#16233C)', borderTop: '1px solid rgba(255,255,255,.08)',
           px: '4px', pt: '6px', pb: 'calc(6px + env(safe-area-inset-bottom))',
           boxShadow: '0 -6px 24px rgba(6,14,26,.35)' } }}>
-        {primary.map((n) => item(n.icon, n.label.split(' ')[0], loc.pathname === n.path && !moreOpen, () => go(n.path), n.path))}
+        {strip.map((n) => item(n.icon, n.label.split(' ')[0], loc.pathname === n.path && !moreOpen, () => go(n.path), n.path))}
         {item('⋯', 'More', moreOpen || inMore, () => setMoreOpen(true), 'more')}
       </Box>
 
@@ -50,7 +64,7 @@ export default function BottomNav() {
           {visible.map((n) => {
             const active = loc.pathname === n.path;
             return (
-              <Box component="button" key={n.path} onClick={() => go(n.path)}
+              <Box component="button" key={n.path} onClick={() => goFromMore(n)}
                 sx={{ border: `1px solid ${active ? tokens.tealHi : tokens.line}`,
                   background: active ? '#F0F8F6' : '#fff', borderRadius: '12px', p: '11px 6px',
                   fontSize: 11.6, fontWeight: 600, fontFamily: 'inherit',

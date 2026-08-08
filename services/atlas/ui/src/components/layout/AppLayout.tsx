@@ -5,7 +5,6 @@ import Navbar from "./Navbar";
 import BottomNav from "./BottomNav";
 import Copilot from "../copilot/Copilot";
 import { VocxProvider, useVocx } from "../vocx/VocxProvider";
-import { VocxFab } from "../vocx/VocxLauncher";
 import VocxPanel from "../vocx/VocxPanel";
 import { NAV } from "./navConfig";
 import { useAuth } from "../../auth/AuthContext";
@@ -327,11 +326,10 @@ export default function AppLayout() {
       <BottomNav />
       {/* v17 AUGMENT 12 — floating ATLAS Copilot (chat over the live Register). */}
       <Copilot />
-      {/* VocX: the phone's draggable capture button and the floating panel. Mounted at
-          the layout root, not inside a page, so an in-progress capture survives
-          navigation — an RM can start a note on Lending, go and check something on
-          Deals, and come back to it. */}
-      <VocxFab />
+      {/* VocX's floating panel. Mounted at the layout root, not inside a page, so an
+          in-progress capture survives navigation — an RM can start a note on Lending, go
+          and check something on Deals, and come back to it. (The launcher itself lives in
+          the navbar on every width.) */}
       <VocxPanelMount />
     </Box>
    </VocxProvider>

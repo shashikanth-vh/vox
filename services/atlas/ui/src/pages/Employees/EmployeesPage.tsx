@@ -118,6 +118,21 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
             onRowClick={(e) => { setFocus(e.name); setMode('cards'); }}
             onEdit={ro ? undefined : (e) => setDialog({ mode: 'edit', emp: e })}
             onDelete={ro ? undefined : (e) => setDel(e)}
+            // The name keeps its own click (filter Dashboard to this person's book) —
+            // it is a separate action from the row's, on a phone as on the desktop.
+            mobileCard={{
+              primary: (e) => (
+                <Box component="span" title="Filter Dashboard to this person’s book"
+                  onClick={(ev) => { ev.stopPropagation(); filterDash(e.name); }}
+                  sx={{ color: tokens.teal, cursor: 'pointer', fontWeight: 700,
+                    '&:hover': { textDecoration: 'underline' } }}>{e.name}</Box>
+              ),
+              value: (e) => (
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                  {employeesService.bookRollup(e.name).total}
+                </span>
+              ),
+            }}
           />
           <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
             Click a row to open detail. Click a name to filter Dashboard to that person’s book. Switch to Card view to edit fields inline.

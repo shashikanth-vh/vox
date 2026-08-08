@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { InputBase, MenuItem, Menu, Divider, ListItemIcon, IconButton, Box, Typography, Stack, Badge, Button } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -17,6 +18,7 @@ import { since } from '../../services/workflowService';
 import { onSave } from '../../utils/saveIndicator';
 import { tokens } from '../../theme';
 import { VocxNavButton } from "../vocx/VocxLauncher";
+import evamLogo from '../../assets/evam-logo.jpeg';
 
 const MOBILE = '@media (max-width:760px)';
 
@@ -47,6 +49,16 @@ export default function Navbar() {
   const [menuEl, setMenuEl] = useState<null | HTMLElement>(null);
   const closeMenu = () => setMenuEl(null);
   const roleLabel = (role: string, name: string) => `${role} · ${name}`;
+
+  // On a phone the search field is opened on demand from the magnifier instead of
+  // permanently occupying a second header row. Desktop is untouched — there the
+  // field is always mounted and this flag is ignored.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
+  // The term feeds every page's table, so closing has to clear it — a hidden filter
+  // would otherwise keep narrowing grids with nothing on screen to explain why.
+  const closeSearch = () => { setSearchOpen(false); setSearch(''); };
 
   // The BELL: the same inbox Today's "Decisions on your work" strip reads (shared
   // query key, so the two never disagree). The badge is the unread count, refreshed
@@ -91,10 +103,16 @@ export default function Navbar() {
       boxShadow: '0 2px 14px rgba(6,14,26,.35)',
       display: 'flex', alignItems: 'center', gap: '13px', px: '20px', py: '11px', flexWrap: 'wrap',
       [MOBILE]: { px: '12px', py: '9px', gap: '8px', pt: 'calc(9px + env(safe-area-inset-top))' } }}>
-      <Stack direction="row" alignItems="baseline" sx={{ gap: '9px', cursor: 'pointer', fontWeight: 700, fontSize: 17, letterSpacing: '.8px', [MOBILE]: { fontSize: 15 } }} onClick={() => nav('/today')}>
-        <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: tokens.tealHi, alignSelf: 'center',
-          boxShadow: '0 0 0 3px rgba(18,145,126,.28),0 0 12px rgba(18,145,126,.85)' }} />
-        EVAM&nbsp;ATLAS <Typography component="small" sx={{ fontWeight: 400, fontSize: 10.5, color: '#9FB3BA', opacity: 0.85, [MOBILE]: { display: 'none' } }}>v17 · MIS-linked</Typography>
+      <Stack direction="row" alignItems="center" sx={{ gap: '9px', cursor: 'pointer', fontWeight: 700, fontSize: 17, letterSpacing: '.8px', [MOBILE]: { fontSize: 15 } }} onClick={() => nav('/today')}>
+        {/* The wordmark is dark-on-white artwork, so it rides in its own light chip to
+            stay legible against the navy header gradient. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: '#fff', borderRadius: '7px',
+          px: '7px', py: '4px', boxShadow: '0 1px 6px rgba(6,14,26,.35)',
+          [MOBILE]: { px: '5px', py: '3px' } }}>
+          <Box component="img" src={evamLogo} alt="Evam"
+            sx={{ height: 20, width: 'auto', display: 'block', [MOBILE]: { height: 16 } }} />
+        </Box>
+        ATLAS <Typography component="small" sx={{ fontWeight: 400, fontSize: 10.5, color: '#9FB3BA', opacity: 0.85, alignSelf: 'flex-end', mb: '2px', [MOBILE]: { display: 'none' } }}>v17 · MIS-linked</Typography>
       </Stack>
 
       {/* v17 hdrnet — live in-sync / offline indicator. */}
@@ -109,20 +127,38 @@ export default function Navbar() {
       <Box sx={{ flex: 1, minWidth: 130, maxWidth: 300, display: 'flex', alignItems: 'center', gap: 0.75,
         bgcolor: 'rgba(11,28,44,.75)', border: '1px solid #31536B', borderRadius: '8px', px: '10px',
         '&:focus-within': { bgcolor: '#0B1C2C', borderColor: tokens.tealHi },
-        [MOBILE]: { order: 5, flexBasis: '100%', maxWidth: 'none' } }}>
+        // Phone: collapsed to the magnifier below until asked for; when open it takes
+        // the full second row it used to occupy unconditionally.
+        [MOBILE]: searchOpen
+          ? { order: 5, flexBasis: '100%', maxWidth: 'none' }
+          : { display: 'none' } }}>
         <SearchIcon sx={{ fontSize: 15, color: '#7F959C' }} />
-        <InputBase value={search} onChange={(e) => setSearch(e.target.value)}
+        <InputBase inputRef={searchInput} value={search} onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') closeSearch(); }}
           placeholder="Search company or Group Code…"
           sx={{ color: '#fff', fontSize: 12.5, py: '4px', width: '100%', '::placeholder': { color: '#7F959C' } }} />
+        {/* Dismissal lives inside the field on a phone, where there is no Esc key. */}
+        <IconButton onClick={closeSearch} aria-label="Close search"
+          sx={{ display: 'none', color: '#7F959C', p: '3px',
+            '&:hover': { color: '#fff' },
+            [MOBILE]: { display: 'inline-flex' } }}>
+          <CloseIcon sx={{ fontSize: 16 }} />
+        </IconButton>
       </Box>
 
       <Stack direction="row" alignItems="center" sx={{ gap: '9px', ml: 'auto', [MOBILE]: { gap: '6px' } }}>
-        {/* VocX beside the search box, where a pointer looks for a toolbar. On a phone
-            the floating draggable button (mounted at the layout root) takes over, so this
-            one steps aside rather than being duplicated. */}
-        <Box sx={{ display: 'inline-flex', [MOBILE]: { display: 'none' } }}>
-          <VocxNavButton />
-        </Box>
+        {/* Phone-only opener for the field above. Hidden while the field is open so the
+            cramped top row isn't carrying two controls that do the same job. */}
+        <IconButton onClick={() => setSearchOpen(true)} aria-label="Search"
+          aria-expanded={searchOpen}
+          sx={{ display: 'none', color: '#C8D6E2', p: '5px',
+            '&:hover': { color: '#fff', background: 'rgba(255,255,255,.07)' },
+            [MOBILE]: { display: searchOpen ? 'none' : 'inline-flex' } }}>
+          <SearchIcon sx={{ fontSize: 21 }} />
+        </IconButton>
+        {/* VocX leads this cluster on every width — docked just before the bell, and a
+            size up from it, so capture is never the small target on a phone. */}
+        <VocxNavButton />
         <IconButton onClick={(e) => setBellEl(e.currentTarget)} aria-label="Notifications"
           sx={{ color: '#C8D6E2', p: '5px',
             '&:hover': { color: '#fff', background: 'rgba(255,255,255,.07)' } }}>

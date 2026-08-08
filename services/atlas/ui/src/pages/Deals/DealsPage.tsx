@@ -45,6 +45,10 @@ export default function DealsPage() {
         onEdit={(d) => setOpen(d.code)}
         editReason={can(user.roles, 'editDealProfile') ? '' : whoCan('editDealProfile')}
         onDelete={can(user.roles, 'deleteRow') ? (d) => setDel(d) : undefined}
+        mobileCard={{
+          primary: (d) => d._name,
+          value: (d) => <TempPill temp={d.temp} />,
+        }}
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refreshAll} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refreshAll} />

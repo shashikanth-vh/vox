@@ -106,6 +106,10 @@ export default function ActivityPage() {
         csvName="atlas_activity"
         // No View icon — clicking the row opens the activity detail.
         onRowClick={(r) => setView(r)}
+        mobileCard={{
+          primary: (r) => r.text,
+          value: (r) => <AreaPill area={r.area} />,
+        }}
       />
 
       <Dialog open={!!view} onClose={() => setView(null)} maxWidth="sm" fullWidth>

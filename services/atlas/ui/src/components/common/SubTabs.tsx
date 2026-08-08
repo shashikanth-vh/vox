@@ -1,6 +1,8 @@
 import { Box } from '@mui/material';
 import { tokens } from '../../theme';
 
+const MOBILE = '@media (max-width:760px)';
+
 export interface SubTab { id: string; label: string; icon?: string }
 
 // v15 `.subbar` / `.subtab` — pill sub-switch inside a grouped tab (Masters, Activity).
@@ -28,7 +30,16 @@ export default function SubTabs({ items, value, onChange, right }: {
           );
         })}
       </Box>
-      {right}
+      {/* On a phone the pill strip and a `right` control fight over one line: the strip
+          is flex:1/minWidth:0, so it collapses to nothing and Clients/FI/Employees read
+          as if the view toggle were sitting on top of them. Give `right` its own
+          full-width row there instead — the container already wraps. */}
+      {right && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0,
+          [MOBILE]: { flexBasis: '100%', order: 2, mt: '4px' } }}>
+          {right}
+        </Box>
+      )}
     </Box>
   );
 }

@@ -82,6 +82,10 @@ export default function LeadsPage() {
             </Tooltip>
           )
         ) : undefined}
+        mobileCard={{
+          primary: (l) => l.company,
+          value: (l) => <TempPill temp={l.temp} />,
+        }}
       />
       <AddLeadDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={refresh} />
       <LeadDrawer lead={edit} onClose={() => setEdit(null)} onChanged={refresh} onPush={(l) => setPush(l)} />

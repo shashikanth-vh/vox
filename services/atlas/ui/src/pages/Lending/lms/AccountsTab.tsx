@@ -237,6 +237,10 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
         onRowClick={(r) => setOpen(r._row)}
         onEdit={(r) => setOpen(r._row)}
         rowSx={(r) => statusRowSx(r.status)}
+        mobileCard={{
+          primary: (r) => r._name,
+          value: (r) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(r.balance)}</span>,
+        }}
       />
       {acctRows.length === 0 && !bookQuery.isLoading && (
         <Typography sx={{ fontSize: 12.5, color: tokens.muted, mt: 1 }}>

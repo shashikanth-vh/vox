@@ -82,6 +82,10 @@ export default function AssetMonPage() {
         onRowClick={(r) => setOpen(r.code)}
         // v12 greys out Dropped rows.
         rowSx={(r) => (r.status === 'Dropped' ? { color: tokens.muted, backgroundColor: '#FAFBFB !important' } : {})}
+        mobileCard={{
+          primary: (r) => r._name,
+          value: (r) => fmt(r.val),
+        }}
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />

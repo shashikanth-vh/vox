@@ -4,6 +4,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { GOOGLE_SSO_CLIENT_ID } from '../../api/axiosClient';
 import { renderGoogleButton } from '../../auth/googleIdentity';
 import { tokens } from '../../theme';
+import evamLogo from '../../assets/evam-logo.jpeg';
 
 export default function LoginPage() {
   const { signIn, signInWithGoogle, signInWithGoogleCredential } = useAuth();
@@ -89,15 +90,16 @@ export default function LoginPage() {
         width: '100%', maxWidth: 520, textAlign: 'center', bgcolor: '#FCFDFD',
         boxShadow: '0 30px 90px rgba(4,10,22,.55)',
       }}>
-        {/* Floating brand tile: gradient, lifted by its own glow. */}
+        {/* Floating brand tile: the Evam wordmark on white, lifted by its own teal glow. */}
         <Box sx={{
-          width: 76, height: 76, borderRadius: '22px', mx: 'auto', mb: 2.4, mt: '-76px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontWeight: 800, fontSize: 38, letterSpacing: '-1px',
-          background: 'linear-gradient(160deg,#0D7377 0%,#12917E 78%)',
-          boxShadow: '0 16px 40px rgba(13,115,119,.55), 0 0 0 6px rgba(252,253,253,1)',
-          transform: 'translateY(38px)', position: 'relative', top: -38,
-        }}>e</Box>
+          width: 172, height: 72, borderRadius: '20px', mx: 'auto', mb: 2.4, mt: '-72px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#fff',
+          boxShadow: '0 16px 40px rgba(13,115,119,.35), 0 0 0 6px rgba(252,253,253,1)',
+          transform: 'translateY(36px)', position: 'relative', top: -36,
+        }}>
+          <Box component="img" src={evamLogo} alt="Evam Finance"
+            sx={{ width: 132, height: 'auto', display: 'block' }} />
+        </Box>
 
         <Typography sx={{ fontSize: 25, color: tokens.navy, fontWeight: 800, letterSpacing: '-0.4px' }}>
           Welcome to ATLAS

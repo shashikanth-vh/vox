@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
 import RoleGuard from './auth/RoleGuard';
 import { useAuth } from './auth/AuthContext';
+import { canSee } from './auth/rbac';
+import { NAV } from './components/layout/navConfig';
 import Login from './pages/Login/LoginPage';
 import Dashboard from './pages/Dashboard/DashboardPage';
 import Today from './pages/Today/TodayPage';
@@ -42,7 +44,8 @@ const routes: [string, string, React.ReactNode][] = [
 ];
 
 export default function App() {
-  const { authed } = useAuth();
+  const { authed, user } = useAuth();
+  const nav = useNavigate();
   // Every dropdown in the app comes from the Register, not from the bundled seed:
   // /v1/ref for the vocabularies (and the role-driven name lists it derives from the
   // people directory), then the people roster itself for the directory lookups. In that
@@ -53,6 +56,24 @@ export default function App() {
     if (!authed) return;
     void referenceService.hydrate().then(() => employeesService.hydrateRoster());
   }, [authed]);
+
+  // Signing in always lands on the FIRST tab, whatever the URL was beforehand. Without
+  // this, signing out on (say) Lending leaves that path in the address bar — the login
+  // screen renders over it — and signing back in drops you straight back onto Lending
+  // rather than the top of the app. The first tab is the first one the ROLE can see, so
+  // a user without Today doesn't land on a guard that bounces them somewhere else.
+  //
+  // Keyed off the false→true transition only: a reload with a live session is not a
+  // sign-in, and rewriting the URL there would break every deep link into the app.
+  const wasAuthed = useRef(authed);
+  useEffect(() => {
+    if (authed && !wasAuthed.current) {
+      const first = NAV.find((n) => canSee(user.roles, n.tab));
+      nav(first?.path ?? '/today', { replace: true });
+    }
+    wasAuthed.current = authed;
+  }, [authed, user.roles, nav]);
+
   if (!authed) return <Login />;
   return (
     <Routes>

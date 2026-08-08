@@ -53,6 +53,10 @@ export default function SynRegisterView({ onOpenBank }: { onOpenBank: (name: str
         csvName="atlas_platform_deals_by_bank"
         actionsEnabled={false}
         onRowClick={(b) => onOpenBank(b.name)}
+        mobileCard={{
+          primary: (b) => b.name,
+          value: (b) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(b.amt, 1)}</span>,
+        }}
       />
     </>
   );

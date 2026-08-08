@@ -39,7 +39,11 @@ export default function AuditPage() {
       {/* Append-only register: the actions column carries row CSV only — no edit/delete.
           Clicking a row opens the full detail. */}
       <CommonTable<AuditRow> queryKey={['audit']} fetcher={(q) => auditService.list(q)} columns={columns} csvName="atlas_audit"
-        onRowClick={(r) => setView(r)} />
+        onRowClick={(r) => setView(r)}
+        mobileCard={{
+          primary: (r) => humanKey(String(r.act || '').replace(/\./g, ' ')),
+          value: (r) => r.t,
+        }} />
 
       <Dialog open={!!view} onClose={() => setView(null)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontSize: 15, fontWeight: 700 }}>Audit detail</DialogTitle>

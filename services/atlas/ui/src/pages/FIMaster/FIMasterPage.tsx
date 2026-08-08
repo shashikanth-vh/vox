@@ -109,6 +109,13 @@ export default function FIMasterPage({ mode: modeProp, onModeChange }: { mode?: 
             // No View icon — a row click opens that bank's dialog (its full engagement
             // + ledger, v12 fiOpenDrawer → openBank), it does not switch to card view.
             onRowClick={(r) => setView(r)}
+            mobileCard={{
+              primary: (r) => r.name,
+              value: (r) => (
+                <Chip size="small" variant="outlined" label={r.inactive ? 'INACTIVE' : 'ACTIVE'}
+                  color={r.inactive ? 'default' : 'success'} />
+              ),
+            }}
           />
           <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
             Click a row to see the full deal ledger for that bank. Switch to Card view to edit notes and preferred sectors inline.

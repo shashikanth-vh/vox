@@ -1,33 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Badge, Box, Tooltip } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
-import { useDraggable } from './useDraggable';
 import { useVocx } from './VocxProvider';
 import { vx } from './vocxStyles';
 import { tokens } from '../../theme';
 
 /**
- * The way into VocX, in the two shapes the two devices want.
+ * The way into VocX: one control, docked in the top bar on every device.
  *
- * `VocxNavButton` sits in the top bar beside the search box, where a pointer looks for a
- * toolbar. `VocxFab` is the phone's answer: a FLOATING button the user drags wherever
- * their thumb reaches. Which hand holds the phone is not a designer's decision, and a
- * control pinned bottom-right is a stretch for a left-handed user on a large screen — so
- * it goes where they put it, and stays there.
- *
- * They are separate components rather than one that switches, because the desktop one is
- * a child of the navbar (which hides itself on mobile) and the floating one must be a
- * child of the layout root — a `display:none` ancestor would take the FAB with it.
+ * It rides beside the notification bell — the toolbar slot a pointer looks for, and the
+ * one a thumb already knows on a phone. It sits a size up from the bell there, because
+ * capture is the thing an RM reaches for in the field and it should never be the small
+ * target.
  *
  * The badge counts captures recorded but never filed. Those are the easiest thing in the
  * product to lose — a preview writes nothing — so the count is on the way IN.
  */
 
-const FAB = 56;
+const MOBILE = '@media (max-width:760px)';
 
-function MicButton({ pending, open, big, recording }:
-                  { pending: number; open: boolean; big: boolean; recording: boolean }) {
-  const d = big ? FAB : 40;
+function MicButton({ pending, open, recording, d, mobileD }:
+                  { pending: number; open: boolean; recording: boolean; d: number; mobileD?: number }) {
+  const icon = Math.round(d * 0.55);
+  const mobileIcon = mobileD ? Math.round(mobileD * 0.55) : undefined;
+  const halo = Math.round(d * 0.28);
   return (
     <Badge
       badgeContent={recording ? 0 : pending}
@@ -47,8 +42,8 @@ function MicButton({ pending, open, big, recording }:
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           bgcolor: recording ? vx.live : (open ? vx.grn2 : tokens.tealHi),
           color: '#04241B',
-          boxShadow: big ? '0 8px 22px rgba(0,0,0,.45)' : 'none',
           transition: 'background-color 180ms',
+          ...(mobileD ? { [MOBILE]: { width: mobileD, height: mobileD } } : {}),
           // A HALO, not a size change: the button keeps its hit area (and the phone's
           // draggable one keeps its geometry) while an expanding ring says, from
           // anywhere in the app, that the microphone is open. Respects
@@ -56,20 +51,20 @@ function MicButton({ pending, open, big, recording }:
           // for, so the colour alone carries it there.
           '@keyframes vocxHalo': {
             '0%': { boxShadow: `0 0 0 0 ${vx.liveSoft}` },
-            '70%': { boxShadow: `0 0 0 ${big ? 16 : 11}px rgba(34,211,238,0)` },
+            '70%': { boxShadow: `0 0 0 ${halo}px rgba(34,211,238,0)` },
             '100%': { boxShadow: '0 0 0 0 rgba(34,211,238,0)' },
           },
           ...(recording ? { animation: 'vocxHalo 1.5s ease-out infinite' } : {}),
           '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
         }}
       >
-        <MicIcon sx={{ fontSize: big ? 28 : 22 }} />
+        <MicIcon sx={{ fontSize: icon, ...(mobileIcon ? { [MOBILE]: { fontSize: mobileIcon } } : {}) }} />
       </Box>
     </Badge>
   );
 }
 
-/** Desktop: a plain toolbar control. */
+/** A plain toolbar control, docked in the navbar on desktop and on mobile alike. */
 export function VocxNavButton() {
   const { open, toggle, pending, recording } = useVocx();
   return (
@@ -91,58 +86,9 @@ export function VocxNavButton() {
           '&:focus-visible': { outline: `3px solid ${tokens.tealHi}`, outlineOffset: 3, borderRadius: '50%' },
         }}
       >
-        <MicButton pending={pending} open={open} big={false} recording={recording} />
+        {/* 34px on a phone against the bell's ~31px control: the same family, one step up. */}
+        <MicButton pending={pending} open={open} d={40} mobileD={34} recording={recording} />
       </Box>
     </Tooltip>
-  );
-}
-
-/** Mobile: draggable, and remembered where it was left. */
-export function VocxFab() {
-  const { open, setOpen, pending, recording } = useVocx();
-  const [show, setShow] = useState(
-    () => typeof window !== 'undefined' && window.innerWidth <= 760);
-
-  useEffect(() => {
-    const onResize = () => setShow(window.innerWidth <= 760);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const size = useCallback(() => ({ w: FAB, h: FAB }), []);
-  // Above the bottom nav by default, so it does not cover the tabs on first use.
-  const initial = useCallback(
-    (vw: number, vh: number) => ({ x: vw - FAB - 16, y: vh - FAB - 96 }), []);
-  const drag = useDraggable({
-    storageKey: 'atlas.vocx.launcher', initial, size, margin: 10, enabled: show,
-  });
-
-  if (!show) return null;
-
-  return (
-    <Box
-      {...drag.handleProps}
-      component="button"
-      type="button"
-      // Dragged by the same element that opens it: a press that never travelled counts
-      // as a tap, so both gestures live on one control with no separate handle.
-      onClick={() => { if (drag.wasTap()) setOpen(!open); }}
-      onDoubleClick={drag.reset}
-      title={recording ? 'Recording — open VocX to stop' : 'Drag to move · double-tap to reset'}
-      aria-label={recording
-        ? 'VocX field intell — recording in progress. Drag to move.'
-        : (pending
-          ? `VocX field intell — ${pending} capture(s) awaiting approval. Drag to move.`
-          : 'VocX field intell. Drag to move.')}
-      aria-expanded={open}
-      sx={{
-        position: 'fixed', left: drag.pos.x, top: drag.pos.y, zIndex: 1260,
-        background: 'none', border: 0, p: 0, cursor: drag.dragging ? 'grabbing' : 'pointer',
-        opacity: drag.dragging ? 0.85 : 1,
-        '&:focus-visible': { outline: `3px solid ${tokens.tealHi}`, outlineOffset: 3, borderRadius: '50%' },
-      }}
-    >
-      <MicButton pending={pending} open={open} big recording={recording} />
-    </Box>
   );
 }

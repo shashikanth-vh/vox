@@ -98,6 +98,10 @@ export default function LendingPage() {
         editReason={ro ? whoCan('editLending') : ''}
         onDelete={ro ? undefined : (r) => setDel(r)}
         rowSx={(r) => stageRowSx(r.stage)}
+        mobileCard={{
+          primary: (r) => r._name,
+          value: (r) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(r.amt)}</span>,
+        }}
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
