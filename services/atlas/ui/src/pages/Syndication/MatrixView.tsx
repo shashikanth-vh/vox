@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover } from '@mui/material';
+import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover, useMediaQuery } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
 import {
   syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, lenderLabel,
@@ -12,6 +12,9 @@ import { useSearch } from '../../context/SearchContext';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { tokens } from '../../theme';
+
+// Same phone breakpoint the navbar, bottom nav and card tables use.
+const MOBILE_QUERY = '(max-width:760px)';
 
 type Scope = 'Live' | 'Closed' | 'All';
 interface MF { states: number[]; dwell: number | ''; preset: string; noout: boolean; }
@@ -40,6 +43,12 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const [amount, setAmount] = useState('');
   // Status-free remark editing (the manual tracker's Remarks column); null = closed.
   const [remark, setRemark] = useState<string | null>(null);
+  // A phone can hold four dot columns of this matrix at best, so below the breakpoint
+  // each company becomes a card whose ENGAGED lenders are tappable status chips (the
+  // same popover behind them). "+ N more" per card reaches the untouched rest of the
+  // lender master — the full market stays one tap away, never the default clutter.
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const match = (name: string, code: string) => {
     const g = search.trim().toLowerCase(); const lq = q.trim().toLowerCase();
@@ -156,6 +165,31 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
     opacity: dim ? 0.14 : 1, transition: 'transform .1s',
   });
 
+  // The company's headline stage — its furthest tracker along the pipeline.
+  const topOf = (c: string) => {
+    const st = synRows(c).map((r: any) => r.status);
+    return ['Disbursed', 'Sanctioned', 'IP Received', 'Queries Received', 'IM Circulated', 'IM in Prep', 'Docs Pending', 'Deal Sourced', 'On Hold'].find((s) => st.includes(s)) || st[0] || '';
+  };
+
+  // One bank on one mandate as a phone chip — dot colour + name + dwell, the same
+  // popover (story + next steps) anchored to the tap.
+  const lenderChip = (c: string, l: string) => {
+    const s = cellS(c, l); const d = cellDays(c, l);
+    const dim = dimOn && !!s && !cellHit(c, l);
+    return (
+      <Box key={l} onClick={(e) => openPop(e, c, l)}
+        sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.6, cursor: 'pointer',
+          border: `1.4px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}`,
+          bgcolor: s ? `${MATRIX_COLORS[s]}1A` : '#fff', borderRadius: 999,
+          px: 1.1, py: 0.5, fontSize: 11.8, opacity: dim ? 0.25 : 1 }}>
+        <Box sx={{ width: 10, height: 10, borderRadius: '50%', flex: 'none',
+          bgcolor: s ? MATRIX_COLORS[s] : '#fff',
+          border: `1.3px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}` }} />
+        {l}{d != null && s ? <span style={{ color: tokens.muted }}>· {d}d</span> : null}
+      </Box>
+    );
+  };
+
   return (
     <Box>
       {/* scope + hint */}
@@ -204,7 +238,52 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
         <ExportBar onCsv={exportCsv} />
       </Box>
 
-      {/* matrix */}
+      {/* matrix — a dot grid needs desktop width; on a phone each company is a card of
+          lender chips instead (same data, same popover, nothing lost) */}
+      {isMobile ? (
+      <Box>
+        {codes.map((c) => {
+          const cl = clientsService.get(c);
+          const engaged = order.filter((l) => cellObj(c, l));
+          // The Un-Assigned filter chip means "show me the untouched cells" — it
+          // force-expands every card, exactly as it force-expands the grid's columns.
+          const showAll = expanded[c] || mf.states.includes(0);
+          const shown = showAll ? order : engaged;
+          const rest = order.length - engaged.length;
+          return (
+            <Box key={c} sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.3, mb: 1 }}>
+              <Box onClick={() => onOpenCompany(c)} sx={{ cursor: 'pointer' }}>
+                <Typography sx={{ fontWeight: 700, fontSize: 13.4, lineHeight: 1.25 }}>{cl.name}</Typography>
+                <Typography sx={{ fontSize: 11, color: tokens.muted, mt: 0.2 }}>
+                  ₹{fmt(syndicationService.offLive(c), 1)} Cr{topOf(c) ? ` · ${topOf(c)}` : ''}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.7, mt: engaged.length || showAll ? 1 : 0.6 }}>
+                {shown.map((l) => lenderChip(c, l))}
+                {!showAll && rest > 0 && (
+                  <Box onClick={() => setExpanded((p) => ({ ...p, [c]: true }))}
+                    sx={{ display: 'inline-flex', alignItems: 'center', border: `1.4px dashed ${tokens.line}`,
+                      borderRadius: 999, px: 1.1, py: 0.5, fontSize: 11.8, color: tokens.muted, cursor: 'pointer' }}>
+                    {engaged.length ? `+ ${rest} more` : `No outreach yet — pick from ${rest} lenders`}
+                  </Box>
+                )}
+                {expanded[c] && !mf.states.includes(0) && (
+                  <Box onClick={() => setExpanded((p) => ({ ...p, [c]: false }))}
+                    sx={{ display: 'inline-flex', alignItems: 'center', border: `1.4px dashed ${tokens.line}`,
+                      borderRadius: 999, px: 1.1, py: 0.5, fontSize: 11.8, color: tokens.muted, cursor: 'pointer' }}>
+                    Show engaged only
+                  </Box>
+                )}
+              </Box>
+            </Box>
+          );
+        })}
+        {!codes.length && <Typography sx={{ p: 3, color: tokens.muted, fontSize: 12.6 }}>No companies match this view.</Typography>}
+        <Typography sx={{ fontSize: 11.5, color: tokens.muted, p: '4px 4px 8px' }}>
+          {codes.length} companies{mf.noout ? ' with a live mandate and zero lender outreach' : ''}
+        </Typography>
+      </Box>
+      ) : (
       <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 2, overflow: 'auto', maxHeight: 'calc(100vh - 250px)' }}>
         <table style={{ borderCollapse: 'collapse', width: 'auto', fontSize: 12.6 }}>
           <thead>
@@ -224,8 +303,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           <tbody>
             {codes.map((c) => {
               const cl = clientsService.get(c);
-              const st = synRows(c).map((r: any) => r.status);
-              const top = ['Disbursed', 'Sanctioned', 'IP Received', 'Queries Received', 'IM Circulated', 'IM in Prep', 'Docs Pending', 'Deal Sourced', 'On Hold'].find((s) => st.includes(s)) || st[0] || '';
+              const top = topOf(c);
               return (
                 <tr key={c}>
                   <td style={{ position: 'sticky', left: 0, zIndex: 6, background: '#fff', minWidth: 210, maxWidth: 250, padding: '5px 9px', borderRight: `1px solid ${tokens.line}`, borderBottom: `1px solid #EFF2F4`, whiteSpace: 'normal' }}>
@@ -255,6 +333,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           {codes.length} companies{mf.noout ? ' with a live mandate and zero lender outreach' : ''}
         </Typography>
       </Box>
+      )}
       {/* Cell popover — the story of one bank on one mandate, and (advanceMatrix) the moves */}
       <Popover open={!!pop} anchorEl={pop?.el ?? null} onClose={closePop}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
