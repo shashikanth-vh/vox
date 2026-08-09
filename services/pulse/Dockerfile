@@ -11,7 +11,11 @@ RUN pip install --upgrade pip && pip install --no-deps /tmp/evam-backend-core /t
 COPY services/pulse/pyproject.toml services/pulse/README.md ./
 RUN pip install .
 COPY services/pulse/app ./app
-RUN pip install .
+# --no-deps: the line above already installed every dependency from the same
+# pyproject, and nothing about copying the app code can change them. Re-resolving them
+# here only re-opens a network round trip to PyPI on the LAST step of the build — the
+# one that has already paid for everything else.
+RUN pip install --no-deps .
 
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
