@@ -90,7 +90,11 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
 
       {open && (
         <Box onClick={(e) => e.stopPropagation()}
-          sx={{ mt: 0.6, px: 1.2, py: 0.9, bgcolor: '#FAFBFC', border: `1px solid ${tokens.line}`, borderRadius: 1.5, cursor: 'default' }}>
+          sx={{ mt: 0.6, px: 1.2, py: 0.9, bgcolor: '#FAFBFC', border: `1px solid ${tokens.line}`,
+            borderRadius: 1.5, cursor: 'default',
+            // A rich VOX row would otherwise stretch the drawer to several screens; the
+            // detail keeps its own window and scrolls inside it.
+            maxHeight: 340, overflowY: 'auto' }}>
           {i.fullNotes && <Field label="Notes"><span style={{ whiteSpace: 'pre-wrap' }}>{i.fullNotes}</span></Field>}
           {i.outcome && <Field label="Outcome"><span style={{ whiteSpace: 'pre-wrap' }}>{i.outcome}</span></Field>}
           {intel.length > 0 && (
@@ -121,8 +125,9 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
                 {showTranscript ? '▴ Hide transcript' : '▾ View transcript'}
               </Typography>
               {showTranscript && (
+                // No cap of its own — the detail panel is the one scroll container.
                 <Typography sx={{ fontSize: 11.8, whiteSpace: 'pre-wrap', mt: 0.5, color: '#3A4A54',
-                  maxHeight: 260, overflow: 'auto', bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
+                  bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1 }}>
                   {i.transcript}
                 </Typography>
               )}
