@@ -500,6 +500,12 @@ async def import_workbook(
     ).scalars().all()
     people_seen: set[str] = {_key(p.full_name or "") for p in existing_people if p.full_name}
     person_by_full = {_key(p.full_name or ""): p for p in existing_people if p.full_name}
+    # ALSO index by the short handle (initials). The tracker sheets name people by their
+    # INITIALS — "Credit Analyst: AT" — while People Master names them in full, so a
+    # roster keyed on full name alone did not recognise "AT" as Archana Tripathi and
+    # invented a second, empty person beside her: the "AT / AT" and "GO / GO" rows the
+    # desk sees in Employees, and a second entry in every RM/Analyst dropdown.
+    person_by_handle = {_key(p.name or ""): p for p in existing_people if p.name}
     n_people = n_pm = 0
 
     # People Master FIRST — the ledger's authoritative team directory (Role / Initials /
@@ -523,6 +529,8 @@ async def import_workbook(
             session.add(p)
             people_seen.add(_key(full))
             person_by_full[_key(full)] = p
+            if p.name:
+                person_by_handle[_key(p.name)] = p
             n_pm += 1
         else:
             if role:
@@ -534,18 +542,36 @@ async def import_workbook(
             if pemail:
                 p.email = pemail
             p.updated_by = "xlsx-import"
+            if p.name:
+                person_by_handle[_key(p.name)] = p
 
     def add_person(nm, role):
+        """A name harvested from an RM / Credit Analyst cell. These sheets write people
+        as INITIALS, so the roster is consulted by handle as well as by full name —
+        otherwise "AT" on a lending row becomes a second person beside the People
+        Master's Archana Tripathi. People Master ran first and is authoritative: a
+        harvested cell never overwrites what it said, it only fills a genuine gap."""
         nonlocal n_people
         nm = _s(nm)
         if not nm or nm.lower() in {"tbd"}:
             return
         pk = _key(nm)
-        if pk in people_seen:
+        if pk in people_seen or pk in person_by_handle:
             return
+        # The sheets are not consistent: most cells hold initials, a few hold a first
+        # name ("Shubh" where the roster says SD · Shubh Dave). Fold a lone token into
+        # the roster person whose full name begins with it — but ONLY when exactly one
+        # person matches, because a first name two people share is not an identity.
+        if " " not in nm:
+            hits = [p for p in person_by_full.values()
+                    if (p.full_name or "").split() and _key((p.full_name or "").split()[0]) == pk]
+            if len(hits) == 1:
+                return
         people_seen.add(pk)
-        session.add(Person(tenant_id=tenant_id, name=nm.split()[0], full_name=nm, role=role,
-                            created_by="xlsx-import", updated_by="xlsx-import"))
+        p = Person(tenant_id=tenant_id, name=nm.split()[0], full_name=nm, role=role,
+                   created_by="xlsx-import", updated_by="xlsx-import")
+        session.add(p)
+        person_by_handle[_key(p.name)] = p
         n_people += 1
     for r in leads:
         add_person(r.get("RM Owner"), "RM")
