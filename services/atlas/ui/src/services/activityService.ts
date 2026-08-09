@@ -101,6 +101,24 @@ function enrich(): ActivityRow[] {
  * it sends one; otherwise the action is described the same way a local audit entry is,
  * so both sources read alike in the table.
  */
+/**
+ * One row of GET /v1/activity — the register's own plain-English rendering of its audit
+ * trail. The sentence, the area and the company are resolved SERVER-side (where the
+ * before→after values and the entity join live), so the browser neither re-derives a
+ * vocabulary nor resolves a UUID per row.
+ */
+export function fromActivityWire(r: any): ActivityRow {
+  return {
+    t: String(r?.at || '').replace('T', ' ').slice(0, 16),
+    by: r?.actor || '',
+    area: r?.area || 'Other',
+    text: r?.summary || '',
+    code: r?.code || '',
+    company: r?.company || '',
+    act: r?.action || '',
+  };
+}
+
 export function toActivityRow(r: any): ActivityRow {
   const act = r?.action || r?.event_type || r?.type || r?.title || '';
   const code = r?.subject_no || r?.code || r?.subject_id || '';
@@ -125,8 +143,11 @@ export const activityService = {
   async listAll(): Promise<ActivityRow[]> {
     return withFallback<ActivityRow[]>(
       async () => {
-        const data = await api.get<any>('/notifications', toCursorParams({ pageIndex: 0, pageSize: 200 }));
-        return asRows(data, 'notifications').map(toActivityRow);
+        // The ACTIVITY TRAIL, not the notification feed. This screen used to read
+        // /v1/notifications — a per-user list of things still UNREAD, which is empty on a
+        // busy register and always will be: it was never a history of what people did.
+        const data = await api.get<any>('/activity', { limit: 200 });
+        return asRows(data, 'activity').map(fromActivityWire);
       },
       () => enrich(),
     );
@@ -136,14 +157,14 @@ export const activityService = {
   async list(q: TableQuery, area?: string): Promise<Paged<ActivityRow>> {
     return withFallback<Paged<ActivityRow>>(
       async () => {
-        // Server-paged: one page comes back, so applyQuery must NOT re-slice it. `area`
-        // is an ATLAS-side grouping derived from the action, not a field the endpoint
-        // knows, so it still narrows here — which means an area-filtered page can hold
-        // fewer rows than the page size.
-        const data = await api.get<any>('/notifications', toCursorParams(q));
-        const all = asRows(data, 'notifications').map(toActivityRow);
+        // One capped read, then page/sort/filter locally: the trail is a bounded recent
+        // window (the endpoint caps at 500), and paging it server-side would cost the
+        // KPI chips their totals. `area` is the register's own grouping, so it narrows
+        // here exactly as any other column filter does.
+        const data = await api.get<any>('/activity', { limit: 500 });
+        const all = asRows(data, 'activity').map(fromActivityWire);
         const rows = area ? all.filter((e) => e.area === area) : all;
-        return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
+        return applyQuery(rows, { ...q, searchFields: ['text', 'by', 'area', 'code', 'company'] });
       },
       async () => {
         await delay();

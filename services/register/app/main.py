@@ -10,6 +10,7 @@ from __future__ import annotations
 from evam_backend_core.app import create_service_app
 from fastapi import FastAPI
 
+from app.api.activity import router as activity_router
 from app.api.advaya import router as advaya_router
 from app.api.advaya_manual import router as advaya_manual_router
 from app.api.calendar import router as calendar_router
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
         export_ledger_router,
         import_router,
         custom_router,
+        activity_router,
         decisions_router,
         cpcs_router,
         sanction_router,

@@ -4,6 +4,7 @@ import { db } from '../api/atlasStore';
 import { GOOGLE_SSO_CLIENT_ID } from '../api/axiosClient';
 import { authService } from '../services/authService';
 import { getSession, type PrismSession } from './session';
+import { api, USE_REAL_API } from '../api/http';
 
 export interface AppUser {
   name: string;
@@ -52,6 +53,18 @@ interface AuthCtx {
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
+
+/** Tell the register a person signed in.
+ *
+ * Tokens are issued by the IdP (Dex / Google), OUTSIDE PRISM — so a sign-in leaves no
+ * trace in the register and the Activity Log could never show "Signed in to ATLAS", the
+ * one row that says who was even here. The register exposes /v1/session-events for
+ * exactly this, and records it as the CALLER's own audited row (you cannot file one for
+ * someone else). Fire-and-forget: a failed bookkeeping call must never fail a login. */
+function recordSignIn(): void {
+  if (!USE_REAL_API) return;
+  void api.post('/session-events', { event: 'signin' }).catch(() => { /* bookkeeping only */ });
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const users: AppUser[] = db().people.map((p: any) => {
@@ -110,22 +123,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const s = await authService.signIn(email ?? '', password ?? '');
-      setSession(s); setUser(userFromSession(s)); setAuthed(true);
+      setSession(s); setUser(userFromSession(s)); setAuthed(true); recordSignIn();
     },
     signInWithIdToken: async (idToken) => {
       if (!authService.isLive()) { setUser(adminUser); setSession(null); setAuthed(true); return; }
       const s = await authService.signInWithIdToken(idToken);
-      setSession(s); setUser(userFromSession(s)); setAuthed(true);
+      setSession(s); setUser(userFromSession(s)); setAuthed(true); recordSignIn();
     },
     signInWithGoogle: async () => {
       if (!authService.isLive()) { setUser(adminUser); setSession(null); setAuthed(true); return; }
       const s = await authService.signInWithGoogle();
-      setSession(s); setUser(userFromSession(s)); setAuthed(true);
+      setSession(s); setUser(userFromSession(s)); setAuthed(true); recordSignIn();
     },
     signInWithGoogleCredential: async (credential) => {
       if (!authService.isLive()) { setUser(adminUser); setSession(null); setAuthed(true); return; }
       const s = await authService.signInWithGoogleCredential(credential);
-      setSession(s); setUser(userFromSession(s)); setAuthed(true);
+      setSession(s); setUser(userFromSession(s)); setAuthed(true); recordSignIn();
     },
     signOut: () => { authService.signOut(); setSession(null); setAuthed(false); },
   }), [user, users, authed, session, adminUser]);
