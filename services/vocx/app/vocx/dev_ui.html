@@ -390,21 +390,45 @@ document.getElementById('micBtn').onclick = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: true});
     chunks = []; tSec = 0;
-    mediaRec = new MediaRecorder(stream);
-    mediaRec.ondataavailable = e => chunks.push(e.data);
+    // Ask for a container explicitly instead of taking the browser's default: Opus in
+    // WebM is what desktop Chrome and Android give us, iOS Safari supports only MP4/AAC
+    // and ignores the list, and the pick then travels to Whisper as the clip's real
+    // type. An unsupported string would make the constructor THROW, so each candidate
+    // is checked first and an old browser still falls back to the default.
+    const WANT = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4;codecs=mp4a.40.2',
+                  'audio/mp4', 'audio/ogg;codecs=opus'];
+    const pick = (window.MediaRecorder && MediaRecorder.isTypeSupported)
+      ? WANT.find(t => { try { return MediaRecorder.isTypeSupported(t); } catch (e) { return false; } })
+      : '';
+    mediaRec = pick ? new MediaRecorder(stream, {mimeType: pick}) : new MediaRecorder(stream);
+    mediaRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
     mediaRec.onstop = async () => {
       stream.getTracks().forEach(t => t.stop());
       clearInterval(tHandle); document.getElementById('micwrap').classList.remove('rec');
       document.getElementById('recState').textContent = 'transcribing (any language → English)…';
       try {
         const blob = new Blob(chunks, {type: mediaRec.mimeType || 'audio/webm'});
+        // A clip of a few hundred bytes is a container header with no speech in it —
+        // a muted mic, a permission the OS granted but a headset never released, a tap
+        // that stopped the recording instantly. Uploading it earns an opaque decode
+        // error from Whisper; saying so here is answerable.
+        if (blob.size < 2048) {
+          document.getElementById('recState').innerHTML =
+            '<span class="bad">That recording came out empty (' + blob.size +
+            ' bytes). Check the mic is not muted or in use by another app, then hold the ' +
+            'recording for a couple of seconds before tapping stop.</span>';
+          return;
+        }
         const qs = new URLSearchParams({rm: rmv(), ...gps});
         const res = await fetch(api('capture_audio?') + qs, {method: 'POST',
           headers: {'X-Tenant': 'EVAM', 'Content-Type': blob.type}, body: blob}).then(j);
         onPreview(res);
       } catch (e) { document.getElementById('recState').innerHTML = `<span class="bad">${e.message}</span>`; }
     };
-    mediaRec.start();
+    // A timeslice: data is flushed every second instead of only at stop, so a tab that
+    // gets backgrounded mid-recording (a phone call, a lock screen) still yields the
+    // audio recorded up to that point rather than one empty final chunk.
+    mediaRec.start(1000);
     document.getElementById('micwrap').classList.add('rec');
     document.getElementById('recState').textContent = 'Recording… tap the mic to stop.';
     tHandle = setInterval(() => {

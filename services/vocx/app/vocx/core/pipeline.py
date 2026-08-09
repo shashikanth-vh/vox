@@ -120,8 +120,19 @@ def process_audio_capture(
     on_stage = kwargs.pop("on_stage", None)
     if on_stage:
         on_stage("transcribing")
-    tr = transcriber.transcribe(audio, language=language,
-                                prompt=kwargs.pop("stt_prompt", None))
+    # What the recorder declared it produced (audio/mp4 from an iPhone, audio/webm from
+    # Android Chrome), passed on ONLY to a transcriber whose signature takes it — the
+    # hint must never break a backend, or a test double, that predates it.
+    ctype = kwargs.pop("content_type", None)
+    tr_kw: dict[str, Any] = {"language": language, "prompt": kwargs.pop("stt_prompt", None)}
+    if ctype:
+        import inspect
+        try:
+            if "content_type" in inspect.signature(transcriber.transcribe).parameters:
+                tr_kw["content_type"] = ctype
+        except (TypeError, ValueError):        # C-implemented / unintrospectable callable
+            pass
+    tr = transcriber.transcribe(audio, **tr_kw)
     ref = kwargs.pop("transcript_ref", None) or vocx_stt.archive_audio(audio, capture_ts, rm, config)
     if on_stage:
         on_stage("structuring")

@@ -28,7 +28,10 @@ class Transcriber:
     toward expected vocabulary (client names, finance terms) where supported."""
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+        """`content_type` is what the RECORDER declared (audio/mp4 from an iPhone,
+        audio/webm from Android Chrome). Backends that decode the bytes themselves
+        ignore it; the HTTP one uses it to name the upload honestly."""
         raise NotImplementedError
 
 
@@ -52,7 +55,7 @@ class StubTranscriber(Transcriber):
         self.text = text
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
         if self.text is not None:
             return _result(self.text, language or "en", backend="stub")
         if isinstance(audio, str):
@@ -107,7 +110,8 @@ class FasterWhisperTranscriber(Transcriber):
         return self._model
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+        # content_type is irrelevant here: PyAV sniffs the container from the bytes.
         with self._lock:
             return self._transcribe_locked(audio, language, prompt)
 
@@ -166,7 +170,7 @@ class APITranscriber(Transcriber):
         self.task = task
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
         import time
 
         import httpx  # lazy
@@ -174,12 +178,21 @@ class APITranscriber(Transcriber):
         key = os.environ.get(self.key_env)
         if not url:
             raise RuntimeError(f"STT API endpoint env {self.endpoint_env} is not set")
+        # A phone does NOT record .wav — iOS Safari hands back audio/mp4 (AAC), Android
+        # Chrome audio/webm — so naming every clip "audio.wav" mislabelled every mobile
+        # capture. Our own STT sniffs the bytes and does not care, but a Whisper endpoint
+        # that validates by extension (OpenAI's does) rejects the lie outright, and an
+        # honest name is what makes a decode failure legible in the logs. Same extension
+        # table the archive uses, so a clip is named identically wherever it lands.
+        from app.vocx.speech.audio_store import ext_for
+        ctype = (content_type or "").split(";")[0].strip().lower() or None
         if isinstance(audio, str):
             with open(audio, "rb") as fh:
                 blob = fh.read()
             fname = os.path.basename(audio)
         else:
-            blob, fname = audio, "audio.wav"
+            blob = audio
+            fname = "audio" + (ext_for(content_type) if content_type else ".wav")
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         data = {"model": self.model, "task": self.task}
         if language:
@@ -189,8 +202,10 @@ class APITranscriber(Transcriber):
         last: Exception | None = None
         for attempt in range(3):
             try:
-                resp = httpx.post(url, headers=headers, data=data,
-                                  files={"file": (fname, blob)}, timeout=self.timeout)
+                resp = httpx.post(
+                    url, headers=headers, data=data,
+                    files={"file": (fname, blob, ctype) if ctype else (fname, blob)},
+                    timeout=self.timeout)
                 if resp.status_code >= 500:
                     # Carry the upstream's own words. "STT service unreachable after
                     # retries: 500" is unanswerable — it cannot distinguish a model that
@@ -199,6 +214,14 @@ class APITranscriber(Transcriber):
                     # reading the capture log needs to know.
                     raise httpx.HTTPStatusError(
                         f"{resp.status_code} from {url}: {_detail(resp)}",
+                        request=resp.request, response=resp)
+                if resp.status_code >= 400:
+                    # Same for 4xx, which is the one the RECORDING USER sees: a bare
+                    # "Client error '400 Bad Request' for url http://stt:8000/..." tells
+                    # the person holding the phone nothing they can act on, while the
+                    # service has already said exactly what was wrong with the clip.
+                    raise httpx.HTTPStatusError(
+                        f"STT rejected the clip ({resp.status_code}): {_detail(resp)}",
                         request=resp.request, response=resp)
                 resp.raise_for_status()   # 4xx = our bug/config — no retry, surface it
                 body = resp.json()

@@ -1117,6 +1117,88 @@ def test_a_recording_keeps_its_real_container_type(tmp_path):
     assert sniff_audio_type(store.playback(legacy)[1]) == "audio/webm"
 
 
+def test_a_rejected_clip_says_why_and_is_uploaded_under_its_real_name(monkeypatch):
+    """Two things a field RM needs when a recording will not transcribe.
+
+    WHY: the STT service explains every 4xx in its problem body ("...could not be
+    decoded..."), and that explanation was thrown away for 4xx while being carried
+    faithfully for 5xx — so a phone showed the bare "Client error '400 Bad Request'
+    for url http://stt:8000/...", which names our internal hostname and nothing the
+    person holding the phone can act on.
+
+    UNDER WHAT NAME: the upload was hardcoded `audio.wav` whatever the browser
+    recorded. No phone records WAV — iOS Safari produces mp4/AAC — so every mobile
+    capture reached the transcriber mislabelled.
+    """
+    import json as _json
+
+    from app.vocx.speech import stt as vocx_stt
+
+    sent: dict = {}
+
+    class _Resp:
+        status_code = 400
+        request = None
+
+        def __init__(self):
+            self.text = ""
+
+        def json(self):
+            return {"error": {"type": "invalid_request",
+                              "title": "Audio could not be transcribed",
+                              "detail": "the 812 byte clip (MP4/M4A (iso5)) could not be "
+                                        "transcribed: no audio stream"}}
+
+    def _fake_post(url, headers=None, data=None, files=None, timeout=None):
+        sent["file"] = files["file"]
+        return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    monkeypatch.setenv("VOCX_STT_API_URL", "http://stt:8000/v1/audio/transcriptions")
+
+    with pytest.raises(httpx.HTTPStatusError) as err:
+        vocx_stt.APITranscriber().transcribe(b"\x00\x00\x00\x18ftypiso5" + b"\x00" * 800,
+                                             content_type="audio/mp4;codecs=mp4a.40.2")
+
+    # The upstream's own words reach the recorder — not just the status code.
+    assert "could not be transcribed" in str(err.value)
+    assert "no audio stream" in str(err.value)
+    # An iPhone clip is offered as .m4a, with the type the browser declared.
+    assert sent["file"][0] == "audio.m4a", sent["file"][0]
+    assert sent["file"][2] == "audio/mp4"
+    assert _json  # (kept: the problem body above is JSON by contract)
+
+
+def test_the_recorders_format_reaches_the_transcriber_without_breaking_older_ones():
+    """The capture endpoint knows what the browser recorded; the transcriber is told —
+    but ONLY when its signature takes the hint, so a backend (or a test double) written
+    before it keeps working rather than dying on an unexpected keyword."""
+    from app.vocx.core import pipeline as vocx_pipeline
+
+    seen: list = []
+
+    class Older:                                   # predates content_type
+        def transcribe(self, audio, language=None, prompt=None):
+            seen.append(("older", None))
+            return {"text": "t", "language": "en", "duration": 1, "segments": []}
+
+    class Newer:
+        def transcribe(self, audio, language=None, prompt=None, content_type=None):
+            seen.append(("newer", content_type))
+            return {"text": "t", "language": "en", "duration": 1, "segments": []}
+
+    for tr in (Older(), Newer()):
+        try:
+            vocx_pipeline.process_audio_capture(
+                b"\x00" * 99, rm="SD", transcriber=tr, offline=True,
+                content_type="audio/mp4;codecs=mp4a.40.2")
+        except Exception:                          # noqa: BLE001
+            pass                                   # transcription already ran; the rest
+            #                                        of the pipeline needs a store
+    assert seen == [("older", None), ("newer", "audio/mp4;codecs=mp4a.40.2")]
+
+
 async def test_playback_is_served_with_the_clips_own_type(stub_register, monkeypatch,
                                                           tmp_path):
     """End to end through the route: post a webm capture, read /v1/audio back, and the

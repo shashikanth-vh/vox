@@ -536,7 +536,7 @@ class VocxApp:
                               content_type=_one(query, "ct") or "")
         result = vocx_pipeline.process_audio_capture(
             bytes(body), rm=rm, capture_ts=_one(query, "ts"),
-            transcript_ref=ref,
+            transcript_ref=ref, content_type=_one(query, "ct") or "",
             transcriber=self.transcriber(), store=self.store, config=self.config,
             execute=False,  # preview; the RM confirms via /commit
             stt_prompt=self.stt_prompt(),

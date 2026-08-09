@@ -47,3 +47,6 @@ deploy/vocx-secrets/*
 
 # Frontend
 node_modules/
+
+# VocX capture archive written by a local test run — recordings are never committed.
+services/vocx/captures/

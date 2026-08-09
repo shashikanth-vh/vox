@@ -56,6 +56,27 @@ class AudioUndecodable(ValueError):
     """The bytes were received but are not audio this build can decode."""
 
 
+def sniff_container(blob: bytes) -> str:
+    """Name the container from its magic bytes. A decode failure that says only
+    "could not be transcribed" leaves an operator guessing whether the phone sent a
+    format this build lacks, a truncated upload, or silence; naming what actually
+    arrived — and how many bytes of it — is the difference between a shrug and a fix."""
+    head = blob[:16]
+    if head[4:8] == b"ftyp":
+        return f"MP4/M4A ({head[8:12].decode('ascii', 'replace')})"   # iOS Safari records this
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "WebM/Matroska"                                        # Chrome, Android
+    if head[:4] == b"RIFF" and blob[8:12] == b"WAVE":
+        return "WAV"
+    if head[:4] == b"OggS":
+        return "Ogg"
+    if head[:4] == b"fLaC":
+        return "FLAC"
+    if head[:3] == b"ID3" or (len(head) > 1 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0):
+        return "MP3/ADTS"
+    return "unrecognised (no known audio container signature)"
+
+
 class FasterWhisperEngine:
     def __init__(self, settings: Settings):
         self.s = settings
@@ -116,8 +137,8 @@ class FasterWhisperEngine:
                                  "text": seg.text.strip()})
             except Exception as exc:                  # noqa: BLE001 - re-raised, typed
                 raise AudioUndecodable(
-                    f"the {len(audio)} byte clip could not be transcribed: "
-                    f"{type(exc).__name__}: {exc}") from exc
+                    f"the {len(audio)} byte clip ({sniff_container(audio)}) could not be "
+                    f"transcribed: {type(exc).__name__}: {exc}") from exc
             return _result("".join(parts), getattr(info, "language", None),
                            getattr(info, "duration", None), segs, "faster_whisper")
 
