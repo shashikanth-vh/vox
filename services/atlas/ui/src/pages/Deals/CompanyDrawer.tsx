@@ -22,6 +22,7 @@ import { USE_REAL_API, isRegisterId } from '../../api/http';
 import { db } from '../../api/atlasStore';
 import ActionsPanel from '../../components/workflow/ActionsPanel';
 import { can } from '../../auth/rbac';
+import InteractionRow from '../../components/common/InteractionRow';
 import { tokens } from '../../theme';
 
 const LIFE_STAGES = ['Prospect', 'Onboarded', 'Active', 'Serviced', 'Vistaar — Expansion', 'Dormant'];
@@ -304,19 +305,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
           action={canInteract ? <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setLogOpen(true)}>Log interaction</Button> : undefined}>
           <Box sx={{ borderLeft: `2px solid ${tokens.line}`, pl: 1.5 }}>
             {ints.length ? ints.slice(0, 8).map((i) => (
-              <Box key={i.interactionId} sx={{ mb: 1.2 }}>
-                <Typography sx={{ fontSize: 11, color: tokens.muted, fontWeight: 600 }}>
-                  {i.occurredAt} · {i.interactionType} · by {i.person}{i.lenderName ? ` · ${i.lenderName}` : ''}
-                  {i.refType === 'Lead' && (
-                    <Box component="span" sx={{ ml: 0.7, px: 0.7, py: 0.1, borderRadius: '99px',
-                      bgcolor: '#FFF3E0', color: '#9A6A00', fontSize: 9.5, fontWeight: 700 }}>
-                      LEAD PHASE
-                    </Box>
-                  )}
-                </Typography>
-                <Typography sx={{ fontSize: 12.5, whiteSpace: 'pre-wrap', mt: 0.3 }}>{i.notes}</Typography>
-                {i.nextAction && <Typography sx={{ fontSize: 11.5, color: tokens.navy, bgcolor: '#EEF4F3', borderRadius: 1, px: 1, py: 0.4, mt: 0.5, display: 'inline-block' }}>Next: {i.nextAction}{i.nextActionDate ? ` by ${i.nextActionDate}` : ''}</Typography>}
-              </Box>
+              <InteractionRow key={i.interactionId} i={i} />
             )) : <Typography sx={{ fontSize: 12, color: tokens.muted }}>No interactions logged yet. Click <b>Log interaction</b> to add one.</Typography>}
           </Box>
         </DrawerSection>

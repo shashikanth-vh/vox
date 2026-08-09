@@ -7,6 +7,21 @@ export interface Interaction {
   occurredAt: string; loggedAt: string; person: string; interactionType: string;
   direction?: string | null; lenderName?: string | null;
   notes: string; nextAction?: string | null; nextActionDate?: string | null;
+  // The depth behind the summary line — everything the register stores that the
+  // timeline's collapsed row does not show. All optional: manual quick-logs carry
+  // none of it, VOX-logged rows carry most of it.
+  fullNotes?: string | null;
+  outcome?: string | null;
+  /** Structured credit intel. The writers disagree on shape (VocX a dict, its reports
+   *  a bullet list), so this stays `any` and the renderer treats each shape. */
+  keyIntel?: any;
+  nextSteps?: any[] | null;
+  transcript?: string | null;
+  attendees?: any[] | null;
+  location?: string | null;
+  nextMeetingDate?: string | null;
+  /** Manual / VOX / Email / System — badges the row with where it came from. */
+  source?: string | null;
 }
 
 const newId = () => 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -23,6 +38,25 @@ const toStamp = (d?: string | null) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day}T00:00:00Z` : day;
 };
 
+/** The hand-typed dialog's record as the register's wire shape. The API caps `summary`
+ *  at 300 chars, so the FULL text always rides in `notes` (the server keeps both) and
+ *  the summary is the cap — a long note must never bounce with a 422 or lose its tail.
+ *  Typed next actions go on the wire too — they used to survive only in the local
+ *  store, which a register-backed timeline rightly never showed. */
+const manualWire = (rec: Partial<Interaction>, by: string) => {
+  const text = (rec.notes || '').trim();
+  return {
+    interaction_type: rec.interactionType || '',
+    occurred_at: toStamp(rec.occurredAt),
+    summary: text.slice(0, 300),
+    ...(text.length > 300 ? { notes: text } : {}),
+    performed_by: rec.person || by,
+    ...(rec.nextAction?.trim() ? { next_action: rec.nextAction.trim() } : {}),
+    ...(rec.nextActionDate ? { next_action_date: rec.nextActionDate } : {}),
+    source: 'Manual',
+  };
+};
+
 /** An API interaction read back as the ledger row the drawer renders. */
 function fromWire(r: any, refId: string, refType = 'Lead'): Interaction {
   const at = String(r?.occurred_at || '');
@@ -33,10 +67,21 @@ function fromWire(r: any, refId: string, refType = 'Lead'): Interaction {
     loggedAt: r?.created_at || at,
     person: r?.performed_by || '',
     interactionType: r?.interaction_type || '',
-    direction: null,
-    lenderName: r?.contact_name || null,
+    direction: r?.direction || null,
+    lenderName: r?.contact_name || r?.lender_name || null,
     notes: r?.summary || '',
-    nextAction: null, nextActionDate: null,
+    nextAction: r?.next_action || null, nextActionDate: r?.next_action_date || null,
+    // The depth the expanded row shows. fullNotes only when it ADDS to the summary —
+    // the register mirrors short manual notes into both columns.
+    fullNotes: r?.notes && r.notes !== r.summary ? r.notes : null,
+    outcome: r?.outcome || null,
+    keyIntel: r?.key_intel ?? null,
+    nextSteps: Array.isArray(r?.next_steps) && r.next_steps.length ? r.next_steps : null,
+    transcript: r?.transcript || null,
+    attendees: Array.isArray(r?.attendees) && r.attendees.length ? r.attendees : null,
+    location: r?.location || null,
+    nextMeetingDate: r?.next_meeting_date || null,
+    source: r?.source || null,
   };
 }
 
@@ -116,11 +161,8 @@ export const interactionService = {
     if (USE_REAL_API && entityId) {
       try {
         await api.post<any>(`/entities/${entityId}/interactions`, {
-          interaction_type: rec.interactionType || '',
-          occurred_at: toStamp(rec.occurredAt),
-          summary: rec.notes || '',
+          ...manualWire(rec, by),
           contact_name: rec.lenderName || '',
-          performed_by: rec.person || by,
         });
       } catch (e: any) {
         const detail = errText(e?.response?.data);
@@ -141,13 +183,8 @@ export const interactionService = {
     if (USE_REAL_API) {
       try {
         await api.post<any>(`/leads/${leadPath(ref)}/interactions`, {
-          interaction_type: rec.interactionType || '',
-          // The API takes a timestamp; the form collects a date, so midnight UTC stands
-          // in for the time of day, which ATLAS does not ask for.
-          occurred_at: toStamp(rec.occurredAt),
-          summary: rec.notes || '',
+          ...manualWire(rec, by),
           contact_name: rec.lenderName || ref.contact || '',
-          performed_by: rec.person || by,
         });
       } catch (e: any) {
         const detail = errText(e?.response?.data);
