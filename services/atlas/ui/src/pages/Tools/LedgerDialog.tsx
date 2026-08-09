@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { ledgerService, LedgerImportResult } from '../../services/ledgerService';
+import { errText } from '../../api/http';
 import { tokens } from '../../theme';
 
 // Admin-only ledger import: bring the desk's Excel (the live Dashboard ledger or a
@@ -38,7 +39,11 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
     try {
       setResult(await ledgerService.importLedger(file, mode, reason.trim(), retain));
     } catch (e: any) {
-      setErr(e?.response?.data?.detail || e?.message || 'Import failed');
+      // The register explains every refusal in a problem envelope ({error:{detail}}) —
+      // `data.detail` is the WRONG key for it, so an audited refusal ("that operation is
+      // not granted", "authorization changed since sign-in") reached the desk as the bare
+      // "Request failed with status code 403", which names nothing anyone can act on.
+      setErr(errText(e?.response?.data) || e?.message || 'Import failed');
     } finally {
       setBusy(false);
     }

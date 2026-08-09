@@ -4,6 +4,7 @@ import { tokens } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { backupService } from '../../services/backupService';
+import { errText } from '../../api/http';
 import { ledgerService } from '../../services/ledgerService';
 import { newsService } from '../../services/newsService';
 import ExportBar from '../../components/common/ExportBar';
@@ -38,7 +39,8 @@ export default function ToolsPage() {
     try {
       await ledgerService.exportLedger();
     } catch (e: any) {
-      window.alert(e?.response?.data?.detail || e?.message || 'Export failed');
+      // Same envelope, same reason as the import dialog: say WHY the export was refused.
+      window.alert(errText(e?.response?.data) || e?.message || 'Export failed');
     }
   };
   const fileRef = useRef<HTMLInputElement>(null);
