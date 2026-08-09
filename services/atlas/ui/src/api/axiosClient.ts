@@ -17,6 +17,11 @@ export const ACCESS_URL: string =
   import.meta.env.VITE_ACCESS_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/access` : '');
 export const ORCHESTRATOR_URL: string =
   import.meta.env.VITE_ORCHESTRATOR_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/orchestrator` : '');
+// PULSE — the News Radar's server side. The browser cannot call Google News or GDELT
+// itself (no CORS headers), so the search runs there; '/pulse' behind the same edge
+// keeps it on the one door everything else uses.
+export const PULSE_URL: string =
+  import.meta.env.VITE_PULSE_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/pulse` : '/pulse');
 
 // Empty dexUrl = the DEV POSTURE: no sign-in request at all, identity is header-trusted.
 // env.json ships it empty for precisely that reason.

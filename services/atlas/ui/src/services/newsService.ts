@@ -1,5 +1,6 @@
 import { db, nowStamp } from '../api/atlasStore';
 import { writeAudit } from './auditService';
+import { PULSE_URL } from '../api/axiosClient';
 
 // Port of v12 AUGMENT 16 — India News Radar. Every item stored here is a REAL
 // article scraped live from GDELT; when a source is unreachable the scan reports
@@ -64,10 +65,17 @@ export function classify(h: string): [Severity, string] {
 export const SEV_LABEL: Record<Severity, string> = { GREEN: 'GOOD', AMBER: 'BAD', RED: 'UGLY' };
 
 /* ---------------- adapters ----------------
-   GDELT is the source, but it sends no CORS header, so we try, in order:
-     0. the PRISM gateway's own PULSE proxy, if this page is served by it;
-     1. GDELT directly;
-     2. public CORS proxies.
+   PULSE is the source of record: it searches Google News + GDELT + Bing server-side,
+   merges and de-duplicates them, and classifies each headline. The browser cannot do
+   that itself — none of those upstreams send CORS headers.
+
+   The order below is deliberate:
+     0. PULSE (/pulse/v1/news/search) — three sources, and the desk's search terms stay
+        inside PRISM;
+     1. GDELT directly — works only where CORS happens to allow it;
+     2. public CORS proxies — LAST RESORT. These route the names of companies we are
+        looking at through a third party nobody vetted, so they exist only to keep the
+        prototype/static build usable and are skipped the moment PULSE answers.
    The FIRST endpoint that returns real articles wins. Nothing is fabricated.
    config: window.NEWS_PROXY = 'https://your-proxy/?url=' overrides the list. */
 function gdeltURL(term: string): string {
@@ -85,7 +93,7 @@ function newsEndpoints(term: string, dfrom?: string, dto?: string) {
   // 0 — same-origin PULSE proxy, only when a PRISM gateway is present. On a plain
   // static host this 404s, so after the first miss we never ask again this session.
   if (location.protocol.indexOf('http') === 0 && PULSE_UP !== false)
-    list.push({ k: 'pulse', u: '/api/pulse/search?q=' + encodeURIComponent(term) + dr });
+    list.push({ k: 'pulse', u: PULSE_URL + '/v1/news/search?q=' + encodeURIComponent(term) + dr });
   list.push({ k: 'direct', u: g });
   const cfg = (window as any).NEWS_PROXY;
   if (cfg) list.push({ k: 'proxy', u: cfg + enc });

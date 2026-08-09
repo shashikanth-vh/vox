@@ -338,6 +338,27 @@ services:
       # PULSE_SOURCES: '[{"name":"google-news","kind":"rss","url":"https://news.google.com/rss/search?q=..."}]'
       PULSE_SOURCES: '[{"name": "sample", "kind": "sample"}]'
       PULSE_LOG_JSON: "true"
+      # ---- News Radar ----------------------------------------------------
+      # These were the ATLAS_* keys in the desk's atlas_config.json. They live in the
+      # environment now — deploy/compose/.env is git-ignored, so the SMTP key never
+      # reaches the repo or a zip, and the image carries no configuration.
+      #
+      # E-MAIL (optional): blank user/password = email OFF; search still works and every
+      # email route says plainly that it is not configured. For Brevo/Gmail/any relay set
+      # PULSE_SMTP_* in .env. Port 587 = STARTTLS, 465 = implicit SSL.
+      PULSE_SMTP_HOST: "${PULSE_SMTP_HOST:-}"
+      PULSE_SMTP_PORT: "${PULSE_SMTP_PORT:-587}"
+      PULSE_SMTP_USER: "${PULSE_SMTP_USER:-}"
+      PULSE_SMTP_PASS: "${PULSE_SMTP_PASS:-}"
+      PULSE_SMTP_FROM: "${PULSE_SMTP_FROM:-}"
+      PULSE_SMTP_FROM_NAME: "${PULSE_SMTP_FROM_NAME:-PRISM Notification}"
+      # GDELT rate-limits hard; 1 = skip it cleanly (Google News + Bing still answer).
+      PULSE_DISABLE_GDELT: "${PULSE_DISABLE_GDELT:-0}"
+      # Recurring digests live on a volume so they survive a container replacement.
+      PULSE_SCHEDULE_FILE: "/data/pulse/schedules.json"
+      PULSE_SCHEDULER_ENABLED: "${PULSE_SCHEDULER_ENABLED:-true}"
+    volumes:
+      - pulsedata:/data/pulse
     # No host port: PULSE is reachable ONLY through the gateway (edge → /pulse/...).
     restart: unless-stopped
 
@@ -673,3 +694,6 @@ volumes:
   vocx_state:
   dexdata:
   pgbackups:
+  # Recurring news digests. Small, but losing it silently stops every scheduled
+  # report — the desk would only notice by the absence of an email.
+  pulsedata:

@@ -58,6 +58,39 @@ class Settings(BaseSettings):
     # Timeout for fetching one external feed.
     fetch_timeout_s: float = 10.0
 
+    # ---- News Radar: search ------------------------------------------------
+    # The desk's search runs HERE, not in the browser: Google News and GDELT send no
+    # CORS headers, so the UI used to route around that through a public proxy — which
+    # put the names of companies we are looking at through a third party. These knobs
+    # were ATLAS_* keys in the old atlas_config.json; they are environment variables
+    # now, so nothing configuration-shaped lives in the image.
+    #
+    # GDELT rate-limits hard and is the flakiest of the three sources. Turning it off
+    # is a legitimate steady state — Google News + Bing still answer.
+    disable_gdelt: bool = False
+    search_timeout_s: float = 12.0
+    search_cache_ttl_s: int = 900          # 15 minutes: news does not move faster
+    search_cache_max: int = 500
+    upstream_concurrency: int = 8          # bounded pool, so a sweep cannot fan out wildly
+
+    # ---- News Radar: e-mail ------------------------------------------------
+    # Blank user/password = email DISABLED (search still works, and every email route
+    # says so plainly). Never put a real key in the repo: these come from the
+    # environment, and deploy/compose/.env is git-ignored.
+    smtp_host: str = ""
+    smtp_port: int = 587                   # 587 = STARTTLS, 465 = implicit SSL
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = ""                    # defaults to smtp_user when blank
+    smtp_from_name: str = "PRISM Notification"
+
+    # ---- News Radar: schedules --------------------------------------------
+    # Recurring digests. The file lives on a mounted volume so schedules survive a
+    # container replacement; a handful of rows per tenant does not earn a schema.
+    schedule_file: str = "/data/pulse/schedules.json"
+    scheduler_enabled: bool = True
+    scheduler_tick_s: int = 60
+
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 
@@ -69,6 +102,13 @@ class Settings(BaseSettings):
 
     def green_word_list(self) -> list[str]:
         return [w.strip().lower() for w in self.green_words.split(",") if w.strip()]
+
+    def smtp(self):  # noqa: ANN201 - the mailer's own dataclass, imported lazily
+        from app.news.mailer import SmtpConfig
+
+        return SmtpConfig(host=self.smtp_host, port=self.smtp_port, user=self.smtp_user,
+                          password=self.smtp_pass, sender=self.smtp_from or self.smtp_user,
+                          from_name=self.smtp_from_name)
 
 
 @lru_cache

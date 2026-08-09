@@ -1,61 +1,97 @@
+import axios from 'axios';
+import { PULSE_URL, TENANT } from '../api/axiosClient';
+import { authHeaders } from '../auth/session';
+import { errText } from '../api/http';
 import { writeAudit } from './auditService';
 
-/* Port of v12 AUGMENT 17/18 — email digests + recurring schedules.
+/* The News Radar's server side — email digests and recurring schedules.
    ----------------------------------------------------------------------------
-   These are the only Tools features that need a server: v12 posts to the PRISM
-   gateway's /api/pulse/* routes, which re-run the search and send the mail.
-   This app has no such backend yet, so every call here is STUBBED — the UI is
-   complete and the payloads are exactly v12's, but nothing is sent.
+   These were stubbed for as long as PULSE had no desk-facing half: the dialogs
+   were complete and every call answered "not connected". PULSE now serves them
+   at /pulse/v1/news/*, so the same payloads go to a real server.
 
-   To go live: drop `STUBBED = false` and implement each call against
-   /api/pulse/* (the commented endpoint above each method is v12's contract).
-   Until then the dialogs surface `NOT_CONNECTED` rather than pretending to send. */
+   Email is OPTIONAL and off until PULSE_SMTP_* is set. That is not an error
+   state — search works without it — so `config()` reports it and the dialogs
+   say plainly what is missing rather than failing at send time. */
 
-export const STUBBED = true;
-export const NOT_CONNECTED =
-  'Email and schedules need the PULSE backend (/api/pulse). Not connected — nothing was sent.';
+const pulse = axios.create({ baseURL: `${PULSE_URL}/v1/news`, timeout: 120_000 });
+// A digest of 300 firms legitimately takes minutes; the edge allows it too.
+
+pulse.interceptors.request.use((c) => {
+  c.headers = { ...(c.headers || {}), 'X-Tenant': TENANT, ...authHeaders() } as any;
+  return c;
+});
 
 export interface Schedule {
   id: string; q: string; recipients: string; cadence: 'daily' | 'weekly'; weekday: number;
   hour: number; window_days: number; adverse_only: boolean; scope: 'all-firms' | 'terms'; subject: string;
 }
 export interface DigestGroup { term: string; articles: any[] }
+export interface PulseConfig { email: boolean; from: string; gdelt: boolean; scheduler: boolean }
 
 type Result<T> = Promise<{ ok: boolean; error?: string; data?: T }>;
-const stub = async <T>(): Result<T> => ({ ok: false, error: NOT_CONNECTED });
+
+/** Every call answers the same shape, and a failure carries the SERVER's words —
+ *  "Email is not configured", "Send failed: …" — not a bare status code. */
+async function call<T>(run: () => Promise<{ data: any }>): Result<T> {
+  try {
+    const res = await run();
+    const body = res.data || {};
+    if (body.ok === false) return { ok: false, error: body.message || 'Failed', data: body };
+    return { ok: true, data: body };
+  } catch (e: any) {
+    const detail = errText(e?.response?.data) || e?.response?.data?.message;
+    return { ok: false, error: detail || e?.message || 'PULSE is not reachable.' };
+  }
+}
 
 export const pulseService = {
-  // v12: POST /api/pulse/email  {q, from, to, recipients, subject}
-  async emailNews(_p: { q: string; from: string; to: string; recipients: string; subject: string }, by: string): Result<void> {
-    if (STUBBED) return stub();
-    writeAudit(by, 'News emailed', '', `${_p.q} → ${_p.recipients}`);
-    return { ok: true };
+  /** What the radar can actually do here — is email configured, is GDELT on. */
+  async config(): Result<PulseConfig> {
+    return call<PulseConfig>(() => pulse.get('/config'));
   },
 
-  // v12: POST /api/pulse/email_digest  {recipients, subject, groups, adverse_only}
-  async emailDigest(_p: { recipients: string; subject: string; groups: DigestGroup[]; adverse_only: boolean }, by: string): Result<{ firms: number; count: number }> {
-    if (STUBBED) return stub();
-    writeAudit(by, 'News emailed', '', `all firms → ${_p.recipients}`);
-    return { ok: true };
+  /** Search the news for one term, server-side (the browser cannot: no CORS). */
+  async search(q: string, from = '', to = ''): Result<{ articles: any[] }> {
+    return call<{ articles: any[] }>(() => pulse.get('/search', { params: { q, from, to } }));
   },
 
-  // v12: GET /api/pulse/schedules -> {schedules:[], smtp:bool}
+  async emailNews(p: { q: string; from: string; to: string; recipients: string; subject: string },
+                  by: string): Result<{ count: number }> {
+    const r = await call<{ count: number }>(() => pulse.post('/email', p));
+    if (r.ok) writeAudit(by, 'News emailed', '', `${p.q} → ${p.recipients}`);
+    return r;
+  },
+
+  async emailDigest(p: { recipients: string; subject: string; groups: DigestGroup[]; adverse_only: boolean },
+                    by: string): Result<{ firms: number; count: number }> {
+    const r = await call<{ firms: number; count: number }>(() => pulse.post('/email-digest', p));
+    if (r.ok) writeAudit(by, 'News emailed', '', `all firms → ${p.recipients}`);
+    return r;
+  },
+
   async listSchedules(): Result<{ schedules: Schedule[]; smtp: boolean }> {
-    if (STUBBED) return { ok: false, error: NOT_CONNECTED, data: { schedules: [], smtp: false } };
-    return { ok: true };
+    const r = await call<{ schedules: Schedule[]; smtp: boolean }>(() => pulse.get('/schedules'));
+    // The dialog renders `data` even on failure, so it must always have the shape.
+    return r.ok ? r : { ...r, data: { schedules: [], smtp: false } };
   },
 
-  // v12: POST /api/pulse/schedules
-  async createSchedule(_p: Omit<Schedule, 'id'>, by: string): Result<void> {
-    if (STUBBED) return stub();
-    writeAudit(by, 'News schedule', '', _p.scope === 'all-firms' ? 'all firms' : _p.q.slice(0, 60));
-    return { ok: true };
+  async createSchedule(p: Omit<Schedule, 'id'>, by: string): Result<void> {
+    const r = await call<void>(() => pulse.post('/schedules', p));
+    if (r.ok) writeAudit(by, 'News schedule', '',
+                         p.scope === 'all-firms' ? 'all firms' : p.q.slice(0, 60));
+    return r;
   },
 
-  // v12: POST /api/pulse/schedules/delete  {id}
-  async deleteSchedule(_id: string): Result<void> { return STUBBED ? stub() : { ok: true }; },
-  // v12: POST /api/pulse/schedules/run  {id}
-  async runSchedule(_id: string): Result<void> { return STUBBED ? stub() : { ok: true }; },
-  // v12: POST /api/pulse/email_test  {recipients}
-  async sendTestEmail(_recipients: string): Result<void> { return STUBBED ? stub() : { ok: true }; },
+  async deleteSchedule(id: string): Result<void> {
+    return call<void>(() => pulse.post('/schedules/delete', { id }));
+  },
+
+  async runSchedule(id: string): Result<void> {
+    return call<void>(() => pulse.post('/schedules/run', { id }));
+  },
+
+  async sendTestEmail(recipients: string): Result<void> {
+    return call<void>(() => pulse.post('/email-test', { recipients }));
+  },
 };

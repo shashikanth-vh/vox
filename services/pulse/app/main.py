@@ -20,8 +20,12 @@ schedule, Kubernetes CronJob, or plain cron at ``POST /v1/scan``.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import hmac
+import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -38,6 +42,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings, get_settings
 from app.matching import WatchEntity, classify_signal, match_entities
+from app.news import schedules as sched
+from app.news.mailer import digest_html, send_email
+from app.news.search import NewsSearch
 from app.providers import NewsItem, build_providers
 
 log = get_logger("pulse")
@@ -139,9 +146,30 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # noqa: ANN202
         app.state.register_clients = {}
-        log.info("pulse_started", extra={"register": settings.register_base_url,
-                                         "sources": [s.get("name") for s in settings.source_list()]})
+        # One search engine per process: it owns the shared cache, the coalescing map and
+        # the bounded upstream pool, so those are shared across requests rather than
+        # rebuilt per call.
+        app.state.search = NewsSearch(
+            disable_gdelt=settings.disable_gdelt, timeout_s=settings.search_timeout_s,
+            cache_ttl_s=settings.search_cache_ttl_s, cache_max=settings.search_cache_max,
+            upstream_concurrency=settings.upstream_concurrency)
+        app.state.schedules = sched.ScheduleStore(settings.schedule_file)
+        app.state.scheduler_task = None
+        if settings.scheduler_enabled:
+            app.state.scheduler_task = asyncio.create_task(
+                sched.scheduler_loop(app.state.schedules, _run_one_schedule,
+                                     tick_seconds=settings.scheduler_tick_s))
+        log.info("pulse_started", extra={
+            "register": settings.register_base_url,
+            "sources": [s.get("name") for s in settings.source_list()],
+            "email": settings.smtp().ready, "gdelt": not settings.disable_gdelt,
+            "schedules": len(app.state.schedules.all())})
         yield
+        task = app.state.scheduler_task
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         for client in app.state.register_clients.values():
             await client.aclose()
 
@@ -253,7 +281,195 @@ def create_app() -> FastAPI:
                 "counts": {k: len(v) for k, v in by_signal.items()},
                 "items": by_signal}
 
+    # ================= News Radar: search, email, schedules =================
+    # The desk-facing half of PULSE. /v1/scan above files intel into the Register on a
+    # watchlist; these routes answer "what does the web say about THIS name, right now",
+    # email it, and do it on a cadence. Ported from the desk's atlas_serve.py.
+
+    def _recipients(value: Any) -> list[str]:
+        """Recipients arrive as a list OR as the one-line string the dialog collects."""
+        if isinstance(value, str):
+            return [r.strip() for r in re.split(r"[,\n;]", value) if r.strip()]
+        return [str(r).strip() for r in (value or []) if str(r).strip()]
+
+    async def _run_one_schedule(schedule: dict) -> None:
+        """The scheduler's callback — searches, then emails. Bound here so it closes over
+        this app's engine and settings rather than reaching for a global."""
+        await sched.run_schedule(
+            schedule,
+            search=lambda term, dfrom, dto: app.state.search.search(term, dfrom, dto),
+            send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
+            digest=digest_html)
+
+    @app.get("/v1/news/search", tags=["News Radar"],
+             summary="Search the news for a term (Google News + GDELT + Bing, merged)")
+    async def news_search(request: Request, q: str = Query(default="", max_length=200),
+                          date_from: str = Query(default="", alias="from"),
+                          date_to: str = Query(default="", alias="to"),
+                          limit: int = Query(default=40, ge=1, le=100),
+                          x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        term = (q or "").strip()
+        if not term:
+            return {"articles": []}
+        t0 = time.time()
+        try:
+            articles = await request.app.state.search.search(term, date_from, date_to, limit)
+        except Exception as exc:  # noqa: BLE001 - a search must fail as a message
+            log.exception("pulse_search_failed", extra={"term": term})
+            return ORJSONResponse(status_code=502, content={
+                "articles": [], "error": f"search failed: {exc}"})
+        log.info("pulse_search", extra={"term": term, "count": len(articles),
+                                        "seconds": round(time.time() - t0, 1)})
+        return {"articles": articles, "count": len(articles)}
+
+    @app.get("/v1/news/config", tags=["News Radar"],
+             summary="What the radar can do here (is email configured, is GDELT on)")
+    async def news_config(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        smtp = settings.smtp()
+        # The sender is shown so a desk can see WHICH address a digest will come from
+        # before sending one; the password is never echoed.
+        return {"email": smtp.ready, "from": smtp.sender if smtp.ready else "",
+                "gdelt": not settings.disable_gdelt, "scheduler": settings.scheduler_enabled}
+
+    @app.post("/v1/news/email", tags=["News Radar"],
+              summary="Search a term and email the digest")
+    async def news_email(payload: dict, request: Request,
+                         x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        term = (payload.get("q") or "").strip()
+        recipients = _recipients(payload.get("recipients"))
+        dfrom, dto = payload.get("from", ""), payload.get("to", "")
+        articles = await request.app.state.search.search(term, dfrom, dto) if term else []
+        subject = payload.get("subject") or f"PRISM news — {term}"
+        ok, msg = await asyncio.to_thread(send_email, settings.smtp(), recipients, subject,
+                                          digest_html(term, articles, dfrom, dto))
+        return ORJSONResponse(status_code=200 if ok else 400,
+                              content={"ok": ok, "message": msg, "count": len(articles)})
+
+    @app.post("/v1/news/email-digest", tags=["News Radar"],
+              summary="Email a digest the caller already assembled (an all-firms sweep)")
+    async def news_email_digest(payload: dict,
+                                x_api_key: str | None = Header(default=None,
+                                                               alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        recipients = _recipients(payload.get("recipients"))
+        adverse_only = bool(payload.get("adverse_only"))
+        parts, total = [], 0
+        for group in payload.get("groups") or []:
+            arts = group.get("articles") or []
+            if adverse_only:
+                arts = [a for a in arts if a.get("severity") in ("UGLY", "BAD")]
+            if arts:                      # a firm with nothing to report is left out
+                parts.append(digest_html(group.get("term", ""), arts))
+                total += len(arts)
+        head = ('<div style="font-family:Segoe UI,Arial,sans-serif;max-width:720px;'
+                f'margin:8px auto;color:#5F6E76;font-size:13px">{len(parts)} firm(s) '
+                f'&middot; {total} articles</div>')
+        subject = payload.get("subject") or f"PRISM news digest — {len(parts)} firms"
+        body = head + "<br>".join(parts) if parts else "<p>No news to send.</p>"
+        ok, msg = await asyncio.to_thread(send_email, settings.smtp(), recipients,
+                                          subject, body)
+        return ORJSONResponse(status_code=200 if ok else 400,
+                              content={"ok": ok, "message": msg, "firms": len(parts),
+                                       "count": total})
+
+    @app.post("/v1/news/email-test", tags=["News Radar"],
+              summary="Send a test email, to prove the SMTP setup before relying on it")
+    async def news_email_test(payload: dict,
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        smtp = settings.smtp()
+        body = ('<div style="font-family:Segoe UI,Arial,sans-serif">'
+                '<h2 style="color:#1B2A4A">PRISM email is working</h2>'
+                '<p>This is a test from the PRISM News Radar. Digests and scheduled '
+                f'reports will be sent from <b>{smtp.sender or "(unset)"}</b>.</p></div>')
+        ok, msg = await asyncio.to_thread(send_email, smtp, _recipients(payload.get("recipients")),
+                                          "PRISM — test email", body)
+        return ORJSONResponse(status_code=200 if ok else 400,
+                              content={"ok": ok, "message": msg, "from": smtp.sender})
+
+    @app.get("/v1/news/schedules", tags=["News Radar"],
+             summary="The recurring digests on file for this tenant")
+    async def list_schedules(request: Request, tenant: str = Depends(tenant_of),
+                             x_api_key: str | None = Header(default=None,
+                                                            alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        return {"schedules": request.app.state.schedules.all(tenant),
+                "smtp": settings.smtp().ready}
+
+    @app.post("/v1/news/schedules", tags=["News Radar"],
+              summary="Create a recurring digest (daily or weekly)")
+    async def create_schedule(payload: dict, request: Request,
+                              tenant: str = Depends(tenant_of),
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        recipients = _recipients(payload.get("recipients"))
+        term = (payload.get("q") or "").strip()
+        if not term or not recipients:
+            return ORJSONResponse(status_code=400, content={
+                "ok": False,
+                "message": "Need a search term and at least one recipient."})
+        cadence = "weekly" if payload.get("cadence") == "weekly" else "daily"
+        hour = max(0, min(23, int(payload.get("hour", 8) or 0)))
+        weekday = max(0, min(6, int(payload.get("weekday", 0) or 0)))
+        schedule = {
+            "id": "S" + str(int(time.time() * 1000)), "tenant": tenant, "q": term,
+            "recipients": recipients, "cadence": cadence, "weekday": weekday, "hour": hour,
+            "window_days": max(1, min(90, int(payload.get("window_days", 7) or 7))),
+            "subject": (payload.get("subject") or "").strip(),
+            "adverse_only": bool(payload.get("adverse_only")),
+            "scope": (payload.get("scope") or "").strip(), "active": True, "last_run": 0,
+            "next_run": sched.next_run(cadence, hour, weekday)}
+        request.app.state.schedules.add(schedule)
+        log.info("pulse_schedule_created", extra={"id": schedule["id"], "tenant": tenant,
+                                                  "cadence": cadence, "hour": hour,
+                                                  "recipients": len(recipients)})
+        return {"ok": True, "schedule": schedule}
+
+    @app.post("/v1/news/schedules/delete", tags=["News Radar"],
+              summary="Delete a recurring digest")
+    async def delete_schedule(payload: dict, request: Request,
+                              tenant: str = Depends(tenant_of),
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        removed = request.app.state.schedules.remove(str(payload.get("id") or ""), tenant)
+        return {"ok": removed}
+
+    @app.post("/v1/news/schedules/run", tags=["News Radar"],
+              summary="Run a schedule now (send its digest immediately)")
+    async def run_schedule_now(payload: dict, request: Request,
+                               tenant: str = Depends(tenant_of),
+                               x_api_key: str | None = Header(default=None,
+                                                              alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        schedule = request.app.state.schedules.get(str(payload.get("id") or ""), tenant)
+        if schedule is None:
+            return ORJSONResponse(status_code=404,
+                                  content={"ok": False, "message": "No such schedule."})
+        ok, msg = await sched.run_schedule(
+            schedule,
+            search=lambda term, dfrom, dto: request.app.state.search.search(term, dfrom, dto),
+            send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
+            digest=digest_html)
+        return ORJSONResponse(status_code=200 if ok else 400,
+                              content={"ok": ok, "message": msg})
+
     return app
+
 
 
 app = create_app()

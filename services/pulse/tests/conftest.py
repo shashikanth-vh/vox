@@ -36,6 +36,13 @@ def _wait_healthy(port: int, timeout: float = 30.0) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def register_server() -> Iterator[None]:
+    # The News Radar tests stub their three upstreams at the transport layer and never
+    # touch the Register — PULSE_TESTS_NO_REGISTER=1 lets them run standalone (CI leaves
+    # it unset, so the scan/digest integration tests keep their real Register). Same
+    # escape hatch, same spelling, as the VOX suite's VOCX_TESTS_NO_REGISTER.
+    if os.environ.get("PULSE_TESTS_NO_REGISTER"):
+        yield
+        return
     env = {**os.environ,
            "REGISTER_DB_HOST": os.environ.get("TEST_DB_HOST", "127.0.0.1"),
            "REGISTER_DB_PORT": os.environ.get("TEST_DB_PORT", "5432"),
