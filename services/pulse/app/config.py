@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,6 +91,30 @@ class Settings(BaseSettings):
     schedule_file: str = "/data/pulse/schedules.json"
     scheduler_enabled: bool = True
     scheduler_tick_s: int = 60
+
+    # A hand-edited .env picks up stray punctuation — a trailing comma from a copied
+    # block, a stray quote. On a NUMBER or a BOOLEAN that is unambiguously a typo: no
+    # port is "587," and no flag is "1,". Cleaning it beats a container that crash-loops
+    # with a pydantic traceback, which is what "PULSE_SMTP_PORT=587," used to earn.
+    #
+    # Deliberately NOT applied to the string settings: a password may legitimately end
+    # in a comma, and silently trimming it would break authentication in a way nobody
+    # could see. Those are passed through exactly as written.
+    @field_validator("port", "watchlist_max_entities", "fetch_timeout_s", "disable_gdelt",
+                     "search_timeout_s", "search_cache_ttl_s", "search_cache_max",
+                     "upstream_concurrency", "smtp_port", "scheduler_enabled",
+                     "scheduler_tick_s", "log_json", mode="before")
+    @classmethod
+    def _tolerate_stray_punctuation(cls, v: object, info: ValidationInfo) -> object:
+        if not isinstance(v, str):
+            return v
+        cleaned = v.strip().strip(",;").strip().strip("'\"").strip()
+        if not cleaned:
+            # `PULSE_SMTP_PORT=` with nothing after it means "I did not set this",
+            # which is the DEFAULT — not None, which would fail validation just as
+            # loudly as the typo this validator exists to absorb.
+            return cls.model_fields[info.field_name].default
+        return cleaned
 
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]

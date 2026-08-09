@@ -289,3 +289,49 @@ def test_a_schedule_needs_a_term_and_a_recipient(client):
 def test_running_an_unknown_schedule_says_so(client):
     r = client.post("/v1/news/schedules/run", json={"id": "nope"})
     assert r.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Configuration read from a hand-edited .env
+# --------------------------------------------------------------------------- #
+def test_a_stray_comma_in_env_does_not_crash_loop_the_service(monkeypatch):
+    """`PULSE_SMTP_PORT=587,` — one comma carried over from a copied block — used to
+    take the container down on boot, over and over, with a pydantic traceback. No port
+    is "587," and no flag is "1,": on a number or a boolean that is unambiguously a
+    typo, and absorbing it beats a crash loop nobody can read."""
+    monkeypatch.setenv("PULSE_SMTP_PORT", "587,")
+    monkeypatch.setenv("PULSE_DISABLE_GDELT", "1,")
+    monkeypatch.setenv("PULSE_SCHEDULER_ENABLED", " false ")
+    monkeypatch.setenv("PULSE_UPSTREAM_CONCURRENCY", '"8"')
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.smtp_port == 587
+    assert s.disable_gdelt is True
+    assert s.scheduler_enabled is False
+    assert s.upstream_concurrency == 8
+    get_settings.cache_clear()
+
+
+def test_a_blank_setting_means_the_default_not_a_failure(monkeypatch):
+    """`PULSE_SMTP_PORT=` with nothing after it is how a stubbed-out block reads. It
+    means "unset" — the default — not None, which fails validation just as loudly."""
+    monkeypatch.setenv("PULSE_SMTP_PORT", "")
+    monkeypatch.setenv("PULSE_SEARCH_CACHE_TTL_S", "   ")
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.smtp_port == 587
+    assert s.search_cache_ttl_s == 900
+    get_settings.cache_clear()
+
+
+def test_a_password_is_never_trimmed(monkeypatch):
+    """The cleaning is deliberately limited to numbers and booleans: an SMTP key may
+    legitimately end in a comma, and trimming it would break authentication in a way
+    nobody could see from the outside."""
+    monkeypatch.setenv("PULSE_SMTP_PASS", "key-with-a-trailing-comma,")
+    monkeypatch.setenv("PULSE_SMTP_FROM_NAME", "PRISM, Notifications")
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.smtp_pass == "key-with-a-trailing-comma,"
+    assert s.smtp_from_name == "PRISM, Notifications"
+    get_settings.cache_clear()
