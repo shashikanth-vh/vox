@@ -68,11 +68,19 @@ class ScheduleStore:
         except OSError as exc:
             log.error("pulse_schedule_save_failed", extra={"error": str(exc)})
 
+    @staticmethod
+    def _key(tenant: str | None) -> str:
+        """Tenant codes are compared case-INSENSITIVELY. A schedule filed as 'evam' and
+        listed as 'EVAM' would otherwise vanish from the screen while sitting in the
+        file, still firing — a silent failure that reads as data loss."""
+        return (tenant or "").strip().casefold()
+
     def all(self, tenant: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             if tenant is None:
                 return list(self._items)
-            return [s for s in self._items if (s.get("tenant") or "") == tenant]
+            want = self._key(tenant)
+            return [s for s in self._items if self._key(s.get("tenant")) == want]
 
     def add(self, schedule: dict[str, Any]) -> None:
         with self._lock:
@@ -84,7 +92,8 @@ class ScheduleStore:
             before = len(self._items)
             self._items[:] = [s for s in self._items
                               if s.get("id") != sid
-                              or (tenant is not None and (s.get("tenant") or "") != tenant)]
+                              or (tenant is not None
+                                  and self._key(s.get("tenant")) != self._key(tenant))]
             if len(self._items) != before:
                 self.save()
             return len(self._items) < before
@@ -92,7 +101,8 @@ class ScheduleStore:
     def get(self, sid: str, tenant: str | None = None) -> dict[str, Any] | None:
         with self._lock:
             for s in self._items:
-                if s.get("id") == sid and (tenant is None or (s.get("tenant") or "") == tenant):
+                if s.get("id") == sid and (tenant is None
+                                           or self._key(s.get("tenant")) == self._key(tenant)):
                     return s
         return None
 

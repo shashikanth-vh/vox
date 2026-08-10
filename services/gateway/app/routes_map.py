@@ -46,6 +46,15 @@ _RAW: list[tuple[str, str, str]] = [
     # PULSE — news radar: triggering a scan / filing items is the intel-scan capability.
     ("POST",   r"^/pulse/v1/scan$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/items$", "run_news_scan"),
+    # The DESK-FACING half of the radar — searching a name, emailing a digest, and the
+    # recurring schedules — is the same capability. Without these lines `operation_for`
+    # returns None and the gate does not run at all: any signed-in user could email a
+    # digest to any address, or leave a recurring one pointed there. Searching is
+    # harmless; sending mail as the firm is not, and both live behind the operation the
+    # matrix already grants for exactly this feature.
+    ("GET",    r"^/pulse/v1/news/(search|config|schedules)$", "run_news_scan"),
+    ("POST",   r"^/pulse/v1/news/(email|email-digest|email-test)$", "run_news_scan"),
+    ("POST",   r"^/pulse/v1/news/schedules(/(delete|run))?$", "run_news_scan"),
     # Orchestrator — starting/deciding workflows maps to the same operation the applied
     # change requires, so an unauthorized user is stopped before a durable workflow starts.
     ("POST",   r"^/orchestrator/v1/workflows/vox-touchpoints$", "log_interaction"),

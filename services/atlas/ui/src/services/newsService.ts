@@ -1,6 +1,7 @@
 import { db, nowStamp } from '../api/atlasStore';
 import { writeAudit } from './auditService';
 import { PULSE_URL } from '../api/axiosClient';
+import { entitiesService } from './entitiesService';
 
 // Port of v12 AUGMENT 16 — India News Radar. Every item stored here is a REAL
 // article scraped live from GDELT; when a source is unreachable the scan reports
@@ -188,6 +189,19 @@ export const newsService = {
 
   // Sequential with a small gap between firms — be a polite API citizen.
   async scanAll(by: string, onProgress: (s: { done: number; total: number; found: number }) => void) {
+    // The sweep reads the CLIENT STORE, which is filled by whichever screen the user
+    // happened to visit first. Land straight on Tools (a bookmark, a reload, the tab
+    // the sign-in lands on) and that store is empty — so "Scan all firms" swept ZERO
+    // firms and reported success. Warm it here rather than trusting the route someone
+    // took to arrive.
+    if (!Object.keys(db().clients || {}).length) {
+      try {
+        const rows = await entitiesService.list();
+        rows.forEach((r: any) => {
+          if (r.code) db().clients[r.code] = { ...(db().clients[r.code] || {}), ...r };
+        });
+      } catch { /* offline / mock mode: fall through with whatever the store has */ }
+    }
     const codes = Object.keys(db().clients || {});
     let found = 0, failTerms = 0, done = 0;
     for (const code of codes) {
