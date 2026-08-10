@@ -506,26 +506,53 @@ export const newsService = {
     if (!terms.length) return { found: 0, failTerms: 0, firms: 0 };
     onProgress({ done: 0, total: terms.length, found: 0 });
 
-    const r = await fetch(PULSE_URL + '/v1/news/sweep', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
-      // A sweep genuinely takes minutes at four hundred terms; the edge budgets for it.
-      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
-        ? AbortSignal.timeout(600_000) : undefined,
-      body: JSON.stringify({ terms, live_terms: Array.from(new Set(liveTerms)) }),
-    });
-    const j = await r.json().catch(() => null);
-    if (!r.ok || !j || !Array.isArray(j.results)) {
-      throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
-    }
+    /* IN BATCHES, so the counter can move.
+       One request for all four hundred terms was the right shape for the upstreams and
+       the wrong shape for the screen: nothing can be reported until it returns, so the
+       banner read "0 / 340" for the whole run and then jumped to done. A progress bar
+       that only moves at the end is worse than none — it looks stuck, and the desk
+       cannot tell a slow scan from a dead one.
+
+       Batching costs almost nothing. Each batch still fans out server-side, six terms
+       at a time; the only loss is the small idle at each boundary. What it buys is a
+       count that advances every few seconds, articles that appear on screen while the
+       rest is still running, and a request short enough that no single failure throws
+       away the whole sweep. */
+    const BATCH = 40;
+    const live = new Set(liveTerms);
     let found = 0, failTerms = 0, done = 0;
-    for (const row of j.results) {
-      if (row.error) failTerms++;
-      const arts = parseArticles(row);
-      for (const code of owners.get(row.term) || []) found += ingest(code, row.term, arts, 'live');
-      onProgress({ done: ++done, total: terms.length, found });
+    for (let i = 0; i < terms.length; i += BATCH) {
+      const slice = terms.slice(i, i + BATCH);
+      const r = await fetch(PULSE_URL + '/v1/news/sweep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
+        // A batch of forty across three sources is a minute or two at worst.
+        signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+          ? AbortSignal.timeout(300_000) : undefined,
+        body: JSON.stringify({ terms: slice,
+          live_terms: slice.filter((t) => live.has(t)) }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !Array.isArray(j.results)) {
+        // The FIRST batch failing means the sweep never started — report it, so the
+        // caller can fall back. A later one failing has already filed real articles,
+        // so it counts as unreachable terms and the rest of the scan carries on.
+        if (i === 0) throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
+        _lastFailure = 'HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : '');
+        failTerms += slice.length;
+        onProgress({ done: (done += slice.length), total: terms.length, found });
+        continue;
+      }
+      for (const row of j.results) {
+        if (row.error) failTerms++;
+        const arts = parseArticles(row);
+        for (const code of owners.get(row.term) || []) found += ingest(code, row.term, arts, 'live');
+        done++;
+      }
+        // Once per batch, not once per term: forty setState calls in a tight loop is
+      // forty renders of a list that is about to change again anyway.
+      onProgress({ done, total: terms.length, found });
     }
-    if (j.error) _lastFailure = String(j.error);
     writeAudit(by, 'News scan', 'ALL',
       `${codes.length} firms · ${terms.length} terms · ${found} new`
       + (failTerms ? ` · ${failTerms} term(s) unreachable` : ''));

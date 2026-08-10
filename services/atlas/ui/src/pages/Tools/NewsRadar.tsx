@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
-import { Box, Button, Chip, Typography, Paper, TextField, Accordion, AccordionSummary, AccordionDetails, Alert, Link } from '@mui/material';
+import { Box, Button, Chip, Typography, Paper, TextField, Accordion, AccordionSummary, AccordionDetails, Alert, Link, LinearProgress } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useSearch } from '../../context/SearchContext';
 import { CodeText } from '../../components/common/Pills';
@@ -75,7 +75,7 @@ export default function NewsRadar() {
      with Ugly, which is the opposite of how it is used, so it is its own toggle and it
      combines with whatever colour is selected. */
   const [liveOnly, setLiveOnly] = useState(false);
-  const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0, why: '' });
+  const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0, why: '', firms: 0 });
   const [adhoc, setAdhoc] = useState<AdhocState>(BLANK_ADHOC);
   const [qBox, setQBox] = useState('');
   const ctrl = useRef<AbortController | null>(null);
@@ -121,7 +121,9 @@ export default function NewsRadar() {
   /* ---------------- scans ---------------- */
   const scanAll = async () => {
     if (scan.running) return;
-    setScan({ running: true, done: 0, total: codes.length, found: 0, failTerms: 0, why: '' });
+    // total 0 until the sweep knows its term list — an honest "reading the register…"
+    // beats a fake denominator taken from the firm count.
+    setScan({ running: true, done: 0, total: 0, found: 0, failTerms: 0, why: '', firms: codes.length });
     const progress = (p: { done: number; total: number; found: number }) =>
       setScan((s) => ({ ...s, done: p.done, total: p.total, found: p.found }));
     let r: { found: number; failTerms: number; firms: number };
@@ -135,8 +137,8 @@ export default function NewsRadar() {
     }
     // A sweep that files nothing across 400 firms is either a quiet news week or a
     // broken pipe, and the count alone cannot say which — so carry the last reason.
-    setScan({ running: false, done: r.firms, total: r.firms, found: r.found,
-              failTerms: r.failTerms, why: lastFailure() });
+    setScan((s) => ({ ...s, running: false, done: s.total, found: r.found,
+                      firms: r.firms, failTerms: r.failTerms, why: lastFailure() }));
     bump();
   };
 
@@ -379,8 +381,16 @@ export default function NewsRadar() {
       )}
 
       {scan.running && (
-        <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-          Scanning {scan.done} / {scan.total} firms · {scan.found} real items…
+        <Alert severity="info" icon={false} sx={{ py: 0.4, fontSize: 12, mb: 1 }}>
+          {/* SEARCHES, not firms. The unit was wrong: the sweep runs one search per
+              company name AND per watch term, so a book of 340 firms is often 400-odd
+              searches — the counter appeared to overshoot its own total. */}
+          {scan.total
+            ? `Searching ${scan.done} / ${scan.total} terms across ${scan.firms || codes.length} firms · ${scan.found} real items so far…`
+            : 'Reading the register…'}
+          <LinearProgress variant={scan.total ? 'determinate' : 'indeterminate'}
+            value={scan.total ? Math.round((scan.done / scan.total) * 100) : undefined}
+            sx={{ mt: 0.6, height: 4, borderRadius: 99 }} />
         </Alert>
       )}
       {!scan.running && scan.failTerms > 0 && (
