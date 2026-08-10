@@ -3777,10 +3777,24 @@ def create_app() -> FastAPI:
                         f"Fully disbursed — {drawn:g} of {ceiling:g} Cr is on the book.")
             if latest_checklist_items and spec["key"] in ("cpcs.prepare", "cpcs.update-cs"):
                 want = "CP" if spec["key"] == "cpcs.prepare" else "CS"
-                rel = [i for i in latest_checklist_items
-                       if str(i.get("condition_type")) == want]
-                done_states = ({"Completed", "Waived", "Deferred as CS"}
-                               if want == "CP" else {"Completed", "Waived"})
+                # A CP the checker DEFERRED AS A CS is done as a CP and open as a CS —
+                # that is what the deferral MEANS. Splitting on the stored
+                # `condition_type` alone (still "CP" until the first CS progress flips
+                # it) made such an item invisible to BOTH halves: the CP read 9/9, the
+                # CS read 8/8, both buttons shut, while Today's chase — which counts
+                # every item not Completed or Waived — said 2 outstanding with nowhere
+                # to go and work them.
+                deferred = [i for i in latest_checklist_items
+                            if str(i.get("status")) == "Deferred as CS"
+                            and str(i.get("condition_type")) != "CS"]
+                if want == "CP":
+                    rel = [i for i in latest_checklist_items
+                           if str(i.get("condition_type")) == "CP"]
+                    done_states = {"Completed", "Waived", "Deferred as CS"}
+                else:
+                    rel = [i for i in latest_checklist_items
+                           if str(i.get("condition_type")) == "CS"] + deferred
+                    done_states = {"Completed", "Waived"}
                 if rel:
                     done = sum(1 for i in rel if str(i.get("status")) in done_states)
                     label = f"{label} ({done}/{len(rel)})"

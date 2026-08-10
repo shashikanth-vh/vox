@@ -168,15 +168,22 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
 
   // The active tab's items are edited; the other half rides along untouched so the
   // register always receives the complete artefact.
+  // A CP the checker DEFERRED AS A CS belongs on the CS tab: the deferral converted it
+  // into a post-disbursement obligation, and it stays typed "CP" until its first
+  // progress flips it. Splitting on the type alone hid it from BOTH tabs while Today
+  // kept chasing it — visible in the reminder, unreachable on the screen.
+  const isCs = (x: CpcsItem) => x.condition_type === 'CS' || x.status === 'Deferred as CS';
   useEffect(() => {
     if (!all.length) return;
-    setItems(all.filter((x) => x.condition_type === phase));
-    setCarried(all.filter((x) => x.condition_type !== phase));
+    const mine = (x: CpcsItem) => (phase === 'CS' ? isCs(x) : !isCs(x));
+    setItems(all.filter(mine));
+    setCarried(all.filter((x) => !mine(x)));
   }, [all, phase]);
 
   /** "(3/9)" for a half that has items, nothing for one that has none yet. */
   const tally = (half: 'CP' | 'CS') => {
-    const rel = (phase === half ? items : all.filter((x) => x.condition_type === half));
+    const rel = (phase === half ? items
+      : all.filter((x) => (half === 'CS' ? isCs(x) : !isCs(x))));
     if (!rel.length) return '';
     const doneStates = half === 'CP'
       ? ['Completed', 'Waived', 'Deferred as CS'] : ['Completed', 'Waived'];

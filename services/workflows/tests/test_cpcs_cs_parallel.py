@@ -205,3 +205,38 @@ async def test_a_returned_checklist_reopens_the_cp_step(monkeypatch):
     # And the CS half stays shut until a CP approval exists.
     assert by_key["cpcs.update-cs"]["enabled"] is False
     get_settings.cache_clear()
+
+
+async def test_a_cp_deferred_as_a_cs_lands_on_the_cs_half(monkeypatch):
+    """The gap that shut both buttons on a line Today was still chasing.
+
+    'Deferred as CS' converts a CP into a post-disbursement obligation, but the item
+    keeps `condition_type: CP` until its first CS progress. Counting each half by that
+    field alone made the item belong to NEITHER: the CP counted it done (correctly — it
+    is decided as a CP), the CS never saw it, both halves read complete and locked, and
+    the follow-up feed — which counts anything not Completed or Waived — kept reporting
+    it outstanding with nowhere to go and work it."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "CP/CS Completed"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cp2", "condition_type": "CP", "status": "Deferred as CS"},
+        {"key": "cp3", "condition_type": "CP", "status": "Deferred as CS"},
+        {"key": "cs1", "condition_type": "CS", "status": "Completed"},
+        {"key": "cs2", "condition_type": "CS", "status": "Completed"},
+    ], status="Approved")
+    cp, cs = by_key["cpcs.prepare"], by_key["cpcs.update-cs"]
+    # As CPs they ARE decided — the deferral is the decision.
+    assert cp["label"].endswith("(3/3)")
+    # As CS obligations they are OPEN, and the tab that works them stays open with them.
+    assert cs["label"].endswith("(2/4)"), cs["label"]
+    assert cs["enabled"] is True, cs.get("reason")
+
+
+async def test_a_deferred_item_that_has_since_been_worked_counts_once(monkeypatch):
+    """First CS progress flips the item's type to CS. It must not then be counted
+    twice — once as a CS and once as a leftover deferral."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Disbursed"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cp2", "condition_type": "CS", "status": "Deferred as CS",
+         "deferred_from": "CP"},
+    ], status="Approved")
+    assert by_key["cpcs.update-cs"]["label"].endswith("(0/1)")
