@@ -89,7 +89,7 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
       ref={paperRef}
       elevation={12}
       role="region"
-      aria-label="VocX field intell capture"
+      aria-label="VocX voice capture"
       sx={{
         position: 'fixed',
         ...placement,
@@ -121,8 +121,13 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
           <Typography sx={{ fontSize: 17, fontWeight: 700, letterSpacing: '.02em', lineHeight: 1.05 }}>
             VOCX
           </Typography>
-          <Typography sx={{ fontSize: 9.5, color: vx.mut, letterSpacing: '.18em' }}>
-            EVAM · FIELD INTELL
+          {/* Not "FIELD INTELL" — an abbreviation that reads as a word cut in half, and
+              a category name besides. The body already teaches the gesture ("Tap. Speak.
+              Done."); the header should say where the words END UP, which is the whole
+              difference between this and a voice recorder. */}
+          <Typography sx={{ fontSize: 9.5, color: vx.mut, letterSpacing: '.18em',
+            whiteSpace: 'nowrap' }}>
+            EVAM · VOICE TO REGISTER
           </Typography>
         </Box>
         {recording && (
