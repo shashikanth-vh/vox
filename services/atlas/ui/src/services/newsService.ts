@@ -411,19 +411,7 @@ function ingest(code: string, term: string, arts: Article[], mode: string): numb
 
 export interface ScanState { running: boolean; done: number; total: number; failTerms: number }
 
-/* The sweep reads the CLIENT STORE, which is filled by whichever screen the user
-   happened to visit first. Land straight on Tools (a bookmark, a reload, the tab the
-   sign-in lands on) and that store is empty — so the sweep swept ZERO firms and
-   reported success. Warm it here rather than trusting the route someone took to arrive. */
-async function warmClients(): Promise<void> {
-  if (Object.keys(db().clients || {}).length) return;
-  try {
-    const rows = await entitiesService.list();
-    rows.forEach((r: any) => {
-      if (r.code) db().clients[r.code] = { ...(db().clients[r.code] || {}), ...r };
-    });
-  } catch { /* offline / mock mode: fall through with whatever the store has */ }
-}
+export interface ScanState { running: boolean; done: number; total: number; failTerms: number }
 
 /* The state-scoped themes a policy sweep asks about. PULSE publishes them; this copy is
    only for a build with no gateway in front of it. */
@@ -440,6 +428,24 @@ async function policyThemes(): Promise<string[]> {
     POLICY_CACHE = list.length ? list : POLICY_FALLBACK;
   } catch { POLICY_CACHE = POLICY_FALLBACK; }
   return POLICY_CACHE || POLICY_FALLBACK;
+}
+
+/* THE FIRMS ARE THE REGISTER'S, not the browser's.
+
+   `db().clients` is a working cache that only ever GROWS: lead conversion adds a row,
+   a ledger import adds rows, every screen that lists companies merges its page into it,
+   and nothing prunes. Read it as the roster and the radar sweeps companies the register
+   does not have — which is why "firms watched" climbed past the number the Clients
+   table shows, and why the sweep spent time on names nobody is lending to.
+
+   hydrateAll() REPLACES the cache with the register's own entity list — the same source,
+   and the same rows, the Clients table renders. Refreshed on every sweep, so the two
+   screens cannot drift apart within a session. */
+async function refreshFirms(): Promise<void> {
+  try {
+    const { clientsService } = await import('./clientsService');
+    await clientsService.hydrateAll();
+  } catch { /* offline / mock mode: keep whatever the store already holds */ }
 }
 
 export const newsService = {
@@ -476,7 +482,7 @@ export const newsService = {
    * build, or a deployment with no gateway), so the sweep degrades rather than dies.
    */
   async sweepAll(by: string, onProgress: (s: { done: number; total: number; found: number }) => void) {
-    await warmClients();
+    await refreshFirms();
     const codes = Object.keys(db().clients || {});
     // term -> the firms watching it. Two firms watching the same promoter is ONE
     // search whose result files against both.
@@ -526,7 +532,7 @@ export const newsService = {
     // the sign-in lands on) and that store is empty — so "Scan all firms" swept ZERO
     // firms and reported success. Warm it here rather than trusting the route someone
     // took to arrive.
-    await warmClients();
+    await refreshFirms();
     const codes = Object.keys(db().clients || {});
     let found = 0, failTerms = 0, done = 0;
     for (const code of codes) {

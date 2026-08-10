@@ -424,6 +424,31 @@ def create_app() -> FastAPI:
         if (denied := _require_api_key(settings, x_api_key)) is not None:
             return denied
         out = await request.app.state.search.probe()
+        # EMAIL and the SCHEDULER ride along, because they fail the same silent way: a
+        # digest that never arrives and a schedule that never fires look identical to a
+        # desk, and both are usually one unset variable. One click, three answers.
+        smtp = settings.smtp()
+        rows = request.app.state.schedules.all()
+        nxt = sorted(float(r.get("next_run") or 0) for r in rows if r.get("active", True))
+        out["email"] = {
+            "ok": smtp.ready,
+            "from": smtp.sender if smtp.ready else "",
+            "detail": (f"configured — digests send from {smtp.sender}" if smtp.ready
+                       else "not configured — set PULSE_SMTP_HOST, PULSE_SMTP_USER and "
+                            "PULSE_SMTP_PASS (search and scanning work without it)"),
+        }
+        out["scheduler"] = {
+            "ok": settings.scheduler_enabled,
+            "schedules": len(rows),
+            "active": sum(1 for r in rows if r.get("active", True)),
+            "next_run": (datetime.fromtimestamp(nxt[0], UTC).isoformat()
+                         if nxt and nxt[0] else None),
+            "detail": ("off — PULSE_SCHEDULER_ENABLED is false, so no digest will fire"
+                       if not settings.scheduler_enabled else
+                       f"on — {len(rows)} schedule(s) stored"
+                       + ("" if smtp.ready else ", but email is not configured so a "
+                          "firing schedule cannot deliver")),
+        }
         return ORJSONResponse(status_code=200 if out["ok"] else 503, content=out)
 
     @app.get("/v1/news/config", tags=["News Radar"],

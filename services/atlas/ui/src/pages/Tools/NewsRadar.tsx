@@ -93,6 +93,13 @@ export default function NewsRadar() {
     && (!q || [n.headline, db().clients?.[n.code]?.name, n.code, n.term, n.source]
       .some((x) => String(x || '').toLowerCase().includes(q))));
 
+  /* The colour chips read the AD-HOC results as well as the book. They used to filter
+     only the stored news, so picking 🔴 Ugly while a search was on screen silently did
+     nothing to it — the one list the desk was actually looking at. */
+  const adhocShown = useMemo(
+    () => (sev && sev !== 'CTX' ? adhoc.items.filter((n) => n.severity === sev) : adhoc.items),
+    [adhoc.items, sev]);
+
   // Group by firm, most-adverse first.
   const groups = useMemo(() => {
     const by: Record<string, NewsItem[]> = {};
@@ -132,10 +139,16 @@ export default function NewsRadar() {
   const runProbe = async () => {
     setProbe('checking the news sources…');
     try {
-      const out = await newsService.diagnostics();
-      setProbe(out.summary + ' — '
-        + (out.sources || []).map((s: any) =>
-          `${s.name}: ${s.ok ? `ok (${s.ms}ms, ${s.count} items)` : s.error}`).join(' · '));
+      const out: any = await newsService.diagnostics();
+      setProbe([
+        out.summary + ' — ' + (out.sources || []).map((s: any) =>
+          `${s.name}: ${s.ok ? `ok (${s.ms}ms, ${s.count} items)` : s.error}`).join(' · '),
+        // A digest that never arrives and a schedule that never fires look identical
+        // from here, and both are usually one unset variable. Say which.
+        out.email ? 'Email — ' + out.email.detail : '',
+        out.scheduler ? 'Schedules — ' + out.scheduler.detail
+          + (out.scheduler.next_run ? ` · next ${String(out.scheduler.next_run).slice(0, 16).replace('T', ' ')}` : '') : '',
+      ].filter(Boolean).join('  |  '));
     } catch (e: any) {
       setProbe('could not reach PULSE itself — ' + String(e?.message || e));
     }
@@ -263,18 +276,16 @@ export default function NewsRadar() {
         {(adhoc.term || adhoc.items.length) ? <Button onClick={searchClear}>↺ New search</Button> : null}
         <Button onClick={() => setSched('plain')}>⏰ Schedules</Button>
       </Box>
-      <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.5 }}>
-        Searches live news across the web (Google News + GDELT) for anything you type — a company, a founder,
-        or a key executive; optionally within a date range. Colour-coded 🟢 good · 🟡 bad · 🔴 ugly; click to
-        open the source, ★ save the term to a firm’s watch list, 📧 email the results, or ⏰ schedule a digest.
-      </Typography>
 
       {adhoc.term && (
         <Paper variant="outlined" sx={{ borderColor: tokens.line, p: 1.2, mb: 1.8 }}>
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
             <Typography component="b" sx={{ fontSize: 13, fontWeight: 700 }}>Results for “{adhoc.term}”</Typography>
             <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-              {adhoc.running ? 'searching…' : `${adhoc.items.length} real articles`}
+              {adhoc.running ? 'searching…'
+                : sev && adhocShown.length !== adhoc.items.length
+                  ? `${adhocShown.length} of ${adhoc.items.length} real articles`
+                  : `${adhoc.items.length} real articles`}
             </Typography>
             <Box sx={{ flex: 1 }} />
             {!adhoc.running && adhoc.items.length > 0 && <Button onClick={() => setEmailNews(true)}>📧 Email these</Button>}
@@ -284,13 +295,19 @@ export default function NewsRadar() {
           {adhoc.err && <Alert severity="error" sx={{ py: 0, fontSize: 12, mb: 1 }}>{adhoc.err}</Alert>}
           {adhoc.running
             ? <Typography sx={{ p: 2, textAlign: 'center', color: tokens.muted, fontSize: 12.5 }}>Scraping live news for “{adhoc.term}”…</Typography>
-            : adhoc.items.length
-              ? adhoc.items.map((n, i) => (
+            : adhocShown.length
+              ? adhocShown.map((n, i) => (
                 <NewsLine key={i} severity={n.severity} headline={n.headline} url={n.url}
                   meta={`${n.source || ''} · ${n.when || ''}`}
                   onOpen={() => newsService.open(n, user.full)} />
               ))
-              : !adhoc.err && <Typography sx={{ p: 2, textAlign: 'center', color: tokens.muted, fontSize: 12.5 }}>No articles found for “{adhoc.term}”.</Typography>}
+              : !adhoc.err && (
+                <Typography sx={{ p: 2, textAlign: 'center', color: tokens.muted, fontSize: 12.5 }}>
+                  {adhoc.items.length
+                    ? `None of the ${adhoc.items.length} articles for “${adhoc.term}” is ${SEV_LABEL[sev as Severity]}.`
+                    : `No articles found for “${adhoc.term}”.`}
+                </Typography>
+              )}
         </Paper>
       )}
 
@@ -339,15 +356,6 @@ export default function NewsRadar() {
           real scraped article; nothing is invented.
         </Alert>
       )}
-      <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>
-        One click sweeps every firm on the Register — company name plus the owner/promoter terms you add per firm.
-        Every item is a REAL article scraped live; if the source is unreachable the scan reports the failure —
-        nothing is ever invented. Colours read 🟢 good · 🟡 bad · 🔴 ugly · 🔵 policy. Watch terms should carry every
-        promoter and director: the person is named before the company is. <b>⚡ Policy</b> sweeps state-level tariff
-        and regulatory moves that never mention the firm, and good-sounding news on a firm we have lent to —
-        fresh debt, an OTS, a share pledge, a stake sale, an auditor change — is flagged ⚠ for review rather than
-        filed as good. Click any item to open the source.
-      </Typography>
 
       {/* ---- per-firm groups ---- */}
       {!all.length ? (
@@ -364,7 +372,16 @@ export default function NewsRadar() {
         const c = db().clients?.[code] || {};
         const terms = watch()[code] || [];
         return (
-          <Accordion key={code} defaultExpanded disableGutters variant="outlined"
+          /* COLLAPSED, and unmounted until opened.
+             Every firm used to render expanded, so a book of 340 firms mounted all
+             7,400 headline rows at once — tens of thousands of DOM nodes, rebuilt on
+             every keystroke in the filter and every re-render. That is the freeze:
+             not the network, the page. Closed by default the sweep costs 340 summary
+             rows, and a firm's headlines are built when someone actually opens it.
+             A filter or a search that narrows to a few firms opens them itself. */
+          <Accordion key={code} disableGutters variant="outlined"
+            defaultExpanded={groups.length <= 12}
+            TransitionProps={{ unmountOnExit: true }}
             sx={{ borderColor: tokens.line, mb: 0.8, '&:before': { display: 'none' } }}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', pr: 1 }}>
@@ -407,16 +424,10 @@ export default function NewsRadar() {
               </Box>
               {items.map((n) => (
                 <NewsLine key={n.id} severity={n.severity} headline={n.headline} url={n.url}
-                  meta={`${n.source || ''} · ${n.when || ''} · matched “${n.term}”${n.verdict ? ` · verdict: ${n.verdict}` : ''}`}
+                  meta={`${n.source || ''} · ${n.when || ''} · matched “${n.term}”`}
                   flag={n.category === 'context-review'
                     ? (n.reason || contextReason(n.headline)) : undefined}
-                  onOpen={() => newsService.open(n, user.full)}
-                  actions={!n.verdict ? (
-                    <>
-                      <Button onClick={() => setVerdict(n.id, 'confirmed')}>✓ Real</Button>
-                      <Button onClick={() => setVerdict(n.id, 'dismissed')}>✕ Noise</Button>
-                    </>
-                  ) : undefined} />
+                  onOpen={() => newsService.open(n, user.full)} />
               ))}
             </AccordionDetails>
           </Accordion>
