@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
   IconButton, Alert, TextField, ToggleButtonGroup, ToggleButton, Checkbox,
-  FormControlLabel, CircularProgress, Chip,
+  FormControlLabel, CircularProgress, Chip, Tooltip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { ledgerService, LedgerImportResult } from '../../services/ledgerService';
@@ -22,10 +22,17 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [result, setResult] = useState<LedgerImportResult | null>(null);
+  // THIS FILE HAS BEEN IMPORTED. Leaving Import live after a result invites a second
+  // run of a job that takes a while and, in Replace mode, wipes the book before
+  // reloading it — and the desk has no reason to want that: the outcome is already on
+  // screen. Choosing a different file (or switching mode) is a different import, and
+  // clears this.
+  const [done, setDone] = useState(false);
 
   const close = () => {
     if (busy) return;
     setFile(null); setReason(''); setErr(''); setResult(null); setMode('merge');
+    setDone(false);
     onClose();
   };
 
@@ -38,6 +45,7 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
     setErr(''); setBusy(true); setResult(null);
     try {
       setResult(await ledgerService.importLedger(file, mode, reason.trim(), retain));
+      setDone(true);
     } catch (e: any) {
       // The register explains every refusal in a problem envelope ({error:{detail}}) —
       // `data.detail` is the WRONG key for it, so an audited refusal ("that operation is
@@ -86,9 +94,10 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
             {file ? file.name : 'Choose .xlsx'}
           </Button>
           <input ref={fileRef} type="file" accept=".xlsx,.xlsm" style={{ display: 'none' }}
-            onChange={(e) => { setFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+            onChange={(e) => { setFile(e.target.files?.[0] || null); e.target.value = '';
+              setDone(false); }} />
           <ToggleButtonGroup exclusive size="small" value={mode}
-            onChange={(_, v) => v && setMode(v)}>
+            onChange={(_, v) => { if (v) { setMode(v); setDone(false); } }}>
             <ToggleButton value="merge" sx={{ fontSize: 11.6, px: 1.2 }}>Merge into current book</ToggleButton>
             <ToggleButton value="replace" sx={{ fontSize: 11.6, px: 1.2 }}>Replace current book</ToggleButton>
           </ToggleButtonGroup>
@@ -176,11 +185,23 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={close} disabled={busy}>Close</Button>
-        <Button variant="contained" onClick={run} disabled={busy}
-          startIcon={busy ? <CircularProgress size={14} /> : undefined}>
-          {busy ? 'Importing…' : 'Import'}
+        {/* Once the import has run, CLOSE is the action — it carries the emphasis, and
+            Import steps back rather than disappearing, so the reason it is spent stays
+            readable. */}
+        <Button onClick={close} disabled={busy} variant={done ? 'contained' : 'text'}>
+          Close
         </Button>
+        <Tooltip title={done
+          ? 'This file is already imported — choose another file, or switch the mode, to import again.'
+          : ''}>
+          <Box component="span">
+            <Button variant={done ? 'outlined' : 'contained'} onClick={run}
+              disabled={busy || done}
+              startIcon={busy ? <CircularProgress size={14} /> : undefined}>
+              {busy ? 'Importing…' : done ? 'Imported' : 'Import'}
+            </Button>
+          </Box>
+        </Tooltip>
       </DialogActions>
     </Dialog>
   );
