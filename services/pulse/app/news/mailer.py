@@ -79,6 +79,31 @@ def digest_html(term: str, articles: list[dict[str, Any]],
         'News Radar. Every article links to its source.</div></div>')
 
 
+def _smtp_hint(exc: Exception, cfg: Any) -> str:
+    """The SMTP layer's errors name a syscall, not a cause.
+
+    "[Errno -2] Name or service not known" is the resolver refusing the host, and it
+    reads on screen as a mail problem when it is a hostname or an egress problem. The
+    library cannot say which of the two it is, but it CAN say what to look at — and the
+    host it actually tried, which is the fact the desk needs and never has.
+    """
+    text = str(exc)
+    host = f"{cfg.host}:{cfg.port}"
+    if "Name or service not known" in text or "nodename nor servname" in text:
+        return (f" — the SMTP host {host!r} could not be resolved from this container. "
+                "Check PULSE_SMTP_HOST for a typo or a stray comma, and that the "
+                "container is allowed to resolve and reach it.")
+    if "Connection refused" in text or "Network is unreachable" in text:
+        return (f" — nothing is listening at {host} from this container. Check the port "
+                "(587 = STARTTLS, 465 = implicit SSL) and any egress firewall.")
+    if "timed out" in text.lower():
+        return (f" — {host} accepted no connection in time, which is usually an egress "
+                "firewall silently dropping outbound SMTP.")
+    if "authentication" in text.lower() or "5.7." in text or "535" in text:
+        return (" — the host answered but rejected the credentials. For most providers "
+                "PULSE_SMTP_PASS is an API/SMTP key, not the account password.")
+    return ""
+
 def send_email(cfg: SmtpConfig, recipients: list[str], subject: str,
                html_body: str) -> tuple[bool, str]:
     """Blocking on purpose — callers run it in a threadpool. Returns (ok, message) where
@@ -121,6 +146,6 @@ def send_email(cfg: SmtpConfig, recipients: list[str], subject: str,
     except Exception as exc:  # noqa: BLE001 - reported to the caller, never raised at them
         log.error("pulse_email_failed", extra={"host": cfg.host, "port": cfg.port,
                                                "user": cfg.user, "error": str(exc)})
-        return False, f"Send failed: {exc}"
+        return False, f"Send failed: {exc}{_smtp_hint(exc, cfg)}"
     log.info("pulse_email_sent", extra={"recipients": len(recipients)})
     return True, f"Sent to {len(recipients)} recipient(s)."

@@ -56,11 +56,13 @@ export default function ToolsPage() {
         <ExportBar onCsv={() => newsService.exportCsv(user.full)} />
       </Box>
 
-      {/* auto-FILL, not auto-fit: with seven cards either behaved the same, but two
-          cards in auto-fit tracks would each stretch to half the screen. Empty tracks
-          hold their width, so the tiles keep the size they have always had. */}
-      <Box sx={{ display: 'grid', gap: 1.2, mb: 1.8,
-        gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))' }}>
+      {/* TWO COLUMNS, ALWAYS — including on a phone, where an auto-fill track list
+          dropped to one and the two cards stacked into a tall header the desk had to
+          scroll past to reach the radar. Two tiles side by side stay legible at 160px
+          each, and `minmax(0,1fr)` lets them shrink rather than overflow. The row is
+          capped so they keep their size on a wide screen instead of becoming banners. */}
+      <Box sx={{ display: 'grid', gap: 1.2, mb: 1.8, maxWidth: 600,
+        gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
         {/* The radar is this page's content, so its card is the one shown as current —
             and it now DOES something (it used to have no click handler at all): it
             takes you to the radar, which matters once the page has scrolled. */}

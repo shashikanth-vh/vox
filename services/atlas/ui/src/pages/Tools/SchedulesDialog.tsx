@@ -19,6 +19,9 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
   const [rows, setRows] = useState<Schedule[]>([]);
   const [smtp, setSmtp] = useState(false);
   const [banner, setBanner] = useState('');
+  // A failure shown in calm blue reads as information. Every banner here was a failure
+  // and every one of them said 'info'; a test email that WORKED said nothing at all.
+  const [bannerOk, setBannerOk] = useState(false);
   const [q, setQ] = useState('');
   const [to, setTo] = useState('');
   const [cad, setCad] = useState<'daily' | 'weekly'>('daily');
@@ -39,6 +42,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     const r = await pulseService.listSchedules();
     setRows(r.data?.schedules ?? []);
     setSmtp(!!r.data?.smtp);
+    setBannerOk(false);
     setBanner(r.ok ? '' : (r.error || ''));
   }, []);
 
@@ -61,9 +65,14 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     if (r.ok) load(); else setBanner(r.error || 'Could not create the schedule');
   };
 
-  const act = async (fn: Promise<{ ok: boolean; error?: string }>) => {
-    const r = await fn;
-    if (r.ok) load(); else setBanner(r.error || 'Action failed');
+  const act = async (fn: Promise<{ ok: boolean; error?: string; data?: any }>,
+                     okMessage?: string) => {
+    const r: any = await fn;
+    setBannerOk(!!r.ok);
+    if (r.ok) {
+      setBanner(okMessage ? (r.data?.message ? `${okMessage} ${r.data.message}` : okMessage) : '');
+      load();
+    } else setBanner(r.error || 'Action failed');
   };
 
   return (
@@ -74,9 +83,12 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
       <DialogContent dividers>
         <Alert severity={smtp ? 'success' : 'warning'} sx={{ py: 0, fontSize: 12, mb: 1.2 }}>
           {smtp ? 'Email is configured on the server.' : 'Email is not configured.'}
-          {smtp && <Button sx={{ ml: 1 }} onClick={() => act(pulseService.sendTestEmail(to.trim()))}>Send test email</Button>}
+          {smtp && <Button sx={{ ml: 1 }} onClick={() => act(pulseService.sendTestEmail(to.trim()), 'Test email sent.')}>Send test email</Button>}
         </Alert>
-        {banner && <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1.2 }}>{banner}</Alert>}
+        {banner && (
+          <Alert severity={bannerOk ? 'success' : 'error'} onClose={() => setBanner('')}
+            sx={{ py: 0, fontSize: 12, mb: 1.2 }}>{banner}</Alert>
+        )}
 
         <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.5, mb: 1.4 }}>
           <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700, mb: 1 }}>

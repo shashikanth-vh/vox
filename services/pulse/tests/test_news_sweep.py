@@ -218,3 +218,33 @@ async def test_the_probe_reads_the_network_now_not_the_cache(monkeypatch):
     out = await engine.probe()
     assert out["ok"] is False, "the probe answered from cache"
     assert all("cannot reach the source" in s["error"] for s in out["sources"])
+
+
+# --------------------------------------------------------------------------- #
+# The SMTP hints
+# --------------------------------------------------------------------------- #
+def test_an_smtp_failure_names_the_cause_and_the_host():
+    """"Send failed: [Errno -2] Name or service not known" is a syscall, not a cause.
+    It reads as a mail problem when it is a hostname or an egress problem, and it never
+    says which host was tried — the one fact the desk needs to fix it."""
+    from types import SimpleNamespace
+
+    from app.news.mailer import _smtp_hint
+
+    cfg = SimpleNamespace(host="smtp-relay.brevo.com", port=587)
+    dns = _smtp_hint(OSError("[Errno -2] Name or service not known"), cfg)
+    assert "could not be resolved" in dns
+    assert "smtp-relay.brevo.com:587" in dns, "the host tried must be named"
+    assert "stray comma" in dns, "the .env fault that actually causes this"
+
+    refused = _smtp_hint(ConnectionRefusedError("[Errno 111] Connection refused"), cfg)
+    assert "nothing is listening" in refused and "465" in refused
+
+    slow = _smtp_hint(TimeoutError("timed out"), cfg)
+    assert "egress firewall" in slow
+
+    auth = _smtp_hint(Exception("535 5.7.8 Authentication credentials invalid"), cfg)
+    assert "API/SMTP key, not the account password" in auth
+
+    # An error nobody has a hint for adds NOTHING — a guess would be worse than silence.
+    assert _smtp_hint(Exception("some novel failure"), cfg) == ""

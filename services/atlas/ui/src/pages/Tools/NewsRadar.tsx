@@ -86,10 +86,12 @@ export default function NewsRadar() {
   // Open review flags: good-looking news on a live borrower that nobody has judged yet.
   const ctxs = all.filter((n) => n.category === 'context-review' && !n.verdict).length;
   const codes = Object.keys(db().clients || {});
+  const lives = all.filter((n) => isLiveBorrower(n.code)).length;
 
   const q = search.trim().toLowerCase();
   const shown = all.filter((n) =>
     (!sev || (sev === 'CTX' ? (n.category === 'context-review' && !n.verdict) : n.severity === sev))
+    && (!liveOnly || isLiveBorrower(n.code))
     && (!q || [n.headline, db().clients?.[n.code]?.name, n.code, n.term, n.source]
       .some((x) => String(x || '').toLowerCase().includes(q))));
 
@@ -135,6 +137,13 @@ export default function NewsRadar() {
 
   /* Is it us or the network? The one question the search itself cannot answer: no
      articles reads the same for a quiet company and a container with no egress. */
+  /* LIVE EXPOSURE is not a colour.
+     Severity says how bad a story is; exposure says whose money is in it — and the
+     question that actually matters ("ugly news on a name we have lent to") needs BOTH
+     at once. Putting exposure in the colour row would make it look mutually exclusive
+     with Ugly, which is the opposite of how it is used, so it is its own toggle and it
+     combines with whatever colour is selected. */
+  const [liveOnly, setLiveOnly] = useState(false);
   const [probe, setProbe] = useState('');
   const runProbe = async () => {
     setProbe('checking the news sources…');
@@ -255,6 +264,56 @@ export default function NewsRadar() {
 
   return (
     <>
+      {/* THE FILTER BAR SITS ABOVE EVERYTHING IT FILTERS.
+          It used to live below the search box and its results, which read as though the
+          colours belonged to the firm list alone — so a desk searching one company saw
+          the chips underneath and never thought to use them on what it was looking at.
+          Above both, one control governs the search results and the book alike. */}
+      {/* ---- register KPIs + filters ---- */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1 }}>
+        {kpi('items', all.length)}
+        {kpi('ugly', reds, tokens.bad)}
+        {kpi('bad', ambs, tokens.warn)}
+        {blues > 0 && kpi('policy', blues, SEV_BG.BLUE)}
+        {ctxs > 0 && kpi('to review', ctxs, tokens.warn)}
+        {kpi('firms watched', codes.length)}
+        <Box sx={{ flex: 1 }} />
+        {sevChip('', 'All')}{sevChip('GREEN', '🟢 Good')}{sevChip('AMBER', '🟡 Bad')}{sevChip('RED', '🔴 Ugly')}
+        {blues > 0 && sevChip('BLUE', '🔵 Policy')}
+        {/* A SECOND AXIS, so it reads as one: a thin rule, then a toggle that combines
+            with the colour rather than replacing it. "Ugly + Live exposure" is the view
+            the credit desk actually wants, and one exclusive row could never express it. */}
+        {lives > 0 && (
+          <>
+            <Box sx={{ width: '1px', height: 20, bgcolor: tokens.line, mx: 0.4 }} />
+            <Chip label={`💰 Live exposure (${lives})`} clickable size="small"
+              variant={liveOnly ? 'filled' : 'outlined'} color={liveOnly ? 'primary' : 'default'}
+              title="Only firms we already have money out to — combines with the colour above"
+              onClick={() => setLiveOnly((v) => !v)} />
+          </>
+        )}
+        {ctxs > 0 && (
+          <Chip label={`⚠ To review (${ctxs})`} clickable size="small"
+            variant={sev === 'CTX' ? 'filled' : 'outlined'} color={sev === 'CTX' ? 'warning' : 'default'}
+            onClick={() => setSev(sev === 'CTX' ? '' : 'CTX')} />
+        )}
+        <Button onClick={() => setSched('all')}>⏰ Schedule scan</Button>
+        {/* The question a search cannot answer: no articles reads the same whether the
+            company is quiet or this deployment has no way out to the internet. */}
+        <Button onClick={runProbe}>🩺 Check sources</Button>
+        {all.length > 0 && <Button onClick={() => setEmailAll(true)}>📧 Email firms’ news</Button>}
+        {all.length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear all news</Button>}
+        <Button variant="contained" disabled={scan.running} onClick={scanAll}>
+          {scan.running ? 'Scanning…' : '📡 Scan all firms'}
+        </Button>
+      </Box>
+
+      {probe && (
+        <Alert severity={/^NO source|could not reach/.test(probe) ? 'error' : 'info'}
+          onClose={() => setProbe('')} sx={{ py: 0, fontSize: 12, mb: 1 }}>
+          {probe}
+        </Alert>
+      )}
       {/* ---- ad-hoc search ---- */}
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 0.8 }}>
         <TextField value={qBox} onChange={(e) => setQBox(e.target.value)}
@@ -311,39 +370,6 @@ export default function NewsRadar() {
         </Paper>
       )}
 
-      {/* ---- register KPIs + filters ---- */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1 }}>
-        {kpi('items', all.length)}
-        {kpi('ugly', reds, tokens.bad)}
-        {kpi('bad', ambs, tokens.warn)}
-        {blues > 0 && kpi('policy', blues, SEV_BG.BLUE)}
-        {ctxs > 0 && kpi('to review', ctxs, tokens.warn)}
-        {kpi('firms watched', codes.length)}
-        <Box sx={{ flex: 1 }} />
-        {sevChip('', 'All')}{sevChip('GREEN', '🟢 Good')}{sevChip('AMBER', '🟡 Bad')}{sevChip('RED', '🔴 Ugly')}
-        {blues > 0 && sevChip('BLUE', '🔵 Policy')}
-        {ctxs > 0 && (
-          <Chip label={`⚠ To review (${ctxs})`} clickable size="small"
-            variant={sev === 'CTX' ? 'filled' : 'outlined'} color={sev === 'CTX' ? 'warning' : 'default'}
-            onClick={() => setSev(sev === 'CTX' ? '' : 'CTX')} />
-        )}
-        <Button onClick={() => setSched('all')}>⏰ Schedule scan</Button>
-        {/* The question a search cannot answer: no articles reads the same whether the
-            company is quiet or this deployment has no way out to the internet. */}
-        <Button onClick={runProbe}>🩺 Check sources</Button>
-        {all.length > 0 && <Button onClick={() => setEmailAll(true)}>📧 Email firms’ news</Button>}
-        {all.length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear all news</Button>}
-        <Button variant="contained" disabled={scan.running} onClick={scanAll}>
-          {scan.running ? 'Scanning…' : '📡 Scan all firms'}
-        </Button>
-      </Box>
-
-      {probe && (
-        <Alert severity={/^NO source|could not reach/.test(probe) ? 'error' : 'info'}
-          onClose={() => setProbe('')} sx={{ py: 0, fontSize: 12, mb: 1 }}>
-          {probe}
-        </Alert>
-      )}
       {scan.running && (
         <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
           Scanning {scan.done} / {scan.total} firms · {scan.found} real items…
