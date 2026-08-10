@@ -10,7 +10,8 @@ const ADAPT_SECT = ['Industrial Water', 'Water Treatment / WASH', 'Climate Data 
 
 /** The create body accepted on POST {{baseUrl}}/v1/leads (api.json, "03 · Lead, ownership & interaction"). */
 export interface LeadInput {
-  lead_no: string;
+  /** Omitted on create — the register allocates it and answers with what it chose. */
+  lead_no?: string;
   entity_id?: string;
   company: string;
   sector: string;
@@ -46,9 +47,11 @@ const isoDate = (v?: string | null) => (v && ISO_DATE.test(v.trim()) ? v.trim() 
  * field's own rules, not an absent one. `converted_deal_id` is never set here: a lead
  * being created has no deal yet, that id only exists after POST /v1/leads/{id}/convert.
  */
-export function toLeadPayload(lead: Lead): LeadInput {
+export function toLeadPayload(lead: Lead, opts?: { withNumber?: boolean }): LeadInput {
   const body: LeadInput = {
-    lead_no: lead.id,
+    // Omitted on CREATE so the register allocates it; sent on update, where it is the
+    // number the row already has.
+    ...(opts?.withNumber === false ? {} : { lead_no: lead.id }),
     company: (lead.company || '').trim(),
     sector: lead.sector || 'Other',
     lens: lead.lens || 'Mitigation',
@@ -136,30 +139,12 @@ function leadError(e: any, what = 'save the lead'): string {
 /** The path segment that addresses a lead: the API's UUID, falling back to lead_no. */
 const leadRef = (l: Pick<Lead, 'id' | 'apiId'>) => l.apiId || l.id;
 
-/** How many times to step the number up when the register says it is taken. */
-const LEAD_NO_RETRIES = 10;
-
 /** LD-001, LD-042, LD-1234 — padded to three digits, wider once it outgrows them. */
 export const leadNo = (n: number) => `LD-${String(n).padStart(3, '0')}`;
 
 /** One past the highest lead_no the local store holds. */
 function nextLocalSeq(): number {
   return Math.max(0, ...db().leads.map((l: Lead) => +((l.id || '').match(/\d+$/) || [0])[0])) + 1;
-}
-
-/**
- * How many leads the register holds, read from the list endpoint's total. A single row is
- * requested because only the count is wanted. Any failure returns 0, which just leaves
- * the local store's own sequence as the floor.
- */
-async function leadTotal(): Promise<number> {
-  try {
-    const data = await api.get<any>('/leads', { limit: 1 });
-    return totalOf(data, asRows(data, 'leads').length);
-  } catch (e) {
-    console.warn('[leads] could not read the register total for the next lead_no:', e);
-    return 0;
-  }
 }
 
 export const leadsService = {
@@ -265,32 +250,26 @@ export const leadsService = {
       source: 'RM', sourceDetail: '', rm: '', status: 'Active', temp: 'Warm', contact: '', phone: '',
       last: today(), next: '', conv: '', createdAt: today(), notes: '', ...input,
     } as Lead;
-    // The number to start from: past every lead_no the local store has seen and, on the
-    // real API, past the register's total as well.
-    let seq = nextLocalSeq();
     if (USE_REAL_API) {
-      seq = Math.max(seq, (await leadTotal()) + 1);
-      // A total is only a floor — deleted rows mean it can name one that already exists.
-      // A 409 is the register saying so, so the next number up is tried rather than
-      // handing the user an error they can do nothing about.
-      for (let attempt = 0; ; attempt++) {
-        lead.id = leadNo(seq + attempt);
-        try {
-          // The API's returned id is a UUID, kept on apiId so later PATCH/convert calls
-          // address the row the backend knows about. `id` stays the LD-nnn lead_no that
-          // was sent up and that the grid's ID column renders.
-          const saved = await api.post<any>('/leads', toLeadPayload(lead));
-          if (saved?.lead_no) lead.id = saved.lead_no;
-          if (saved?.id) lead.apiId = saved.id;
-          if (saved?.entity_id) lead.entityId = saved.entity_id;
-          break;
-        } catch (e: any) {
-          if (e?.response?.status === 409 && attempt < LEAD_NO_RETRIES) continue;
-          return { ok: false, error: leadError(e) };
-        }
+      // THE REGISTER MINTS THE NUMBER. This used to guess it here — start at the row
+      // COUNT plus one and step up on each 409 — which works only while the numbers run
+      // unbroken from 1. Import the desk's ledger and they do not: 201 leads numbered to
+      // LD-210, so the guess opened at LD-202, walked into the taken ones and gave up
+      // after ten tries with "the write violates a database constraint" on a company
+      // that had nothing wrong with it. The register holds the whole sequence under an
+      // advisory lock and answers with the number it allocated.
+      try {
+        const saved = await api.post<any>('/leads', toLeadPayload(lead, { withNumber: false }));
+        // The API's id is a UUID, kept on apiId so later PATCH/convert calls address the
+        // row the backend knows about; `id` carries the LD-nnn the grid renders.
+        if (saved?.lead_no) lead.id = saved.lead_no;
+        if (saved?.id) lead.apiId = saved.id;
+        if (saved?.entity_id) lead.entityId = saved.entity_id;
+      } catch (e: any) {
+        return { ok: false, error: leadError(e) };
       }
     } else {
-      lead.id = leadNo(seq);
+      lead.id = leadNo(nextLocalSeq());
     }
     db().leads.unshift(lead);
     writeAudit(by, 'Lead added', lead.id, lead.company);

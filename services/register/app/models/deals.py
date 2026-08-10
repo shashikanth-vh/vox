@@ -28,7 +28,13 @@ class Lead(RegisterBase):
     # (field, prefix, width) — the repository hands out the next free number on create.
     # Declared on the MODEL rather than on the route so it applies wherever the row is
     # created, not only through POST /v1/leads.
-    __auto_number__ = ("lead_no", "L-", 4)
+    #
+    # "LD-nnn" is the DESK'S OWN numbering — what the ledger carries and what people
+    # quote. The prefix used to be "L-", which meant the allocator scanned for
+    # ^L-[0-9]+$ and could not see a single imported LD-207: it would have restarted at
+    # L-0001 beside a book numbered to LD-210. Matching the book's vocabulary is what
+    # makes "the next free number" mean the next one the desk would say.
+    __auto_number__ = ("lead_no", "LD-", 3)
 
     lead_no: Mapped[str | None] = mapped_column(String(40))  # e.g. "LD-002"
     entity_id: Mapped[uuid.UUID | None] = mapped_column(
