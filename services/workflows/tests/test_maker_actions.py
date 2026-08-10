@@ -539,7 +539,11 @@ def test_disburse_is_the_single_verb_and_the_partner_answer_is_gated():
     from app.api import _PACKAGE_REASON
 
     disburse = _action("disburse")
-    assert disburse["stages"] == {"CP/CS Completed", "Ready for Disbursement", "Disbursed"}
+    # 'Sanctioned' belongs here: 'CP/CS Completed' now means BOTH halves are satisfied,
+    # so a line whose conditions subsequent are still being chased never reaches it —
+    # and that line must still be able to disburse on the CP approval's evidence.
+    assert disburse["stages"] == {"Sanctioned", "CP/CS Completed",
+                                  "Ready for Disbursement", "Disbursed"}
     assert disburse["screen"] == "disburse"
     assert "package" not in disburse          # sending is how a package comes to exist
 

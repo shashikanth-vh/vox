@@ -241,8 +241,12 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "label": "Move to CP/CS Completed",
             "method": "PATCH", "url": "/v1/lending/{subject_id}",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
-            "stage_reason": "The line moves here automatically when the CP checklist is "
-                            "approved.",
+            # No longer automatic: 'CP/CS Completed' means BOTH halves are satisfied, and
+            # the CP approval only settles the CP half. The desk marks this when the CS
+            # chase finishes before the money moves; if it moves first, the terminal is
+            # 'Disbursed' and the line never passes through here.
+            "stage_reason": "Mark this once the conditions subsequent are satisfied too "
+                            "— the CP approval alone does not close both halves.",
             "evidence": ("cp_cs_completion",),
             "constant": {"stage": "CP/CS Completed"},
             "form": [],
@@ -258,7 +262,10 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "roles": _CREDIT_MAKERS,
             # 'Disbursed' too: the same dialog records the partner's answers and each
             # later tranche (T2, T3, ...) — the whole journey lives in one place.
-            "stages": {"CP/CS Completed", "Ready for Disbursement", "Disbursed"},
+            # 'Sanctioned' too: a line whose CP is approved but whose CS are still
+            # being chased never reaches 'CP/CS Completed', and it must still disburse.
+            "stages": {"Sanctioned", "CP/CS Completed", "Ready for Disbursement",
+                       "Disbursed"},
             "stage_reason": "Disbursement follows the Conditions Precedent approval.",
             "screen": "disburse",
             "prefill": {"lending_id": "id"},
@@ -2343,14 +2350,20 @@ def create_app() -> FastAPI:
         if lerr is not None:
             return lerr
         stage = str(line.get("stage") or "")
-        if stage not in ("CP/CS Completed", "Ready for Disbursement"):
+        # THE GATE IS THE EVIDENCE, NOT THE LABEL. 'CP/CS Completed' now means both
+        # halves are done, which a line with a live CS chase will not reach — and that
+        # line is still perfectly disbursable, because the CP approval already minted
+        # cp_cs_completion. So 'Sanctioned' is accepted here and the register's own
+        # evidence gate decides: without that evidence the move to 'Ready for
+        # Disbursement' is refused there, in one place, rather than guessed at here.
+        if stage not in ("Sanctioned", "CP/CS Completed", "Ready for Disbursement"):
             return _problem(409, "Conflict",
                             f"The line is {stage!r} — disbursement follows the CP "
                             "checklist approval.")
         # Stage + proposed figures: fold "Move to Ready for Disbursement" into the verb.
         amount = payload.proposed_amount or line.get("proposed_disbursement_amount")
         date_ = payload.proposed_date or line.get("proposed_disbursement_date")
-        if stage == "CP/CS Completed":
+        if stage in ("Sanctioned", "CP/CS Completed"):
             if not amount or not date_:
                 return _problem(422, "Validation failed",
                                 "Enter the proposed drawdown amount and date — they "
@@ -2704,17 +2717,37 @@ def create_app() -> FastAPI:
                     "is.")
                 return ORJSONResponse(status_code=200, content=row)
             row["cp_cs_completion"] = orjson.loads(ev.body).get("id")
-            # The approval IS the milestone: move the line to 'CP/CS Completed' here,
-            # as the approver, instead of leaving a dropdown for someone to discover.
+            # 'CP/CS COMPLETED' MEANS BOTH HALVES ARE DONE — and the CP approval only
+            # settles the CP half. Moving the line here on that approval alone put a
+            # label on the screen that claimed the Conditions Subsequent were satisfied
+            # while the desk was still chasing them, sometimes for months. The CP
+            # approval is what UNBLOCKS disbursement (it minted the evidence the stage
+            # gate reads); it is not the milestone that closes both halves.
+            #
+            # So: move only when nothing is open on either half. Otherwise leave the
+            # stage alone and say which conditions are still being worked — the line
+            # disburses off the evidence, and reaches 'CP/CS Completed' when the CS
+            # chase actually finishes (before disbursement) or never, if the money
+            # moves first and the terminal is 'Disbursed'.
+            open_cs = [i for i in (row.get("items") or [])
+                       if str(i.get("condition_type")) == "CS"
+                       and str(i.get("status") or "Pending") not in ("Completed", "Waived")]
+            if open_cs:
+                row["next"] = (
+                    f"CP approved — the line can disburse. {len(open_cs)} condition"
+                    f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
+                    f" ({', '.join(str(i.get('label') or i.get('key')) for i in open_cs[:3])}"
+                    f"{', …' if len(open_cs) > 3 else ''}); the line reaches "
+                    "'CP/CS Completed' when they are satisfied.")
+                return ORJSONResponse(status_code=200, content=row)
             # Best-effort — a failed move leaves the fallback action and says so.
             moved = await _register_patch_as(
                 request, f"/v1/lending/{lending_id}", approved_by, checker,
                 {"stage": "CP/CS Completed"})
             if isinstance(moved, ORJSONResponse) and moved.status_code == 200:
                 row["stage"] = "CP/CS Completed"
-                row["next"] = ("The line is at 'CP/CS Completed' — work the Conditions "
-                               "Subsequent and prepare the disbursement request to "
-                               "Advaya (unmet CPs travel with it).")
+                row["next"] = ("Both halves are satisfied — the line is at 'CP/CS "
+                               "Completed'. Prepare the disbursement request to Advaya.")
             else:
                 log.warning("cpcs_stage_automove_failed",
                             extra={"checklist": checklist_id, "lending": lending_id})

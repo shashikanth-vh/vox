@@ -1,0 +1,111 @@
+"""'CP/CS Completed' means BOTH halves are done.
+
+The CP approval settles the CP half and mints the evidence that unblocks disbursement.
+It used to also stamp the line 'CP/CS Completed', which claimed the conditions
+subsequent were satisfied while the desk was still chasing them — sometimes for months.
+
+The rule this pins: before disbursement, a line reaches 'CP/CS Completed' only when
+nothing is open on either half; a line whose CS are still live disburses on the evidence
+and its terminal is 'Disbursed'.
+"""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.config import get_settings
+from tests.test_maker_actions import _Http, _app, _get
+
+pytestmark = pytest.mark.asyncio
+
+LID = "22222222-2222-2222-2222-222222222222"
+
+
+class _Register(_Http):
+    """Serves the line, the checklist approval, the minted evidence — and RECORDS every
+    PATCH, which is where the stage move would show up."""
+
+    def __init__(self, row: dict, items: list[dict]) -> None:
+        super().__init__(row)
+        self.items = items
+        self.patches: list[dict] = []
+
+    async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        u = str(url)
+        if "/approve" in u:
+            return httpx.Response(200, request=httpx.Request("POST", u), json={
+                "id": "c1", "lending_id": LID, "checklist_version": 1,
+                "status": "Approved", "items": self.items})
+        if "/v1/evidence" in u:
+            return httpx.Response(201, request=httpx.Request("POST", u), json={"id": "e1"})
+        return httpx.Response(200, request=httpx.Request("POST", u), json={})
+
+    async def patch(self, url, **kwargs):  # noqa: ANN001, ANN003
+        self.patches.append(dict(kwargs.get("json") or {}))
+        return httpx.Response(200, request=httpx.Request("PATCH", str(url)), json=self.row)
+
+
+async def _approve(app):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        return await c.post("/v1/workflows/cpcs-checklists/c1/approve",
+                            json={"approved_by": "ch@evamfinance.com"},
+                            headers={"X-API-Key": "k", "X-User-Email": "ch@evamfinance.com",
+                                     "X-User-Roles": "Credit Head"})
+
+
+async def test_an_open_cs_keeps_the_line_out_of_cp_cs_completed(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    reg = _Register({"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cs-noc", "label": "NOC from lender", "condition_type": "CS",
+         "status": "Pending"},
+    ])
+    app.state.http = reg
+    r = await _approve(app)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cp_cs_completion"] == "e1", "the evidence still mints — disbursement is unblocked"
+    assert not reg.patches, f"the stage must not move: {reg.patches}"
+    assert "CP approved" in body["next"] and "NOC from lender" in body["next"]
+    get_settings.cache_clear()
+
+
+async def test_both_halves_satisfied_moves_the_line(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    reg = _Register({"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cs-noc", "condition_type": "CS", "status": "Completed"},
+    ])
+    app.state.http = reg
+    r = await _approve(app)
+    assert r.status_code == 200, r.text
+    assert reg.patches == [{"stage": "CP/CS Completed"}]
+    assert r.json()["stage"] == "CP/CS Completed"
+    get_settings.cache_clear()
+
+
+async def test_a_waived_cs_is_not_an_open_one(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    reg = _Register({"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cs-x", "condition_type": "CS", "status": "Waived"},
+    ])
+    app.state.http = reg
+    assert (await _approve(app)).status_code == 200
+    assert reg.patches == [{"stage": "CP/CS Completed"}]
+    get_settings.cache_clear()
+
+
+async def test_a_sanctioned_line_is_still_offered_the_disburse_verb(monkeypatch):
+    """The consequence of the rule: a line with a live CS chase never reaches
+    'CP/CS Completed', so Disburse has to be reachable from 'Sanctioned' or the money
+    could never move."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _Http({"id": LID, "stage": "Sanctioned"})
+    r = await _get(app, {"subject_type": "Lending", "subject_id": LID})
+    assert r.status_code == 200, r.text
+    keys = {a["key"] for a in r.json()["actions"]}
+    assert "disburse" in keys
+    get_settings.cache_clear()
