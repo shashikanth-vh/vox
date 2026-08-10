@@ -489,6 +489,15 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         raise ValidationAppError("Lead has no entity_id — link it to a company first.")
     if lead.status in {"Converted", "Lost", "Dropped", "Rejected", "Closed"}:
         raise ConflictError(f"Lead is {lead.status}; only an open lead can be converted.")
+    # TEMPERATURE IS THE DESK'S OWN QUALIFICATION GATE. A deal is a commitment of the
+    # book's attention — an analyst, a CAM, a committee slot — and the desk qualifies a
+    # lead to 'Hot' before spending any of it. A Warm or Cold lead reaching the deal
+    # register means the pipeline count stops meaning anything, so the register refuses
+    # it rather than trusting the screen to have hidden the button.
+    if str(lead.temperature or "").strip().casefold() != "hot":
+        raise ConflictError(
+            f"Lead is {lead.temperature or 'unrated'}; only a HOT lead converts to a "
+            "deal. Work it up and set the temperature to Hot first.")
 
     # rm / analyst, if named, must be known people in this tenant — not free-text.
     #

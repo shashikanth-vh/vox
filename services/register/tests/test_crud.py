@@ -233,7 +233,8 @@ async def test_conversion_numbers_the_rows_it_creates(client: AsyncClient):
     assert (await client.post("/v1/people", json={
         "name": "Asha", "full_name": "Asha Nair", "role": "BDRM"})).status_code == 201
     lead = (await client.post("/v1/leads", json={
-        "company": "Convert Numbering", "entity_id": ent["id"], "status": "Active"})).json()
+        "company": "Convert Numbering", "entity_id": ent["id"], "status": "Active",
+              "temperature": "Hot"})).json()
     r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
         "is_lending": True, "is_syndication": True, "product_type": "Term Loan",
         "amount_cr": 10, "rm": "Asha"})

@@ -95,7 +95,7 @@ async def test_convert_carries_the_am_opening_facts(client):
                                    "state": "Karnataka"})).json()["id"]
     lead = (await client.post("/v1/leads",
                               json={"company": "AM Facts Co",
-                                    "entity_id": eid})).json()
+                                    "entity_id": eid, "temperature": "Hot"})).json()
     r = await client.post(
         f"/v1/leads/{lead['id']}/convert",
         json={"is_asset_mon": True, "rm": "Kiran Rao", "analyst": "Dev Mehta",
@@ -129,7 +129,7 @@ async def test_convert_carries_every_line_fact(client):
                                    "toi": "EPC"})).json()["id"]
     lead = (await client.post("/v1/leads",
                               json={"company": "Every Fact Co",
-                                    "entity_id": eid})).json()
+                                    "entity_id": eid, "temperature": "Hot"})).json()
     admin = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
 
     # A birth stage deep in governance is refused outright.

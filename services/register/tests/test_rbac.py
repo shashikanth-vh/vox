@@ -247,7 +247,8 @@ async def test_row_lock_converted_lead(client: AsyncClient):
     ent = (await client.post("/v1/entities",
                              json={"code": "LOCKENT", "legal_name": "Locked Lead Co"})).json()
     lead = (await client.post("/v1/leads",
-                              json={"company": "Locked Lead Co", "entity_id": ent["id"]},
+                              json={"company": "Locked Lead Co", "entity_id": ent["id"],
+                                    "temperature": "Hot"},
                               headers=ARUN)).json()
     # Direct status=Converted is refused for everyone — must use /convert.
     bad = await client.patch(f"/v1/leads/{lead['id']}", json={"status": "Converted"},
@@ -336,7 +337,7 @@ async def test_convert_accepts_the_short_handle_a_person_is_known_by(client: Asy
 
     async def convert(rm: str, analyst: str | None = None) -> int:
         lead = (await client.post("/v1/leads", json={
-            "company": "Handle Co", "entity_id": ent["id"], "status": "Active"})).json()
+            "company": "Handle Co", "entity_id": ent["id"], "status": "Active", "temperature": "Hot"})).json()
         body = {"is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": rm}
         if analyst:
             body["analyst"] = analyst
@@ -360,7 +361,7 @@ async def test_transactional_lead_convert(client: AsyncClient):
                           json={"name": "Chetan", "full_name": "Chetan", "role": "RM"})
     assert p.status_code == 201, p.text
     lead = (await client.post("/v1/leads", json={
-        "company": "Convert Co", "entity_id": ent["id"], "status": "Active"})).json()
+        "company": "Convert Co", "entity_id": ent["id"], "status": "Active", "temperature": "Hot"})).json()
     r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
         "is_lending": True, "is_syndication": True, "product_type": "Term Loan",
         "amount_cr": 25, "rm": "Chetan"})
@@ -395,7 +396,7 @@ async def test_convert_reports_an_access_outage_as_503_not_422(client: AsyncClie
     assert (await client.post("/v1/people", json={
         "name": "Meera", "full_name": "Meera Rao", "role": "Deal Analyst"})).status_code == 201
     lead = (await client.post("/v1/leads", json={
-        "company": "Outage Co", "entity_id": ent["id"], "status": "Active"})).json()
+        "company": "Outage Co", "entity_id": ent["id"], "status": "Active", "temperature": "Hot"})).json()
 
     async def _down(tenant, user_id, role, expected_name=None):  # noqa: ANN001
         raise access_client.AccessUnavailableError("connect timeout")
@@ -446,7 +447,8 @@ async def test_a_person_resolves_by_e_mail_and_by_the_handle_vocx_uses(client: A
 
     async def convert(rm: str) -> int:
         lead = (await client.post("/v1/leads", json={
-            "company": "Identity Co", "entity_id": ent["id"], "status": "Active"})).json()
+            "company": "Identity Co", "entity_id": ent["id"], "status": "Active",
+                  "temperature": "Hot"})).json()
         return (await client.post(f"/v1/leads/{lead['id']}/convert", json={
             "is_lending": True, "product_type": "Term Loan", "amount_cr": 5,
             "rm": rm})).status_code
@@ -475,7 +477,8 @@ async def test_a_shared_handle_is_refused_rather_than_guessed(client: AsyncClien
 
     async def convert(rm: str):
         lead = (await client.post("/v1/leads", json={
-            "company": "Ambiguous Co", "entity_id": ent["id"], "status": "Active"})).json()
+            "company": "Ambiguous Co", "entity_id": ent["id"], "status": "Active",
+                  "temperature": "Hot"})).json()
         return await client.post(f"/v1/leads/{lead['id']}/convert", json={
             "is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": rm})
 

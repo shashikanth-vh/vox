@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, FormControlLabel, IconButton, Switch, Tooltip, Snackbar, Alert } from '@mui/material';
+import { Box, Button, FormControlLabel, IconButton, Switch, Tooltip, Snackbar, Alert } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { useQueryClient } from '@tanstack/react-query';
@@ -73,15 +73,25 @@ export default function LeadsPage() {
         editReason={ro ? whoCan('editLead') : ''}
         onDelete={can(user.roles, 'deleteRow') ? (l) => setDel(l) : undefined}
         // Push to deals — convert this lead into a deal (v11 doPush flow).
-        extraActions={can(user.roles, 'pushToDeals') ? (l) => (
-          l.status === 'Converted' ? null : (
-            <Tooltip title="Push to deal">
-              <IconButton sx={{ color: tokens.teal }} onClick={() => setPush(l)}>
-                <RocketLaunchIcon fontSize="small" />
-              </IconButton>
+        extraActions={can(user.roles, 'pushToDeals') ? (l) => {
+          if (l.status === 'Converted') return null;
+          // A deal costs the book an analyst, a CAM and a committee slot, so the desk
+          // qualifies a lead to HOT before spending any of it — the register refuses a
+          // Warm or Cold conversion outright. Say so on the button rather than letting
+          // the click fail; a disabled MUI button swallows the tooltip, hence the span.
+          const hot = String(l.temp || '').trim().toLowerCase() === 'hot';
+          return (
+            <Tooltip title={hot ? 'Push to deal'
+              : `Only a Hot lead converts — this one is ${l.temp || 'unrated'}.`}>
+              <Box component="span">
+                <IconButton disabled={!hot} sx={{ color: tokens.teal }}
+                  onClick={() => setPush(l)}>
+                  <RocketLaunchIcon fontSize="small" />
+                </IconButton>
+              </Box>
             </Tooltip>
-          )
-        ) : undefined}
+          );
+        } : undefined}
         mobileCard={{
           primary: (l) => l.company,
           value: (l) => <TempPill temp={l.temp} />,

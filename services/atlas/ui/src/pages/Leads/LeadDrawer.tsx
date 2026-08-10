@@ -1,4 +1,4 @@
-import { Drawer, Box, Typography, Button, IconButton, Divider, Alert } from '@mui/material';
+import { Drawer, Box, Typography, Button, IconButton, Divider, Alert, Tooltip } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import { useEffect, useState } from 'react';
@@ -158,7 +158,20 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
       </Box>
       <Divider />
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-        {!ro && v('status') === 'Active' && <Button variant="contained" onClick={push} disabled={saving}>Push to Deals →</Button>}
+        {/* Same gate as the grid and the register: a deal is only worth opening on a
+            lead the desk has qualified to Hot. Disabled with the reason attached, not
+            hidden — a button that vanishes teaches nobody what to do next. */}
+        {!ro && v('status') === 'Active' && (
+          <Tooltip title={String(v('temp') || '').trim().toLowerCase() === 'hot' ? ''
+            : `Only a Hot lead converts — this one is ${v('temp') || 'unrated'}. Set the temperature to Hot first.`}>
+            <Box component="span">
+              <Button variant="contained" onClick={push}
+                disabled={saving || String(v('temp') || '').trim().toLowerCase() !== 'hot'}>
+                Push to Deals →
+              </Button>
+            </Box>
+          </Tooltip>
+        )}
         <Box sx={{ flex: 1 }} />
         {dirty && <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>Unsaved changes</Typography>}
         <Button variant={dirty ? 'contained' : 'outlined'} onClick={done} disabled={saving}>
