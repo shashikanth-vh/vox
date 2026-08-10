@@ -51,6 +51,26 @@ from app.providers import NewsItem, build_providers
 log = get_logger("pulse")
 
 
+class SweepIn(BaseModel):
+    """A whole sweep in one request: every term the desk wants scanned.
+
+    The browser used to send these one at a time — one HTTP round trip per firm per
+    watch term, strictly sequential, because a `for` loop that awaits cannot overlap.
+    Four hundred firms is then four hundred serial crossings of the gateway.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    terms: list[str] = Field(min_length=1, max_length=1200)
+    date_from: str = Field(default="", max_length=10)
+    date_to: str = Field(default="", max_length=10)
+    limit: int = Field(default=40, ge=1, le=100)
+    # The terms belonging to companies we already have money out to. Polarity depends on
+    # the relationship and only the CALLER holds the book, so it says which is which —
+    # "raises fresh debt" is a win for a prospect and a review flag for a borrower.
+    live_terms: list[str] = Field(default_factory=list, max_length=1200)
+
+
 class ItemIn(BaseModel):
     """One news item pushed by an external feeder (scraper, paid API webhook, human).
 
@@ -173,6 +193,8 @@ def create_app() -> FastAPI:
                 await task
         for client in app.state.register_clients.values():
             await client.aclose()
+        # The engine's own upstream pool holds keep-alive sockets to the news sources.
+        await app.state.search.aclose()
 
     app = FastAPI(title="PRISM PULSE", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,
@@ -343,6 +365,66 @@ def create_app() -> FastAPI:
             body["error"] = ("no news source could be reached — "
                              + "; ".join(f"{s['name']}: {s['error']}" for s in down))
         return body
+
+    @app.post("/v1/news/sweep", tags=["News Radar"],
+              summary="Search MANY terms in one request (the all-firms sweep)")
+    async def news_sweep(request: Request, payload: SweepIn,
+                         x_api_key: str | None = Header(default=None,
+                                                        alias="X-API-Key")) -> Any:
+        """The sweep, done where the upstreams are.
+
+        Sending one request per firm made the browser the bottleneck: every term waited
+        for the one before it, and each paid its own TLS handshakes to the same three
+        hosts. Here the terms overlap, share one connection pool, and share the cache
+        and coalescing — two firms watching the same promoter cost one fetch.
+
+        One row per term, in the order given, each with its own sources: a term that
+        found nothing has to be distinguishable from a term whose sources were down,
+        per term, or a sweep of four hundred reports "0 items" and says nothing about
+        which half of that is a fault.
+        """
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        t0 = time.time()
+        try:
+            rows = await request.app.state.search.sweep(
+                payload.terms, dfrom=payload.date_from, dto=payload.date_to,
+                limit=payload.limit, live_terms=set(payload.live_terms))
+        except Exception as exc:  # noqa: BLE001 - a sweep must fail as a message
+            log.exception("pulse_sweep_failed", extra={"terms": len(payload.terms)})
+            return ORJSONResponse(status_code=502, content={
+                "results": [], "error": f"sweep failed: {exc}"})
+        failed = [r for r in rows if r.get("error")]
+        body: dict[str, Any] = {
+            "results": rows, "terms": len(rows),
+            "articles": sum(r["count"] for r in rows),
+            "failed_terms": len(failed),
+            "seconds": round(time.time() - t0, 1)}
+        # EVERY term failing is one fault, not four hundred: say it once, in the words
+        # the first term's sources used, so the screen shows a cause and not a tally.
+        if failed and len(failed) == len(rows):
+            body["error"] = str(failed[0].get("error") or "every term failed")
+        return body
+
+    @app.get("/v1/news/diagnostics", tags=["News Radar"],
+             summary="Can this container reach the news? (per-source probe)")
+    async def news_diagnostics(request: Request,
+                               x_api_key: str | None = Header(default=None,
+                                                              alias="X-API-Key")) -> Any:
+        """Answers the question a search cannot.
+
+        "No articles" reads the same whether the desk picked a quiet company or this
+        container has no outbound HTTPS — and on a locked-down host it is always the
+        second. That is a firewall rule somebody can add in five minutes once they
+        know, and a fortnight of blaming the radar until they do.
+
+        Probes each source with a fixed, always-newsworthy term, bypassing the cache,
+        and times them separately.
+        """
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        out = await request.app.state.search.probe()
+        return ORJSONResponse(status_code=200 if out["ok"] else 503, content=out)
 
     @app.get("/v1/news/config", tags=["News Radar"],
              summary="What the radar can do here (is email configured, is GDELT on)")

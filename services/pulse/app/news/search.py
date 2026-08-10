@@ -22,6 +22,7 @@ are async here (httpx + asyncio.gather) so one slow source never holds a worker 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import time
 import urllib.parse
@@ -135,6 +136,37 @@ class NewsSearch:
         self._inflight: dict[str, asyncio.Future] = {}
         self._sem = asyncio.Semaphore(upstream_concurrency)
         self._gdelt_warned = False
+        # ONE client for the process, built on first use.
+        #
+        # A sweep of four hundred firms used to open four hundred clients — three fresh
+        # TLS handshakes each, to the same three hosts, thrown away after one request.
+        # The handshakes, not the searching, were most of the sweep's wall-clock. A
+        # shared pool keeps the connections alive between terms.
+        #
+        # Built lazily rather than in __init__ so a test that patches
+        # ``app.news.search.httpx.AsyncClient`` still gets its stub — construction has
+        # to happen after the patch, not before it.
+        self._client: httpx.AsyncClient | None = None
+        self._client_lock = asyncio.Lock()
+
+    async def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = httpx.AsyncClient(
+                        headers=UA, follow_redirects=True, timeout=self.timeout_s,
+                        limits=httpx.Limits(max_keepalive_connections=20,
+                                            max_connections=40,
+                                            keepalive_expiry=60.0))
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the shared pool — called from the app's shutdown hook."""
+        client, self._client = self._client, None
+        if client is not None:
+            # A socket that will not close politely must not hold up shutdown.
+            with contextlib.suppress(Exception):
+                await client.aclose()
 
     async def _get(self, client: httpx.AsyncClient, url: str) -> str:
         async with self._sem:
@@ -215,11 +247,11 @@ class NewsSearch:
 
     async def _fetch_merge(self, term: str, dfrom: str, dto: str,
                            limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        async with httpx.AsyncClient() as client:
-            (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
-                self._google(client, term, dfrom, dto),
-                self._gdelt(client, term, dfrom, dto),
-                self._bing(client, term, dfrom, dto))
+        client = await self._http()
+        (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
+            self._google(client, term, dfrom, dto),
+            self._gdelt(client, term, dfrom, dto),
+            self._bing(client, term, dfrom, dto))
         sources = [s_google, s_gdelt, s_bing]
         log.info("pulse_search_sources", extra={"term": term, "google": len(google),
                                                 "gdelt": len(gdelt), "bing": len(bing),
@@ -297,3 +329,97 @@ class NewsSearch:
             raise
         finally:
             self._inflight.pop(key, None)
+
+    async def sweep(self, terms: list[str], *, dfrom: str = "", dto: str = "",
+                    limit: int = 40, live_terms: set[str] | None = None,
+                    concurrency: int = 6) -> list[dict[str, Any]]:
+        """Search MANY terms at once, server-side.
+
+        The sweep is what the radar is for — four hundred firms, asked in one go — and
+        it used to run in the BROWSER: one request per firm per watch term, strictly
+        one after another, each crossing the gateway. Four hundred round trips of a few
+        seconds each is half an hour of a spinner, and every one of them paid its own
+        TLS handshakes. None of that work was ever parallel, because a `for` loop with
+        an `await` in it cannot be.
+
+        Here the fan-out happens next to the upstreams instead: `concurrency` terms in
+        flight at a time, sharing the pool, the cache and the coalescing that already
+        exist. The bound is deliberate and modest — Google News and Bing answer a
+        polite client and rate-limit a greedy one, and a sweep that gets itself
+        throttled finishes later than one that waits its turn.
+
+        Returns one row per term IN THE ORDER GIVEN, each carrying its own articles and
+        its own per-source outcome, so a term that found nothing can be told apart from
+        a term whose sources were unreachable — per term, not just for the sweep.
+        """
+        wanted = [t.strip() for t in (terms or []) if t and t.strip()]
+        if not wanted:
+            return []
+        live = live_terms or set()
+        gate = asyncio.Semaphore(max(1, concurrency))
+
+        async def one(term: str) -> dict[str, Any]:
+            async with gate:
+                try:
+                    articles, sources = await self.search_detail(
+                        term, dfrom, dto, limit, term in live)
+                except Exception as exc:  # noqa: BLE001 — one bad term never ends a sweep
+                    log.warning("pulse_sweep_term_failed",
+                                extra={"term": term, "error": str(exc)})
+                    return {"term": term, "articles": [], "count": 0, "sources": [],
+                            "error": _reason(exc)}
+                row: dict[str, Any] = {"term": term, "articles": articles,
+                                       "count": len(articles), "sources": sources}
+                down = [s for s in sources if not s["ok"]]
+                if down and not articles:
+                    row["error"] = ("no news source could be reached — " + "; ".join(
+                        f"{s['name']}: {s['error']}" for s in down))
+                return row
+
+        t0 = time.time()
+        rows = await asyncio.gather(*(one(t) for t in wanted))
+        log.info("pulse_sweep", extra={
+            "terms": len(wanted), "seconds": round(time.time() - t0, 1),
+            "articles": sum(r["count"] for r in rows),
+            "failed_terms": sum(1 for r in rows if r.get("error"))})
+        return list(rows)
+
+    async def probe(self) -> dict[str, Any]:
+        """Can this container reach the news at all?
+
+        The one question a deployment cannot answer from the outside. A search that
+        returns nothing looks identical whether the desk picked a quiet company or the
+        container has no egress, and on a locked-down host it is ALWAYS the second —
+        which is a five-minute fix once somebody knows, and a fortnight of blaming the
+        radar until they do.
+
+        Uses a fixed, deliberately well-covered term so "no articles" cannot be
+        mistaken for "no connectivity", bypasses the cache so it reports the network as
+        it is NOW, and times each source separately.
+        """
+        term = "reserve bank of india"
+        client = await self._http()
+        out: list[dict[str, Any]] = []
+
+        async def timed(name: str, coro: Any) -> None:
+            t0 = time.time()
+            items, status = await coro
+            out.append({**status, "name": name, "count": len(items),
+                        "ms": int((time.time() - t0) * 1000)})
+
+        await asyncio.gather(
+            timed("Google News", self._google(client, term, "", "")),
+            timed("GDELT", self._gdelt(client, term, "", "")),
+            timed("Bing News", self._bing(client, term, "", "")))
+        out.sort(key=lambda s: str(s.get("name")))
+        reachable = [s for s in out if s["ok"] and not s.get("note")]
+        return {
+            "ok": bool(reachable),
+            "term": term,
+            "sources": out,
+            "summary": (f"{len(reachable)} of {len(out)} sources answered"
+                        if reachable else
+                        "NO source could be reached from this container — the radar "
+                        "cannot work until outbound HTTPS to news.google.com, "
+                        "www.bing.com and api.gdeltproject.org is allowed"),
+        }

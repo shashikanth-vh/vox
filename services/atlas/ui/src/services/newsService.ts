@@ -227,8 +227,22 @@ function newsEndpoints(term: string, dfrom?: string, dto?: string, live?: boolea
     + (live ? '&exposure=live' : '');
   // 0 — same-origin PULSE proxy, only when a PRISM gateway is present. On a plain
   // static host this 404s, so after the first miss we never ask again this session.
-  if (location.protocol.indexOf('http') === 0 && PULSE_UP !== false)
+  const havePulse = location.protocol.indexOf('http') === 0 && PULSE_UP !== false;
+  if (havePulse)
     list.push({ k: 'pulse', u: PULSE_URL + '/v1/news/search?q=' + encodeURIComponent(term) + dr });
+  // WHEN PULSE IS THERE, PULSE IS THE ANSWER — right or wrong.
+  //
+  // The public fallbacks below were written for a static build with no server at all.
+  // Left in the chain on a real deployment they did two bad things. They turned a
+  // 2-second refusal into a 50-second one: PULSE's own 30s budget, then GDELT direct
+  // (blocked by CORS), then three third-party proxies at 9s each — which is why a
+  // failed search reads on screen as a hang rather than an error. And they put the
+  // desk's search terms — the names of the companies we are looking at — through
+  // corsproxy.io and allorigins.win, services nobody here vetted.
+  //
+  // If PULSE answered badly, that is a fault to fix in PULSE, and its diagnostics
+  // endpoint says which source is down. Guessing around it hides the fault.
+  if (havePulse) return list;
   list.push({ k: 'direct', u: g });
   const cfg = (window as any).NEWS_PROXY;
   if (cfg) list.push({ k: 'proxy', u: cfg + enc });
@@ -381,6 +395,20 @@ function ingest(code: string, term: string, arts: Article[], mode: string): numb
 
 export interface ScanState { running: boolean; done: number; total: number; failTerms: number }
 
+/* The sweep reads the CLIENT STORE, which is filled by whichever screen the user
+   happened to visit first. Land straight on Tools (a bookmark, a reload, the tab the
+   sign-in lands on) and that store is empty — so the sweep swept ZERO firms and
+   reported success. Warm it here rather than trusting the route someone took to arrive. */
+async function warmClients(): Promise<void> {
+  if (Object.keys(db().clients || {}).length) return;
+  try {
+    const rows = await entitiesService.list();
+    rows.forEach((r: any) => {
+      if (r.code) db().clients[r.code] = { ...(db().clients[r.code] || {}), ...r };
+    });
+  } catch { /* offline / mock mode: fall through with whatever the store has */ }
+}
+
 /* The state-scoped themes a policy sweep asks about. PULSE publishes them; this copy is
    only for a build with no gateway in front of it. */
 const POLICY_FALLBACK = ['tariff order', 'open access charges', 'net metering policy', 'ALMM',
@@ -413,6 +441,68 @@ export const newsService = {
     return { added: total, fails };
   },
 
+  /**
+   * ONE request for the whole sweep.
+   *
+   * This used to be a `for` loop over four hundred firms, each awaiting its own
+   * fetch — and a loop that awaits cannot overlap, so no two firms were ever
+   * searched at the same time. Four hundred serial crossings of the gateway, each
+   * re-opening TLS to the same three news hosts, plus a deliberate 250 ms pause
+   * between firms, is half an hour of spinner for work the upstreams could have
+   * done in a couple of minutes.
+   *
+   * PULSE now takes every term at once and fans out next to the upstreams, sharing
+   * one connection pool and the cache and coalescing it already had. The browser's
+   * job shrinks to what only the browser can do: knowing which term belongs to which
+   * firm, and which of those firms we have money out to.
+   *
+   * Falls back to the old firm-by-firm path when PULSE is not reachable (a static
+   * build, or a deployment with no gateway), so the sweep degrades rather than dies.
+   */
+  async sweepAll(by: string, onProgress: (s: { done: number; total: number; found: number }) => void) {
+    await warmClients();
+    const codes = Object.keys(db().clients || {});
+    // term -> the firms watching it. Two firms watching the same promoter is ONE
+    // search whose result files against both.
+    const owners = new Map<string, string[]>();
+    const liveTerms: string[] = [];
+    for (const code of codes) {
+      for (const term of termsFor(code)) {
+        const at = owners.get(term);
+        if (at) at.push(code); else owners.set(term, [code]);
+        if (isLiveBorrower(code)) liveTerms.push(term);
+      }
+    }
+    const terms = [...owners.keys()];
+    if (!terms.length) return { found: 0, failTerms: 0, firms: 0 };
+    onProgress({ done: 0, total: terms.length, found: 0 });
+
+    const r = await fetch(PULSE_URL + '/v1/news/sweep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      // A sweep genuinely takes minutes at four hundred terms; the edge budgets for it.
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? AbortSignal.timeout(600_000) : undefined,
+      body: JSON.stringify({ terms, live_terms: Array.from(new Set(liveTerms)) }),
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !Array.isArray(j.results)) {
+      throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
+    }
+    let found = 0, failTerms = 0, done = 0;
+    for (const row of j.results) {
+      if (row.error) failTerms++;
+      const arts = parseArticles(row);
+      for (const code of owners.get(row.term) || []) found += ingest(code, row.term, arts, 'live');
+      onProgress({ done: ++done, total: terms.length, found });
+    }
+    if (j.error) _lastFailure = String(j.error);
+    writeAudit(by, 'News scan', 'ALL',
+      `${codes.length} firms · ${terms.length} terms · ${found} new`
+      + (failTerms ? ` · ${failTerms} term(s) unreachable` : ''));
+    return { found, failTerms, firms: codes.length };
+  },
+
   // Sequential with a small gap between firms — be a polite API citizen.
   async scanAll(by: string, onProgress: (s: { done: number; total: number; found: number }) => void) {
     // The sweep reads the CLIENT STORE, which is filled by whichever screen the user
@@ -420,14 +510,7 @@ export const newsService = {
     // the sign-in lands on) and that store is empty — so "Scan all firms" swept ZERO
     // firms and reported success. Warm it here rather than trusting the route someone
     // took to arrive.
-    if (!Object.keys(db().clients || {}).length) {
-      try {
-        const rows = await entitiesService.list();
-        rows.forEach((r: any) => {
-          if (r.code) db().clients[r.code] = { ...(db().clients[r.code] || {}), ...r };
-        });
-      } catch { /* offline / mock mode: fall through with whatever the store has */ }
-    }
+    await warmClients();
     const codes = Object.keys(db().clients || {});
     let found = 0, failTerms = 0, done = 0;
     for (const code of codes) {
@@ -438,6 +521,22 @@ export const newsService = {
     }
     writeAudit(by, 'News scan', 'ALL', `${codes.length} firms · ${found} new${failTerms ? ` · ${failTerms} source failures` : ''}`);
     return { found, failTerms, firms: codes.length };
+  },
+
+  /** Can PULSE reach the news from where it runs? Names each source and its latency. */
+  async diagnostics(): Promise<{ ok: boolean; summary: string; sources: any[] }> {
+    const r = await fetch(PULSE_URL + '/v1/news/diagnostics', {
+      headers: { Accept: 'application/json' },
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? AbortSignal.timeout(45_000) : undefined,
+    });
+    const j = await r.json().catch(() => null);
+    // 503 is a real ANSWER here — "I am up, the sources are not" — so it is read, not
+    // thrown. Only an unparseable reply means PULSE itself could not be reached.
+    if (!j || typeof j.summary !== 'string') {
+      throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
+    }
+    return j;
   },
 
   /* POLICY SWEEP — the risk that never names the firm.

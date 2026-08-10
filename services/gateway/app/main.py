@@ -70,7 +70,11 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
 # The long window is scoped to these prefixes on purpose: a hung register call must never
 # get minutes to hang.
 _SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/template_fill",
-               "/orchestrator/v1/cam/")
+               "/orchestrator/v1/cam/",
+               # The all-firms sweep: four hundred terms fanned out across three news
+               # sources. Minutes, legitimately — and cutting it short throws away a
+               # scan that was working, which is exactly what the short budget did.
+               "/pulse/v1/news/sweep")
 
 
 def _timeout_for(settings, full_path: str) -> float:  # noqa: ANN001

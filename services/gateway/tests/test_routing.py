@@ -132,9 +132,15 @@ def test_a_speech_capture_gets_the_long_upstream_window():
     assert _timeout_for(s, "/vocx/v1/capture_audio") == 300.0
     assert _timeout_for(s, "/vocx/v1/capture") == 300.0
     assert _timeout_for(s, "/orchestrator/v1/cam/some-line/generate") == 300.0
-    # Everything else keeps the short one — including the rest of VocX.
+    # The all-firms news sweep: four hundred terms across three sources in ONE request.
+    # Minutes of real work, and abandoning it halfway throws away a scan that was
+    # succeeding — the same bargain as a capture, for the same reason.
+    assert _timeout_for(s, "/pulse/v1/news/sweep") == 300.0
+    # Everything else keeps the short one — including the rest of VocX and of PULSE.
     assert _timeout_for(s, "/v1/leads") == 60.0
     assert _timeout_for(s, "/vocx/v1/reports") == 60.0
+    assert _timeout_for(s, "/pulse/v1/news/search") == 60.0
+    assert _timeout_for(s, "/pulse/v1/news/diagnostics") == 60.0
     assert _timeout_for(s, "/orchestrator/v1/workflows/pending") == 60.0
     # Never SHORTER than the default, however the two are configured.
     lopsided = Settings(upstream_timeout_s=120.0, slow_upstream_timeout_s=30.0)

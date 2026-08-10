@@ -108,13 +108,37 @@ export default function NewsRadar() {
   const scanAll = async () => {
     if (scan.running) return;
     setScan({ running: true, done: 0, total: codes.length, found: 0, failTerms: 0, why: '' });
-    const r = await newsService.scanAll(user.full, (p) =>
-      setScan((s) => ({ ...s, done: p.done, total: p.total, found: p.found })));
+    const progress = (p: { done: number; total: number; found: number }) =>
+      setScan((s) => ({ ...s, done: p.done, total: p.total, found: p.found }));
+    let r: { found: number; failTerms: number; firms: number };
+    try {
+      // ONE request; PULSE fans out next to the upstreams.
+      r = await newsService.sweepAll(user.full, progress);
+    } catch {
+      // No PULSE in front of this build (a static host, or the gateway is down): fall
+      // back to the old firm-by-firm walk rather than leaving the desk with nothing.
+      r = await newsService.scanAll(user.full, progress);
+    }
     // A sweep that files nothing across 400 firms is either a quiet news week or a
     // broken pipe, and the count alone cannot say which — so carry the last reason.
     setScan({ running: false, done: r.firms, total: r.firms, found: r.found,
               failTerms: r.failTerms, why: lastFailure() });
     bump();
+  };
+
+  /* Is it us or the network? The one question the search itself cannot answer: no
+     articles reads the same for a quiet company and a container with no egress. */
+  const [probe, setProbe] = useState('');
+  const runProbe = async () => {
+    setProbe('checking the news sources…');
+    try {
+      const out = await newsService.diagnostics();
+      setProbe(out.summary + ' — '
+        + (out.sources || []).map((s: any) =>
+          `${s.name}: ${s.ok ? `ok (${s.ms}ms, ${s.count} items)` : s.error}`).join(' · '));
+    } catch (e: any) {
+      setProbe('could not reach PULSE itself — ' + String(e?.message || e));
+    }
   };
 
   const scanOne = async (code: string) => {
@@ -287,6 +311,9 @@ export default function NewsRadar() {
             onClick={() => setSev(sev === 'CTX' ? '' : 'CTX')} />
         )}
         <Button onClick={() => setSched('all')}>⏰ Schedule scan</Button>
+        {/* The question a search cannot answer: no articles reads the same whether the
+            company is quiet or this deployment has no way out to the internet. */}
+        <Button onClick={runProbe}>🩺 Check sources</Button>
         {all.length > 0 && <Button onClick={() => setEmailAll(true)}>📧 Email firms’ news</Button>}
         {all.length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear all news</Button>}
         <Button variant="contained" disabled={scan.running} onClick={scanAll}>
@@ -294,6 +321,12 @@ export default function NewsRadar() {
         </Button>
       </Box>
 
+      {probe && (
+        <Alert severity={/^NO source|could not reach/.test(probe) ? 'error' : 'info'}
+          onClose={() => setProbe('')} sx={{ py: 0, fontSize: 12, mb: 1 }}>
+          {probe}
+        </Alert>
+      )}
       {scan.running && (
         <Alert severity="info" sx={{ py: 0, fontSize: 12, mb: 1 }}>
           Scanning {scan.done} / {scan.total} firms · {scan.found} real items…
