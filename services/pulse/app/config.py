@@ -116,6 +116,35 @@ class Settings(BaseSettings):
             return cls.model_fields[info.field_name].default
         return cleaned
 
+    # A HOSTNAME CANNOT CONTAIN A COMMA. The rule above deliberately leaves strings
+    # alone because a PASSWORD may legitimately end in one — but that reasoning does not
+    # extend to a host or a sender address, where a comma is never valid and is always
+    # the same copy-paste artefact. Left as written, "smtp.gmail.com," is handed to the
+    # resolver verbatim and comes back "[Errno -2] Name or service not known", which
+    # reads as a mail outage rather than a typo one character long.
+    #
+    # smtp_pass is NOT in this list and must never be: silently trimming a real password
+    # would break authentication in a way nobody could see.
+    @field_validator("smtp_host", "smtp_from", "smtp_user", "register_base_url",
+                     mode="before")
+    @classmethod
+    def _tolerate_stray_punctuation_in_names(cls, v: object) -> object:
+        if not isinstance(v, str):
+            return v
+        return v.strip().strip(",;").strip().strip("'\"").strip()
+
+    def smtp_password_looks_mangled(self) -> bool:
+        """Does the password carry the same stray punctuation as everything around it?
+
+        The password is the one SMTP setting that must NOT be cleaned automatically —
+        a real one may legitimately end in a comma, and trimming it would break
+        authentication invisibly. But when a hand-edited config gives every value a
+        trailing comma (a pasted block; a YAML `KEY: value,` list), the password has one
+        too, and the desk then sees "authentication failed" for a password they can see
+        is correct. Say so instead of guessing.
+        """
+        return self.smtp_pass.rstrip().endswith((",", ";"))
+
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 

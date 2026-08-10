@@ -248,3 +248,33 @@ def test_an_smtp_failure_names_the_cause_and_the_host():
 
     # An error nobody has a hint for adds NOTHING — a guess would be worse than silence.
     assert _smtp_hint(Exception("some novel failure"), cfg) == ""
+
+
+def test_a_trailing_comma_in_the_smtp_host_is_absorbed(monkeypatch):
+    """The exact fault that broke email in the field: PULSE_SMTP_HOST=smtp.gmail.com,
+
+    A hostname can never contain a comma, so this is always a copy-paste artefact —
+    and left as written it reaches the resolver verbatim and comes back "[Errno -2]
+    Name or service not known", which reads as a mail outage rather than a one-character
+    typo. Numbers and booleans were already cleaned; names were not.
+    """
+    from app.config import Settings
+
+    s = Settings(smtp_host="smtp.gmail.com,", smtp_port="587,",  # type: ignore[arg-type]
+                 smtp_from="news@evamfinance.com,", smtp_user="u", smtp_pass="k")
+    assert s.smtp_host == "smtp.gmail.com"
+    assert s.smtp_port == 587
+    assert s.smtp_from == "news@evamfinance.com"
+    assert s.smtp().ready is True
+
+    assert Settings(smtp_user="news@evamfinance.com,").smtp_user == "news@evamfinance.com"
+
+    # A PASSWORD may legitimately end in a comma — trimming one would break auth
+    # invisibly, which is far worse than the typo this absorbs. So it is left alone,
+    # and FLAGGED instead: a config block where everything carries a trailing comma
+    # gives the password one too, and the desk then sees "authentication failed" for a
+    # password they can see is correct.
+    assert Settings(smtp_pass="secret,").smtp_pass == "secret,"
+    assert Settings(smtp_pass="hnwi okbt ggah blrw,").smtp_password_looks_mangled() is True
+    assert Settings(smtp_pass="hnwi okbt ggah blrw").smtp_password_looks_mangled() is False
+    assert Settings(smtp_pass="").smtp_password_looks_mangled() is False

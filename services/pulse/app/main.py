@@ -430,10 +430,17 @@ def create_app() -> FastAPI:
         smtp = settings.smtp()
         rows = request.app.state.schedules.all()
         nxt = sorted(float(r.get("next_run") or 0) for r in rows if r.get("active", True))
+        # The password is never cleaned automatically (a real one may end in a comma),
+        # so when it carries the same stray punctuation as everything around it, the
+        # desk sees "authentication failed" for a password they can see is correct.
+        mangled = settings.smtp_password_looks_mangled()
         out["email"] = {
-            "ok": smtp.ready,
+            "ok": smtp.ready and not mangled,
             "from": smtp.sender if smtp.ready else "",
-            "detail": (f"configured — digests send from {smtp.sender}" if smtp.ready
+            "detail": ("PULSE_SMTP_PASS ends in a comma — almost certainly a stray one "
+                       "from the config block, and SMTP will reject it as a wrong "
+                       "password. Remove it." if mangled else
+                       f"configured — digests send from {smtp.sender}" if smtp.ready
                        else "not configured — set PULSE_SMTP_HOST, PULSE_SMTP_USER and "
                             "PULSE_SMTP_PASS (search and scanning work without it)"),
         }
