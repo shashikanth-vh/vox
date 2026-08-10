@@ -1,4 +1,4 @@
-import { api, errText, listAll } from '../api/http';
+import { api, apiErr, listAll } from '../api/http';
 import { orchestrator } from '../api/orchestratorClient';
 
 /**
@@ -63,9 +63,12 @@ export interface SanctionTermsOut {
 }
 
 function msg(e: any, what: string): string {
-  const detail = errText(e?.response?.data);
   if (e?.response) console.warn('[cam] %s failed (%s):', what, e.response.status, e.response.data);
-  return detail || e?.message || `Could not ${what}.`;
+  // apiErr, not errText: the CAM lane is the one that runs for minutes against an
+  // external engine, so it is the likeliest to meet an edge failure with no envelope in
+  // it — and "Request failed with status code 502" is the least useful thing the desk
+  // could be told about a letter it just waited on.
+  return apiErr(e, what);
 }
 
 export const camService = {

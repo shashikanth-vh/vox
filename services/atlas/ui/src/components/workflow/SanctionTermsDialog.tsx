@@ -248,13 +248,32 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   const save = async () => {
     setErr('');
     const num = (k: string) => (f[k]?.trim() ? Number(f[k]) : undefined);
-    // An EMI schedule amortises over its tenor — without rate + tenure the LMS can
-    // never compute the EMI, and the account opens with a dash where the figure
-    // should be. Catch it HERE, while the letter is still in hand.
-    if ((f.schedule_kind || 'EMI') === 'EMI' && (!num('rate_pct') || !num('tenor_months'))) {
-      setErr('An EMI schedule needs Rate % and Tenor (months) — the EMI is computed '
-        + 'from them. Fill both, or pick Bullet/Custom as the schedule.');
-      return;
+    // An EMI schedule amortises over its tenor, and interest accrues at a rate — the
+    // loan account refuses to accrue at all without one ("this account has no interest
+    // rate"), and a recorded term can only be corrected by amendment afterwards. So
+    // catch a gap HERE, while the letter is still in hand.
+    //
+    // Name ONLY what is actually missing. The message used to demand "Rate % and Tenor"
+    // whenever either was blank, so a desk that had just typed the tenor was told to
+    // fill it in again — and it justified itself with "the EMI is computed from them"
+    // while sitting beside an EMI field the desk had typed off the letter. A typed EMI
+    // is honoured verbatim; the rate is still required, because it prices the interest,
+    // not the instalment.
+    if ((f.schedule_kind || 'EMI') === 'EMI') {
+      const missing = [
+        !num('rate_pct') && 'Rate %',
+        !num('tenor_months') && 'Tenor (months)',
+      ].filter(Boolean) as string[];
+      if (missing.length) {
+        setErr(`An EMI schedule needs ${missing.join(' and ')}. `
+          + (num('emi_amount')
+            ? 'The instalment you have entered is kept as it stands — the rate is what '
+              + 'the interest accrues at, and the tenor is how long it runs. '
+            : 'The instalment is computed from the rate and the tenor. ')
+          + `Fill ${missing.length > 1 ? 'them' : 'it'} in, or pick Bullet/Custom as `
+          + 'the schedule.');
+        return;
+      }
     }
     const covenants = covs.filter((c) => c.name.trim());
     // No first-due date is FINE: the covenant defers, and its schedule stamps itself

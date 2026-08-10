@@ -154,6 +154,34 @@ export function errText(data: any): string {
   return d ? JSON.stringify(d) : '';
 }
 
+// The EDGE's own failures carry no envelope. When nginx cannot reach the gateway — the
+// container is down, restarting, or was recreated mid-request — it answers its own HTML
+// error page, `errText` finds nothing in it, and the caller falls back to axios's
+// "Request failed with status code 502". That sentence names no service, no lane and no
+// next step, and it is indistinguishable from an application refusal: a desk reports it,
+// and the actual cause (a service that was not running) has to be guessed at from
+// scratch. So when the body is NOT a problem envelope, say what the status means.
+const _EDGE: Record<number, string> = {
+  502: 'the service behind it did not answer, so it may be down or restarting',
+  503: 'the service is unavailable, either starting up or stopped',
+  504: 'the service took too long to answer and the edge gave up waiting',
+};
+
+/** The message for a failed request: the server's own words when it sent any, otherwise
+ *  a plain account of the infrastructure failure. `what` completes "Could not <what>". */
+export function apiErr(e: any, what: string): string {
+  const detail = errText(e?.response?.data);
+  if (detail) return detail;
+  const status: number | undefined = e?.response?.status;
+  if (status && _EDGE[status]) {
+    return `Could not ${what} — ${_EDGE[status]}. `
+      + `Nothing was changed; try again once it is back (HTTP ${status}).`;
+  }
+  // No response at all: the request never reached a server (offline, DNS, TLS).
+  if (!e?.response) return `Could not ${what} — PRISM could not be reached. Check the connection.`;
+  return e?.message || `Could not ${what}.`;
+}
+
 // Writes: dispatch to the backend when enabled (fire-and-forget so the optimistic
 // local-store mutation keeps the UI responsive). No-op in mock mode.
 export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any): void {
