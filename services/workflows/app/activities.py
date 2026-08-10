@@ -637,6 +637,56 @@ async def verify_control(control_ref: str,
             "note": rec.get("note")}
 
 
+# The REST resource each workflow subject prefix lives at, and the field that carries the
+# number a person would QUOTE for it. Anything not listed keeps its raw subject.
+_SUBJECT_RESOURCE: dict[str, tuple[str, str]] = {
+    "Lead": ("leads", "lead_no"),
+    "Deal": ("deals", "deal_no"),
+    "Lending": ("lending", "tracker_no"),
+    "Syndication": ("syndication", "tracker_no"),
+    "AssetMonetisation": ("asset-monetisation", "tracker_no"),
+    "Entity": ("entities", "code"),
+}
+
+
+async def _subject_label(reg: Any, subject_type: str, subject_id: str) -> str | None:
+    """"Suryodaya Energy · L042" for a subject the workflow only knows as a UUID.
+
+    A workflow cannot do this itself — it runs in a deterministic sandbox with no I/O —
+    so the title it builds is "Awaiting checker approval — Lending:814ef731-03bc-…".
+    That is the correct binding and a useless sentence: nobody on the desk knows a line
+    by its UUID, and Today showed six of them in a row. The ACTIVITY is where the lookup
+    is allowed, so the naming happens here, on the way to the inbox.
+
+    Best-effort in the strictest sense: any failure returns None and the caller keeps the
+    raw subject. A notification that says less must never become a notification that
+    never arrives.
+    """
+    resource, no_field = _SUBJECT_RESOURCE.get(subject_type, ("", ""))
+    if not resource or not subject_id:
+        return None
+    try:
+        row = await reg.get(resource, subject_id)
+    except Exception:  # noqa: BLE001 — naming is decoration; delivery is not
+        return None
+    if not isinstance(row, dict):
+        return None
+    number = str(row.get(no_field) or "").strip()
+    # The company: on its own row for a lead, one hop away for anything deal-shaped.
+    name = str(row.get("company") or row.get("legal_name") or "").strip()
+    entity_id = row.get("entity_id")
+    if not name and entity_id:
+        try:
+            ent = await reg.get("entities", str(entity_id))
+            name = str((ent or {}).get("legal_name")
+                       or (ent or {}).get("display_name") or "").strip()
+        except Exception:  # noqa: BLE001 — same as above
+            name = ""
+    if name and number:
+        return f"{name} · {number}"
+    return name or number or None
+
+
 async def _fan_out_notifications(payload: dict[str, Any],
                                  notify: dict[str, Any]) -> dict[str, Any]:
     """The increment-7 upgrade of the ops seam: when a workflow's operational event names
@@ -670,12 +720,23 @@ async def _fan_out_notifications(payload: dict[str, Any],
     errors: list[str] = []
     caller = notify.get("caller")
     async with _client(CallerContext(**caller) if isinstance(caller, dict) else caller) as reg:
+        # Say WHICH line, in the words the desk uses. Resolved once for the whole fan-out
+        # (every recipient reads the same title) and only when the raw "Type:uuid" is
+        # actually sitting in the title — a title already written in desk language is
+        # left exactly as its author wrote it.
+        title = str(notify.get("title") or payload.get("event"))
+        stype, sid = str(notify.get("subject_type") or ""), str(notify.get("subject_id") or "")
+        raw = f"{stype}:{sid}"
+        if stype and sid and raw in title:
+            label = await _subject_label(reg, stype, sid)
+            if label:
+                title = title.replace(raw, label)
         for recipient in recipients:
             try:
                 await reg.create_notification(
                     recipient,
                     str(payload.get("event")),
-                    str(notify.get("title") or payload.get("event")),
+                    title,
                     severity=str(notify.get("severity") or "info"),
                     body=notify.get("body"),
                     subject_type=notify.get("subject_type"),
