@@ -67,8 +67,7 @@ export default function NewsRadar() {
   const [, force] = useState(0);
   const bump = () => force((n) => n + 1);
 
-  // 'CTX' is a filter, not a severity: the open review flags cut across colours.
-  const [sev, setSev] = useState<Severity | 'CTX' | ''>('');
+  const [sev, setSev] = useState<Severity | ''>('');
   /* LIVE EXPOSURE is not a colour.
      Severity says how bad a story is; exposure says whose money is in it — and the
      question that actually matters ("ugly news on a name we have lent to") needs BOTH
@@ -90,23 +89,22 @@ export default function NewsRadar() {
   const reds = all.filter((n) => n.severity === 'RED').length;
   const ambs = all.filter((n) => n.severity === 'AMBER').length;
   const blues = all.filter((n) => n.severity === 'BLUE').length;
-  // Open review flags: good-looking news on a live borrower that nobody has judged yet.
-  const ctxs = all.filter((n) => n.category === 'context-review' && !n.verdict).length;
+  const greens = all.filter((n) => n.severity === 'GREEN').length;
   const codes = Object.keys(db().clients || {});
   const lives = all.filter((n) => isLiveBorrower(n.code)).length;
 
   const q = search.trim().toLowerCase();
   const shown = all.filter((n) =>
-    (!sev || (sev === 'CTX' ? (n.category === 'context-review' && !n.verdict) : n.severity === sev))
+    (!sev || n.severity === sev)
     && (!liveOnly || isLiveBorrower(n.code))
     && (!q || [n.headline, db().clients?.[n.code]?.name, n.code, n.term, n.source]
       .some((x) => String(x || '').toLowerCase().includes(q))));
 
-  /* The colour chips read the AD-HOC results as well as the book. They used to filter
-     only the stored news, so picking 🔴 Ugly while a search was on screen silently did
+  /* The colour tiles read the AD-HOC results as well as the book. They used to filter
+     only the stored news, so picking Ugly while a search was on screen silently did
      nothing to it — the one list the desk was actually looking at. */
   const adhocShown = useMemo(
-    () => (sev && sev !== 'CTX' ? adhoc.items.filter((n) => n.severity === sev) : adhoc.items),
+    () => (sev ? adhoc.items.filter((n) => n.severity === sev) : adhoc.items),
     [adhoc.items, sev]);
 
   // Group by firm, most-adverse first.
@@ -250,17 +248,33 @@ export default function NewsRadar() {
     newsService.addTerm(code, adhoc.term, user.full); bump();
   };
 
-  const kpi = (label: string, value: number | string, color?: string) => (
-    <Paper variant="outlined" sx={{ px: 1.5, py: 0.7, borderColor: tokens.line, display: 'flex', alignItems: 'baseline', gap: 0.7 }}>
-      <Typography component="b" sx={{ fontSize: 15, fontWeight: 700, color }}>{value}</Typography>
-      <Typography sx={{ fontSize: 12, color: tokens.muted }}>{label}</Typography>
-    </Paper>
-  );
-
-  const sevChip = (s: Severity | 'CTX' | '', label: string) => (
-    <Chip label={label} clickable size="small" variant={sev === s ? 'filled' : 'outlined'}
-      color={sev === s ? 'primary' : 'default'} onClick={() => setSev(s)} />
-  );
+  /* THE COUNT IS THE FILTER.
+     Two rows said the same thing: tiles reporting "25 ugly", and chips to filter to
+     Ugly. The desk reads the number, then hunts for the matching chip — two controls
+     for one intention, on a bar wide enough to wrap. The tile IS the button now: it
+     carries the count in its own colour and selecting it filters to that colour, so
+     what you read and what you press are the same object. `items` clears back to
+     everything; `firms watched` is context rather than a colour, so it stays inert. */
+  const stat = (label: string, value: number | string, opts?: {
+    color?: string; filter?: Severity | ''; title?: string;
+  }) => {
+    const pickable = opts?.filter !== undefined;
+    const on = pickable && sev === opts!.filter;
+    return (
+      <Paper variant="outlined" key={label} title={opts?.title}
+        onClick={pickable ? () => setSev(opts!.filter!) : undefined}
+        sx={{ display: 'flex', alignItems: 'baseline', gap: 0.7, userSelect: 'none',
+          cursor: pickable ? 'pointer' : 'default',
+          // A 2px border on selection eats 1px of padding, so the tile does not jump.
+          borderWidth: on ? 2 : 1, px: on ? '11px' : '12px', py: on ? '4.6px' : '5.6px',
+          borderColor: on ? (opts?.color || tokens.teal) : tokens.line,
+          bgcolor: on ? '#F0F8F6' : tokens.card,
+          ...(pickable ? { '&:hover': { borderColor: opts?.color || tokens.tealHi } } : {}) }}>
+        <Typography component="b" sx={{ fontSize: 15, fontWeight: 700, color: opts?.color }}>{value}</Typography>
+        <Typography sx={{ fontSize: 12, color: tokens.muted }}>{label}</Typography>
+      </Paper>
+    );
+  };
 
   return (
     <>
@@ -271,32 +285,26 @@ export default function NewsRadar() {
           Above both, one control governs the search results and the book alike. */}
       {/* ---- register KPIs + filters ---- */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1 }}>
-        {kpi('items', all.length)}
-        {kpi('ugly', reds, tokens.bad)}
-        {kpi('bad', ambs, tokens.warn)}
-        {blues > 0 && kpi('policy', blues, SEV_BG.BLUE)}
-        {ctxs > 0 && kpi('to review', ctxs, tokens.warn)}
-        {kpi('firms watched', codes.length)}
-        <Box sx={{ flex: 1 }} />
-        {sevChip('', 'All')}{sevChip('GREEN', '🟢 Good')}{sevChip('AMBER', '🟡 Bad')}{sevChip('RED', '🔴 Ugly')}
-        {blues > 0 && sevChip('BLUE', '🔵 Policy')}
-        {/* A SECOND AXIS, so it reads as one: a thin rule, then a toggle that combines
-            with the colour rather than replacing it. "Ugly + Live exposure" is the view
-            the credit desk actually wants, and one exclusive row could never express it. */}
+        {stat('items', all.length, { filter: '', title: 'Everything on file — clears the filter' })}
+        {stat('good', greens, { color: tokens.ok, filter: 'GREEN' })}
+        {stat('ugly', reds, { color: tokens.bad, filter: 'RED' })}
+        {stat('bad', ambs, { color: tokens.warn, filter: 'AMBER' })}
+        {blues > 0 && stat('policy', blues, { color: SEV_BG.BLUE, filter: 'BLUE' })}
+        {stat('firms watched', codes.length)}
+        {/* A SECOND AXIS, set apart by a rule: exposure is not a colour, and it
+            COMBINES with whichever colour is selected rather than replacing it.
+            "Ugly + Live exposure" is the view the credit desk actually wants, and one
+            exclusive row of tiles could never express it. */}
         {lives > 0 && (
           <>
-            <Box sx={{ width: '1px', height: 20, bgcolor: tokens.line, mx: 0.4 }} />
+            <Box sx={{ width: '1px', height: 24, bgcolor: tokens.line, mx: 0.2 }} />
             <Chip label={`💰 Live exposure (${lives})`} clickable size="small"
               variant={liveOnly ? 'filled' : 'outlined'} color={liveOnly ? 'primary' : 'default'}
-              title="Only firms we already have money out to — combines with the colour above"
+              title="Only firms we already have money out to — combines with the colour"
               onClick={() => setLiveOnly((v) => !v)} />
           </>
         )}
-        {ctxs > 0 && (
-          <Chip label={`⚠ To review (${ctxs})`} clickable size="small"
-            variant={sev === 'CTX' ? 'filled' : 'outlined'} color={sev === 'CTX' ? 'warning' : 'default'}
-            onClick={() => setSev(sev === 'CTX' ? '' : 'CTX')} />
-        )}
+        <Box sx={{ flex: 1 }} />
         <Button onClick={() => setSched('all')}>⏰ Schedule scan</Button>
         {/* The question a search cannot answer: no articles reads the same whether the
             company is quiet or this deployment has no way out to the internet. */}

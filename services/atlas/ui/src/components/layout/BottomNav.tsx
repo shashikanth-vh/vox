@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, Drawer } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { NAV, type NavItem } from './navConfig';
@@ -14,14 +14,29 @@ export default function BottomNav() {
   const loc = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // Picking a tab out of the More sheet PROMOTES it onto the strip, so the place you
-  // just went to stays one thumb away instead of back behind ⋯. It takes the last of the
-  // four slots; whichever tab held that slot drops back into the sheet. Only one slot
-  // ever moves — the first three stay put, so the strip never reshuffles under you.
-  const [promoted, setPromoted] = useState<NavItem | null>(null);
+  // A tab off the default four PROMOTES onto the strip, so the place you are stays one
+  // thumb away instead of behind ⋯. It takes the last of the four slots; whichever tab
+  // held it drops into the sheet. Only one slot ever moves — the first three stay put,
+  // so the strip never reshuffles under you.
+  //
+  // DERIVED FROM THE URL, not from the tap that got you here. It used to be state set
+  // by the More sheet, and state does not survive a reload: you would be sitting on
+  // Tools, refresh, and the strip would show four other tabs and a menu with nothing
+  // marked current — the screen you were on had vanished from the bar. Reading the
+  // route means the bar cannot disagree with the page, however you arrived.
+  const [sticky, setSticky] = useState<NavItem | null>(null);
 
   const visible = NAV.filter((n) => canSee(user.roles, n.tab));
   const defaults = visible.slice(0, 4);
+  const here = visible.find((n) => n.path === loc.pathname);
+  const offStrip = here && !defaults.some((d) => d.path === here.path) ? here : null;
+  // `sticky` only holds the LAST off-strip tab, so navigating back to one of the first
+  // three does not throw away the fourth slot the desk just chose.
+  const promoted = offStrip || sticky;
+  useEffect(() => {
+    if (offStrip && offStrip.path !== sticky?.path) setSticky(offStrip);
+  }, [offStrip, sticky]);
+
   const strip = promoted ? [...defaults.slice(0, 3), promoted] : defaults;
   const inMore = !strip.some((n) => n.path === loc.pathname);
 
@@ -29,10 +44,7 @@ export default function BottomNav() {
 
   // From the sheet: promote it, unless it is already on the strip (tapping one of the
   // first three there shouldn't displace anything).
-  const goFromMore = (n: NavItem) => {
-    if (!strip.some((s) => s.path === n.path)) setPromoted(n);
-    go(n.path);
-  };
+  const goFromMore = (n: NavItem) => go(n.path);
 
   const item = (icon: string, label: string, active: boolean, onClick: () => void, key: string) => (
     <Box component="button" key={key} onClick={onClick}
