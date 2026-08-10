@@ -2,18 +2,34 @@ import { useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
   IconButton, Alert, TextField, ToggleButtonGroup, ToggleButton, Checkbox,
-  FormControlLabel, CircularProgress, Chip, Tooltip,
+  FormControlLabel, CircularProgress, Chip, Tooltip, Tabs, Tab,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { ledgerService, LedgerImportResult } from '../../services/ledgerService';
-import { errText } from '../../api/http';
+import { apiErr } from '../../api/http';
 import { tokens } from '../../theme';
 
-// Admin-only ledger import: bring the desk's Excel (the live Dashboard ledger or a
-// previous PRISM export) into the register, with the server's full account of what
-// happened shown back — quarantined rows, healed wording, derivations. The reason is
-// mandatory because an import is a governed exception to the interactive rules.
+/**
+ * The ledger, both directions, behind one door.
+ *
+ * Import and export used to be two tiles on Tools, which put the DIRECTION before the
+ * subject — the desk says "the ledger", not "the import" — and left Import sitting in
+ * the grid beside Restore, the other control that can wipe the book.
+ *
+ * They are deliberately not symmetric inside, because they are not symmetric in use:
+ *
+ *   EXPORT is frequent, needs nothing, and changes nothing. It opens first, and is one
+ *   button — but a button that first SAYS what the file will contain, which the old
+ *   tile never did: it fired a download and left you to open it to find out.
+ *
+ *   IMPORT is rare and governed. It keeps its file, its merge/replace choice, its
+ *   mandatory audited reason, and the server's full account of what happened —
+ *   quarantined rows, healed wording, derivations.
+ */
 export default function LedgerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [tab, setTab] = useState<'export' | 'import'>('export');
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exported, setExported] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
@@ -30,10 +46,22 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
   const [done, setDone] = useState(false);
 
   const close = () => {
-    if (busy) return;
+    if (busy || exportBusy) return;
     setFile(null); setReason(''); setErr(''); setResult(null); setMode('merge');
-    setDone(false);
+    setDone(false); setExported(false); setTab('export');
     onClose();
+  };
+
+  const runExport = async () => {
+    setErr(''); setExportBusy(true);
+    try {
+      await ledgerService.exportLedger();
+      setExported(true);
+    } catch (e: any) {
+      setErr(apiErr(e, 'export the ledger'));
+    } finally {
+      setExportBusy(false);
+    }
   };
 
   const run = async () => {
@@ -51,7 +79,7 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
       // `data.detail` is the WRONG key for it, so an audited refusal ("that operation is
       // not granted", "authorization changed since sign-in") reached the desk as the bare
       // "Request failed with status code 403", which names nothing anyone can act on.
-      setErr(errText(e?.response?.data) || e?.message || 'Import failed');
+      setErr(apiErr(e, 'import the ledger'));
     } finally {
       setBusy(false);
     }
@@ -77,11 +105,62 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
 
   return (
     <Dialog open={open} onClose={close} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', fontSize: 16 }}>
-        Import ledger (Excel)
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', fontSize: 16, pb: 0 }}>
+        Ledger (Excel)
         <IconButton onClick={close} sx={{ ml: 'auto' }} size="small"><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
+      {/* Export first: it is the frequent, safe direction, and nobody should have to
+          pass the wipe-capable half to reach it. */}
+      <Tabs value={tab} onChange={(_, v) => { setTab(v); setErr(''); }}
+        sx={{ px: 2, minHeight: 38, '& .MuiTab-root': { minHeight: 38, fontSize: 12.6,
+          textTransform: 'none', fontWeight: 700 } }}>
+        <Tab value="export" label="Export" disabled={busy} />
+        <Tab value="import" label="Import" disabled={exportBusy} />
+      </Tabs>
       <DialogContent dividers>
+        {err && <Alert severity="error" sx={{ mb: 1.2 }}>{String(err)}</Alert>}
+
+        {tab === 'export' ? (
+          <Box>
+            <Typography sx={{ fontSize: 12.4, color: tokens.muted, mb: 1.2 }}>
+              Writes the register out as the desk&apos;s Excel ledger — the same workbook
+              shape the import reads, so a file exported here can be edited and brought
+              straight back in.
+            </Typography>
+            {/* What you are about to get. The old Export tile fired a download and left
+                you to open the file to find out what was in it. */}
+            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1.5,
+              p: '10px 12px', mb: 1.4 }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: tokens.muted,
+                textTransform: 'uppercase', letterSpacing: '.5px', mb: 0.6 }}>
+                The workbook contains
+              </Typography>
+              {[
+                ['Clients & lenders', 'the company register and the FI master'],
+                ['Leads & Deals', 'the pipeline with its stages and temperatures'],
+                ['Lending', 'every line with stage, amount and dates'],
+                ['Platform Deals', 'mandates, partnerships and lender allocations'],
+                ['Asset Monetisation', 'mandates with indicative value and MW'],
+              ].map(([label, text]) => (
+                <Box key={label} sx={{ display: 'flex', gap: 1, mb: 0.35 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: tokens.navy,
+                    minWidth: 132, flexShrink: 0 }}>{label}</Typography>
+                  <Typography sx={{ fontSize: 12, color: tokens.ink }}>{text}</Typography>
+                </Box>
+              ))}
+            </Box>
+            <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
+              Reading the book changes nothing on the register, and the download is
+              audited like every other export.
+            </Typography>
+            {exported && (
+              <Alert severity="success" sx={{ mt: 1.2 }}>
+                Ledger downloaded. Check your browser&apos;s downloads if you do not see it.
+              </Alert>
+            )}
+          </Box>
+        ) : (
+        <Box>
         <Typography sx={{ fontSize: 12.4, color: tokens.muted, mb: 1.4 }}>
           Reads the desk&apos;s Dashboard ledger or a PRISM ledger export. Old wording
           (Rejected, Disbursed, typos) is translated to PRISM&apos;s stages automatically,
@@ -111,8 +190,6 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
           label={<Typography sx={{ fontSize: 12.2 }}>
             Keep incomplete historical rows (flagged for reconciliation) instead of skipping them
           </Typography>} />
-
-        {err && <Alert severity="error" sx={{ mt: 1.2 }}>{String(err)}</Alert>}
 
         {result && (
           <Box sx={{ mt: 1.4 }}>
@@ -183,25 +260,36 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
             </Typography>
           </Box>
         )}
+        </Box>
+        )}
       </DialogContent>
       <DialogActions>
-        {/* Once the import has run, CLOSE is the action — it carries the emphasis, and
-            Import steps back rather than disappearing, so the reason it is spent stays
-            readable. */}
-        <Button onClick={close} disabled={busy} variant={done ? 'contained' : 'text'}>
+        {/* Once the action has run, CLOSE is what is left to do — it carries the
+            emphasis, and the spent action steps back rather than disappearing, so the
+            reason it is spent stays readable. */}
+        <Button onClick={close} disabled={busy || exportBusy}
+          variant={(tab === 'import' ? done : exported) ? 'contained' : 'text'}>
           Close
         </Button>
-        <Tooltip title={done
-          ? 'This file is already imported — choose another file, or switch the mode, to import again.'
-          : ''}>
-          <Box component="span">
-            <Button variant={done ? 'outlined' : 'contained'} onClick={run}
-              disabled={busy || done}
-              startIcon={busy ? <CircularProgress size={14} /> : undefined}>
-              {busy ? 'Importing…' : done ? 'Imported' : 'Import'}
-            </Button>
-          </Box>
-        </Tooltip>
+        {tab === 'export' ? (
+          <Button variant={exported ? 'outlined' : 'contained'} onClick={runExport}
+            disabled={exportBusy}
+            startIcon={exportBusy ? <CircularProgress size={14} /> : undefined}>
+            {exportBusy ? 'Preparing…' : exported ? 'Download again' : 'Download ledger'}
+          </Button>
+        ) : (
+          <Tooltip title={done
+            ? 'This file is already imported — choose another file, or switch the mode, to import again.'
+            : ''}>
+            <Box component="span">
+              <Button variant={done ? 'outlined' : 'contained'} onClick={run}
+                disabled={busy || done}
+                startIcon={busy ? <CircularProgress size={14} /> : undefined}>
+                {busy ? 'Importing…' : done ? 'Imported' : 'Import'}
+              </Button>
+            </Box>
+          </Tooltip>
+        )}
       </DialogActions>
     </Dialog>
   );

@@ -1,27 +1,41 @@
-import { useRef, useState } from 'react';
-import { Box, Paper, Typography, Button } from '@mui/material';
+import { useState } from 'react';
+import { Box, Paper, Typography } from '@mui/material';
 import { tokens } from '../../theme';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
-import { backupService } from '../../services/backupService';
-import { errText } from '../../api/http';
-import { ledgerService } from '../../services/ledgerService';
 import { newsService } from '../../services/newsService';
 import ExportBar from '../../components/common/ExportBar';
 import NewsRadar from './NewsRadar';
-import MailIntakeDialog from './MailIntakeDialog';
-import ApplicationDialog from './ApplicationDialog';
 import LedgerDialog from './LedgerDialog';
 
-// Port of v12 AUGMENT 16 — the Tools tab. Visible to every role, per the template.
-function ToolCard({ icon, title, sub, on, onClick }: {
-  icon: string; title: string; sub: string; on?: boolean; onClick?: () => void;
+/**
+ * Tools — two things, both of them real.
+ *
+ * This page used to carry seven tiles, and most of them earned their place by existing
+ * rather than by working:
+ *
+ *  * Backup and Restore ran against `db()`, the browser's in-memory store, never the
+ *    register. On a live deployment Backup downloaded the local cache and Restore wiped
+ *    that cache and announced "Backup restored." having changed nothing on the server —
+ *    a control that lies is worse than no control. (Real backup/restore needs an
+ *    export-all/import-all pair on the register; it is not a UI change.)
+ *  * Mail intake and Application form did work — both created leads — but the desk does
+ *    not use them, and a tile nobody presses is a tile that hides the ones they do.
+ *  * India News Radar was not a tile at all: it had no click handler, and the radar
+ *    rendered below it regardless. One dead tile beside one live tile reads as broken.
+ *
+ * What is left is the ledger — one door, both directions — and the radar as the page's
+ * actual content.
+ */
+function ToolCard({ icon, title, sub, onClick }: {
+  icon: string; title: string; sub: string; onClick: () => void;
 }) {
   return (
     <Paper variant="outlined" onClick={onClick}
       sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.4,
-        p: '13px 15px', cursor: 'pointer', textAlign: 'left',
-        borderColor: on ? tokens.tealHi : tokens.line, bgcolor: on ? '#F0F8F6' : tokens.card }}>
+        p: '13px 15px', cursor: 'pointer', textAlign: 'left', maxWidth: 280,
+        borderColor: tokens.line, bgcolor: tokens.card,
+        '&:hover': { borderColor: tokens.tealHi, bgcolor: '#F0F8F6' } }}>
       <Box component="span" sx={{ fontSize: 21 }}>{icon}</Box>
       <Typography sx={{ fontSize: 13.4, fontWeight: 700 }}>{title}</Typography>
       <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>{sub}</Typography>
@@ -29,61 +43,46 @@ function ToolCard({ icon, title, sub, on, onClick }: {
   );
 }
 
+function SectionHead({ title, sub, right }: {
+  title: string; sub?: string; right?: React.ReactNode;
+}) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, mb: 1.2, flexWrap: 'wrap' }}>
+      <Box>
+        <Typography sx={{ fontSize: 11, fontWeight: 700, color: tokens.muted,
+          textTransform: 'uppercase', letterSpacing: '.6px' }}>{title}</Typography>
+        {sub && <Typography sx={{ fontSize: 12.2, color: tokens.muted }}>{sub}</Typography>}
+      </Box>
+      {right && <Box sx={{ ml: 'auto' }}>{right}</Box>}
+    </Box>
+  );
+}
+
 export default function ToolsPage() {
   const { user } = useAuth();
-  const [mail, setMail] = useState(false);
-  const [app, setApp] = useState(false);
   const [ledger, setLedger] = useState(false);
-
-  const onLedgerExport = async () => {
-    try {
-      await ledgerService.exportLedger();
-    } catch (e: any) {
-      // Same envelope, same reason as the import dialog: say WHY the export was refused.
-      window.alert(errText(e?.response?.data) || e?.message || 'Export failed');
-    }
-  };
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [, force] = useState(0);
-
-  const onRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = ''; // clear so re-picking the same file re-fires
-    if (!f) return;
-    if (!window.confirm('Replace ALL current data with this backup? This cannot be undone.')) return;
-    const r = new FileReader();
-    r.onload = () => {
-      const res = backupService.restore(String(r.result), user.full);
-      if (!res.ok) { window.alert(res.error); return; }
-      force((n) => n + 1);
-      window.alert('Backup restored.');
-    };
-    r.readAsText(f);
-  };
+  // The Excel ledger is Admin-only in both directions — the server enforces it too, so
+  // this only spares a non-Admin a refusal they could not act on.
+  const canLedger = can(user.roles, 'backupRestore');
 
   return (
     <>
-      <Box sx={{ mb: 1.2 }}>
-        <ExportBar onCsv={() => newsService.exportCsv(user.full)} />
-      </Box>
+      {canLedger && (
+        <Box sx={{ mb: 2.4 }}>
+          <SectionHead title="Ledger"
+            sub="The desk's Excel ledger, in and out of PRISM." />
+          <ToolCard icon="📒" title="Ledger" sub="export the book · import a ledger file"
+            onClick={() => setLedger(true)} />
+        </Box>
+      )}
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 1.2, mb: 1.8 }}>
-        <ToolCard icon="📰" title="India News Radar" sub="firms · owners · related" on />
-        <ToolCard icon="📧" title="Mail intake" sub="scrape an email" onClick={() => setMail(true)} />
-        <ToolCard icon="📝" title="Application form" sub="consent-first intake" onClick={() => setApp(true)} />
-        {/* Backup / restore is Admin-only (RBAC: restore can wipe the book). */}
-        {can(user.roles, 'backupRestore') && <ToolCard icon="💾" title="Backup" sub="download all data (JSON)" onClick={() => backupService.backup(user.full)} />}
-        {can(user.roles, 'backupRestore') && <ToolCard icon="♻️" title="Restore" sub="import a backup file" onClick={() => fileRef.current?.click()} />}
-        {/* The desk's Excel ledger, in and out — Admin-only (the server enforces it too). */}
-        {can(user.roles, 'backupRestore') && <ToolCard icon="📥" title="Import ledger" sub="bring the Excel ledger into PRISM" onClick={() => setLedger(true)} />}
-        {can(user.roles, 'backupRestore') && <ToolCard icon="📤" title="Export ledger" sub="the register as the Excel ledger" onClick={onLedgerExport} />}
-      </Box>
-      <input ref={fileRef} type="file" accept=".json" style={{ display: 'none' }} onChange={onRestore} />
-
+      {/* The radar IS this page's content, so it gets a heading and its own export bar —
+          "Export this view" sat at the very top, above a row of tiles it had nothing to
+          do with, and exported the news. */}
+      <SectionHead title="India News Radar" sub="firms · owners · related"
+        right={<ExportBar onCsv={() => newsService.exportCsv(user.full)} />} />
       <NewsRadar />
 
-      <MailIntakeDialog open={mail} onClose={() => setMail(false)} />
-      <ApplicationDialog open={app} onClose={() => setApp(false)} />
       <LedgerDialog open={ledger} onClose={() => setLedger(false)} />
     </>
   );
