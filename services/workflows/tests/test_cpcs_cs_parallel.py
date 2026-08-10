@@ -114,21 +114,22 @@ async def test_a_sanctioned_line_is_still_offered_the_disburse_verb(monkeypatch)
 class _WithChecklist(_Http):
     """The line plus one checklist version, so the action counts have something to read."""
 
-    def __init__(self, row: dict, items: list[dict]) -> None:
+    def __init__(self, row: dict, items: list[dict], status: str = "Approved") -> None:
         super().__init__(row)
         self.items = items
+        self.status = status
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
         if "cpcs-checklists" in str(url):
             return httpx.Response(200, request=httpx.Request("GET", str(url)), json={
-                "items": [{"checklist_version": 1, "status": "Approved",
+                "items": [{"checklist_version": 1, "status": self.status,
                            "items": self.items}]})
         return await super().get(url, **kwargs)
 
 
-async def _actions(monkeypatch, row, items):
+async def _actions(monkeypatch, row, items, status="Approved"):
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
-    app.state.http = _WithChecklist(row, items)
+    app.state.http = _WithChecklist(row, items, status)
     r = await _get(app, {"subject_type": "Lending", "subject_id": LID})
     assert r.status_code == 200, r.text
     return {a["key"]: a for a in r.json()["actions"]}
@@ -143,20 +144,24 @@ async def test_a_finished_half_stops_inviting_a_click(monkeypatch):
         {"key": "cs2", "condition_type": "CS", "status": "Pending"},
     ])
     cp, cs = by_key["cpcs.prepare"], by_key["cpcs.update-cs"]
+    # The CP is shut by its APPROVAL, which outranks the item count and says so —
+    # see test_the_cp_step_closes_on_its_approval_not_its_item_count.
     assert cp["label"].endswith("(1/1)") and cp["enabled"] is False
-    assert "satisfied" in cp["reason"]
     # The CS half still has one open — it stays workable.
     assert cs["label"].endswith("(1/2)") and cs["enabled"] is True
     get_settings.cache_clear()
 
 
-async def test_both_halves_finished_close_both_buttons(monkeypatch):
+async def test_a_satisfied_cs_half_stops_inviting_a_click(monkeypatch):
+    """The count rule, on the half it still governs: CS has no approval to close it, so
+    "nothing left open" is what shuts it."""
     by_key = await _actions(monkeypatch, {"id": LID, "stage": "Disbursed"}, [
         {"key": "cp1", "condition_type": "CP", "status": "Completed"},
         {"key": "cs1", "condition_type": "CS", "status": "Waived"},
     ])
+    cs = by_key["cpcs.update-cs"]
+    assert cs["enabled"] is False and "satisfied" in cs["reason"]
     assert by_key["cpcs.prepare"]["enabled"] is False
-    assert by_key["cpcs.update-cs"]["enabled"] is False
     get_settings.cache_clear()
 
 
@@ -173,4 +178,30 @@ async def test_disburse_closes_only_when_the_line_is_fully_drawn(monkeypatch):
         "proposed_disbursement_amount": 10}, [])
     assert full["disburse"]["enabled"] is False
     assert "Fully disbursed" in full["disburse"]["reason"]
+    get_settings.cache_clear()
+
+
+async def test_the_cp_step_closes_on_its_approval_not_its_item_count(monkeypatch):
+    """The checker's approval IS the decision — it minted the evidence the money moves
+    on. Re-opening the preparer's screen afterwards invites a settled condition to be
+    re-typed into a version nobody asked for."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cp2", "condition_type": "CP", "status": "Pending"},
+    ], status="Approved")
+    cp = by_key["cpcs.prepare"]
+    assert cp["label"].endswith("(1/2)"), "still shows the true tally"
+    assert cp["enabled"] is False
+    assert "approved" in cp["reason"]
+    get_settings.cache_clear()
+
+
+async def test_a_returned_checklist_reopens_the_cp_step(monkeypatch):
+    """Which is the whole point of a return: the maker has to be able to re-prepare."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Pending"},
+    ], status="Returned")
+    assert by_key["cpcs.prepare"]["enabled"] is True
+    # And the CS half stays shut until a CP approval exists.
+    assert by_key["cpcs.update-cs"]["enabled"] is False
     get_settings.cache_clear()

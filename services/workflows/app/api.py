@@ -3697,6 +3697,18 @@ def create_app() -> FastAPI:
                           "approval first."
                           if latest_checklist_status else
                           "Prepare and get the CP checklist approved first.")
+            # THE CP CLOSES ON ITS APPROVAL, not on its item count. The checker's
+            # approval IS the decision — it minted the evidence the money moves on — so
+            # re-opening the preparer's screen afterwards invites a settled condition to
+            # be re-typed into a version nobody asked for. A RETURNED or rejected
+            # checklist leaves this open, which is the whole point of a return.
+            if (spec["key"] == "cpcs.prepare" and enabled
+                    and latest_checklist_status == "Approved"):
+                enabled = False
+                reason = ("The CP checklist is approved — that decision is the record. "
+                          "Conditions subsequent are worked on the Conditions Subsequent "
+                          "tab; re-opening the CP half needs a fresh sanction condition, "
+                          "not a new version here.")
             # The committee decides ON the CAM: no CAM on the line, nothing to send.
             if spec["key"] == "deal-structuring.start" and enabled and not cam_ready:
                 enabled = False
