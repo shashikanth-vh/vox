@@ -404,3 +404,69 @@ async def test_pending_refuses_rather_than_faking_an_empty_queue(monkeypatch):
     assert r.status_code == 503, r.text
     assert "not empty" in r.text
     get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------------- #
+# The CP/CS checklist waiting on its checker — the one approval with no clock of its own
+# --------------------------------------------------------------------------------- #
+class _WithFollowUps(_FakeHttp):
+    """The register's follow-up feed, plus the empty checker queues."""
+
+    def __init__(self, rows: list, roles: list[str] | None = None) -> None:
+        super().__init__({}, roles=roles)
+        self.rows = rows
+
+    async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if "/v1/internal/follow-ups" in str(url):
+            return httpx.Response(200, json={"items": self.rows},
+                                  request=httpx.Request("GET", url))
+        return await super().get(url, **kwargs)
+
+    async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        return httpx.Response(200, json={}, request=httpx.Request("POST", url))
+
+
+_AWAITING = [{
+    "kind": "cpcs-approval", "lending_id": "L1", "checklist_id": "c9",
+    "checklist_version": 3, "prepared_by": "an@evamfinance.com",
+    "waiting_hours": 96.0, "escalated": True, "company": "Acme Solar",
+    "created_at": "2026-08-01T00:00:00+00:00",
+}]
+
+
+async def test_a_checklist_awaiting_its_checker_reaches_the_checker(monkeypatch):
+    """It never expires, so it has to be chased — and the line says how long it has
+    waited, because "awaiting approval" reads the same on hour one and on day nine."""
+    app = _prod_app(monkeypatch, _FakeTemporal([]),
+                    _WithFollowUps(_AWAITING, roles=["Credit Head"]))
+    r = await _get_pending_as(app)
+    assert r.status_code == 200, r.text
+    row = next(p for p in r.json()["pending"] if p["kind"] == "cpcs-approval")
+    assert "CP/CS checklist v3 awaiting approval" in row["stage"]
+    assert "for 4 days" in row["stage"], row["stage"]
+    assert "Acme Solar" in row["stage"]
+    assert "before the line can disburse" in row["stage"]
+    assert row["escalated"] is True and row["checklist_id"] == "c9"
+    get_settings.cache_clear()
+
+
+async def test_it_does_not_land_on_a_desk_that_cannot_approve(monkeypatch):
+    """A BDRM cannot approve a checklist. Putting it on their Today is noise, and noise
+    is what makes a desk stop reading Today."""
+    app = _prod_app(monkeypatch, _FakeTemporal([]),
+                    _WithFollowUps(_AWAITING, roles=["BDRM"]))
+    r = await _get_pending_as(app)
+    assert r.status_code == 200, r.text
+    assert not [p for p in r.json()["pending"] if p["kind"] == "cpcs-approval"]
+    get_settings.cache_clear()
+
+
+async def test_a_fresh_wait_is_chased_without_being_urgent(monkeypatch):
+    app = _prod_app(monkeypatch, _FakeTemporal([]),
+                    _WithFollowUps([{**_AWAITING[0], "waiting_hours": 5.0,
+                                     "escalated": False}], roles=["Management"]))
+    r = await _get_pending_as(app)
+    row = next(p for p in r.json()["pending"] if p["kind"] == "cpcs-approval")
+    assert "for 5h" in row["stage"], row["stage"]
+    assert "escalated" not in row
+    get_settings.cache_clear()

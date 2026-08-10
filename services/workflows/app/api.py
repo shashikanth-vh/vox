@@ -3994,7 +3994,7 @@ def create_app() -> FastAPI:
         # (CS conditions still open after CP approval; covenant cycles due on disbursed
         # lines) and Today shows them until the work lands. No verbs: there is nothing
         # to approve here, only documents to chase and compliance to record.
-        _REMINDER_KINDS = {"cs-followup", "covenant-due"}
+        _REMINDER_KINDS = {"cs-followup", "covenant-due", "cpcs-approval"}
         # The RM (BDRM) or the analyst CALLS the borrower and collects the documents;
         # the reminder must reach both, plus the credit line that owns the covenant —
         # and the SERVICING desk: post-handover the LMS Operator runs the monthly
@@ -4032,11 +4032,34 @@ def create_app() -> FastAPI:
                 fu = await request.app.state.http.get(
                     f"{base_url}/v1/internal/follow-ups", headers=reg_headers,
                     params=fu_params)
+                # WHO can act on each kind. The document chases belong to whoever calls
+                # the borrower; a CHECKLIST AWAITING APPROVAL belongs to the checker
+                # alone — a BDRM cannot approve one, so putting it on their Today is
+                # noise, and noise is what makes a desk stop reading Today.
+                # NOT _APPROVER_ROLES — that name is the module's per-prefix map and
+                # shadowing it here broke every other approver check in this function.
+                _CHECKLIST_CHECKERS = {"Credit Head", "Management", "Admin"}
                 for row in (fu.json().get("items", []) if fu.status_code == 200 else []):
                     if kind is not None and row.get("kind") != kind:
                         continue
+                    if (row.get("kind") == "cpcs-approval" and caller_roles is not None
+                            and not (caller_roles & _CHECKLIST_CHECKERS)):
+                        continue
                     company = row.get("company") or ""
-                    if row.get("kind") == "cs-followup":
+                    if row.get("kind") == "cpcs-approval":
+                        # The one approval with no clock behind it, so the line is the
+                        # clock: say how long it has waited, because "awaiting approval"
+                        # reads the same on hour one and on day nine.
+                        h = row.get("waiting_hours")
+                        waited_txt = ("" if h is None else
+                                      (f" for {round(h)}h" if h < 48
+                                       else f" for {round(h / 24)} days"))
+                        stage_txt = (f"CP/CS checklist v{row.get('checklist_version')} "
+                                     f"awaiting approval{waited_txt}"
+                                     + (f" · {company}" if company else "")
+                                     + " — a different checker must approve it before "
+                                       "the line can disburse")
+                    elif row.get("kind") == "cs-followup":
                         stage_txt = (f"{row.get('count')} condition(s) outstanding"
                                      + (f" · {company}" if company else "")
                                      + " — chase the documents")
@@ -4056,7 +4079,11 @@ def create_app() -> FastAPI:
                         **({"monitoring_id": row["monitoring_id"]}
                            if row.get("monitoring_id") else {}),
                         **({"metric": row["metric"]} if row.get("metric") else {}),
-                        **({"covenant_name": row["name"]} if row.get("name") else {})})
+                        **({"covenant_name": row["name"]} if row.get("name") else {}),
+                        # 72h without a checker: the same point a parked run escalates.
+                        **({"escalated": True} if row.get("escalated") else {}),
+                        **({"checklist_id": row["checklist_id"]}
+                           if row.get("checklist_id") else {})})
             except (httpx.HTTPError, AttributeError, ValueError):
                 pass   # reminders are additive; the decision queue still serves
 

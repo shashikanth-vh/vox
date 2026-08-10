@@ -7,6 +7,12 @@ drift — Today recomputes when someone looks, which is exactly when a reminder 
   carries conditions that are neither Completed nor Waived: the conditions subsequent
   (and CPs deferred as CS) the analyst keeps chasing after disbursement started. The
   reminder lives until every item lands or is waived — or the line closes.
+* ``cpcs-approval`` — a CP/CS checklist filed and sitting at 'Completed', waiting for a
+  checker. The only approval in the lending flow with no durable run behind it and so no
+  clock of its own: it never expires (timing out a checklist would discard prepared work
+  and walk the line backwards), so it is CHASED instead — shown from the moment it is
+  filed and marked escalated once it has waited 72 hours, the same point the parked runs
+  escalate at.
 * ``covenant-due`` — an active covenant on a DISBURSED line whose current compliance
   cycle (stepped from ``first_due_on`` by ``frequency``) is due within the window or
   overdue. Covenant monitoring starts when money moves and runs to closure; recording
@@ -18,7 +24,7 @@ as REMINDER rows (no decision verbs — there is nothing to approve, only work t
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, Query
@@ -34,6 +40,9 @@ from app.models.prism import MonitoringReporting
 router = api_router()
 
 _DONE = ("Completed", "Waived")
+# A filed CP/CS checklist turns urgent at the same 72 hours the parked durable runs
+# escalate at, so one waiting desk reads the same as another.
+_ESCALATE_AFTER_HOURS = 72
 _FREQ_MONTHS = {"monthly": 1, "quarterly": 3, "half-yearly": 6, "half yearly": 6,
                 "semi-annual": 6, "semiannual": 6, "annually": 12, "annual": 12,
                 "yearly": 12}
@@ -161,6 +170,40 @@ async def list_follow_ups(
             "prepared_by": None,
             "entity_id": str(line.entity_id) if line is not None and line.entity_id else None,
             "created_at": first.isoformat() if first else None,
+        })
+
+    # ---- a CP/CS checklist waiting on its CHECKER ------------------------------------
+    # The one approval in the lending flow that does NOT park a durable run: the
+    # checklist workflow files it, tells the checkers, and returns. Approval is a REST
+    # call whenever someone gets to it, so a checklist sitting at 'Completed' waits
+    # indefinitely — and an unapproved checklist blocks disbursement SILENTLY, because
+    # nothing else in the flow is waiting on a clock that would notice.
+    #
+    # It must not expire: timing out a CP checklist would throw away prepared work and
+    # walk a line backwards for no reason, and unlike a committee decision there is no
+    # external deadline it is answering to. So it gets chased instead. The feed is
+    # recomputed on every read, so this shows CONTINUOUSLY from the moment it is filed
+    # — a stronger nudge than a daily ping — and it turns urgent at the same 72 hours
+    # the parked runs escalate at.
+    for lending_id, c in latest.items():
+        if c.status != "Completed":          # Approved / Returned / Rejected: not waiting
+            continue
+        line = lending_by_id.get(lending_id)
+        if line is not None and str(getattr(line, "stage", "") or "") in ("Closed", "Rejected"):
+            continue
+        if not _in_scope(line, c.prepared_by):
+            continue
+        waited_h = None
+        if c.created_at is not None:
+            waited_h = max(0.0, (datetime.now(UTC) - c.created_at).total_seconds() / 3600)
+        items.append({
+            "kind": "cpcs-approval", "lending_id": lending_id,
+            "checklist_id": str(c.id), "checklist_version": c.checklist_version,
+            "prepared_by": c.prepared_by,
+            "waiting_hours": round(waited_h, 1) if waited_h is not None else None,
+            "escalated": bool(waited_h is not None and waited_h >= _ESCALATE_AFTER_HOURS),
+            "entity_id": str(line.entity_id) if line is not None and line.entity_id else None,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
         })
 
     # ---- covenant cycles due on DISBURSED lines --------------------------------------
