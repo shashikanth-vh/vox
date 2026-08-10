@@ -4,7 +4,7 @@ import {
   IconButton, TextField, Alert, MenuItem, CircularProgress, Divider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { camService, type SanctionTermsOut, type EntityDoc } from '../../services/camService';
+import { camService, newestOf, type SanctionTermsOut, type EntityDoc } from '../../services/camService';
 import { documentsService } from '../../services/documentsService';
 import type { WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -58,7 +58,7 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
   const loadLetter = async (id: string) => {
     try {
       const docs = await camService.lendingDocs(id);
-      setLetter(docs.filter((d) => d.doc_type === 'sanction_letter').pop() || null);
+      setLetter(newestOf(docs, 'sanction_letter'));
     } catch { /* the letter block simply shows no file yet */ }
   };
 
@@ -205,7 +205,9 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       setInfo(`Sanction letter "${file.name}" filed — reading the terms out of it…`);
       await loadLetter(lendingId);
       const docs = await camService.lendingDocs(lendingId);
-      const fresh = docs.filter((d) => d.doc_type === 'sanction_letter').pop() || null;
+      // The one just uploaded — NOT whatever `.pop()` happened to land on. This is the
+      // line that read the previous letter while announcing it was reading this one.
+      const fresh = newestOf(docs, 'sanction_letter');
       setLetterBusy('');
       // The upload IS the trigger: the terms fill themselves from what was just filed.
       await fillFromLetter(fresh, decision?.note || undefined);

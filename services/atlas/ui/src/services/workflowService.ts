@@ -5,6 +5,7 @@ import { db } from '../api/atlasStore';
 import { clientsService } from './clientsService';
 import { runSuffix } from './entitiesService';
 import { settled } from './workflowRun';
+import { latestBy } from '../api/latest';
 
 /**
  * Runs on the workflow plane that are parked on a HUMAN decision. The plane lists them
@@ -311,7 +312,10 @@ export async function approvalContext(w: PendingWorkflow): Promise<ApprovalConte
       if (w.kind === 'cpcs-checklist') {
         const all = rows(await api.get<any>('/internal/cpcs-checklists',
           { lending_id: w.subjectId }).catch(() => []));
-        const row = all.filter((r: any) => r.status === 'Completed').pop();
+        // Highest version — the checklist list arrives created_at DESC, so `.pop()`
+        // showed the checker the OLDEST completed version of the conditions.
+        const row = latestBy(all.filter((r: any) => r.status === 'Completed'),
+          'checklist_version');
         const items: any[] = row?.items || [];
         const done = items.filter((i: any) => i.status === 'Completed').length;
         return {

@@ -7,6 +7,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import { workflowActionsService, type WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
+import { latestBy } from '../../api/latest';
 
 /**
  * DISBURSE — the whole disbursement journey in ONE dialog, staged by where the line
@@ -71,7 +72,11 @@ export default function DisburseDialog({ action, onClose, onDone }: {
       const raw = await api.get<any>('/internal/cpcs-checklists',
         { lending_id: lendingId }).catch(() => []);
       const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
-      const approved = lists.filter((l) => l.status === 'Approved').pop();
+      // Highest VERSION, not last in the array: the register returns checklists
+      // created_at DESC, so `.pop()` was reading the oldest approved one — on a line
+      // whose conditions had been reworked, that is a stale list of unmet CPs.
+      const approved = latestBy(lists.filter((l) => l.status === 'Approved'),
+        'checklist_version');
       setUnmet(((approved?.items || []) as any[])
         .filter((i) => i.condition_type === 'CP' && String(i.status) !== 'Completed')
         .map((i) => `${i.label || i.key} — ${i.status}`));

@@ -1,4 +1,5 @@
 import { api, apiErr, listAll } from '../api/http';
+import { newestByTime } from '../api/latest';
 import { orchestrator } from '../api/orchestratorClient';
 
 /**
@@ -38,6 +39,20 @@ export interface EntityDoc {
   doc_type: string;
   content_type: string;
   status: string;
+  /** When the file landed. Carried so callers can pick the LATEST of a doc_type by
+   *  comparing dates instead of trusting the array's order — see `newestOf`. */
+  uploaded_at?: string;
+  created_at?: string;
+}
+
+/**
+ * The most recently filed document of a type — e.g. THE sanction letter.
+ *
+ * Not `docs.filter(...).pop()`: the register orders documents `uploaded_at DESC`, so
+ * that returned the OLDEST letter on file. See api/latest.ts for the full account.
+ */
+export function newestOf(docs: EntityDoc[], docType: string): EntityDoc | null {
+  return newestByTime(docs.filter((d) => d.doc_type === docType));
 }
 
 export interface SanctionTermsOut {
@@ -81,6 +96,7 @@ export const camService = {
         id: r.id, title: r.title || r.original_filename || 'document',
         section: r.section || '', doc_type: r.doc_type || '',
         content_type: r.content_type || '', status: r.status || '',
+        uploaded_at: r.uploaded_at || undefined, created_at: r.created_at || undefined,
       }));
   },
 
@@ -303,6 +319,7 @@ export const camService = {
         id: r.id, title: r.title || r.original_filename || 'document',
         section: r.section || '', doc_type: r.doc_type || '',
         content_type: r.content_type || '', status: r.status || '',
+        uploaded_at: r.uploaded_at || undefined, created_at: r.created_at || undefined,
       }));
   },
 

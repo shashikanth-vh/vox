@@ -89,9 +89,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     if (!lid) return;
     setErr(''); setParsing(true);
     try {
-      const { camService } = await import('../../services/camService');
+      const { camService, newestOf } = await import('../../services/camService');
       const docs = await camService.lendingDocs(lid);
-      const letter = docs.filter((d) => d.doc_type === 'sanction_letter').pop();
+      const letter = newestOf(docs, 'sanction_letter');
       if (!letter) throw new Error('No sanction letter on this line yet — upload it in "Enter sanction terms" first.');
       const out = await camService.extractTerms(letter.id);
       const labels = phase === 'CP'
