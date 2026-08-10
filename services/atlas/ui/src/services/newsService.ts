@@ -1,6 +1,7 @@
 import { db, nowStamp } from '../api/atlasStore';
 import { writeAudit } from './auditService';
 import { PULSE_URL } from '../api/axiosClient';
+import { authHeaders } from '../auth/session';
 import { entitiesService } from './entitiesService';
 
 // Port of v12 AUGMENT 16 — India News Radar. Every item stored here is a REAL
@@ -276,13 +277,28 @@ function detailOf(j: any): string {
   return typeof j.detail === 'string' ? j.detail : '';
 }
 
-function tryEndpoint(u: string, ms: number, userSignal?: AbortSignal): Promise<Article[]> {
+/* WHO IS ASKING.
+   Every PULSE call here uses raw `fetch` — for the abort signal, the mixed endpoint
+   kinds and the non-JSON error pages — and `fetch` knows nothing about the axios
+   request interceptor that attaches identity to every OTHER API call. So all of them
+   went to the gateway anonymously and came back "HTTP 401 — Authentication required
+   (Bearer token)", four hundred times per sweep. The screen reported it faithfully;
+   nobody read it as "the radar is signed out" because nothing else on the page was.
+
+   Sent to PULSE ONLY. The public CORS proxies in the fallback chain are third parties,
+   and handing one of them a live bearer token would be far worse than a failed search. */
+function pulseHeaders(): Record<string, string> {
+  return { Accept: 'application/json', ...authHeaders() };
+}
+
+function tryEndpoint(u: string, ms: number, userSignal?: AbortSignal,
+                     mine = false): Promise<Article[]> {
   const to = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms || 9000) : undefined;
   let sig: AbortSignal | undefined;
   if (userSignal && typeof AbortSignal !== 'undefined' && (AbortSignal as any).any)
     sig = (AbortSignal as any).any([to, userSignal].filter(Boolean)); // timeout OR user-stop
   else sig = userSignal || to;
-  return fetch(u, { signal: sig, headers: { Accept: 'application/json' } })
+  return fetch(u, { signal: sig, headers: mine ? pulseHeaders() : { Accept: 'application/json' } })
     .then((r) => r.text().then((t) => {
       let j: any;
       try { j = JSON.parse(t); } catch { j = null; }   // HTML error page → no detail to read
@@ -324,7 +340,7 @@ export function fetchTerm(term: string, dfrom?: string, dto?: string, userSignal
         return reject(err);
       }
       const ep = eps[i++];
-      tryEndpoint(ep.u, ep.k === 'pulse' ? 30000 : 9000, userSignal) // local server fetches the web — give it room
+      tryEndpoint(ep.u, ep.k === 'pulse' ? 30000 : 9000, userSignal, ep.k === 'pulse')
         .then((arts) => { if (ep.k === 'pulse') { PULSE_UP = true; _lastFailure = ''; } resolve(arts); })
         .catch((e) => {
           if (aborted()) { e.name = 'AbortError'; return reject(e); } // user stopped — don't try more
@@ -418,7 +434,7 @@ let POLICY_CACHE: string[] | null = null;
 async function policyThemes(): Promise<string[]> {
   if (POLICY_CACHE) return POLICY_CACHE;
   try {
-    const r = await fetch(PULSE_URL + '/v1/news/config', { headers: { Accept: 'application/json' } });
+    const r = await fetch(PULSE_URL + '/v1/news/config', { headers: pulseHeaders() });
     const j = r.ok ? await r.json() : null;
     const list = Array.isArray(j?.policy_themes) ? j.policy_themes.filter(Boolean) : [];
     POLICY_CACHE = list.length ? list : POLICY_FALLBACK;
@@ -479,7 +495,7 @@ export const newsService = {
 
     const r = await fetch(PULSE_URL + '/v1/news/sweep', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
       // A sweep genuinely takes minutes at four hundred terms; the edge budgets for it.
       signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
         ? AbortSignal.timeout(600_000) : undefined,
@@ -526,7 +542,7 @@ export const newsService = {
   /** Can PULSE reach the news from where it runs? Names each source and its latency. */
   async diagnostics(): Promise<{ ok: boolean; summary: string; sources: any[] }> {
     const r = await fetch(PULSE_URL + '/v1/news/diagnostics', {
-      headers: { Accept: 'application/json' },
+      headers: pulseHeaders(),
       signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
         ? AbortSignal.timeout(45_000) : undefined,
     });
