@@ -21,13 +21,31 @@ function toLists(payload: any): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   Object.entries(payload || {}).forEach(([category, values]) => {
     if (!Array.isArray(values)) return;
-    const list = values
-      .map((v: any) => (typeof v === 'string' ? v : v?.value))
-      .filter((v: any): v is string => typeof v === 'string' && v !== '');
-    if (list.length) out[category] = list;
+    const list: string[] = [];
+    const labels: Record<string, string> = {};
+    values.forEach((v: any) => {
+      const value = typeof v === 'string' ? v : v?.value;
+      if (typeof value !== 'string' || value === '') return;
+      list.push(value);
+      const label = typeof v === 'string' ? '' : String(v?.label || '');
+      if (label && label !== value) labels[value] = label;
+    });
+    if (list.length) {
+      out[category] = list;
+      // THE LABEL WAS BEING THROWN AWAY. The register answers each reference value as
+      // {value, label} — and for the person lists the value is the SHORT HANDLE the
+      // platform stores in rm/analyst ("AT", "PS") while the label is the full name
+      // ("Arun Tiwari"). Keeping only the value left the desk picking from a column of
+      // initials, with the odd full name mixed in wherever a handle happened to be a
+      // name — which is exactly what made the Allot analyst list unreadable.
+      REF_LABELS[category] = labels;
+    }
   });
   return out;
 }
+
+/** category → { storedValue: humanLabel }, for every value whose label differs. */
+const REF_LABELS: Record<string, Record<string, string>> = {};
 
 /** Categories `/v1/ref` actually served this session — the Register's answer wins over
  *  anything derived locally (see employeesService.hydrateRoster). */
@@ -65,6 +83,8 @@ export const referenceService = {
     return { roles: Object.keys(ROLE_TABS), roleTabs: ROLE_TABS };
   },
   getRefSync(key: string): string[] { return db().ref[key] ?? []; },
+  /** How a stored value should READ. Empty when the value is already the label. */
+  getRefLabels(key: string): Record<string, string> { return REF_LABELS[key] ?? {}; },
   getThresholds() { return db().th; },
   exportData() {
     const a = document.createElement('a');

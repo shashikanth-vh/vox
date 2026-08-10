@@ -46,13 +46,21 @@ export function TextFld({ label, value, onChange, disabled, required, type = 'te
   );
 }
 
-export function SelectFld({ label, value, onChange, options, disabled, required, blank }: Base & { options: string[]; blank?: boolean }) {
+export function SelectFld({ label, value, onChange, options, disabled, required, blank, labels }:
+  Base & { options: string[]; blank?: boolean; labels?: Record<string, string> }) {
+  /* WHAT IS STORED AND WHAT IS READ ARE NOT THE SAME STRING.
+     The person lists store a short handle ("AT") and read as a full name ("Arun
+     Tiwari"). Rendering only the stored value gave the desk a column of initials with
+     the occasional full name where a handle happened to be one — unreadable, and
+     impossible to tell two colleagues apart in. The handle stays in the record and
+     stays visible beside the name, so what gets written is never a mystery either. */
+  const show = (o: string) => (labels?.[o] ? `${labels[o]} · ${o}` : o);
   return (
     <FieldShell label={label} required={required}>
       <TextField select value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)}
         fullWidth size="small" sx={CONTROL_SX}>
         {blank && <MenuItem value="">—</MenuItem>}
-        {options.map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
+        {options.map((o) => <MenuItem key={o} value={o}>{show(o)}</MenuItem>)}
       </TextField>
     </FieldShell>
   );

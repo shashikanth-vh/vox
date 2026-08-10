@@ -127,7 +127,7 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
                 register, which explains itself), a fresh hydrate retries a boot-time
                 fetch that failed, and the empty state SAYS what to do about it. */}
             <SelectFld label="BDRM" required value={v('rm')} disabled={!can(user.roles, 'reassignLead')} onChange={(x) => set('rm', x)}
-              options={[...new Set([...(v('rm') ? [v('rm')] : []), ...ref.getRefSync('RM')])]} />
+              options={[...new Set([...(v('rm') ? [v('rm')] : []), ...ref.getRefSync('RM')])]} labels={ref.getRefLabels('RM')} />
             {!ref.getRefSync('RM').length && (
               <Alert severity="info" sx={{ gridColumn: '1 / -1', py: 0, fontSize: 12 }}>
                 No BDRMs on the roster yet — add the person (with their e-mail) under

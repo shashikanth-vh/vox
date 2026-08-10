@@ -162,8 +162,8 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
         {d ? (
           <DrawerSection title="Ownership & sourcing">
             <FieldGrid>
-              <SelectFld label="RM" required value={d.rm} disabled={roOwn} onChange={(v) => updD('rm', v)} options={ref.getRefSync('RM')} blank />
-              <SelectFld label="Deal Analyst" value={d.an} disabled={!canAssign} onChange={(v) => updD('an', v)} options={ref.getRefSync('Analyst')} blank />
+              <SelectFld label="RM" required value={d.rm} disabled={roOwn} onChange={(v) => updD('rm', v)} options={ref.getRefSync('RM')} labels={ref.getRefLabels('RM')} blank />
+              <SelectFld label="Deal Analyst" value={d.an} disabled={!canAssign} onChange={(v) => updD('an', v)} options={ref.getRefSync('Analyst')} labels={ref.getRefLabels('Analyst')} blank />
               <SelectFld label="Temperature" value={d.temp} disabled={roOwn} onChange={(v) => updD('temp', v)} options={ref.getRefSync('Temperature')} blank />
               {/* Source + Source detail are locked-from-lead (Forms spec) — always disabled. */}
               <SelectFld label="Source" value={d.source} disabled onChange={(v) => updD('source', v)} options={ref.getRefSync('Source')} blank />
@@ -223,9 +223,9 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
               {/* Amount is mandatory past Data Awaited and LOCKS on Sanctioned (Admin/Mgmt only after). */}
               <TextFld label="Amount (₹ Cr)" required type="number" value={r.amt} disabled={roLend || (LEND_GREEN.includes(r.stage) && !adminOverride)} onChange={(v) => updL(r.id, 'amt', v)} />
               <SelectFld label="Stage" required value={r.stage} disabled={roLend} onChange={(v) => { void lendingService.updateStage(r.id, v, user.full).then((res) => { if (!res.ok) alert(res.error); bump(); }); }} options={ref.getRefSync('Lending Stage')} />
-              <SelectFld label="Deal Analyst" value={r.an} disabled={roLend} onChange={(v) => updL(r.id, 'an', v)} options={ref.getRefSync('Analyst')} blank />
+              <SelectFld label="Deal Analyst" value={r.an} disabled={roLend} onChange={(v) => updL(r.id, 'an', v)} options={ref.getRefSync('Analyst')} labels={ref.getRefLabels('Analyst')} blank />
               {/* BDRM is read-only here — edited on Company Ownership (Forms spec). */}
-              <SelectFld label="RM" value={r.rm} disabled onChange={(v) => updL(r.id, 'rm', v)} options={ref.getRefSync('RM')} blank />
+              <SelectFld label="RM" value={r.rm} disabled onChange={(v) => updL(r.id, 'rm', v)} options={ref.getRefSync('RM')} labels={ref.getRefLabels('RM')} blank />
               <SelectFld label="Pending with" value={r.pendingWith} disabled={roLend} onChange={(v) => updL(r.id, 'pendingWith', v)} options={ref.getRefSync('Pending With')} blank />
               {/* Sanction date is mandatory at Sanctioned and locks 24h after stamping (Admin-only after). */}
               {LEND_GREEN.includes(r.stage) &&

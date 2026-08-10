@@ -150,7 +150,7 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
           <SelectFld label="Climate lens" value={cl.lens} onChange={(v) => setCl((p) => ({ ...p, lens: v }))} options={ref.getRefSync('Lens')} />
           <TextFld label="State" required value={cl.state} onChange={(v) => setCl((p) => ({ ...p, state: v }))} />
           <TextFld label="Type of industry" value={cl.toi} onChange={(v) => setCl((p) => ({ ...p, toi: v }))} placeholder="EPC / IPP / Manufacturing / Services" />
-          <SelectFld label="Allot analyst" value={cl.an} onChange={(v) => setCl((p) => ({ ...p, an: v }))} options={ref.getRefSync('Analyst')} blank />
+          <SelectFld label="Allot analyst" value={cl.an} onChange={(v) => setCl((p) => ({ ...p, an: v }))} options={ref.getRefSync('Analyst')} labels={ref.getRefLabels('Analyst')} blank />
           <SelectFld label="Temperature" value={cl.temp} onChange={(v) => setCl((p) => ({ ...p, temp: v }))} options={ref.getRefSync('Temperature')} />
           {/* Source + Source detail are LOCKED from the lead (Forms spec) — pre-filled, not editable. */}
           <SelectFld label="Source" value={cl.source} disabled onChange={(v) => setCl((p) => ({ ...p, source: v }))} options={ref.getRefSync('Source')} />

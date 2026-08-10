@@ -78,7 +78,7 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
             <SelectFld label="Climate lens" value={f.lens} onChange={(v) => set('lens', v)} options={ref.getRefSync('Lens')} />
             <SelectFld label="Source" required value={f.source} onChange={(v) => set('source', v)} options={ref.getRefSync('Source')} />
             <TextFld label="Source detail" required={SRC_NEEDS_DETAIL.includes(f.source)} value={f.sourceDetail} onChange={(v) => set('sourceDetail', v)} />
-            <SelectFld label="BDRM" required value={f.rm} onChange={(v) => set('rm', v)} options={ref.getRefSync('RM')} />
+            <SelectFld label="BDRM" required value={f.rm} onChange={(v) => set('rm', v)} options={ref.getRefSync('RM')} labels={ref.getRefLabels('RM')} />
             <SelectFld label="Temperature" value={f.temp} onChange={(v) => set('temp', v)} options={ref.getRefSync('Temperature')} />
             <TextFld label="Designation" value={f.designation} onChange={(v) => set('designation', v)} />
             <TextFld label="Phone" value={f.phone} onChange={(v) => set('phone', v)} />
