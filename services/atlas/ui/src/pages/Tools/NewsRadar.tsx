@@ -69,6 +69,13 @@ export default function NewsRadar() {
 
   // 'CTX' is a filter, not a severity: the open review flags cut across colours.
   const [sev, setSev] = useState<Severity | 'CTX' | ''>('');
+  /* LIVE EXPOSURE is not a colour.
+     Severity says how bad a story is; exposure says whose money is in it — and the
+     question that actually matters ("ugly news on a name we have lent to") needs BOTH
+     at once. Putting exposure in the colour row would make it look mutually exclusive
+     with Ugly, which is the opposite of how it is used, so it is its own toggle and it
+     combines with whatever colour is selected. */
+  const [liveOnly, setLiveOnly] = useState(false);
   const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0, why: '' });
   const [adhoc, setAdhoc] = useState<AdhocState>(BLANK_ADHOC);
   const [qBox, setQBox] = useState('');
@@ -137,13 +144,6 @@ export default function NewsRadar() {
 
   /* Is it us or the network? The one question the search itself cannot answer: no
      articles reads the same for a quiet company and a container with no egress. */
-  /* LIVE EXPOSURE is not a colour.
-     Severity says how bad a story is; exposure says whose money is in it — and the
-     question that actually matters ("ugly news on a name we have lent to") needs BOTH
-     at once. Putting exposure in the colour row would make it look mutually exclusive
-     with Ugly, which is the opposite of how it is used, so it is its own toggle and it
-     combines with whatever colour is selected. */
-  const [liveOnly, setLiveOnly] = useState(false);
   const [probe, setProbe] = useState('');
   const runProbe = async () => {
     setProbe('checking the news sources…');

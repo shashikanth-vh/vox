@@ -443,8 +443,15 @@ async function policyThemes(): Promise<string[]> {
    screens cannot drift apart within a session. */
 async function refreshFirms(): Promise<void> {
   try {
-    const { clientsService } = await import('./clientsService');
-    await clientsService.hydrateAll();
+    const [{ clientsService }, { lendingService }] = await Promise.all([
+      import('./clientsService'), import('./lendingService')]);
+    // THE LENDING BOOK TOO, because exposure is what makes the radar a CREDIT tool.
+    // isLiveBorrower() reads db().lending, which only the Lending screen ever filled —
+    // so a desk that opened Tools directly had an empty book, and every firm looked
+    // like a prospect. Two consequences, both silent: the 💰 exposure filter never
+    // appeared, and the context flip never fired, so "raises fresh debt" on a live
+    // borrower was filed as good news instead of raising the ⚠ review flag.
+    await Promise.all([clientsService.hydrateAll(), lendingService.hydrateAll()]);
   } catch { /* offline / mock mode: keep whatever the store already holds */ }
 }
 
