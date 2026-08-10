@@ -33,6 +33,8 @@ from typing import Any
 import httpx
 from evam_backend_core.logging import get_logger
 
+from app.news.triage import classify, triage
+
 log = get_logger("pulse.search")
 
 UA = {"User-Agent": "Mozilla/5.0 (PRISM-NewsRadar/1.0)"}
@@ -45,47 +47,10 @@ GDELT_RANGE = ("https://api.gdeltproject.org/api/v2/doc/doc?query=%s"
                "&startdatetime=%s&enddatetime=%s")
 BING_NEWS = "https://www.bing.com/news/search?q=%s&format=rss&count=25"
 
-# Whole-word lists. Phrases match as phrases; stems are spelled out as full words rather
-# than truncated, because a substring match here mislabels a company for the whole desk.
-RED = ["fraud", "frauds", "fraudulent", "defrauded", "default", "defaults", "defaulter",
-       "wilful defaulter", "insolvency", "insolvent", "bankruptcy", "bankrupt", "arrest",
-       "arrested", "raid", "raids", "raided", "scam", "npa", "npas", "money laundering",
-       "cbi", "ed probe", "probe", "fir", "firs", "embezzlement", "embezzled",
-       "irregularity", "irregularities", "misappropriation", "shell company",
-       "tax evasion", "forgery", "fugitive", "fraud case", "loan fraud"]
-AMBER = ["litigation", "lawsuit", "court", "penalty", "penalties", "fined", "fine",
-         "downgrade", "downgraded", "delay", "delays", "delayed", "layoff", "layoffs",
-         "strike", "dispute", "disputes", "show cause", "showcause", "investigation",
-         "investigated", "shortfall", "recall", "recalled", "resignation", "resigns",
-         "resigned", "warning", "summons"]
-GOOD = ["wins", "win", "won", "bags", "bagged", "secures", "secured", "awarded", "awards",
-        "award", "signs", "signed", "order", "orders", "contract", "contracts", "epc",
-        "ppa", "mou", "commissions", "commissioned", "inaugurates", "inaugurated",
-        "inauguration", "launches", "launched", "expansion", "expands", "funding",
-        "funded", "raises", "raised", "investment", "invests", "profit", "profits",
-        "record", "milestone", "partnership", "partners", "acquires", "acquisition",
-        "ipo", "listing", "approval", "approved", "sanctioned", "disbursed", "growth",
-        "surges", "jumps", "rises", "upgrade", "upgraded"]
-
-
-def _wre(words: list[str]) -> re.Pattern[str]:
-    return re.compile(r"\b(" + "|".join(re.escape(w) for w in words) + r")\b", re.I)
-
-
-_RED_RE, _AMBER_RE, _GOOD_RE = _wre(RED), _wre(AMBER), _wre(GOOD)
-
-
-def classify(headline: str) -> str:
-    """UGLY / BAD / GOOD — in the desk's own vocabulary, and explainable: whichever list
-    the headline hits, hard-adverse first."""
-    h = headline or ""
-    if _RED_RE.search(h):        # hard-adverse always wins
-        return "UGLY"
-    if _GOOD_RE.search(h):       # a clear positive outranks a routine watch word
-        return "GOOD"
-    if _AMBER_RE.search(h):
-        return "BAD"
-    return "GOOD"
+# The judgement lives in triage.py — four tiers, negation and word-sense guards, and the
+# context flip that reads "raises fresh debt" differently for a borrower than a prospect.
+# Re-exported here because this module is the one every caller already imports.
+__all__ = ["NewsSearch", "classify", "triage"]
 
 
 def _domain(url: str) -> str:
@@ -271,18 +236,27 @@ class NewsSearch:
             if key in seen:
                 continue
             seen.add(key)
-            h["severity"] = classify(h["title"])
             merged.append(h)
         merged.sort(key=lambda h: h.get("when") or "0", reverse=True)
         return merged[:limit], sources
 
+    @staticmethod
+    def _judged(articles: list[dict[str, Any]], live: bool) -> list[dict[str, Any]]:
+        """Colour the articles for THIS caller.
+
+        Triage is applied on the way out rather than baked into the cache, because the
+        same story is a different colour depending on whether the firm owes us money —
+        and one fetch has to serve both readings."""
+        return [{**a, **triage(a.get("title", ""), live).as_dict()} for a in articles]
+
     async def search(self, term: str, dfrom: str = "", dto: str = "",
-                     limit: int = 40) -> list[dict[str, Any]]:
+                     limit: int = 40, live: bool = False) -> list[dict[str, Any]]:
         """Just the articles — what the digest and the schedules want."""
-        return (await self.search_detail(term, dfrom, dto, limit))[0]
+        return (await self.search_detail(term, dfrom, dto, limit, live))[0]
 
     async def search_detail(self, term: str, dfrom: str = "", dto: str = "",
-                            limit: int = 40) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                            limit: int = 40, live: bool = False,
+                            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Articles AND how each source fared.
 
         An empty list means two very different things — "this company is not in the
@@ -295,12 +269,13 @@ class NewsSearch:
         hit = self._cache.get(key)
         if hit and time.time() - hit[0] < self.cache_ttl_s:
             self._cache.move_to_end(key)
-            return hit[1], hit[2]
+            return self._judged(hit[1], live), hit[2]
         # COALESCING: an all-firms sweep asks for 300 companies at once and the same
         # company can appear on several desks' screens. Everyone waits on ONE fetch.
         inflight = self._inflight.get(key)
         if inflight is not None:
-            return await asyncio.shield(inflight)
+            raw, sources = await asyncio.shield(inflight)
+            return self._judged(raw, live), sources
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._inflight[key] = fut
         try:
@@ -315,7 +290,7 @@ class NewsSearch:
                     self._cache.popitem(last=False)
             if not fut.done():
                 fut.set_result((merged, sources))
-            return merged, sources
+            return self._judged(merged, live), sources
         except Exception as exc:
             if not fut.done():
                 fut.set_exception(exc)

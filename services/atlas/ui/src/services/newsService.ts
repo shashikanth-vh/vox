@@ -7,16 +7,21 @@ import { entitiesService } from './entitiesService';
 // article scraped live from GDELT; when a source is unreachable the scan reports
 // the failure rather than inventing anything.
 
-export type Severity = 'RED' | 'AMBER' | 'GREEN';
+export type Severity = 'RED' | 'AMBER' | 'GREEN' | 'BLUE';
 
 export interface NewsItem {
   id: string; code: string; term: string;
   headline: string; url: string; source: string; when: string;
-  severity: Severity; category: string; mode: string;
+  severity: Severity; category: string; reason?: string; mode: string;
   verdict: string | null; at: string;
 }
 
-export interface Article { headline: string; url: string; source: string; when: string; }
+export interface Article {
+  headline: string; url: string; source: string; when: string;
+  // Present only when PULSE answered: its verdict, which the screen prefers over the
+  // client-side fallback so a digest and a live search never disagree about a headline.
+  severity?: Severity; category?: string; reason?: string;
+}
 
 /* ---------------- state ---------------- */
 export function news(): NewsItem[] {
@@ -29,41 +34,166 @@ export function watch(): Record<string, string[]> {
   return d.newswatch;
 }
 
-/* PULSE's triage lists, client-side (keep in sync with services/pulse).
-   Whole-word matching on BOTH sides — a keyword must be its own word, so
-   "fir" (FIR) never matches "first" or "firm", "raid" never matches "afraid". */
-const N_RED = ['fraud', 'frauds', 'fraudulent', 'defrauded', 'default', 'defaults', 'defaulter',
-  'wilful defaulter', 'insolvency', 'insolvent', 'bankruptcy', 'bankrupt', 'arrest', 'arrested',
-  'raid', 'raids', 'raided', 'scam', 'npa', 'npas', 'money laundering', 'cbi', 'ed probe', 'probe',
-  'fir', 'firs', 'embezzlement', 'embezzled', 'irregularity', 'irregularities', 'misappropriation',
-  'shell company', 'tax evasion', 'forgery', 'fugitive', 'fraud case', 'loan fraud'];
-const N_AMBER = ['litigation', 'lawsuit', 'court', 'penalty', 'penalties', 'fined', 'fine',
-  'downgrade', 'downgraded', 'delay', 'delays', 'delayed', 'layoff', 'layoffs', 'strike',
-  'dispute', 'disputes', 'show cause', 'showcause', 'investigation', 'investigated', 'shortfall',
-  'recall', 'recalled', 'resignation', 'resigns', 'resigned', 'warning', 'summons', 'defaulted payment'];
-const N_GOOD = ['wins', 'win', 'won', 'bags', 'bagged', 'secures', 'secured', 'awarded', 'awards', 'award',
-  'signs', 'signed', 'order', 'orders', 'contract', 'contracts', 'epc', 'ppa', 'mou', 'commissions',
-  'commissioned', 'inaugurates', 'inaugurated', 'inauguration', 'launches', 'launched', 'expansion',
-  'expands', 'funding', 'funded', 'raises', 'raised', 'investment', 'invests', 'profit', 'profits',
-  'record', 'milestone', 'partnership', 'partners', 'tie-up', 'acquires', 'acquisition', 'ipo',
-  'listing', 'approval', 'approved', 'sanctioned', 'disbursed', 'growth', 'surges', 'jumps', 'rises',
-  'upgrade', 'upgraded', 'wins order', 'wins contract', 'bags order'];
+/* ---------------- triage, client-side ----------------
+   PULSE IS THE AUTHORITY. Every article it returns already carries `severity`,
+   `category` and — for a context flip — the `reason`, and the screen renders what the
+   server decided. That matters beyond tidiness: a scheduled digest and a live search
+   must colour the same headline the same way, and only one copy of the rules can be
+   right about that.
 
+   What follows is the FALLBACK, used when the answer came from somewhere other than
+   PULSE (the direct-GDELT hop, a public proxy, the offline prototype build). It mirrors
+   services/pulse/app/news/triage.py — keep the two in step. */
+
+const T_RED = ['fraud', 'frauds', 'fraudulent', 'defrauded', 'default', 'defaults', 'defaulter',
+  'wilful defaulter', 'willful defaulter', 'insolvency', 'insolvent', 'bankruptcy', 'bankrupt',
+  'arrest', 'arrested', 'raid', 'raids', 'raided', 'scam', 'npa', 'npas', 'money laundering',
+  'cbi', 'ed probe', 'probe', 'fir', 'firs', 'embezzlement', 'embezzled', 'irregularity',
+  'irregularities', 'misappropriation', 'shell company', 'shell entity', 'tax evasion',
+  'forgery', 'fugitive', 'fraud case', 'loan fraud',
+  'siphoning', 'siphoned', 'diversion of funds', 'round-tripping', 'round tripping',
+  'fake itc', 'gst evasion', 'dggi', 'sfio', 'eow', 'lookout notice', 'lookout circular',
+  'chargesheet', 'charge sheet', 'absconding', 'hawala', 'ponzi', 'forensic audit',
+  'asset attachment', 'provisional attachment', 'sarfaesi', 'nclt', 'ibc', 'liquidation',
+  'winding up', 'pmla', 'benami', 'circular trading', 'cross-default', 'event of default',
+  'enforcement directorate'];
+// The stress ladder — separate from the routine watch words because it must outrank a
+// positive verb ("Promoter pledge RISES to 62 per cent" is not good news).
+const T_STRESS = ['downgrade', 'downgraded', 'defaulted payment',
+  'sma-0', 'sma-1', 'sma-2', 'special mention account', 'restructuring', 'restructured',
+  'debt recast', 'recast', 'moratorium', 'one-time settlement', 'one time settlement', 'ots',
+  'credit watch', 'rating withdrawn', 'covenant breach', 'dscr breach', 'dsra breach',
+  'promoter pledge', 'share pledge', 'pledged shares', 'invocation of pledge', 'discom dues',
+  'receivables from discom', 'auditor change', 'auditor resigns', 'auditor resignation',
+  'new auditor appointed', 'qualified opinion', 'restatement', 'accounting irregularity',
+  'cfo exit', 'cfo resigns', 'kmp resignation', 'gst notice', 'it survey', 'pcb notice',
+  'almm delisting', 'roc charge', 'second charge', 'pari passu', 'inter-corporate deposit',
+  'upstreaming', 'related party', 'related-party'];
+const T_AMBER = ['litigation', 'lawsuit', 'court', 'penalty', 'penalties', 'fined', 'fine',
+  'delay', 'delays', 'delayed', 'layoff', 'layoffs', 'strike', 'dispute', 'disputes',
+  'show cause', 'showcause', 'investigation', 'investigated', 'shortfall', 'recall',
+  'recalled', 'resignation', 'resigns', 'resigned', 'warning', 'summons'];
+// Policy: fires with NO company name. A state tariff order re-prices a portfolio.
+const T_BLUE = ['tariff order', 'tariff revision', 'true-up', 'serc', 'cerc', 'regulator order',
+  'regulatory order', 'open access', 'demand charge', 'fixed charge', 'sub-metering',
+  'cross-subsidy surcharge', 'ists waiver', 'connectivity regulation', 'rpo',
+  'renewable purchase obligation', 'payment security mechanism', 'late payment surcharge',
+  'almm', 'dcr', 'domestic content requirement', 'pli scheme', 'pli disbursement',
+  'anti-dumping duty', 'safeguard duty', 'net metering', 'gross metering',
+  'mnre notification', 'mop notification', 'gazette notification', 'viability gap funding',
+  'vgf', 'must-run status', 'curtailment compensation', 'deviation settlement',
+  'dsm regulation', 'green hydrogen incentive'];
+const T_GOOD = ['wins', 'win', 'won', 'bags', 'bagged', 'awarded', 'awards', 'award',
+  'ppa signed', 'signs ppa', 'mou', 'commissions', 'commissioned', 'cod achieved',
+  'inaugurates', 'inaugurated', 'inauguration', 'launches', 'launched', 'expansion',
+  'expands', 'profit', 'profits', 'record', 'milestone', 'partnership', 'partners',
+  'tie-up', 'ipo', 'listing', 'growth', 'surges', 'jumps', 'rises', 'upgrade', 'upgraded',
+  'credit upgrade', 'accretive acquisition', 'wins order', 'wins contract', 'bags order'];
+// Good-looking news that a live borrower doing it makes a question, with the reason.
+const T_CONTEXT: [string, string[], string][] = [
+  ['fresh_debt', ['raises debt', 'fresh debt', 'raises funding', 'raised funding', 'secures loan',
+    'secures funding', 'new loan', 'bridge loan', 'top-up loan', 'refinance', 'rollover',
+    'raises capital', 'funding round', 'debt raise', 'funding', 'funded', 'raises', 'raised',
+    'investment', 'invests'],
+    'Borrower levering up elsewhere dilutes our cover — could be desperation funding or ever-greening.'],
+  ['settlement', ['one-time settlement', 'one time settlement', 'ots', 'settles with lender',
+    'settlement with bank', 'debt settled'],
+    'An OTS means a lender took a haircut — a default event, not a win.'],
+  ['pledge', ['pledges shares', 'share pledge', 'promoter pledge', 'pledged stake'],
+    'Promoter share-pledging for cash is a classic early-distress signal.'],
+  ['big_order', ['wins huge order', 'bags order worth', 'wins order worth', 'largest order',
+    'record order'],
+    'Over-trading: orders beyond funding capacity start working-capital blowups.'],
+  ['stake_sale', ['stake sale', 'sells stake', 'strategic investor', 'promoter stake',
+    'divests stake', 'equity infusion'],
+    'Could be growth — or a distress sale / promoter exit. Context decides.'],
+  ['auditor_change', ['auditor change', 'new auditor appointed', 'auditor appointed',
+    'changes auditor', 'auditor resigns'],
+    'Auditor churn often precedes a qualified opinion or fraud discovery.'],
+];
+// A negator this close BEFORE a keyword means the headline clears the name, not accuses it.
+const T_NEG = ['cleared of', 'clears', 'cleared', 'absolves', 'absolved', 'denies', 'denied',
+  'deny', 'refutes', 'refuted', 'rejects', 'no default', 'not defaulted', 'acquitted',
+  'acquittal', 'exonerated', 'dismisses', 'dismissed', 'quashes', 'quashed', 'clean chit'];
+// keyword -> phrases that mean it is the WRONG sense. "Charging station" is not a charge.
+const T_SENSE: Record<string, string[]> = {
+  charge: ['charging station', 'ev charg', 'fast charg', 'battery charg', 'free of charge',
+    'in charge of', 'took charge'],
+  charges: ['charging station', 'ev charg'],
+  default: ['by default', 'default setting', 'default option', 'default mode'],
+  fine: ['doing fine', 'works fine', 'fine print'],
+  strike: ['strike price', 'strikes a deal'],
+  recast: ['recasts its board', 'recasts board', 'recasts team'],
+};
+const NEG_WINDOW = 70;
+
+// Whole words and whole phrases, tolerant of punctuation: the press writes both
+// "one-time settlement" and "one time settlement".
 const wordRe = (arr: string[]) =>
-  new RegExp('\\b(' + arr.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'i');
-const RE_RED = wordRe(N_RED), RE_AMBER = wordRe(N_AMBER), RE_GOOD = wordRe(N_GOOD);
+  new RegExp('\\b(' + arr.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/[\s-]+/g, '[\\s-]+')).join('|') + ')\\b', 'i');
+const RE_RED = wordRe(T_RED), RE_STRESS = wordRe(T_STRESS), RE_AMBER = wordRe(T_AMBER);
+const RE_BLUE = wordRe(T_BLUE), RE_GOOD = wordRe(T_GOOD), RE_NEG = wordRe(T_NEG);
+const RE_CTX: [string, RegExp, string][] = T_CONTEXT.map(([n, ws, why]) => [n, wordRe(ws), why]);
 
-// Precedence: a hard-adverse (RED) word always wins; otherwise a clear positive
-// reads GOOD even alongside a routine watch word; only then does AMBER apply.
-export function classify(h: string): [Severity, string] {
+const blockedWords = (h: string): Set<string> => {
+  const low = h.toLowerCase();
+  return new Set(Object.keys(T_SENSE).filter((k) => T_SENSE[k].some((p) => low.includes(p))));
+};
+
+// The first match that is neither the wrong word sense nor negated. Every match is
+// checked, not just the first: "EV charging firm arrested over fraud" has a blocked
+// "charge" and a real "fraud", and stopping early would drop the alert.
+function realHit(h: string, re: RegExp, blocked: Set<string>): boolean {
+  const rx = new RegExp(re.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(h)) !== null) {
+    if (blocked.has(m[0].toLowerCase())) continue;
+    if (RE_NEG.test(h.slice(Math.max(0, m.index - NEG_WINDOW), m.index))) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Is our money already out to this firm? A lending line that is not Rejected or On Hold.
+ *  Mirrors the exposure the server is told about via `exposure=live`. */
+export function isLiveBorrower(code: string): boolean {
+  const rows: any[] = (db() as any).lending || [];
+  return rows.some((r) => r?.code === code
+    && String(r?.stage || '').trim() !== ''
+    && !['rejected', 'on hold'].includes(String(r.stage).toLowerCase()));
+}
+
+/** Why a context phrase tenses credit up — for the flag's tooltip. */
+export function contextReason(h: string): string {
+  const hit = RE_CTX.find(([, re]) => re.test(String(h || '')));
+  return hit ? hit[2] : '';
+}
+
+/* Precedence: hard-adverse, the context flip (live names only, so the flag carries its
+   reason), the stress ladder, a genuine win, the routine watch words, then policy. */
+export function classify(h: string, live = false): [Severity, string] {
   h = String(h || '');
-  if (RE_RED.test(h)) return ['RED', 'adverse'];
+  if (!h.trim()) return ['GREEN', 'neutral'];
+  const blocked = blockedWords(h);
+  if (realHit(h, RE_RED, blocked)) return ['RED', 'adverse'];
+  const ctx = RE_CTX.find(([, re]) => re.test(h));
+  if (ctx && live) return ['AMBER', 'context-review'];
+  if (realHit(h, RE_STRESS, blocked)) return ['AMBER', 'stress'];
   if (RE_GOOD.test(h)) return ['GREEN', 'positive'];
-  if (RE_AMBER.test(h)) return ['AMBER', 'watch'];
+  if (realHit(h, RE_AMBER, blocked)) return ['AMBER', 'watch'];
+  if (RE_AMBER.test(h)) return ['GREEN', 'neutral'];   // matched, but negated / wrong sense
+  if (RE_BLUE.test(h)) return ['BLUE', 'policy'];
+  if (ctx) return ['GREEN', 'positive'];               // a name we are chasing: a win
   return ['GREEN', 'neutral'];
 }
 
-export const SEV_LABEL: Record<Severity, string> = { GREEN: 'GOOD', AMBER: 'BAD', RED: 'UGLY' };
+/** PULSE speaks the desk's labels; the screen's palette is keyed by colour. */
+export const SEV_OF: Record<string, Severity> = {
+  UGLY: 'RED', BAD: 'AMBER', GOOD: 'GREEN', POLICY: 'BLUE',
+};
+
+export const SEV_LABEL: Record<Severity, string> = { GREEN: 'GOOD', AMBER: 'BAD', RED: 'UGLY', BLUE: 'POLICY' };
 
 /* ---------------- adapters ----------------
    PULSE is the source of record: it searches Google News + GDELT + Bing server-side,
@@ -87,10 +217,14 @@ function gdeltURL(term: string): string {
 
 let PULSE_UP: boolean | null = null; // null=untried · true=gateway present · false=static host
 
-function newsEndpoints(term: string, dfrom?: string, dto?: string) {
+function newsEndpoints(term: string, dfrom?: string, dto?: string, live?: boolean) {
   const g = gdeltURL(term), enc = encodeURIComponent(g);
   const list: { k: string; u: string }[] = [];
-  const dr = (dfrom ? '&from=' + encodeURIComponent(dfrom) : '') + (dto ? '&to=' + encodeURIComponent(dto) : '');
+  const dr = (dfrom ? '&from=' + encodeURIComponent(dfrom) : '') + (dto ? '&to=' + encodeURIComponent(dto) : '')
+    // Polarity depends on our relationship with the firm and the BROWSER is what knows
+    // it — the book is in this store. Told this, PULSE flips good-looking news on a
+    // borrower to a review flag instead of filing it as a win.
+    + (live ? '&exposure=live' : '');
   // 0 — same-origin PULSE proxy, only when a PRISM gateway is present. On a plain
   // static host this 404s, so after the first miss we never ask again this session.
   if (location.protocol.indexOf('http') === 0 && PULSE_UP !== false)
@@ -109,6 +243,11 @@ function parseArticles(j: any): Article[] {
     headline: a.title || a.headline || '', url: a.url || '',
     source: (a.source || a.domain || '') + (a.via ? ' · ' + a.via : ''),
     when: (a.seendate || a.when || a.published_at || '').slice(0, 8),
+    // PULSE labels in the desk's words (UGLY/BAD/GOOD/POLICY); GDELT and the proxies
+    // send no verdict at all, and those fall through to the client-side rules.
+    ...(a.severity && SEV_OF[a.severity] ? { severity: SEV_OF[a.severity] } : {}),
+    ...(a.category ? { category: String(a.category) } : {}),
+    ...(a.reason ? { reason: String(a.reason) } : {}),
   })).filter((a: Article) => a.headline && /^https?:\/\//i.test(a.url));
 }
 
@@ -154,8 +293,9 @@ let _lastFailure = '';
 export const lastFailure = (): string => _lastFailure;
 
 // PRODUCTION RULE: returns REAL articles or throws — never fabricates.
-export function fetchTerm(term: string, dfrom?: string, dto?: string, userSignal?: AbortSignal): Promise<Article[]> {
-  const eps = newsEndpoints(term, dfrom, dto);
+export function fetchTerm(term: string, dfrom?: string, dto?: string, userSignal?: AbortSignal,
+                          live?: boolean): Promise<Article[]> {
+  const eps = newsEndpoints(term, dfrom, dto, live);
   const aborted = () => !!(userSignal && userSignal.aborted);
   return new Promise((resolve, reject) => {
     let i = 0, lastErr: any, pulseErr = '';
@@ -219,14 +359,20 @@ export function termsFor(code: string): string[] {
 
 function ingest(code: string, term: string, arts: Article[], mode: string): number {
   let added = 0;
+  const live = isLiveBorrower(code);
   arts.forEach((a) => {
     if (!a.headline) return;
     if (news().some((n) => (a.url && n.url === a.url) || (n.headline === a.headline && n.code === code))) return;
-    const cc = classify(a.headline);
+    // The server's verdict wins where there is one — it knows the same rules and it is
+    // the copy a scheduled digest also used.
+    const cc: [Severity, string] = a.severity
+      ? [a.severity, a.category || 'neutral'] : classify(a.headline, live);
+    const why = a.reason || (cc[1] === 'context-review' ? contextReason(a.headline) : '');
     news().unshift({
       id: 'N' + (news().length + 1) + '-' + code, code, term,
       headline: a.headline, url: a.url, source: a.source, when: a.when,
-      severity: cc[0], category: cc[1], mode, verdict: null, at: nowStamp(),
+      severity: cc[0], category: cc[1], ...(why ? { reason: why } : {}),
+      mode, verdict: null, at: nowStamp(),
     });
     added++;
   });
@@ -235,12 +381,30 @@ function ingest(code: string, term: string, arts: Article[], mode: string): numb
 
 export interface ScanState { running: boolean; done: number; total: number; failTerms: number }
 
+/* The state-scoped themes a policy sweep asks about. PULSE publishes them; this copy is
+   only for a build with no gateway in front of it. */
+const POLICY_FALLBACK = ['tariff order', 'open access charges', 'net metering policy', 'ALMM',
+  'payment security mechanism DISCOM', 'anti-dumping duty solar'];
+let POLICY_CACHE: string[] | null = null;
+
+async function policyThemes(): Promise<string[]> {
+  if (POLICY_CACHE) return POLICY_CACHE;
+  try {
+    const r = await fetch(PULSE_URL + '/v1/news/config', { headers: { Accept: 'application/json' } });
+    const j = r.ok ? await r.json() : null;
+    const list = Array.isArray(j?.policy_themes) ? j.policy_themes.filter(Boolean) : [];
+    POLICY_CACHE = list.length ? list : POLICY_FALLBACK;
+  } catch { POLICY_CACHE = POLICY_FALLBACK; }
+  return POLICY_CACHE || POLICY_FALLBACK;
+}
+
 export const newsService = {
   async scanCompany(code: string, by: string, quiet?: boolean): Promise<{ added: number; fails: number }> {
     const terms = termsFor(code);
+    const live = isLiveBorrower(code);
     let total = 0, fails = 0;
     for (const term of terms) {
-      try { total += ingest(code, term, await fetchTerm(term), 'live'); }
+      try { total += ingest(code, term, await fetchTerm(term, undefined, undefined, undefined, live), 'live'); }
       catch { fails++; } // real data only — never invent
     }
     if (!quiet) {
@@ -274,6 +438,30 @@ export const newsService = {
     }
     writeAudit(by, 'News scan', 'ALL', `${codes.length} firms · ${found} new${failTerms ? ` · ${failTerms} source failures` : ''}`);
     return { found, failTerms, firms: codes.length };
+  },
+
+  /* POLICY SWEEP — the risk that never names the firm.
+     A state tariff order, an ALMM revision, a change to open-access charges: none of
+     these mention a borrower, so a radar that only matches company names cannot see
+     them, yet they re-price whole exposures at once. The sweep asks each theme AGAINST
+     THE FIRM'S STATE and files what it finds against that firm, so triage shows which
+     exposure the policy move touches.
+
+     Themes come from PULSE (/v1/news/config) so there is one list, not a copy here that
+     drifts; POLICY_FALLBACK only covers a static build with no gateway. */
+  async policyScan(code: string, by: string): Promise<{ added: number; fails: number; state: string }> {
+    const c: any = db().clients?.[code] || {};
+    const state = String(c.state || '').trim();
+    if (!state) return { added: 0, fails: 0, state: '' };   // policy risk is state-scoped
+    const themes = await policyThemes();
+    let added = 0, fails = 0;
+    for (const theme of themes) {
+      const q = theme + ' ' + state;
+      try { added += ingest(code, 'policy: ' + q, await fetchTerm(q), 'scan'); }
+      catch { fails++; }
+    }
+    writeAudit(by, 'News scan', code, `policy sweep (${state}) · ${added} new${fails ? ` · ${fails} source failures` : ''}`);
+    return { added, fails, state };
   },
 
   verdict(id: string, v: string, by: string) {

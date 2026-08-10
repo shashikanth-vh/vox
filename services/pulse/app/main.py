@@ -45,6 +45,7 @@ from app.matching import WatchEntity, classify_signal, match_entities
 from app.news import schedules as sched
 from app.news.mailer import digest_html, send_email
 from app.news.search import NewsSearch
+from app.news.triage import POLICY_THEMES
 from app.providers import NewsItem, build_providers
 
 log = get_logger("pulse")
@@ -307,16 +308,24 @@ def create_app() -> FastAPI:
                           date_from: str = Query(default="", alias="from"),
                           date_to: str = Query(default="", alias="to"),
                           limit: int = Query(default=40, ge=1, le=100),
+                          exposure: str = Query(
+                              default="",
+                              description="'live' when we already have money out to this "
+                                          "name — flips good-looking news to a review flag"),
                           x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
         if (denied := _require_api_key(settings, x_api_key)) is not None:
             return denied
         term = (q or "").strip()
         if not term:
             return {"articles": []}
+        # Polarity depends on our relationship with the firm, and the CALLER is what knows
+        # it — the sweep holds the book. Anything other than "live" is a name we are
+        # chasing, for which fresh funding really is good news.
+        live = (exposure or "").strip().lower() in {"live", "borrower", "true", "1"}
         t0 = time.time()
         try:
             articles, sources = await request.app.state.search.search_detail(
-                term, date_from, date_to, limit)
+                term, date_from, date_to, limit, live)
         except Exception as exc:  # noqa: BLE001 - a search must fail as a message
             log.exception("pulse_search_failed", extra={"term": term})
             return ORJSONResponse(status_code=502, content={
@@ -344,7 +353,10 @@ def create_app() -> FastAPI:
         # The sender is shown so a desk can see WHICH address a digest will come from
         # before sending one; the password is never echoed.
         return {"email": smtp.ready, "from": smtp.sender if smtp.ready else "",
-                "gdelt": not settings.disable_gdelt, "scheduler": settings.scheduler_enabled}
+                "gdelt": not settings.disable_gdelt, "scheduler": settings.scheduler_enabled,
+                # The screen composes a policy sweep from these; publishing them keeps one
+                # list of themes rather than a copy per client that drifts.
+                "policy_themes": POLICY_THEMES}
 
     @app.post("/v1/news/email", tags=["News Radar"],
               summary="Search a term and email the digest")

@@ -23,12 +23,63 @@ three sources, merged and de-duplicated, and the search terms never leave PRISM.
 Any one failing is normal and never fails the search. The same story arriving from two
 sources under two URLs is listed **once** (de-duplicated on the normalised headline).
 
-### Severity
+### Triage — `app/news/triage.py`
 
-`UGLY` / `BAD` / `GOOD`, from whole-word keyword lists in `app/news/search.py`. Whole
-words matter: substring matching turned "firm" into an FIR and "afraid" into a raid,
-which mislabels a company on the desk's screen. Hard-adverse beats a positive; a clear
-positive beats a routine watch word.
+Four tiers, in the desk's own words. PULSE is the authority: every article it returns
+carries its `severity`, `category` and (for a context flip) the `reason`, and the screen
+renders that rather than re-deciding, so a scheduled digest and a live search can never
+disagree about the same headline. The UI keeps a mirror of the rules only for answers that
+did **not** come from PULSE — the direct-GDELT hop, a public proxy, an offline build.
+
+| Tier | What it is |
+|---|---|
+| `UGLY` | hard-adverse — fraud, enforcement, insolvency. Includes the euphemisms recovery is actually reported by: SARFAESI, NCLT, provisional attachment, lookout circular, DGGI, forensic audit |
+| `BAD` | the stress ladder — SMA-0/1/2, restructuring, OTS, covenant/DSCR/DSRA breach, promoter pledge, discom dues, auditor churn, qualified opinion — plus routine litigation |
+| `POLICY` | tariff and regulatory moves that name **no company at all** |
+| `GOOD` | genuine wins |
+
+**The stress ladder is kept separate from the routine watch words** so it outranks a
+positive verb. "Promoter pledge *rises* to 62 per cent" contains "rises"; a rule that lets
+any cheerful word win files a distress signal as good news.
+
+#### Polarity is not a property of the headline
+
+"Raises fresh debt" is a win for a name we are chasing and a warning about a name we have
+already lent to — the borrower is levering up somewhere else, ahead of us. Six patterns
+(fresh debt, OTS, share pledge, an outsized order, a stake sale, an auditor change) flip to
+`BAD` / `context-review` when the caller passes `exposure=live`, each carrying the sentence
+that explains the flip:
+
+> *An OTS means a lender took a haircut — a default event, not a win.*
+
+The **caller** decides, because the caller holds the book: the screen passes
+`exposure=live` for any firm with a lending line that is not Rejected or On Hold. Triage is
+applied on the way out of the cache, so one fetch serves both readings. Nothing is
+auto-filed as good on a borrower.
+
+#### Two guards
+
+Recall without precision is a radar the desk stops reading.
+
+- **Negation** — a negator within 70 characters *before* the keyword suppresses it, so
+  "cleared of siphoning", "acquitted" and "clean chit" do not read as UGLY. The window
+  matters: a "cleared" about a different matter later in the sentence must not mask a real
+  arrest.
+- **Word sense** — "charge" means a criminal charge, except beside "EV charging station",
+  which is half this book. Same for "by default", "doing fine", "strike price". Every match
+  is checked, not just the first: "EV charging firm arrested over loan fraud" is still UGLY.
+
+Phrases match however they are punctuated, so "one-time settlement" and "one time
+settlement" are the same rule.
+
+### The policy sweep — the risk that never names the firm
+
+A state tariff order, an ALMM revision, a change to open-access charges: none of these
+mention a borrower, yet each re-prices whole exposures at once. **⚡ Policy** on a firm's
+card asks each theme *against that firm's state* and files what comes back against the
+firm, so triage shows which exposure the policy move touches. Themes come from
+`/v1/news/config` (`policy_themes`) so there is one list, not a copy per client. A firm with
+no State set is skipped — policy risk is state-scoped.
 
 ## Configuration
 
@@ -101,8 +152,8 @@ gateway injects (`PULSE_API_KEYS`), so nothing reaches it directly from a browse
 
 | Route | Purpose |
 |---|---|
-| `GET /v1/news/search?q=&from=&to=` | search; returns `{articles:[{title,url,source,when,via,severity}], sources:[…]}` |
-| `GET /v1/news/config` | is email configured, is GDELT on, is the scheduler running |
+| `GET /v1/news/search?q=&from=&to=&exposure=` | search; returns `{articles:[{title,url,source,when,via,severity,category,reason?}], sources:[…]}`. `exposure=live` turns on the context flip |
+| `GET /v1/news/config` | is email configured, is GDELT on, is the scheduler running, and the `policy_themes` a sweep uses |
 | `POST /v1/news/email` | search a term and email the digest |
 | `POST /v1/news/email-digest` | email a digest the caller already assembled (an all-firms sweep) |
 | `POST /v1/news/email-test` | send a test email |

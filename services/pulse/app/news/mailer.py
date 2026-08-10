@@ -27,7 +27,8 @@ from evam_backend_core.logging import get_logger
 
 log = get_logger("pulse.mailer")
 
-_SEV_COLOR = {"GOOD": "#2E7D4F", "BAD": "#C98A1B", "UGLY": "#B3432B"}
+_SEV_COLOR = {"GOOD": "#2E7D4F", "BAD": "#C98A1B", "UGLY": "#B3432B",
+               "POLICY": "#1F6FA8"}
 
 
 @dataclass(frozen=True)

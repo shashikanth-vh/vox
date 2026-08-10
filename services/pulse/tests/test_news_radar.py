@@ -21,6 +21,7 @@ from app.main import create_app
 from app.news import schedules as sched
 from app.news.mailer import SmtpConfig, digest_html, send_email
 from app.news.search import NewsSearch, classify
+from app.news.triage import triage
 
 GOOGLE_RSS = """<?xml version="1.0"?><rss><channel>
 <item><title>Acme Solar wins 300 MW order - Mint</title>
@@ -96,6 +97,81 @@ def test_a_word_inside_another_word_is_not_a_signal():
     assert classify("Acme, a firm in Pune, expands capacity") != "UGLY"
     assert classify("Investors were afraid of the tariff change") != "UGLY"
     assert classify("The first phase is complete") != "UGLY"
+
+
+# --------------------------------------------------------------------------- #
+# Triage: the guards and the context flip
+# --------------------------------------------------------------------------- #
+def test_a_cleared_name_is_not_an_adverse_hit():
+    """Without this, every exoneration files as UGLY — and a radar that cries fraud over
+    "cleared of fraud" is one the desk stops reading."""
+    assert classify("Promoter cleared of fraud charges by court") != "UGLY"
+    assert classify("Acme acquitted in the siphoning case") != "UGLY"
+    assert classify("Company denies default on term loan") != "UGLY"
+    assert classify("Regulator gives clean chit on related-party dealings") != "UGLY"
+    # But the negator must be NEAR the keyword, not merely somewhere in the sentence.
+    far = ("Court cleared the merger last year, and in a separate matter the promoter "
+           "was arrested this week over an alleged loan fraud at the group")
+    assert classify(far) == "UGLY"
+
+
+def test_the_wrong_sense_of_a_word_is_not_a_signal():
+    """Half this book is charging infrastructure. "Charge" has to mean a criminal charge,
+    not a plug."""
+    assert classify("Zeon opens 40 new EV charging stations in Pune") != "UGLY"
+    assert classify("Battery charging capacity doubled at the depot") != "UGLY"
+    assert classify("Tariff applies by default to open access consumers") != "UGLY"
+    assert classify("The plant is doing fine after the monsoon") != "BAD"
+    # A blocked sense must not shadow a real hit elsewhere in the same headline.
+    assert classify("EV charging firm arrested over loan fraud") == "UGLY"
+
+
+def test_good_looking_news_is_a_review_flag_on_a_live_borrower():
+    """The heart of it: polarity is keyword x OUR RELATIONSHIP. Fresh debt is a win for a
+    name we are chasing and a warning about a name we have lent to."""
+    head = "Acme Solar raises fresh debt of Rs 400 crore"
+    assert triage(head, live=False).severity == "GOOD"
+    v = triage(head, live=True)
+    assert (v.severity, v.category) == ("BAD", "context-review")
+    assert "dilutes our cover" in v.reason          # the screen shows this on the flag
+
+    ots = triage("Acme settles with lender in one-time settlement", live=True)
+    assert ots.category == "context-review"
+    assert "haircut" in ots.reason
+
+
+def test_a_hard_adverse_hit_outranks_the_context_flip():
+    """A borrower under enforcement is UGLY, not a polite review flag."""
+    assert classify("Acme raises fresh debt weeks after ED probe", live=True) == "UGLY"
+
+
+def test_policy_news_fires_without_a_company_name():
+    """The item that re-prices a portfolio never mentions the borrower."""
+    assert classify("SERC issues revised tariff order for FY27") == "POLICY"
+    assert classify("MNRE notification revises ALMM list") == "POLICY"
+    assert classify("Net metering policy changed for rooftop consumers") == "POLICY"
+
+
+def test_the_stress_ladder_reads_as_a_warning():
+    assert classify("Lender flags covenant breach at Acme") == "BAD"
+    assert classify("Acme classified as SMA-2 by two banks") == "BAD"
+    assert classify("Auditor resigns at Acme weeks before results") == "BAD"
+    assert classify("Promoter pledge rises to 62 per cent") == "BAD"
+
+
+def test_enforcement_euphemisms_read_as_adverse():
+    """These are how recovery is actually reported, long before anyone writes "default"."""
+    for h in ["Lookout circular issued against the promoter",
+              "Bank invokes SARFAESI against Acme's Gujarat plant",
+              "NCLT admits insolvency plea against Acme",
+              "DGGI alleges fake ITC claims at the group"]:
+        assert classify(h) == "UGLY", h
+
+
+def test_a_phrase_matches_however_it_is_punctuated():
+    """The press writes it both ways; a rule that knows one spelling misses half."""
+    assert classify("Acme agrees one-time settlement with lenders", live=True) == "BAD"
+    assert classify("Acme agrees one time settlement with lenders", live=True) == "BAD"
 
 
 # --------------------------------------------------------------------------- #
@@ -348,7 +424,9 @@ def test_config_route_reports_what_is_actually_wired(client):
     body = client.get("/v1/news/config").json()
     assert body["email"] is False          # no SMTP in the test environment
     assert body["from"] == ""              # never echo a sender we cannot send from
-    assert set(body) == {"email", "from", "gdelt", "scheduler"}
+    assert set(body) == {"email", "from", "gdelt", "scheduler", "policy_themes"}
+    # The screen builds its policy sweep from these, so they have to arrive.
+    assert "ALMM" in body["policy_themes"]
 
 
 def test_emailing_without_smtp_fails_with_a_reason_a_person_can_act_on(client):

@@ -6,7 +6,7 @@ import { CodeText } from '../../components/common/Pills';
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
-import { newsService, news, watch, classify, fetchTerm, lastFailure, SEV_LABEL, type Severity, type NewsItem } from '../../services/newsService';
+import { newsService, news, watch, classify, fetchTerm, lastFailure, contextReason, isLiveBorrower, tradingName, SEV_LABEL, type Severity, type NewsItem } from '../../services/newsService';
 import { EmailNewsDialog, EmailAllFirmsDialog } from './EmailDialogs';
 import SchedulesDialog from './SchedulesDialog';
 
@@ -16,7 +16,12 @@ export interface AdhocState {
 }
 const BLANK_ADHOC: AdhocState = { term: '', running: false, items: [], err: '', dfrom: '', dto: '' };
 
-const SEV_BG: Record<Severity, string> = { RED: tokens.bad, AMBER: tokens.warn, GREEN: tokens.ok };
+const SEV_BG: Record<Severity, string> = {
+  RED: tokens.bad, AMBER: tokens.warn, GREEN: tokens.ok,
+  // POLICY is its own colour, not a shade of warning: a tariff order is not a problem
+  // with the borrower, it is a change in the ground they stand on.
+  BLUE: '#1F6FA8',
+};
 
 function SevPill({ s }: { s: Severity }) {
   return (
@@ -26,9 +31,9 @@ function SevPill({ s }: { s: Severity }) {
 }
 
 // One headline row — click anywhere opens the source article.
-function NewsLine({ severity, headline, url, meta, onOpen, actions }: {
+function NewsLine({ severity, headline, url, meta, onOpen, actions, flag }: {
   severity: Severity; headline: string; url?: string; meta: string;
-  onOpen: () => void; actions?: React.ReactNode;
+  onOpen: () => void; actions?: React.ReactNode; flag?: string;
 }) {
   return (
     <Box onClick={onOpen} title="Open the source article"
@@ -42,6 +47,14 @@ function NewsLine({ severity, headline, url, meta, onOpen, actions }: {
             onClick={(e) => e.stopPropagation()} sx={{ color: tokens.navy }}>{headline} ↗</Link> : headline}
         </Typography>
         <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{meta}</Typography>
+        {/* The context flip, explained where it is read. Good-looking news on a firm we
+            have lent to is a question, and the answer to "why is this flagged?" has to
+            be one hover away or the flag is just noise. */}
+        {flag && (
+          <Typography title={flag} sx={{ fontSize: 11.3, fontWeight: 600, color: tokens.warn, mt: 0.2 }}>
+            ⚠ good-news check — live borrower: {flag}
+          </Typography>
+        )}
       </Box>
       {actions && <Box onClick={(e) => e.stopPropagation()} sx={{ display: 'flex', gap: 0.5 }}>{actions}</Box>}
     </Box>
@@ -54,7 +67,8 @@ export default function NewsRadar() {
   const [, force] = useState(0);
   const bump = () => force((n) => n + 1);
 
-  const [sev, setSev] = useState<Severity | ''>('');
+  // 'CTX' is a filter, not a severity: the open review flags cut across colours.
+  const [sev, setSev] = useState<Severity | 'CTX' | ''>('');
   const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0, why: '' });
   const [adhoc, setAdhoc] = useState<AdhocState>(BLANK_ADHOC);
   const [qBox, setQBox] = useState('');
@@ -68,11 +82,14 @@ export default function NewsRadar() {
   const all = news();
   const reds = all.filter((n) => n.severity === 'RED').length;
   const ambs = all.filter((n) => n.severity === 'AMBER').length;
+  const blues = all.filter((n) => n.severity === 'BLUE').length;
+  // Open review flags: good-looking news on a live borrower that nobody has judged yet.
+  const ctxs = all.filter((n) => n.category === 'context-review' && !n.verdict).length;
   const codes = Object.keys(db().clients || {});
 
   const q = search.trim().toLowerCase();
   const shown = all.filter((n) =>
-    (!sev || n.severity === sev)
+    (!sev || (sev === 'CTX' ? (n.category === 'context-review' && !n.verdict) : n.severity === sev))
     && (!q || [n.headline, db().clients?.[n.code]?.name, n.code, n.term, n.source]
       .some((x) => String(x || '').toLowerCase().includes(q))));
 
@@ -103,6 +120,16 @@ export default function NewsRadar() {
   const scanOne = async (code: string) => {
     await newsService.scanCompany(code, user.full);
     bump();
+  };
+
+  // The risk that never names the firm — state-level tariff / ALMM / open-access moves.
+  const [policyBusy, setPolicyBusy] = useState('');
+  const policyScan = async (code: string) => {
+    setPolicyBusy(code);
+    try {
+      const r = await newsService.policyScan(code, user.full);
+      if (!r.state) window.alert('Set this firm’s State first — policy risk is state-scoped.');
+    } finally { setPolicyBusy(''); bump(); }
   };
 
   const addTerm = (code: string) => {
@@ -145,7 +172,8 @@ export default function NewsRadar() {
       if (stopped.current) return;                 // ignore a late result after Stop
       setAdhoc((a) => ({
         ...a, running: false,
-        items: arts.map((x) => ({ ...x, severity: classify(x.headline)[0] })),
+        // PULSE already judged these; only a fallback source leaves it to us.
+        items: arts.map((x) => ({ ...x, severity: x.severity || classify(x.headline)[0] })),
       }));
     } catch (e: any) {
       if (stopped.current || e?.name === 'AbortError') { setAdhoc((a) => ({ ...a, running: false })); return; }
@@ -183,7 +211,7 @@ export default function NewsRadar() {
     </Paper>
   );
 
-  const sevChip = (s: Severity | '', label: string) => (
+  const sevChip = (s: Severity | 'CTX' | '', label: string) => (
     <Chip label={label} clickable size="small" variant={sev === s ? 'filled' : 'outlined'}
       color={sev === s ? 'primary' : 'default'} onClick={() => setSev(s)} />
   );
@@ -247,9 +275,17 @@ export default function NewsRadar() {
         {kpi('items', all.length)}
         {kpi('ugly', reds, tokens.bad)}
         {kpi('bad', ambs, tokens.warn)}
+        {blues > 0 && kpi('policy', blues, SEV_BG.BLUE)}
+        {ctxs > 0 && kpi('to review', ctxs, tokens.warn)}
         {kpi('firms watched', codes.length)}
         <Box sx={{ flex: 1 }} />
         {sevChip('', 'All')}{sevChip('GREEN', '🟢 Good')}{sevChip('AMBER', '🟡 Bad')}{sevChip('RED', '🔴 Ugly')}
+        {blues > 0 && sevChip('BLUE', '🔵 Policy')}
+        {ctxs > 0 && (
+          <Chip label={`⚠ To review (${ctxs})`} clickable size="small"
+            variant={sev === 'CTX' ? 'filled' : 'outlined'} color={sev === 'CTX' ? 'warning' : 'default'}
+            onClick={() => setSev(sev === 'CTX' ? '' : 'CTX')} />
+        )}
         <Button onClick={() => setSched('all')}>⏰ Schedule scan</Button>
         {all.length > 0 && <Button onClick={() => setEmailAll(true)}>📧 Email firms’ news</Button>}
         {all.length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear all news</Button>}
@@ -272,8 +308,12 @@ export default function NewsRadar() {
       )}
       <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>
         One click sweeps every firm on the Register — company name plus the owner/promoter terms you add per firm.
-        Every item is a REAL article scraped live from GDELT’s global news index; if the source is unreachable the
-        scan reports the failure — nothing is ever invented. Click any item to open the source.
+        Every item is a REAL article scraped live; if the source is unreachable the scan reports the failure —
+        nothing is ever invented. Colours read 🟢 good · 🟡 bad · 🔴 ugly · 🔵 policy. Watch terms should carry every
+        promoter and director: the person is named before the company is. <b>⚡ Policy</b> sweeps state-level tariff
+        and regulatory moves that never mention the firm, and good-sounding news on a firm we have lent to —
+        fresh debt, an OTS, a share pledge, a stake sale, an auditor change — is flagged ⚠ for review rather than
+        filed as good. Click any item to open the source.
       </Typography>
 
       {/* ---- per-firm groups ---- */}
@@ -301,12 +341,28 @@ export default function NewsRadar() {
                   {items.length} item{items.length > 1 ? 's' : ''}
                 </Typography>
                 <Box sx={{ flex: 1 }} />
+                {isLiveBorrower(code) && (
+                  <Chip label="live exposure" size="small" variant="outlined"
+                    title="Our money is out to this firm, so good-looking news is flagged for review rather than filed as a win."
+                    sx={{ height: 20, fontSize: 10.5 }} />
+                )}
                 <Button onClick={(e) => { e.stopPropagation(); scanOne(code); }}>↻ Scan</Button>
+                {c.state && (
+                  <Button disabled={policyBusy === code}
+                    title={`Policy sweep: tariff / ALMM / payment-security / net-metering × ${c.state} — these never name the firm`}
+                    onClick={(e) => { e.stopPropagation(); policyScan(code); }}>
+                    {policyBusy === code ? 'sweeping…' : '⚡ Policy'}
+                  </Button>
+                )}
               </Box>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
               <Box sx={{ px: 1, pb: 0.8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.6 }}>
-                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>watching: {c.name || ''}</Typography>
+                {/* The term actually searched, not the register's legal name — otherwise
+                    this line claims a search that never went out. */}
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                  watching: {c.name ? tradingName(c.name) : ''}
+                </Typography>
                 {terms.map((t, i) => (
                   <Typography key={i} sx={{ fontSize: 11.5, color: tokens.muted }}>
                     · {t}{' '}
@@ -319,6 +375,8 @@ export default function NewsRadar() {
               {items.map((n) => (
                 <NewsLine key={n.id} severity={n.severity} headline={n.headline} url={n.url}
                   meta={`${n.source || ''} · ${n.when || ''} · matched “${n.term}”${n.verdict ? ` · verdict: ${n.verdict}` : ''}`}
+                  flag={n.category === 'context-review'
+                    ? (n.reason || contextReason(n.headline)) : undefined}
                   onOpen={() => newsService.open(n, user.full)}
                   actions={!n.verdict ? (
                     <>
