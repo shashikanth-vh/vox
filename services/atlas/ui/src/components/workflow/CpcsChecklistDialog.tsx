@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography,
-  IconButton, MenuItem, TextField, Alert,
+  IconButton, MenuItem, TextField, Alert, Tabs, Tab,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
@@ -56,7 +56,17 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   // conditions; "Update CS checklist" starts once disbursement is in motion and records
   // documents as they arrive. The OTHER half's items ride along unchanged (hidden), so
   // the register always holds the complete picture in one versioned artefact.
-  const phase: 'CP' | 'CS' = action?.key === 'cpcs.update-cs' ? 'CS' : 'CP';
+  // TWO TABS, because the two checklists are different documents: the conditions
+  // precedent are the pre-disbursement gate, the conditions subsequent are the chase
+  // that runs on afterwards. The button you came in on picks the opening tab; from
+  // there the desk can read either half without leaving the screen.
+  const opening: 'CP' | 'CS' = action?.key === 'cpcs.update-cs' ? 'CS' : 'CP';
+  const [phase, setPhase] = useState<'CP' | 'CS'>(opening);
+  // A fresh open re-seats the tab on whichever half was asked for.
+  useEffect(() => { if (open) setPhase(opening); }, [open, opening]);
+  // Everything the register holds, both halves, kept whole so switching tabs is a
+  // filter rather than a reload.
+  const [all, setAll] = useState<CpcsItem[]>([]);
   const [items, setItems] = useState<CpcsItem[]>([]);
   const [carried, setCarried] = useState<CpcsItem[]>([]);
   // The CS step writes PROGRESS onto the approved checklist row — it needs its id.
@@ -103,6 +113,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
     // invented starter conditions: the letter is the source of truth.
     setCarried([]);
     setItems([]);
+    setAll([]);
     setLatestId(''); setLatestStatus('');
     // The plane knows which version comes next — a checklist is keyed on (lending,
     // version), so opening on 1 every time hands the user a 409 after they have filled
@@ -139,7 +150,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           ];
         }
         if (alive && seeded.length) {
-          const all = seeded.map((s: any): CpcsItem => ({
+          const loaded = seeded.map((s: any): CpcsItem => ({
             key: String(s.key || ''), label: String(s.label || s.key || ''),
             condition_type: s.condition_type === 'CS' ? 'CS' : 'CP',
             required: s.required !== false,
@@ -148,14 +159,29 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
             reason: String(s.reason || ''),
             expiry_date: String(s.expiry_date || ''),
           }));
-          // This phase's items are edited; the other half rides along untouched.
-          setItems(all.filter((x) => x.condition_type === phase));
-          setCarried(all.filter((x) => x.condition_type !== phase));
+          setAll(loaded);
         }
       } catch { /* the phase's starter stays */ }
     })();
     return () => { alive = false; };
   }, [open, action]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The active tab's items are edited; the other half rides along untouched so the
+  // register always receives the complete artefact.
+  useEffect(() => {
+    if (!all.length) return;
+    setItems(all.filter((x) => x.condition_type === phase));
+    setCarried(all.filter((x) => x.condition_type !== phase));
+  }, [all, phase]);
+
+  /** "(3/9)" for a half that has items, nothing for one that has none yet. */
+  const tally = (half: 'CP' | 'CS') => {
+    const rel = (phase === half ? items : all.filter((x) => x.condition_type === half));
+    if (!rel.length) return '';
+    const doneStates = half === 'CP'
+      ? ['Completed', 'Waived', 'Deferred as CS'] : ['Completed', 'Waived'];
+    return ` (${rel.filter((r) => doneStates.includes(r.status)).length}/${rel.length})`;
+  };
 
   const set = (i: number, patch: Partial<CpcsItem>) =>
     setItems((rows) => rows.map((r, n) => (n === i ? { ...r, ...patch } : r)));
@@ -274,15 +300,29 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
 
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
-      <DialogTitle sx={{ fontSize: 16 }}>
+      <DialogTitle sx={{ fontSize: 16, pb: 1 }}>
         {phase === 'CP' ? 'Prepare CP checklist' : 'Update CS checklist'}
         {phase === 'CP' && (
           <TextField size="small" type="number" label="Version" value={version}
             onChange={(e) => setVersion(Math.max(1, Number(e.target.value) || 1))}
             sx={{ ml: 1.5, width: 104 }} inputProps={{ min: 1 }} />
         )}
+        {/* Two documents, two tabs. Each shows how much of its own half is done, so the
+            desk can see at a glance which one still needs work. */}
+        <Tabs value={phase} onChange={(_e, v) => setPhase(v)} sx={{ mt: 1, minHeight: 36 }}>
+          <Tab value="CP" label={`Conditions Precedent${tally('CP')}`}
+            sx={{ minHeight: 36, fontSize: 12.5, textTransform: 'none' }} />
+          <Tab value="CS" label={`Conditions Subsequent${tally('CS')}`}
+            sx={{ minHeight: 36, fontSize: 12.5, textTransform: 'none' }} />
+        </Tabs>
       </DialogTitle>
       <DialogContent dividers>
+        {phase === 'CS' && latestStatus !== 'Approved' && (
+          <Alert severity="info" sx={{ mb: 1, py: 0.2, fontSize: 12.3 }}>
+            Conditions subsequent are recorded on the APPROVED checklist — get the CP
+            half approved first, then chase these here.
+          </Alert>
+        )}
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>
           {phase === 'CP' ? (
             <>Conditions PRECEDENT — read from the sanction letter — must be worked before

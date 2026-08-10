@@ -109,3 +109,68 @@ async def test_a_sanctioned_line_is_still_offered_the_disburse_verb(monkeypatch)
     keys = {a["key"] for a in r.json()["actions"]}
     assert "disburse" in keys
     get_settings.cache_clear()
+
+
+class _WithChecklist(_Http):
+    """The line plus one checklist version, so the action counts have something to read."""
+
+    def __init__(self, row: dict, items: list[dict]) -> None:
+        super().__init__(row)
+        self.items = items
+
+    async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if "cpcs-checklists" in str(url):
+            return httpx.Response(200, request=httpx.Request("GET", str(url)), json={
+                "items": [{"checklist_version": 1, "status": "Approved",
+                           "items": self.items}]})
+        return await super().get(url, **kwargs)
+
+
+async def _actions(monkeypatch, row, items):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _WithChecklist(row, items)
+    r = await _get(app, {"subject_type": "Lending", "subject_id": LID})
+    assert r.status_code == 200, r.text
+    return {a["key"]: a for a in r.json()["actions"]}
+
+
+async def test_a_finished_half_stops_inviting_a_click(monkeypatch):
+    """A satisfied checklist is a completed step, not an open one — and re-opening it is
+    how a settled condition gets accidentally re-typed."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cs1", "condition_type": "CS", "status": "Completed"},
+        {"key": "cs2", "condition_type": "CS", "status": "Pending"},
+    ])
+    cp, cs = by_key["cpcs.prepare"], by_key["cpcs.update-cs"]
+    assert cp["label"].endswith("(1/1)") and cp["enabled"] is False
+    assert "satisfied" in cp["reason"]
+    # The CS half still has one open — it stays workable.
+    assert cs["label"].endswith("(1/2)") and cs["enabled"] is True
+    get_settings.cache_clear()
+
+
+async def test_both_halves_finished_close_both_buttons(monkeypatch):
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Disbursed"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+        {"key": "cs1", "condition_type": "CS", "status": "Waived"},
+    ])
+    assert by_key["cpcs.prepare"]["enabled"] is False
+    assert by_key["cpcs.update-cs"]["enabled"] is False
+    get_settings.cache_clear()
+
+
+async def test_disburse_closes_only_when_the_line_is_fully_drawn(monkeypatch):
+    """It must stay live at 'Disbursed' — that is where T2, T3 … are recorded — so the
+    test is the money, not the stage."""
+    part = await _actions(monkeypatch, {
+        "id": LID, "stage": "Disbursed", "disbursed_amount": 4,
+        "proposed_disbursement_amount": 10}, [])
+    assert part["disburse"]["enabled"] is True, "4 of 10 Cr drawn — T2 still to record"
+
+    full = await _actions(monkeypatch, {
+        "id": LID, "stage": "Disbursed", "disbursed_amount": 10,
+        "proposed_disbursement_amount": 10}, [])
+    assert full["disburse"]["enabled"] is False
+    assert "Fully disbursed" in full["disburse"]["reason"]
+    get_settings.cache_clear()

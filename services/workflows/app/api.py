@@ -3752,6 +3752,17 @@ def create_app() -> FastAPI:
             # (4/9)" reads as a status, not a mystery step. Counts come from the latest
             # checklist version; a completed CP is anything no longer being chased.
             label = spec["label"]
+            # DISBURSE closes when the line is fully drawn. It has to stay live at
+            # 'Disbursed' — that is where T2, T3 … are recorded — so the test is the
+            # MONEY, not the stage: once the actuals reach the proposed drawdown (or the
+            # facility) there is nothing left to disburse and the button says so.
+            if spec["key"] == "disburse" and enabled and subject_type == "Lending":
+                drawn = float(row.get("disbursed_amount") or 0)
+                ceiling = float(row.get("proposed_disbursement_amount")
+                                or row.get("amount_cr") or 0)
+                if ceiling and drawn + 1e-9 >= ceiling:
+                    enabled, reason = False, (
+                        f"Fully disbursed — {drawn:g} of {ceiling:g} Cr is on the book.")
             if latest_checklist_items and spec["key"] in ("cpcs.prepare", "cpcs.update-cs"):
                 want = "CP" if spec["key"] == "cpcs.prepare" else "CS"
                 rel = [i for i in latest_checklist_items
@@ -3761,6 +3772,16 @@ def create_app() -> FastAPI:
                 if rel:
                     done = sum(1 for i in rel if str(i.get("status")) in done_states)
                     label = f"{label} ({done}/{len(rel)})"
+                    # A finished half is a finished half: nothing is left to work, so the
+                    # button stops inviting a click. It reads as a completed step rather
+                    # than an open one — and re-opening a satisfied checklist is how a
+                    # settled condition gets accidentally re-typed.
+                    if done == len(rel) and enabled:
+                        enabled, reason = False, (
+                            f"All {len(rel)} condition"
+                            f"{'s' if len(rel) > 1 else ''} "
+                            f"{'precedent are' if want == 'CP' else 'subsequent are'} "
+                            "satisfied — nothing left to work here.")
             actions.append({
                 "key": spec["key"], "label": label, "method": spec["method"],
                 "url": url, "enabled": enabled,
