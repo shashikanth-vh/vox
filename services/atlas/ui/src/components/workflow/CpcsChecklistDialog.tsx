@@ -98,11 +98,26 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         ? out.cp_items
         : out.cs_items.map((c) => c.label + (c.timeline ? ` (${c.timeline})` : ''));
       if (!labels.length) throw new Error(`The letter yielded no ${phase} conditions.`);
-      setItems(labels.map((label, n) => ({
-        key: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80) || `condition-${n + 1}`,
-        label, condition_type: phase, required: true,
-        status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
-      })));
+      // MERGE, never replace. Reading the letter used to overwrite the list, which threw
+      // away everything already on this tab — a CP the checker deferred as a CS (with
+      // its reason and its satisfy-by date), a receipt already recorded, a condition
+      // someone typed by hand. The letter is a SOURCE of conditions, not the authority
+      // on which ones exist: what is already on record wins, and only genuinely new
+      // lines are appended.
+      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      setItems((rows) => {
+        const seen = new Set(rows.map((r) => norm(r.label || r.key)));
+        const fresh = labels
+          .filter((label) => !seen.has(norm(label)))
+          .map((label, n): CpcsItem => ({
+            key: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80)
+              || `condition-${rows.length + n + 1}`,
+            label, condition_type: phase, required: true,
+            status: 'Pending', evidence_ref: '', reason: '', expiry_date: '',
+          }));
+        if (!fresh.length) setErr(`Every ${phase} condition in the letter is already on this list.`);
+        return [...rows, ...fresh];
+      });
     } catch (e: any) { setErr(e?.message || String(e)); }
     setParsing(false);
   };
@@ -378,7 +393,15 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
               <TextField size="small" select label="Status" value={r.status}
                 onChange={(e) => set(i, { status: e.target.value as CpcsItem['status'] })}
                 sx={{ width: 160 }}>
-                {(phase === 'CS' ? (['Pending', 'Completed'] as const) : STATUSES)
+                {/* The CS tab offers Pending | Completed: deferring is a CP decision the
+                    checker makes, not something to pick here. But an item CARRYING
+                    'Deferred as CS' must still render its own state — without the option
+                    present the Select showed blank, and saving that blank sent the item
+                    up as a plain Pending, losing the deferral on the screen. */}
+                {(phase === 'CS'
+                  ? ([...(['Pending', 'Completed'] as const),
+                      ...(r.status === 'Deferred as CS' ? (['Deferred as CS'] as const) : [])])
+                  : STATUSES)
                   .map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
               </TextField>
               <TextField size="small" select label="Required" value={r.required ? 'y' : 'n'}
