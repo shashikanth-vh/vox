@@ -7,6 +7,12 @@ stage + account + covenant stamping) in its own transaction; rejection needs the
 reason and frees the headroom. Four-eyes: the recorder can never settle their own
 booking. The machine lane (service keys) still books directly — test_increment4
 covers that unchanged.
+
+THIS WHOLE FILE IS THE LMS-ENABLED SPEC. Servicing is deferred by default now
+(``REGISTER_LMS_ENABLED=false``), which retires the queue entirely — recording IS the
+disbursement. The fixture below turns the flag ON so these tests keep describing the
+gate they were written for, and it stays honest the day servicing comes back.
+test_lms_deferred.py covers the default.
 """
 
 from __future__ import annotations
@@ -17,6 +23,14 @@ from tests.test_advaya_manual import _submitted_line
 from tests.test_handover import ADMIN, CREDIT_HEAD
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _lms_on(monkeypatch):
+    """The booking gate only exists when the servicing side does."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "lms_enabled", True)
 
 OPERATOR = {"X-User-Email": "ops@evamfinance.com", "X-User-Roles": "LMS Operator"}
 AUTHORIZER = {"X-User-Email": "authz@evamfinance.com", "X-User-Roles": "LMS Management"}

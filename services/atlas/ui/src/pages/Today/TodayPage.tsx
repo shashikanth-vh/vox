@@ -117,10 +117,10 @@ export default function TodayPage() {
     refetchInterval: 60000,
     staleTime: 30000,
   });
-  // BOOKING APPROVALS — the LMS gate's queue, straight from the register: every
-  // human-recorded tranche waiting for LMS Management. Approval opens/grows the loan
-  // account in the register's own transaction; this is the servicing checker's inbox,
-  // so it lands on Today, not only on the LMS page.
+  // BOOKING APPROVALS — the LMS gate's queue. WITH SERVICING DEFERRED nothing enters
+  // it: recording a disbursement books it outright, so this section is empty and hides
+  // itself. It is left in place rather than deleted because the queue is data-driven —
+  // the day REGISTER_LMS_ENABLED goes on, the inbox comes back on its own.
   const canBook = can(user.roles, 'lmsAuthorize');
   const [bookBusy, setBookBusy] = useState('');
   const [bookErr, setBookErr] = useState('');
@@ -166,7 +166,7 @@ export default function TodayPage() {
     try {
       await lmsService.book(t.lending_id, t.id, action, note);
       setBookFlash(action === 'approve'
-        ? `${t.tranche_ref} booked — the loan account is updated (LMS · Servicing has the statement).`
+        ? `${t.tranche_ref} booked — the line is Disbursed and the actuals are on the register.`
         : `${t.tranche_ref} rejected — the recorder corrects and records afresh.`);
       setBookView(null);
       await refetchBookings(); refresh();

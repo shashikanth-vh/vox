@@ -160,6 +160,13 @@ advayaIntegration:
   enabled: false
   url: ""
 
+# LMS · Servicing. DEFERRED: the book ends at 'Disbursed' — recording a disbursement
+# books it outright, no loan account is opened, and the CP/CS checklist stays with the
+# origination desk. Turn on when a servicing desk exists; the booking gate, the account
+# and the handover all come back for new tranches.
+lms:
+  enabled: false
+
 # Access service — when a url is set, the Register VERIFIES an assignee's identity + role
 # there before placing an assignment (closes "services can assign arbitrary UUIDs"). Empty
 # url = verification off (dev). The apiKey is rendered into the chart Secret.

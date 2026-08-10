@@ -41,6 +41,7 @@ from sqlalchemy import select
 from app.api.advaya import HandoffIn, apply_handoff
 from app.api.custom import _ensure_subject_scope
 from app.api.tranches import TrancheIn, apply_tranche
+from app.core.config import get_settings
 from app.core.errors import ConflictError, ForbiddenError, ValidationAppError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -86,14 +87,18 @@ async def record_manual_advaya_event(
             raise ValidationAppError(
                 "A 'disbursed' event needs amount_cr — the tranche amount Advaya "
                 "confirmed.")
-        # A HUMAN relaying an offline confirmation records a PENDING BOOKING: the
-        # actuals, the stage move and the loan account wait for the LMS Management's
-        # approval (the maker/checker seam at LOS→LMS). The machine lane, where the
-        # partner's own system speaks, still books directly.
+        # WITH LMS DEFERRED (the default) recording IS the disbursement: the actuals
+        # and the stage move land here, attributed to whoever attested. There is no
+        # second queue, because there is no servicing desk to hold it — and a booking
+        # waiting on an unstaffed role is a line stuck at 'Ready for Disbursement'
+        # forever. The control on the money already ran: CP/CS approval is what let it
+        # move. When the servicing side goes live (REGISTER_LMS_ENABLED), this reverts
+        # to a PENDING BOOKING settled four-eyed at the LOS→LMS seam.
         tranche = await apply_tranche(ctx, lid, TrancheIn(
             tranche_ref=payload.reference, amount=payload.amount_cr,
             disbursed_on=payload.disbursed_on, advaya_reference=payload.reference,
-            note=payload.note), source=_SOURCE, require_booking=True)
+            note=payload.note), source=_SOURCE,
+            require_booking=get_settings().lms_enabled)
         return {"event": "disbursed", "source": _SOURCE,
                 "recorded_by": ctx.user.email, "tranche": tranche}
 

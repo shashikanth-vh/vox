@@ -180,6 +180,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.advayaIntegration.enabled | quote }}
 - name: REGISTER_ADVAYA_INTEGRATION_URL
   value: {{ .Values.advayaIntegration.url | quote }}
+# LMS · Servicing — DEFERRED by default: the book ends at 'Disbursed', recording a
+# disbursement books it outright, and the CP/CS checklist stays with the origination
+# desk. Enable when there is a servicing desk (docs/LENDING_WORKFLOW_DESIGN.md §0).
+- name: REGISTER_LMS_ENABLED
+  value: {{ .Values.lms.enabled | quote }}
 # Object storage (document bytes) — only wired when the backend is "s3".
 - name: REGISTER_STORAGE_BACKEND
   value: {{ .Values.storage.backend | quote }}

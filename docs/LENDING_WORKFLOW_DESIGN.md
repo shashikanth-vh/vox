@@ -9,6 +9,46 @@ codebase, so each phase starts from real seams rather than a blank page.
 
 ---
 
+## 0. LMS · Servicing is DEFERRED — what the desk actually runs today
+
+> **The book ends at 'Disbursed'.** Everything below phase [I] is built and tested but
+> switched off, because there is no servicing desk to run it yet.
+
+`REGISTER_LMS_ENABLED` (default **false**) is the switch. While it is off:
+
+| | Deferred (today) | Enabled (when servicing goes live) |
+|---|---|---|
+| Recording a disbursement | **Books outright** — actuals and the stage move land in one step, in the recorder's name | Lands **Pending**; an LMS Management settles it four-eyed |
+| The line's terminal | `Disbursed` | `Disbursed`, then the servicing book |
+| Loan account | **Not opened** | Opened on the first booked tranche |
+| CP/CS checklist | **Stays with the origination desk**, which keeps chasing it | Hands over to the servicing register |
+| Later tranches (T2, T3…) | Recorded on the **same** Disburse screen | Recorded in LMS · Servicing |
+| The Lending screen | One register, no sub-tabs | LOS · Origination \| LMS · Servicing |
+
+**Why the booking queue had to go rather than move.** It waited on `authorize_loan_account`,
+held by LMS Management. Point it at a role nobody staffs and a disbursement sits at
+'Ready for Disbursement' with the money already out of the door — a queue with no one in
+it is worse than no queue. The control on that money already ran upstream: **CP/CS
+approval is what let it move.** The recording is then a fact, attributed and evidenced by
+the reference the desk cites — never anonymous.
+
+**Why the checklist does not hand over.** Opening the loan account is also what transfers
+the CP/CS register to servicing. Handing a live chase to a desk that does not exist is how
+conditions go quiet, so the conditions stay where they are being worked.
+
+**Turning it back on.** Set `REGISTER_LMS_ENABLED=true` and recreate the register
+container (a container captures its environment when it is created — a restart is not
+enough). New tranches resume the gate, the handover and the account. **Loan accounts for
+anything disbursed during the deferral do not appear by themselves** — they need a
+deliberate backfill from the booked tranches, which is a decision about historical data,
+not a migration. Migration `0015` settled the bookings that were in flight when the
+deferral landed and recorded each one in the audit trail under `system:lms-deferred`.
+
+The rest of this document describes the full design, including the servicing half. Read
+phase [I] and the LMS rows in the build order as *designed and shelved*, not as *live*.
+
+---
+
 ## 1. The flow, end to end
 
 ```

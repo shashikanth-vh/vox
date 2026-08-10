@@ -28,7 +28,18 @@ async def _submitted_line(client: AsyncClient) -> str:
     return lid
 
 
-async def test_manual_attestation_full_boundary(client: AsyncClient):
+@pytest.fixture()
+def _lms_on(monkeypatch):
+    """This one test describes the LOS→LMS SEAM, which only exists when servicing does.
+    Deferred (the shipped default) recording books outright — test_lms_deferred covers
+    that. Every other test in this file is about the attestation itself and holds either
+    way."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "lms_enabled", True)
+
+
+async def test_manual_attestation_full_boundary(client: AsyncClient, _lms_on):
     """accepted → package settles with the cited reference; disbursed → a PENDING
     BOOKING attributed to the human — nothing moves until the LMS Management approves;
     then actuals + stage 'Disbursed' land in the approval's transaction."""

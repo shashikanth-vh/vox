@@ -62,6 +62,18 @@ class Settings(BaseServiceSettings):
     advaya_integration_enabled: bool = False
     advaya_integration_url: str = ""
 
+    # ---- LMS · servicing (DEFERRED — DEFAULT OFF) -------------------------
+    # The book stops at 'Disbursed'. Recording the disbursement IS the disbursement: it
+    # writes the actuals and moves the line, in one step, attributed to whoever recorded
+    # it. The control on the money is the CP/CS approval that already ran upstream.
+    #
+    # With LMS deferred there is also NO LOAN ACCOUNT and NO CONDITION HANDOVER — the
+    # CP/CS checklist stays with the origination desk, which is the whole point: there
+    # is no servicing desk to hand it to, and a checklist handed to nobody is a chase
+    # that stops. Turn this on when the servicing side goes live, and the maker/checker
+    # booking gate, the loan account and the handover all come back for new tranches.
+    lms_enabled: bool = False
+
     def validate_startup(self) -> None:
         """Fail closed on an incomplete future-integration configuration. Called at app startup."""
         if self.advaya_integration_enabled and not self.advaya_integration_url.strip():

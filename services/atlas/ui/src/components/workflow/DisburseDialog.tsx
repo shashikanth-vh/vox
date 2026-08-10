@@ -17,10 +17,11 @@ import { tokens } from '../../theme';
  *   2. ANSWER — the partner replies OFFLINE; the desk records accepted / rejected here,
  *      citing the partner's reference.
  *   3. TRANCHES — each confirmed phase is one "Record disbursement" (T1, T2, …) with
- *      amount, value date and UTR. A recording lands as a PENDING BOOKING: the LMS
- *      Authorizer approves it in LMS · Servicing, and THAT is what flips the line to
- *      Disbursed and opens the loan account (maker/checker at the LOS→LMS seam).
- *      Once the account is on the servicing book, later phases are recorded there.
+ *      amount, value date and UTR. With LMS · Servicing DEFERRED, recording IS the
+ *      disbursement: the actuals land and the line moves to Disbursed in the same step,
+ *      attributed to whoever attested it. Every later phase is recorded here too —
+ *      there is no servicing book to move to. The control on the money already ran:
+ *      CP/CS approval is what let it out of the door.
  *
  * Reopen the dialog any time — it lands on whichever step is live.
  */
@@ -141,9 +142,9 @@ export default function DisburseDialog({ action, onClose, onDone }: {
         disbursed_on: trDate || undefined,
         ...(note.trim() ? { note: note.trim() } : {}) });
     setTrRef('');
-    onDone('Tranche recorded — awaiting the LMS Management\'s booking approval '
-      + '(LMS · Servicing → Accounts). The line moves to Disbursed when it is booked.');
-    return 'Recorded — pending LMS booking approval.';
+    onDone('Disbursement recorded — the line is now Disbursed and the actuals are on '
+      + 'the register. Record any further tranche here as it is confirmed.');
+    return 'Recorded — the line is Disbursed.';
   });
 
   if (!action) return null;
@@ -277,19 +278,16 @@ export default function DisburseDialog({ action, onClose, onDone }: {
                   {sched.fully_disbursed ? ' — fully disbursed' : ` · remaining ${money(sched.remaining)}`}</>}
               </Typography>
             )}
-            {tranches.some((t: any) => t.booking_status === 'Booked') && !sched?.fully_disbursed && (
-              <Alert severity="info" sx={{ mt: 1, py: 0.2, fontSize: 12 }}>
-                This line is on the servicing book — record further tranches in
-                LMS · Servicing → Accounts (open the account, Record disbursement tranche).
-              </Alert>
-            )}
-            {!sched?.fully_disbursed && !tranches.some((t: any) => t.booking_status === 'Booked') && (
+            {/* Every tranche is recorded HERE while servicing is deferred. This used to
+                send the desk to LMS · Servicing after the first one, which is now a dead
+                end — the line would sit part-disbursed with nowhere to record T2. */}
+            {!sched?.fully_disbursed && (
               <>
                 <Divider sx={{ my: 1.2 }} />
                 <Typography sx={{ fontSize: 12.5, color: tokens.muted, mb: 0.8 }}>
-                  Record T{tranches.length + 1} from the partner's manual confirmation —
-                  it lands as a pending booking; the LMS Management's approval moves the
-                  money onto the book.
+                  Record T{tranches.length + 1} from the partner's manual confirmation.
+                  It lands straight on the book: the actuals are written and the line
+                  moves to Disbursed, in your name.
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <TextField size="small" type="number" label="Amount ₹ Cr" required

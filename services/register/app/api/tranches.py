@@ -45,6 +45,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.authz.engine import service_ctx
+from app.core.config import get_settings
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
@@ -188,6 +189,13 @@ async def _settle_booked(ctx: RequestContext, line: LendingTracker,
     # The LMS follows the money: the FIRST booked tranche opens the loan account
     # (header from the sanction terms), each further one raises its principal, and the
     # statement gets its "Loan Disbursement" row.
+    #
+    # WITH LMS DEFERRED this does not run. Opening the account is also what HANDS THE
+    # CP/CS CHECKLIST OVER to the servicing desk, and there is no servicing desk — a
+    # checklist handed to nobody is a chase that stops. So the book ends at 'Disbursed'
+    # and the conditions stay with the origination desk, which keeps chasing them.
+    if not get_settings().lms_enabled:
+        return
     from app.api.lms import open_or_grow_account
 
     await open_or_grow_account(ctx, line, float(row.amount), row.disbursed_on,
@@ -357,7 +365,8 @@ async def record_tranche_user(lending_id: uuid.UUID, payload: TrancheIn,
 
     await _ensure_subject_scope(ctx, "record_ledger_entry", "Lending", lending_id)
     return await apply_tranche(ctx, str(lending_id), payload,
-                               source="lms-recorded", require_booking=True)
+                               source="lms-recorded",
+                               require_booking=get_settings().lms_enabled)
 
 
 class BookIn(BaseModel):

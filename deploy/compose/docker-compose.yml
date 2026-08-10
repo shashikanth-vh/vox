@@ -118,6 +118,13 @@ services:
       # endpoint when the integration goes live — locally it names the simulated peer.
       REGISTER_ADVAYA_INTEGRATION_ENABLED: "true"
       REGISTER_ADVAYA_INTEGRATION_URL: "${ADVAYA_URL:-https://advaya.simulated.local/api}"
+      # LMS · SERVICING IS DEFERRED. The book ends at 'Disbursed': recording a
+      # disbursement books it outright, no loan account is opened and the CP/CS checklist
+      # stays with the origination desk. Flip to "true" when there is a servicing desk —
+      # the booking gate, the account and the handover all come back for new tranches
+      # (see docs/LENDING_WORKFLOW_DESIGN.md §0, including the account backfill).
+      # A container captures its environment at CREATION: recreate, do not restart.
+      REGISTER_LMS_ENABLED: "${LMS_ENABLED:-false}"
       REGISTER_WEB_CONCURRENCY: "4"
       REGISTER_DB_POOL_SIZE: "20"
       REGISTER_LOG_JSON: "true"

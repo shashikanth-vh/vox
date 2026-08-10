@@ -6,6 +6,12 @@ raise the principal, and the statement ledger behaves like the servicing team's 
 Date | Particulars | Debit | Credit | Balance, with interest COMPUTED (balance × rate% ×
 days ÷ day-count) through the preview-then-accrue pair — the "calculate the percentage"
 option — never hand-keyed.
+
+THIS FILE IS THE LMS-ENABLED SPEC. Servicing is deferred by default now
+(``REGISTER_LMS_ENABLED=false``), which means no loan account opens at all — the book
+ends at 'Disbursed' and the CP/CS checklist stays with the origination desk. The fixture
+below turns the flag on so this keeps describing the module it was written for, ready for
+the day servicing goes live. test_lms_deferred.py covers the default.
 """
 
 from __future__ import annotations
@@ -16,6 +22,14 @@ from tests.test_handover import ADMIN
 from tests.test_increment4 import SVC, _accepted_line
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _lms_on(monkeypatch):
+    """The loan account only exists when the servicing side does."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "lms_enabled", True)
 
 
 def test_the_interest_formula_is_exact():

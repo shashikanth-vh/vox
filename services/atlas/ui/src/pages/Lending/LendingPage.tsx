@@ -1,7 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Alert, MenuItem, TextField } from '@mui/material';
-import SubTabs from '../../components/common/SubTabs';
-import LmsView from './lms/LmsView';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
@@ -31,9 +29,10 @@ const stageRowSx = (stage: string) => {
 export default function LendingPage() {
   const { user } = useAuth();
   const ro = !can(user.roles, 'editLending');
-  // The NBFC split: LOS (origination — lead to disbursement) | LMS (servicing — the
-  // loan account from first disbursement to closure). One nav item, two worlds.
-  const [side, setSide] = useState<'los' | 'lms'>('los');
+  // LMS · SERVICING IS DEFERRED. The NBFC split (origination | servicing) is built and
+  // still in the register, but the desk works one book for now — so this screen is the
+  // origination register, with no sub-tabs to choose between. The servicing half comes
+  // back behind REGISTER_LMS_ENABLED when there is a desk to run it.
   const qc = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
@@ -75,16 +74,10 @@ export default function LendingPage() {
 
   return (
     <>
-      <SubTabs value={side} onChange={(id) => setSide(id as 'los' | 'lms')}
-        items={[
-          { id: 'los', label: 'LOS · Origination', icon: '📋' },
-          { id: 'lms', label: 'LMS · Servicing', icon: '🏦' },
-        ]} />
-      {side === 'lms' && <LmsView />}
-      {side === 'lms' ? null : <>
       <PageHint>Stage edits stamp the date automatically; sanction date lives in the company profile.
-        Sanctioned, CP/CS Completed, Ready for Disbursement and Disbursed are reached through
-        their approvals — the register refuses them here.</PageHint>
+        Sanctioned, CP/CS Completed and Ready for Disbursement are reached through their approvals —
+        the register refuses them here. Recording the disbursement is what moves a line to
+        Disbursed, which is where the book ends; CP/CS conditions stay on this desk’s checklist.</PageHint>
       {stageErr && <Alert severity="warning" sx={{ mb: 1, fontSize: 12.5, py: 0.2 }}
         onClose={() => setStageErr('')}>{stageErr}</Alert>}
       <CommonTable<LendingRow>
@@ -107,7 +100,6 @@ export default function LendingPage() {
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       <ConfirmDialog open={!!del} title="Delete lending row" message={`Delete ${del?._name}'s lending facility?`}
         onCancel={() => setDel(null)} onConfirm={() => { if (del) lendingService.remove(del.id, user.full); setDel(null); refresh(); }} />
-      </>}
     </>
   );
 }
