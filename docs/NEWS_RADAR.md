@@ -101,7 +101,7 @@ gateway injects (`PULSE_API_KEYS`), so nothing reaches it directly from a browse
 
 | Route | Purpose |
 |---|---|
-| `GET /v1/news/search?q=&from=&to=` | search; returns `{articles:[{title,url,source,when,via,severity}]}` |
+| `GET /v1/news/search?q=&from=&to=` | search; returns `{articles:[{title,url,source,when,via,severity}], sources:[…]}` |
 | `GET /v1/news/config` | is email configured, is GDELT on, is the scheduler running |
 | `POST /v1/news/email` | search a term and email the digest |
 | `POST /v1/news/email-digest` | email a digest the caller already assembled (an all-firms sweep) |
@@ -110,6 +110,27 @@ gateway injects (`PULSE_API_KEYS`), so nothing reaches it directly from a browse
 | `POST /v1/news/schedules` | create one |
 | `POST /v1/news/schedules/delete` | delete one |
 | `POST /v1/news/schedules/run` | run one now |
+
+### Reading an empty search
+
+Every search reports how each upstream fared:
+
+```json
+"sources": [{"name": "Google News", "ok": true,  "count": 7},
+            {"name": "GDELT",       "ok": false, "count": 0, "error": "the source did not answer in time"},
+            {"name": "Bing News",   "ok": true,  "count": 3}]
+```
+
+One source down is normal — the others answer. When **every** source fails the body also
+carries a top-level `error`, and the screen shows that sentence instead of an empty list.
+This is the difference between *this firm is not in the news* and *this container cannot
+reach the news*, which are otherwise the same zero and the reason an all-firms sweep could
+report "0 items" while nothing was actually working. A total outage is never cached, so the
+next search goes back out to the network rather than replaying the failure for 15 minutes.
+
+The desk searches the **trading name**, not the legal one: the register holds "Avana
+Capital Private Limited" and the radar asks for "Avana Capital", because no headline prints
+the suffix. Watch terms you add per firm are searched exactly as typed.
 
 `/v1/scan`, `/v1/items` and `/v1/digest` are unchanged: that is the *watchlist* half of
 PULSE, which files intel into the Register against the companies on the book. The News

@@ -128,6 +128,32 @@ def _rss_items(xml_text: str, via: str, *, require_http: bool = False) -> list[d
     return out
 
 
+def _reason(exc: Any) -> str:
+    """A sentence a desk can act on, from an exception a desk cannot read.
+
+    ``ConnectError('[Errno -3] Temporary failure in name resolution')`` and
+    ``ReadTimeout('')`` are the two that matter most in a container, and the second
+    stringifies to nothing at all — so the exception TYPE has to carry the meaning
+    when the message is empty."""
+    if isinstance(exc, str):
+        return exc[:200]
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code} from the source"
+    if isinstance(exc, httpx.ConnectError):
+        return f"cannot reach the source ({str(exc)[:120] or 'connection refused'})"
+    if isinstance(exc, httpx.TimeoutException):
+        return "the source did not answer in time"
+    return (f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__)[:200]
+
+
+def _ok(name: str, count: int) -> dict[str, Any]:
+    return {"name": name, "ok": True, "count": count}
+
+
+def _failed(name: str, exc: Any) -> dict[str, Any]:
+    return {"name": name, "ok": False, "count": 0, "error": _reason(exc)}
+
+
 class NewsSearch:
     """One search engine per process: a bounded upstream pool, a shared TTL cache and
     request coalescing, so twenty desks asking about the same company at once cost one
@@ -153,7 +179,7 @@ class NewsSearch:
             return resp.text
 
     async def _google(self, client: httpx.AsyncClient, term: str,
-                      dfrom: str, dto: str) -> list[dict[str, Any]]:
+                      dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         q = term
         if _valid_date(dfrom):
             q += " after:" + dfrom
@@ -161,26 +187,28 @@ class NewsSearch:
             q += " before:" + dto
         try:
             xml = await self._get(client, GOOGLE_NEWS % urllib.parse.quote(q))
-            return _rss_items(xml, "Google News")
+            items = _rss_items(xml, "Google News")
+            return items, _ok("Google News", len(items))
         except Exception as exc:  # noqa: BLE001 - a best-effort source
             log.warning("pulse_google_news_failed", extra={"error": str(exc)})
-            return []
+            return [], _failed("Google News", exc)
 
     async def _bing(self, client: httpx.AsyncClient, term: str,
-                    dfrom: str, dto: str) -> list[dict[str, Any]]:
+                    dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Ignores the date range — Bing's RSS has no reliable date filter — but stays
         up when the other two throttle, which is exactly when it earns its place."""
         try:
             xml = await self._get(client, BING_NEWS % urllib.parse.quote(term))
-            return _rss_items(xml, "Bing News", require_http=True)
+            items = _rss_items(xml, "Bing News", require_http=True)
+            return items, _ok("Bing News", len(items))
         except Exception as exc:  # noqa: BLE001
             log.warning("pulse_bing_news_failed", extra={"error": str(exc)})
-            return []
+            return [], _failed("Bing News", exc)
 
     async def _gdelt(self, client: httpx.AsyncClient, term: str,
-                     dfrom: str, dto: str) -> list[dict[str, Any]]:
+                     dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if self.disable_gdelt:
-            return []
+            return [], {"name": "GDELT", "ok": True, "count": 0, "note": "off"}
         q = urllib.parse.quote('"%s"' % term)
         url = (GDELT_RANGE % (q, dfrom.replace("-", "") + "000000",
                               dto.replace("-", "") + "235959")
@@ -189,7 +217,8 @@ class NewsSearch:
             try:
                 raw = (await self._get(client, url)).strip()
                 if not raw or raw[0] not in "{[":
-                    return []
+                    # A throttled GDELT answers 200 with a plain-text notice, not JSON.
+                    return [], _failed("GDELT", "non-JSON response (usually rate-limited)")
                 import json as _json
                 out = []
                 for a in (_json.loads(raw).get("articles") or []):
@@ -198,7 +227,7 @@ class NewsSearch:
                         out.append({"title": (a.get("title") or "").strip(), "url": u,
                                     "source": a.get("domain") or _domain(u),
                                     "when": (a.get("seendate") or "")[:8], "via": "GDELT"})
-                return out
+                return out, _ok("GDELT", len(out))
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc)
                 if attempt == 0 and ("429" in msg or "timeout" in msg.lower()):
@@ -212,22 +241,25 @@ class NewsSearch:
                         "error": msg,
                         "note": "results come from Google News + Bing; "
                                 "set PULSE_DISABLE_GDELT=1 to silence"})
-                return []
-        return []
+                return [], _failed("GDELT", exc)
+        return [], _failed("GDELT", "no answer after a retry")
 
     @staticmethod
     def _norm(t: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", (t or "").lower())[:60]
 
     async def _fetch_merge(self, term: str, dfrom: str, dto: str,
-                           limit: int) -> list[dict[str, Any]]:
+                           limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         async with httpx.AsyncClient() as client:
-            google, gdelt, bing = await asyncio.gather(
+            (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
                 self._google(client, term, dfrom, dto),
                 self._gdelt(client, term, dfrom, dto),
                 self._bing(client, term, dfrom, dto))
+        sources = [s_google, s_gdelt, s_bing]
         log.info("pulse_search_sources", extra={"term": term, "google": len(google),
-                                                "gdelt": len(gdelt), "bing": len(bing)})
+                                                "gdelt": len(gdelt), "bing": len(bing),
+                                                "failed": [s["name"] for s in sources
+                                                           if not s["ok"]]})
         seen: set[str] = set()
         merged: list[dict[str, Any]] = []
         for h in google + gdelt + bing:
@@ -242,18 +274,28 @@ class NewsSearch:
             h["severity"] = classify(h["title"])
             merged.append(h)
         merged.sort(key=lambda h: h.get("when") or "0", reverse=True)
-        return merged[:limit]
+        return merged[:limit], sources
 
     async def search(self, term: str, dfrom: str = "", dto: str = "",
                      limit: int = 40) -> list[dict[str, Any]]:
+        """Just the articles — what the digest and the schedules want."""
+        return (await self.search_detail(term, dfrom, dto, limit))[0]
+
+    async def search_detail(self, term: str, dfrom: str = "", dto: str = "",
+                            limit: int = 40) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Articles AND how each source fared.
+
+        An empty list means two very different things — "this company is not in the
+        news" and "nothing could be reached" — and a desk sweeping 400 firms cannot
+        tell them apart from the count alone. The second value says which is which."""
         term = (term or "").strip()
         if not term:
-            return []
+            return [], []
         key = f"{term.lower()}|{dfrom or ''}|{dto or ''}"
         hit = self._cache.get(key)
         if hit and time.time() - hit[0] < self.cache_ttl_s:
             self._cache.move_to_end(key)
-            return hit[1]
+            return hit[1], hit[2]
         # COALESCING: an all-firms sweep asks for 300 companies at once and the same
         # company can appear on several desks' screens. Everyone waits on ONE fetch.
         inflight = self._inflight.get(key)
@@ -262,14 +304,18 @@ class NewsSearch:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._inflight[key] = fut
         try:
-            merged = await self._fetch_merge(term, dfrom, dto, limit)
-            self._cache[key] = (time.time(), merged)
-            self._cache.move_to_end(key)
-            while len(self._cache) > self.cache_max:
-                self._cache.popitem(last=False)
+            merged, sources = await self._fetch_merge(term, dfrom, dto, limit)
+            # Only a search that actually reached something is worth remembering: cache
+            # a total outage for 15 minutes and the radar stays blind long after the
+            # network comes back.
+            if any(s["ok"] and not s.get("note") for s in sources):
+                self._cache[key] = (time.time(), merged, sources)
+                self._cache.move_to_end(key)
+                while len(self._cache) > self.cache_max:
+                    self._cache.popitem(last=False)
             if not fut.done():
-                fut.set_result(merged)
-            return merged
+                fut.set_result((merged, sources))
+            return merged, sources
         except Exception as exc:
             if not fut.done():
                 fut.set_exception(exc)

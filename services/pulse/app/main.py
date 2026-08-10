@@ -315,14 +315,25 @@ def create_app() -> FastAPI:
             return {"articles": []}
         t0 = time.time()
         try:
-            articles = await request.app.state.search.search(term, date_from, date_to, limit)
+            articles, sources = await request.app.state.search.search_detail(
+                term, date_from, date_to, limit)
         except Exception as exc:  # noqa: BLE001 - a search must fail as a message
             log.exception("pulse_search_failed", extra={"term": term})
             return ORJSONResponse(status_code=502, content={
                 "articles": [], "error": f"search failed: {exc}"})
         log.info("pulse_search", extra={"term": term, "count": len(articles),
                                         "seconds": round(time.time() - t0, 1)})
-        return {"articles": articles, "count": len(articles)}
+        # `sources` is the difference between "this firm is not in the news" and "this
+        # container could not reach the news". Zero articles is a legitimate answer to
+        # the first and a fault to be fixed in the second, and only the server knows
+        # which happened — so it says, rather than leaving the screen to guess.
+        down = [s for s in sources if not s["ok"]]
+        body: dict[str, Any] = {"articles": articles, "count": len(articles),
+                                "sources": sources}
+        if down and not articles:
+            body["error"] = ("no news source could be reached — "
+                             + "; ".join(f"{s['name']}: {s['error']}" for s in down))
+        return body
 
     @app.get("/v1/news/config", tags=["News Radar"],
              summary="What the radar can do here (is email configured, is GDELT on)")

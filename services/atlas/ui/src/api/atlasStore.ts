@@ -50,7 +50,10 @@ if (!store.lenderOrder) store.lenderOrder = (store.lenders37 || []).slice();
 // v11's DATA object seeds these at runtime (its seed()), not in the JSON — mirror that
 // so the Audit trail / Activity Log have their opening entry and every write can log.
 // (Mock mode only: live audit reads the register's own /v1/audit.)
-if (!LIVE && !store.audit.length) store.audit = [{
+// `?.` because the seed JSON has no `audit` key at all: this line runs at module load,
+// so an undefined there is not one blank tab but a blank APP — the whole bundle throws
+// before React mounts. (Live builds take emptyData(), which always has the array.)
+if (!LIVE && !store.audit?.length) store.audit = [{
   t: new Date().toISOString().slice(0, 16).replace('T', ' '), by: 'System', act: 'Seeded', code: '',
   detail: 'Register seeded from ATLAS v11 (full live register)',
 }];

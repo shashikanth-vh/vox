@@ -112,6 +112,17 @@ function parseArticles(j: any): Article[] {
   })).filter((a: Article) => a.headline && /^https?:\/\//i.test(a.url));
 }
 
+/* Whatever the far end called the problem. PULSE answers `{error:"…"}`, the gateway
+   answers the problem envelope `{error:{detail:"…"}}`, and FastAPI's own refusals are
+   `{detail:"…"}` — all three have to read back as one sentence. */
+function detailOf(j: any): string {
+  if (!j) return '';
+  const e = j.error;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') return String(e.detail || e.title || '');
+  return typeof j.detail === 'string' ? j.detail : '';
+}
+
 function tryEndpoint(u: string, ms: number, userSignal?: AbortSignal): Promise<Article[]> {
   const to = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms || 9000) : undefined;
   let sig: AbortSignal | undefined;
@@ -119,29 +130,58 @@ function tryEndpoint(u: string, ms: number, userSignal?: AbortSignal): Promise<A
     sig = (AbortSignal as any).any([to, userSignal].filter(Boolean)); // timeout OR user-stop
   else sig = userSignal || to;
   return fetch(u, { signal: sig, headers: { Accept: 'application/json' } })
-    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-    .then((t) => {
+    .then((r) => r.text().then((t) => {
       let j: any;
-      try { j = JSON.parse(t); } catch { throw new Error('non-JSON'); } // HTML error page → skip
+      try { j = JSON.parse(t); } catch { j = null; }   // HTML error page → no detail to read
+      // Carry the far end's OWN words. "HTTP 403" is unanswerable; "HTTP 403 —
+      // Forbidden: run_news_scan" names the permission to grant, and "HTTP 502 —
+      // Upstream unavailable" says the service is down rather than the news.
+      if (!r.ok) throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
+      if (j === null) throw new Error('non-JSON response');
+      // A 200 that carries an error and no articles is a REACHED-BUT-EMPTY answer:
+      // PULSE saying every upstream failed. Treat it as a failure so the fallbacks
+      // still get their turn and the reason reaches the screen.
+      const why = detailOf(j);
+      if (why && !((j.articles || []).length)) throw new Error(why);
       return parseArticles(j);
-    });
+    }));
 }
+
+// The reason the LAST search failed, in the server's own words — held here so the screen
+// can show it and a support call starts from a fact rather than a guess. A function
+// rather than a live binding, so it reads the same however the bundle is built.
+let _lastFailure = '';
+export const lastFailure = (): string => _lastFailure;
 
 // PRODUCTION RULE: returns REAL articles or throws — never fabricates.
 export function fetchTerm(term: string, dfrom?: string, dto?: string, userSignal?: AbortSignal): Promise<Article[]> {
   const eps = newsEndpoints(term, dfrom, dto);
   const aborted = () => !!(userSignal && userSignal.aborted);
   return new Promise((resolve, reject) => {
-    let i = 0, lastErr: any;
+    let i = 0, lastErr: any, pulseErr = '';
     (function next() {
       if (aborted()) { const a: any = new Error('stopped'); a.name = 'AbortError'; return reject(a); }
-      if (i >= eps.length) return reject(lastErr || new Error('all sources failed'));
+      if (i >= eps.length) {
+        // PULSE is the only endpoint whose failure is diagnosable — the public proxies
+        // fail for a hundred uninteresting reasons — so its reason is the one to keep.
+        _lastFailure = pulseErr || String(lastErr?.message || lastErr || 'all sources failed');
+        const err: any = new Error(_lastFailure);
+        err.pulse = pulseErr;
+        return reject(err);
+      }
       const ep = eps[i++];
       tryEndpoint(ep.u, ep.k === 'pulse' ? 30000 : 9000, userSignal) // local server fetches the web — give it room
-        .then((arts) => { if (ep.k === 'pulse') PULSE_UP = true; resolve(arts); })
+        .then((arts) => { if (ep.k === 'pulse') { PULSE_UP = true; _lastFailure = ''; } resolve(arts); })
         .catch((e) => {
           if (aborted()) { e.name = 'AbortError'; return reject(e); } // user stopped — don't try more
-          if (ep.k === 'pulse') PULSE_UP = false; // static host — stop asking
+          if (ep.k === 'pulse') {
+            pulseErr = String(e?.message || e);
+            // Only a 404 means "no gateway here" (a static host). Any other answer —
+            // 403, 502, an upstream outage — means PULSE exists and is worth asking
+            // again; giving up on it for the session would silently downgrade every
+            // later search to the public proxies.
+            if (/HTTP 404/.test(pulseErr)) PULSE_UP = false;
+          }
           lastErr = e; next();
         });
     })();
@@ -151,8 +191,30 @@ export function fetchTerm(term: string, dfrom?: string, dto?: string, userSignal
 /* ---------------- the scan ---------------- */
 const coName = (code: string) => (db().clients?.[code]?.name) || code || '';
 
+/* The register holds LEGAL names — "Avana Capital Private Limited". Headlines do not:
+   they say "Avana Capital". Searching the legal name verbatim is why a sweep of four
+   hundred firms can finish with nothing at all and look like a broken pipeline; the
+   suffix is the whole reason the phrase never matches. Strip it and search the name the
+   press actually prints. (Watch terms are typed by the desk and left exactly as typed.) */
+const CORP_SUFFIX =
+  /\s*[,.]?\s*\b(private limited|pvt\.?\s?ltd\.?|pvt\.?\s?limited|public limited|limited|ltd\.?|llp|inc\.?|incorporated|corporation|corp\.?|plc|pte\.?\s?ltd\.?|gmbh|s\.?a\.?|b\.?v\.?|&\s?co\.?|company)\b\.?\s*$/i;
+
+export function tradingName(name: string): string {
+  const original = String(name || '').trim();
+  let s = original;
+  // Twice, so "Acme Solar India Pvt. Ltd." sheds "Ltd." and then "Pvt." — but never so
+  // far that nothing recognisable is left ("Reliance Ltd" must not become "Reliance"
+  // by way of an empty string).
+  for (let i = 0; i < 2 && CORP_SUFFIX.test(s); i++) s = s.replace(CORP_SUFFIX, '').trim();
+  s = s.replace(/[,\s]+$/, '').trim();
+  return s.length >= 3 ? s : original;
+}
+
 export function termsFor(code: string): string[] {
-  return [db().clients?.[code]?.name].concat(watch()[code] || []).filter(Boolean) as string[];
+  const legal = db().clients?.[code]?.name;
+  const terms = [legal ? tradingName(legal) : '', ...(watch()[code] || [])]
+    .map((t) => String(t || '').trim()).filter(Boolean);
+  return Array.from(new Set(terms));   // a watch term equal to the name is one search
 }
 
 function ingest(code: string, term: string, arts: Article[], mode: string): number {

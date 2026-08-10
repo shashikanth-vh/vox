@@ -6,7 +6,7 @@ import { CodeText } from '../../components/common/Pills';
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
-import { newsService, news, watch, classify, fetchTerm, SEV_LABEL, type Severity, type NewsItem } from '../../services/newsService';
+import { newsService, news, watch, classify, fetchTerm, lastFailure, SEV_LABEL, type Severity, type NewsItem } from '../../services/newsService';
 import { EmailNewsDialog, EmailAllFirmsDialog } from './EmailDialogs';
 import SchedulesDialog from './SchedulesDialog';
 
@@ -55,7 +55,7 @@ export default function NewsRadar() {
   const bump = () => force((n) => n + 1);
 
   const [sev, setSev] = useState<Severity | ''>('');
-  const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0 });
+  const [scan, setScan] = useState({ running: false, done: 0, total: 0, found: 0, failTerms: 0, why: '' });
   const [adhoc, setAdhoc] = useState<AdhocState>(BLANK_ADHOC);
   const [qBox, setQBox] = useState('');
   const ctrl = useRef<AbortController | null>(null);
@@ -90,10 +90,13 @@ export default function NewsRadar() {
   /* ---------------- scans ---------------- */
   const scanAll = async () => {
     if (scan.running) return;
-    setScan({ running: true, done: 0, total: codes.length, found: 0, failTerms: 0 });
+    setScan({ running: true, done: 0, total: codes.length, found: 0, failTerms: 0, why: '' });
     const r = await newsService.scanAll(user.full, (p) =>
       setScan((s) => ({ ...s, done: p.done, total: p.total, found: p.found })));
-    setScan({ running: false, done: r.firms, total: r.firms, found: r.found, failTerms: r.failTerms });
+    // A sweep that files nothing across 400 firms is either a quiet news week or a
+    // broken pipe, and the count alone cannot say which — so carry the last reason.
+    setScan({ running: false, done: r.firms, total: r.firms, found: r.found,
+              failTerms: r.failTerms, why: lastFailure() });
     bump();
   };
 
@@ -146,7 +149,19 @@ export default function NewsRadar() {
       }));
     } catch (e: any) {
       if (stopped.current || e?.name === 'AbortError') { setAdhoc((a) => ({ ...a, running: false })); return; }
-      setAdhoc((a) => ({ ...a, running: false, err: 'No news source reachable. If you opened this file directly, run it from a web address or the PRISM gateway — browsers block cross-site news calls from a local file.' }));
+      // Say WHAT failed. The old text guessed one cause — a file:// page — and read as
+      // nonsense to a desk sitting on the gateway over HTTPS, while the server had
+      // already explained itself (a permission it lacks, a service that is down, an
+      // upstream that would not answer). Show that, and keep the file:// hint only for
+      // the case it actually describes.
+      const why = String(e?.message || '').trim();
+      const local = location.protocol === 'file:';
+      setAdhoc((a) => ({
+        ...a, running: false,
+        err: 'News search failed'
+          + (why ? ' — ' + why : '.')
+          + (local ? ' This page was opened as a local file; browsers block cross-site news calls from file://. Run it from the PRISM gateway.' : ''),
+      }));
     }
   };
 
@@ -250,8 +265,9 @@ export default function NewsRadar() {
       )}
       {!scan.running && scan.failTerms > 0 && (
         <Alert severity="error" sx={{ py: 0, fontSize: 12, mb: 1 }}>
-          {scan.failTerms} source request{scan.failTerms > 1 ? 's' : ''} failed in the last scan. Usually connectivity
-          or rate limiting — everything shown is a real scraped article; nothing is invented.
+          {scan.failTerms} source request{scan.failTerms > 1 ? 's' : ''} failed in the last scan
+          {scan.why ? <> — <b>{scan.why}</b></> : '. Usually connectivity or rate limiting'}. Everything shown is a
+          real scraped article; nothing is invented.
         </Alert>
       )}
       <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 1.2 }}>

@@ -45,6 +45,12 @@ GDELT_JSON = json.dumps({"articles": [
      "domain": "gd.example", "seendate": "20260802T000000Z"}]})
 
 
+# The genuine class, captured before any test patches the name. A helper that reads
+# httpx.AsyncClient at call time can pick up ANOTHER test's stub and quietly wrap it —
+# which is how a "no upstream answers" test ended up answering.
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
 def _stub_transport() -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         host = request.url.host
@@ -136,6 +142,81 @@ async def test_one_dead_source_never_fails_the_search(monkeypatch):
     arts = await NewsSearch(cache_ttl_s=0).search("Acme Solar")
     assert arts, "Bing alone still answers"
     assert {a["via"] for a in arts} == {"Bing News"}
+
+
+def _all_upstreams_dead(monkeypatch, exc=None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exc or httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: _REAL_ASYNC_CLIENT(*a, **{**k, "transport": transport}))
+
+
+@pytest.mark.asyncio
+async def test_a_total_outage_is_reported_not_returned_as_no_news(monkeypatch):
+    """The whole point of the source report. "Nothing found" and "nothing reached" are
+    the same empty list, and a desk sweeping 400 firms cannot tell them apart — one is
+    a quiet week, the other is a container with no way out."""
+    _all_upstreams_dead(monkeypatch)
+    arts, sources = await NewsSearch(cache_ttl_s=0).search_detail("Acme Solar")
+    assert arts == []
+    assert [s["name"] for s in sources] == ["Google News", "GDELT", "Bing News"]
+    assert all(s["ok"] is False for s in sources)
+    # The reason has to be a sentence someone can act on, not a class name.
+    assert "cannot reach the source" in sources[0]["error"]
+    assert "name resolution" in sources[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_still_says_something_when_it_stringifies_to_nothing(monkeypatch):
+    """httpx.ReadTimeout('') is the commonest container failure and str() gives ''. A
+    blank reason on the screen is no better than no reason at all."""
+    _all_upstreams_dead(monkeypatch, httpx.ReadTimeout(""))
+    _, sources = await NewsSearch(cache_ttl_s=0).search_detail("Acme Solar")
+    assert all("did not answer in time" in s["error"] for s in sources)
+
+
+@pytest.mark.asyncio
+async def test_a_partial_answer_is_not_an_outage(monkeypatch):
+    """One source down while another answers is normal — it must not read as a fault."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "bing.com" in request.url.host:
+            return httpx.Response(200, text=BING_RSS)
+        raise httpx.ConnectError("down")
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: real(*a, **{**k, "transport": transport}))
+    arts, sources = await NewsSearch(cache_ttl_s=0).search_detail("Acme Solar")
+    assert arts
+    by = {s["name"]: s for s in sources}
+    assert by["Bing News"]["ok"] and by["Bing News"]["count"] == 2
+    assert by["Google News"]["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_outage_is_never_cached(monkeypatch):
+    """Caching a total failure for the TTL would keep the radar blind for fifteen
+    minutes after the network came back — the one case where a retry must go out."""
+    state = {"dead": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state["dead"]:
+            raise httpx.ConnectError("down")
+        if "news.google.com" in request.url.host:
+            return httpx.Response(200, text=GOOGLE_RSS)
+        return httpx.Response(200, text="<rss><channel></channel></rss>")
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: real(*a, **{**k, "transport": transport}))
+    engine = NewsSearch(disable_gdelt=True, cache_ttl_s=900)
+    assert await engine.search("Acme Solar") == []
+    state["dead"] = False
+    assert await engine.search("Acme Solar"), "the retry must reach the network again"
 
 
 @pytest.mark.asyncio
@@ -243,6 +324,20 @@ def test_search_route_answers_articles(client):
     body = r.json()
     assert body["count"] == len(body["articles"]) > 0
     assert {"title", "url", "source", "when", "via", "severity"} <= set(body["articles"][0])
+    # A healthy search reports its sources too, and says nothing failed.
+    assert all(s["ok"] for s in body["sources"])
+    assert "error" not in body
+
+
+def test_the_route_says_when_nothing_could_be_reached(client, monkeypatch):
+    """What the desk actually needed on a live deployment: 200 with zero articles read
+    as "no news about this firm" whether the sources answered or the container had no
+    way out. The screen can only tell the difference if the server says."""
+    _all_upstreams_dead(monkeypatch, httpx.ConnectError("connection refused"))
+    body = client.get("/v1/news/search", params={"q": "Acme Solar"}).json()
+    assert body["articles"] == [] and body["count"] == 0
+    assert "no news source could be reached" in body["error"]
+    assert "Google News" in body["error"] and "Bing News" in body["error"]
 
 
 def test_an_empty_term_is_an_empty_answer_not_a_search(client):
