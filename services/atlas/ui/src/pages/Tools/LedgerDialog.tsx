@@ -258,6 +258,17 @@ export default function LedgerDialog({ open, onClose }: { open: boolean; onClose
               {result.report.reconciliation_count} reconciliation item(s). The full
               detail is in the audit trail (batch {String(result.checksum || '').slice(0, 12)}…).
             </Typography>
+            {/* A COUNT THAT LEADS SOMEWHERE. Reconciliation rows are HIDDEN from every
+                operational list until they are closed, so a number here and nothing else
+                is how a lending list ends up quietly short and the desk concludes the
+                import failed. Name the consequence, and say where to go. */}
+            {result.report.reconciliation_count > 0 && (
+              <Alert severity="warning" sx={{ mt: 1, fontSize: 12.2 }}>
+                {result.report.reconciliation_count} row(s) came in INCOMPLETE and are
+                held back — they will not appear in the lists or the workflows until an
+                Admin closes them. Work them in <b>Masters → Reconciliation</b>.
+              </Alert>
+            )}
           </Box>
         )}
         </Box>

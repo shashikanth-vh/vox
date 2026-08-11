@@ -6,6 +6,7 @@ import SubTabs, { type SubTab } from '../../components/common/SubTabs';
 import ClientsPage from '../Clients/ClientsPage';
 import FIMasterPage from '../FIMaster/FIMasterPage';
 import EmployeesPage from '../Employees/EmployeesPage';
+import ReconciliationPage from './ReconciliationPage';
 import { useAuth } from '../../auth/AuthContext';
 import { canSee } from '../../auth/rbac';
 
@@ -15,11 +16,17 @@ const SUBS: (SubTab & { tab: string })[] = [
   { id: 'clients', label: 'Clients', icon: '👥', tab: 'clients' },
   { id: 'fi', label: 'FI Master', icon: '🏦', tab: 'fi' },
   { id: 'emp', label: 'Employees', icon: '🧑‍💼', tab: 'emp' },
+  // Import reconciliation. NOT in the view matrix: the register restricts these
+  // endpoints to an Admin or Management identity, so the tab mirrors that rule exactly
+  // rather than inventing a view row a role could be granted independently — a tab that
+  // offers only refusals is worse than no tab.
+  { id: 'recon', label: 'Reconciliation', icon: '🧾', tab: 'recon' },
 ];
 
 export default function MastersPage() {
   const { user } = useAuth();
-  const visible = SUBS.filter((s) => canSee(user.roles, s.tab));
+  const senior = user.roles.includes('Admin') || user.roles.includes('Management');
+  const visible = SUBS.filter((s) => (s.tab === 'recon' ? senior : canSee(user.roles, s.tab)));
   const [sub, setSub] = useState(visible[0]?.id ?? 'clients');
   const active = visible.some((s) => s.id === sub) ? sub : visible[0]?.id;
   // The view toggle lives on the sub-tab line and drives FI Master / Employees.
@@ -41,6 +48,7 @@ export default function MastersPage() {
       {active === 'clients' && <ClientsPage />}
       {active === 'fi' && <FIMasterPage mode={mode} onModeChange={setMode} />}
       {active === 'emp' && <EmployeesPage mode={mode} onModeChange={setMode} />}
+      {active === 'recon' && <ReconciliationPage />}
     </>
   );
 }
