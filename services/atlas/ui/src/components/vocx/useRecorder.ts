@@ -13,9 +13,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * willing to wait — the edge and the gateway both carry a matching long window for the
  * capture path alone. Stopping AT the limit keeps the audio recorded so far; a clip that
  * simply ran on would be refused after the user had finished speaking.
+ *
+ * TWO minutes, not three. Decode time scales with the clip, and three minutes of speech
+ * sat close enough to the wait every hop allows that a slow deployment could turn a
+ * finished recording into a timeout. Two leaves real headroom — and a field note that
+ * needs longer than two minutes is two notes.
  */
 
-export const MAX_SECONDS = 180;
+export const MAX_SECONDS = 120;
 
 export type RecorderState = 'idle' | 'requesting' | 'recording' | 'finishing';
 

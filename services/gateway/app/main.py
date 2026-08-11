@@ -63,7 +63,7 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
 
 
 # Paths whose upstream legitimately takes minutes rather than seconds. A speech capture
-# is transcribed SYNCHRONOUSLY on CPU, and a three-minute clip can decode for longer than
+# is transcribed SYNCHRONOUSLY on CPU, and a two-minute clip can decode for longer than
 # that — so the shared 60s upstream timeout would abandon a recording the user has already
 # made, and report it as an upstream failure they cannot act on. The CAM workbench is the
 # same shape: the engine reads several documents and writes a long answer synchronously.

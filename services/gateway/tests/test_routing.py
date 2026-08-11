@@ -120,7 +120,7 @@ def test_a_speech_capture_gets_the_long_upstream_window():
     """Transcription is synchronous, so the capture path needs minutes — and nothing else
     does.
 
-    A three-minute recording is decoded on CPU while the request is held open. Under the
+    A two-minute recording is decoded on CPU while the request is held open. Under the
     ordinary 60s budget the gateway abandons it and the user loses a recording they have
     already made, reported as an upstream failure they cannot act on. The long window is
     scoped to the capture prefixes on purpose: a hung register call must still fail fast.
