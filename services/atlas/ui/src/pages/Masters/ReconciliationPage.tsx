@@ -128,44 +128,20 @@ export default function ReconciliationPage() {
           </Typography>
         </Paper>
       ) : rows.map((r) => (
-        <Paper key={r.id} variant="outlined" sx={{ borderColor: tokens.line, p: 1.4, mb: 1 }}>
+        <Paper key={r.id} variant="outlined" sx={{ borderColor: tokens.line, p: 1.4, mb: 1,
+          display: 'flex', gap: 1, alignItems: 'flex-start',
+          // Narrow: the actions drop BELOW the whole card, so a phone reads
+          // company → what is missing → what the sheet said → what to do about it.
+          // Wide: they sit on the right of the heading line where the eye expects them.
+          flexDirection: { xs: 'column', md: 'row' } }}>
+          <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.6 }}>
             <Typography component="b" sx={{ fontSize: 13.4, fontWeight: 700 }}>
               {r.company || '(no company on the row)'}
             </Typography>
             <Chip size="small" label={`${r.subject_type} · ${r.stage_value || '—'}`} />
             {r.sheet && <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>from “{r.sheet}”</Typography>}
-            <Box sx={{ flex: 1 }} />
-            {r.status === 'Required' ? (
-              <>
-                {SUBJECT_PATH[r.subject_type] && (
-                  <Button sx={{ fontSize: 12 }}
-                    onClick={() => nav(SUBJECT_PATH[r.subject_type])}>
-                    Open {r.subject_type.toLowerCase()} →
-                  </Button>
-                )}
-                <Button variant="contained" sx={{ fontSize: 12 }}
-                  onClick={() => { setNote(''); setTicket(''); setDlg({ item: r, kind: 'Resolved' }); }}>
-                  Mark corrected
-                </Button>
-                {/* Waiving keeps an incomplete record in the business of record — the
-                    register restricts it to Management, so the button is not offered to
-                    anyone who would only be refused. */}
-                {canWaive && (
-                  <Button color="warning" sx={{ fontSize: 12 }}
-                    onClick={() => { setNote(''); setTicket(''); setDlg({ item: r, kind: 'Waived' }); }}>
-                    Waive
-                  </Button>
-                )}
-              </>
-            ) : (
-              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                {r.status} by {r.resolved_by || '—'}
-                {r.resolved_at ? ` · ${r.resolved_at.slice(0, 10)}` : ''}
-              </Typography>
-            )}
           </Box>
-
           <Typography sx={{ fontSize: 12.2, color: tokens.bad, fontWeight: 600 }}>
             Missing: {r.missing_fields.map(nice).join(' · ') || '—'}
           </Typography>
@@ -195,6 +171,40 @@ export default function ReconciliationPage() {
               “{r.resolution_note}”
             </Typography>
           )}
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap',
+            justifyContent: 'flex-end', width: { xs: '100%', md: 'auto' },
+            flexShrink: 0 }}>
+            {r.status === 'Required' ? (
+              <>
+                {SUBJECT_PATH[r.subject_type] && (
+                  <Button sx={{ fontSize: 12 }}
+                    onClick={() => nav(SUBJECT_PATH[r.subject_type])}>
+                    Open {r.subject_type.toLowerCase()} →
+                  </Button>
+                )}
+                <Button variant="contained" sx={{ fontSize: 12 }}
+                  onClick={() => { setNote(''); setTicket(''); setDlg({ item: r, kind: 'Resolved' }); }}>
+                  Mark corrected
+                </Button>
+                {/* Waiving keeps an incomplete record in the business of record — the
+                    register restricts it to Management, so the button is not offered to
+                    anyone who would only be refused. */}
+                {canWaive && (
+                  <Button color="warning" sx={{ fontSize: 12 }}
+                    onClick={() => { setNote(''); setTicket(''); setDlg({ item: r, kind: 'Waived' }); }}>
+                    Waive
+                  </Button>
+                )}
+              </>
+            ) : (
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                {r.status} by {r.resolved_by || '—'}
+                {r.resolved_at ? ` · ${r.resolved_at.slice(0, 10)}` : ''}
+              </Typography>
+            )}
+          </Box>
         </Paper>
       ))}
 
