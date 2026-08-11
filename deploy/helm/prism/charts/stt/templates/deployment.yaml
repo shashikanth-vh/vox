@@ -45,6 +45,8 @@ spec:
               value: {{ .Values.config.computeType | quote }}
             - name: STT_PRELOAD
               value: {{ .Values.config.preload | quote }}
+            - name: STT_CPU_THREADS
+              value: {{ .Values.config.cpuThreads | quote }}
           ports:
             - name: http
               containerPort: 8000

@@ -21,6 +21,14 @@ config:
   device: cpu
   computeType: int8
   preload: true
+  # Decoder threads. MUST track resources.limits.cpu below — left at 0, CTranslate2
+  # reads the NODE's core count and knows nothing about this container's cgroup quota,
+  # so a pod limited to 2 CPUs happily spawns a thread per core on a 16-core node and
+  # those threads then fight over the 2 it actually has. The clip decodes SLOWER than
+  # it would on two honest threads, and nothing about the pod looks wrong. Raise this
+  # and the cpu limit together. Speed only — same model, same beam width, identical
+  # transcript.
+  cpuThreads: 2
 
 service:
   type: ClusterIP
@@ -35,6 +43,7 @@ serviceAccount:
 # limits (or replicas) before touching anything else when transcription queues.
 resources:
   requests: { cpu: "1", memory: 1Gi }
+  # Raising this? Raise config.cpuThreads to match, or the extra cores go unused.
   limits: { cpu: "2", memory: 2Gi }
 
 securityContext:

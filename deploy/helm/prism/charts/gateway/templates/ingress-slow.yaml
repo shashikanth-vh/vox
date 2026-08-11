@@ -1,0 +1,51 @@
+{{- if and .Values.ingress.enabled .Values.ingress.slowPaths }}
+# THE SLOW LANE — a second Ingress for the handful of prefixes that are slow BY DESIGN.
+#
+# ingress-nginx applies annotations per INGRESS OBJECT, not per path, so a single
+# Ingress cannot both let a speech capture decode for minutes and still fail a hung
+# register call fast. Two objects on the same host merge into one server block, each
+# path keeping its own timeouts — which is how the compose edge already does it with a
+# scoped `location`, and this is the same rule expressed in Kubernetes.
+#
+# Without this the controller's 60s default cuts every capture at the edge: the person
+# has already finished speaking, the platform is still decoding, and the recorder
+# reports a failure nobody can act on.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "gateway.fullname" . }}-slow
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.slowTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.slowTimeoutSeconds | quote }}
+    {{- if .Values.ingress.proxyBodySize }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host | quote }}
+      {{- end }}
+      http:
+        paths:
+          {{- range .Values.ingress.slowPaths }}
+          - path: {{ . | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gateway.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+{{- end }}

@@ -106,6 +106,27 @@ ingress:
   tls: []
   # ATLAS UI service name — set to route /ui (and the bare /) to the SPA container.
   uiService: ""
+  # Largest request body the edge will accept. ingress-nginx defaults to 1m, which is
+  # smaller than a ledger workbook and smaller than a long voice capture — both would be
+  # refused with a 413 the app never sees. Matches the compose edge's 64m.
+  proxyBodySize: "64m"
+  # THE SLOW LANE. ingress-nginx gives every route a 60s proxy-read-timeout, and its
+  # annotations are per-Ingress, not per-path — so the only way to let ONE prefix run
+  # long without handing a minutes-long window to a hung register call is a second
+  # Ingress object carrying its own annotations. These are the paths that are slow BY
+  # DESIGN: a speech capture is transcribed synchronously, and a CAM generation reads
+  # whole documents and streams a memo back. The compose edge does exactly this with a
+  # scoped `location` block; this is the same rule expressed in Kubernetes.
+  #
+  # Set to [] to opt out — at which point a voice capture that decodes for longer than
+  # a minute is cut off at the edge, and the recorder reports a failure the user cannot
+  # act on.
+  slowPaths:
+    - /vocx/v1/capture
+    - /orchestrator/v1/cam
+  # Keep this at or above the gateway's own slowUpstreamTimeout (600s) so the EDGE is
+  # never the hop that gives up on an answer the platform was still producing.
+  slowTimeoutSeconds: 625
 
 # Verified identity (SSO). Set issuer to your IdP to REQUIRE bearer tokens and ignore
 # X-User-Email. requireAuth refuses anonymous even without OIDC (a no-anonymous mesh).
