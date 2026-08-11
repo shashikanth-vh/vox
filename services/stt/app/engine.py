@@ -98,6 +98,7 @@ class FasterWhisperEngine:
             try:
                 self._model = WhisperModel(self.s.model_size, device=self.s.device,
                                            compute_type=self.s.compute_type,
+                                           cpu_threads=self.s.cpu_threads,
                                            download_root=self.s.model_dir)
             except Exception as exc:              # noqa: BLE001 - re-raised, typed
                 self.load_error = (

@@ -520,6 +520,7 @@ class VocxApp:
     # ---- mobile: audio capture -> pipeline preview -------------------------
     def _capture_audio(self, query, body):
         from app.vocx.core import pipeline as vocx_pipeline
+        from app.vocx.speech import stt as vocx_stt
         rm = (_one(query, "rm") or "").strip()
         if not rm or len(rm) > 120:
             return 400, "application/json", _j({"ok": False, "error": "rm required"})
@@ -534,14 +535,23 @@ class VocxApp:
         if astore is not None:
             ref = astore.save(bytes(body), _one(query, "ts") or "", rm,
                               content_type=_one(query, "ct") or "")
-        result = vocx_pipeline.process_audio_capture(
-            bytes(body), rm=rm, capture_ts=_one(query, "ts"),
-            transcript_ref=ref, content_type=_one(query, "ct") or "",
-            transcriber=self.transcriber(), store=self.store, config=self.config,
-            execute=False,  # preview; the RM confirms via /commit
-            stt_prompt=self.stt_prompt(),
-            on_stage=lambda s: _set_capture_stage(cid, s),
-            meta_extra=_gps_meta(lambda k: _one(query, k)))
+        try:
+            result = vocx_pipeline.process_audio_capture(
+                bytes(body), rm=rm, capture_ts=_one(query, "ts"),
+                transcript_ref=ref, content_type=_one(query, "ct") or "",
+                transcriber=self.transcriber(), store=self.store, config=self.config,
+                execute=False,  # preview; the RM confirms via /commit
+                stt_prompt=self.stt_prompt(),
+                on_stage=lambda s: _set_capture_stage(cid, s),
+                meta_extra=_gps_meta(lambda k: _one(query, k)))
+        except vocx_stt.SttTimeoutError as e:
+            # ANSWER, rather than leave the caller to time out on us. The decode ran past
+            # the budget this capture was given, which is a fact about how long the clip
+            # needs — not a fault anyone can retry into working. Said plainly here it
+            # reaches the recorder as a sentence; left unsaid, the browser aborts on its
+            # own clock and reports "VocX did not answer in time", which names nothing.
+            # `ref` goes with it: the audio IS stored, and the reference proves it.
+            return 504, "application/json", _j({"ok": False, "error": str(e), "ref": ref})
         _stamp_capture_id(result.get("extraction"), _one(query, "capture_id"))
         self._autosave_draft(result, rm)
         self._log_preview(result, rm)

@@ -77,11 +77,21 @@ export const vocx = {
    * body as the clip itself, so the Content-Type must be the recording's real codec
    * (`audio/webm;codecs=opus` and friends) — not JSON, and not a multipart wrapper.
    */
-  async postAudio<T>(path: string, blob: Blob, params: Record<string, any>): Promise<T> {
+  async postAudio<T>(path: string, blob: Blob, params: Record<string, any>,
+                     onUpload?: (sentPct: number) => void): Promise<T> {
     const r = await vocxClient.post(path, blob, {
       params,
       timeout: CAPTURE_TIMEOUT_MS,
       headers: { 'Content-Type': blob.type || 'audio/webm' },
+      // The BROWSER knows when the clip has finished going up; the server cannot say so
+      // until it has the whole body. Reporting it lets the progress strip stay honest
+      // during a long upload instead of guessing on a timer.
+      onUploadProgress: onUpload
+        ? (e) => {
+          const total = e.total || blob.size || 0;
+          onUpload(total ? Math.min(100, Math.round((e.loaded / total) * 100)) : 0);
+        }
+        : undefined,
     });
     return unwrap<T>(r.data, 'transcribe that recording');
   },

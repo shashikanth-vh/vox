@@ -62,8 +62,14 @@ def create_app() -> FastAPI:
             # Load from the baked image dir now so the FIRST capture isn't slow and a
             # bad model config fails the pod at startup, not mid-request.
             await run_in_threadpool(app.state.engine.warm)
+            # cpu_threads is logged because it is the one knob whose WRONG value looks
+            # like nothing at all — the service works, it is simply slow, and nobody can
+            # tell from the outside whether it took the container's core count or the
+            # host's.
             log.info("stt_model_ready", extra={"model": settings.model_size,
-                                               "device": settings.device})
+                                               "device": settings.device,
+                                               "beam_size": settings.beam_size,
+                                               "cpu_threads": settings.cpu_threads})
         yield
 
     app = FastAPI(title="PRISM STT", version="0.1.0",

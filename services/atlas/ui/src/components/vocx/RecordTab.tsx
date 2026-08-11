@@ -41,34 +41,53 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
   const [busy, setBusy] = useState(false);
   // '' = no audio pipeline running; else uploading/received/transcribing/structuring.
   const [stage, setStage] = useState('');
+  // How much of the clip has actually left the device, 0..100 — the only progress that
+  // is knowable while the upload is still in flight.
+  const [sent, setSent] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   useEffect(() => stopPoll, []);
 
   const send = useCallback(async (blob: Blob) => {
     setErr(''); setBusy(true);
-    setStage('uploading');
+    setStage('uploading'); setSent(0);
     setStatus('Transcribing — any language, filed in English…');
     // The capture id is minted HERE so the progress poll and the capture speak about
     // the same take; VocX reports the take's live stage against it while the call runs.
     const cid = newCaptureId();
-    // If the backend never answers with a real stage (an older VocX without the
-    // status route), the strip must not sit on "Uploading" forever — after ~8s of
-    // silence it steps aside for the plain status line.
+    // If the backend never answers with a real stage (an older VocX without the status
+    // route), the strip must not sit on "Uploading" forever — after ~8s of silence it
+    // steps aside for the plain status line.
+    //
+    // BUT VocX cannot report a stage until the whole clip has ARRIVED, and a three-minute
+    // recording takes longer than eight seconds to go up on a phone. Counting silence
+    // from the moment the take ends therefore retired the strip mid-upload — the longer
+    // the recording, the likelier it happened, which is exactly backwards. The patience
+    // window now starts when the BROWSER says the last byte is sent; until then the
+    // upload's own percentage is the honest thing to show.
     let heard = false;
+    let uploaded = false;
     let quietPolls = 0;
+    // Belt and braces: if the browser reports no upload progress at all (an adapter that
+    // does not emit it), the strip must still be able to stand down rather than claim
+    // "Uploading" for the whole decode. A minute is far longer than any real upload of a
+    // three-minute clip and far shorter than the capture's own timeout.
+    const uploadCeiling = setTimeout(() => { uploaded = true; }, 60_000);
     pollRef.current = setInterval(() => {
       void vocxService.captureStatus(cid).then((s) => {
         if (s !== 'unknown') { heard = true; setStage(s); return; }
-        if (!heard && ++quietPolls >= 12) { setStage(''); stopPoll(); }
+        if (!heard && uploaded && ++quietPolls >= 12) { setStage(''); stopPoll(); }
       });
     }, 700);
     // Location rides along when the browser will give it, and is simply absent when it
     // will not. A capture must never wait on, or fail because of, geolocation.
     const gps = await currentPosition();
-    const r = await vocxService.captureAudio(blob, rm, gps, cid);
-    stopPoll();
-    setBusy(false); setStatus(''); setStage('');
+    const r = await vocxService.captureAudio(blob, rm, gps, cid, (pct) => {
+      if (!heard) setSent(pct);
+      if (pct >= 100) uploaded = true;
+    });
+    stopPoll(); clearTimeout(uploadCeiling);
+    setBusy(false); setStatus(''); setStage(''); setSent(0);
     if (!r.ok) { setErr(r.error); return; }
     setPreview(r.data);
   }, [rm]);
@@ -219,7 +238,10 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
                 <Typography sx={{ fontSize: 12.5,
                   color: state === 'todo' ? vx.mut : state === 'active' ? vx.live : vx.grn2,
                   fontWeight: state === 'active' ? 700 : 500 }}>
-                  {label}
+                  {/* A long clip spends real time on this step, and a percentage is the
+                      difference between "it is working" and "it has hung". */}
+                  {key === 'uploading' && state === 'active' && sent > 0
+                    ? `${label} ${sent}%` : label}
                 </Typography>
               </Box>
             );

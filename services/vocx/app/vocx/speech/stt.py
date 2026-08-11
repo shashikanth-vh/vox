@@ -151,15 +151,38 @@ def _detail(resp: Any) -> str:
     return str(body)[:400]
 
 
+class SttTimeoutError(RuntimeError):
+    """The STT service did not finish inside the budget this capture was given.
+
+    Distinct from every other STT failure because the answer is different: nothing is
+    wrong with the clip or the service, it simply needs longer than a person is willing
+    to hold a phone. The capture endpoint turns this into a 504 with a plain explanation
+    rather than letting the browser abort blind."""
+
+
 # --- remote API (the PRISM STT service, or any Whisper-compatible endpoint) ---
 class APITranscriber(Transcriber):
     """A remote Whisper-compatible endpoint (OpenAI-style multipart) — in PRISM this is
     the dedicated ``services/stt`` container. Endpoint and key come from env so no
     secrets live in config. Transient failures retry with backoff: a network blip must
-    not fail a capture whose audio is already archived."""
+    not fail a capture whose audio is already archived.
+
+    THE RETRIES LIVE INSIDE A TOTAL BUDGET. Retrying three times at a 300s per-attempt
+    timeout meant this call could legitimately run for a quarter of an hour — long after
+    the browser had given up at its own 300s and told the user "VocX did not answer in
+    time", which names nothing and leaves the desk re-recording a clip that was in fact
+    still being decoded. ``budget_s`` is the whole wall-clock allowance across every
+    attempt, sized to expire BEFORE the client does, so the person holding the phone gets
+    a real sentence instead of a blind abort — and the server stops burning CPU on an
+    answer nobody is waiting for any more."""
+
+    #: Below this much remaining budget an attempt cannot plausibly finish, so starting
+    #: one only delays the honest failure.
+    MIN_ATTEMPT_S = 15.0
 
     def __init__(self, endpoint_env: str = "VOCX_STT_API_URL", key_env: str = "VOCX_STT_API_KEY",
-                 model: str = "whisper-1", timeout: int = 300, task: str = "translate"):
+                 model: str = "whisper-1", timeout: int = 240, task: str = "translate",
+                 budget_s: float | None = None, attempts: int = 3):
         self.endpoint_env = endpoint_env
         self.key_env = key_env
         self.model = model
@@ -168,6 +191,10 @@ class APITranscriber(Transcriber):
         # language (identity for English input); the detected original language still
         # comes back and lands in the interaction's `language` column.
         self.task = task
+        # Default: the budget IS one attempt's timeout — retries have to fit inside it,
+        # they do not extend it.
+        self.budget_s = float(budget_s if budget_s is not None else timeout)
+        self.attempts = max(1, int(attempts))
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
                    prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
@@ -200,12 +227,23 @@ class APITranscriber(Transcriber):
         if prompt:
             data["prompt"] = prompt[:1500]
         last: Exception | None = None
-        for attempt in range(3):
+        deadline = time.monotonic() + self.budget_s
+        for attempt in range(self.attempts):
+            # Every attempt is capped by whichever runs out first — its own timeout, or
+            # what is left of this capture's total allowance.
+            remaining = deadline - time.monotonic()
+            # The FIRST attempt is always made, however tight the budget: the audio is in
+            # hand and a deployment that sets a small budget wants a fast failure, not a
+            # call that never reaches the service at all. Only RETRIES have to justify
+            # themselves against what is left.
+            if attempt and remaining < self.MIN_ATTEMPT_S:
+                break
+            remaining = max(remaining, 1.0)
             try:
                 resp = httpx.post(
                     url, headers=headers, data=data,
                     files={"file": (fname, blob, ctype) if ctype else (fname, blob)},
-                    timeout=self.timeout)
+                    timeout=min(float(self.timeout), remaining))
                 if resp.status_code >= 500:
                     # Carry the upstream's own words. "STT service unreachable after
                     # retries: 500" is unanswerable — it cannot distinguish a model that
@@ -231,8 +269,21 @@ class APITranscriber(Transcriber):
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
                     raise
                 last = e
-                time.sleep(0.5 * (2 ** attempt))
-        raise RuntimeError(f"STT service at {url} failed after 3 attempts: {last}")
+                # Only sleep if the budget can still afford the nap AND an attempt after
+                # it; otherwise stop now and say so, rather than spending the remainder
+                # waiting to start something that cannot finish.
+                nap = 0.5 * (2 ** attempt)
+                if deadline - time.monotonic() <= nap + self.MIN_ATTEMPT_S:
+                    break
+                time.sleep(nap)
+        left = deadline - time.monotonic()
+        if isinstance(last, httpx.TimeoutException) or left < self.MIN_ATTEMPT_S:
+            raise SttTimeoutError(
+                f"transcription did not finish within the {round(self.budget_s)}s this "
+                f"capture was given. The recording is stored — a shorter clip, or a "
+                f"faster STT deployment, will get through.")
+        raise RuntimeError(
+            f"STT service at {url} failed after {self.attempts} attempts: {last}")
 
 
 # --- factory ------------------------------------------------------------------
@@ -246,7 +297,10 @@ def build_transcriber(config: dict[str, Any]) -> Transcriber:
         return APITranscriber(api.get("endpoint_env", "VOCX_STT_API_URL"),
                               api.get("key_env", "VOCX_STT_API_KEY"),
                               api.get("model", "whisper-1"),
-                              task=stt.get("task", "translate"))
+                              timeout=int(api.get("timeout_s", 240)),
+                              task=stt.get("task", "translate"),
+                              budget_s=api.get("budget_s"),
+                              attempts=int(api.get("attempts", 3)))
     if backend == "faster_whisper":
         return FasterWhisperTranscriber(
             model_size=stt.get("model_size", "medium"),

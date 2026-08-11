@@ -78,11 +78,12 @@ export const vocxService = {
 
   /** A recorded clip -> archive + transcription + a structured PREVIEW. Writes nothing. */
   async captureAudio(blob: Blob, rm: string, extra: Record<string, string> = {},
-                     captureId?: string): Promise<Result<VocxPreview>> {
+                     captureId?: string,
+                     onUpload?: (sentPct: number) => void): Promise<Result<VocxPreview>> {
     try {
       const params: Record<string, string> = { rm, ts: new Date().toISOString(), ...extra };
       if (captureId) params.capture_id = captureId;
-      return ok(await vocx.postAudio<VocxPreview>('/v1/capture_audio', blob, params));
+      return ok(await vocx.postAudio<VocxPreview>('/v1/capture_audio', blob, params, onUpload));
     } catch (e) { return fail(vocxError(e, 'transcribe that recording')); }
   },
 

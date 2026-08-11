@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     compute_type: str = "int8"
     beam_size: int = 5
     vad_filter: bool = True
+    # CPU parallelism for the decoder. 0 hands the choice to CTranslate2, which reads the
+    # HOST's core count and knows nothing about the container's CPU quota — so a container
+    # limited to 2 cores can spawn a thread per host core, and those threads then fight
+    # each other for the 2 it actually has and decode SLOWER than 2 threads would. Set
+    # this to the cores the container is really allowed (docker `cpus:` / k8s limit) and
+    # a long clip gets meaningfully faster with NO change to the model, the beam width or
+    # the transcript — accuracy is untouched, only the scheduling is.
+    cpu_threads: int = 0
     model_dir: str = "/opt/models"
     # Load the model at STARTUP (readiness gates on it) instead of on the first request.
     preload: bool = True
