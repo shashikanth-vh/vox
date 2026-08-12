@@ -277,6 +277,25 @@ restore_images() {          # re-point the compose image names at the tagged sna
 # Two questions, both of which must be yes: does every container that declares a
 # healthcheck report healthy, and does a real request survive the whole edge → gateway
 # path? Container state alone would call a stack healthy that answers 502 at the door.
+# THE EDGE CACHES THE IPs OF EVERYTHING BEHIND IT. nginx.conf declares static upstreams
+# (`upstream ui { server ui:80; }`), and nginx resolves those names ONCE at startup, for
+# the life of the worker. An upgrade recreates the ui and gateway containers, Docker
+# hands them new addresses, and nginx — whose own image did not change, so it was never
+# recreated — keeps dialling the old ones. Every page then 502s with "connect() failed
+# (111: Connection refused)" against a container that no longer exists, while every
+# container reports perfectly healthy. A reload re-reads the config and re-resolves,
+# without dropping a connection; a restart is the fallback if the reload is refused.
+reload_edge() {
+  dc "$LIVE" ps --status running --services 2>/dev/null | grep -qx nginx || return 0
+  step "Reloading the edge so it re-resolves the recreated containers"
+  if dc "$LIVE" exec -T nginx nginx -s reload >>"$LOG" 2>&1; then
+    say "  reloaded"
+  else
+    warn "reload refused — restarting nginx instead"
+    run dc "$LIVE" restart nginx || warn "could not restart nginx; check it by hand"
+  fi
+}
+
 health_once() {
   local port; port="$(edge_http_port)"
   local cid state unhealthy=0
@@ -285,7 +304,11 @@ health_once() {
     [[ "$state" == "unhealthy" || "$state" == "starting" ]] && unhealthy=$((unhealthy+1))
   done
   (( unhealthy == 0 )) || return 1
+  # /healthz proves the GATEWAY lane. It says nothing about the UI, which nginx reaches
+  # through a different upstream — and a stranded ui upstream passed this gate happily
+  # while every page in the browser answered 502. Probe both doors.
   curl -sf -m 10 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 || return 1
+  curl -sf -m 10 -o /dev/null "http://127.0.0.1:${port}/ui/" 2>/dev/null || return 1
   return 0
 }
 
@@ -396,6 +419,7 @@ cmd_upgrade() {
     warn "compose up failed — rolling back"
     do_rollback ""; exit 1
   fi
+  reload_edge
 
   if ! wait_healthy; then
     warn "the new release did not become healthy — rolling back automatically"
