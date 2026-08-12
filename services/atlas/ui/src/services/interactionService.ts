@@ -123,12 +123,30 @@ export const interactionService = {
         api.get<any>(`/entities/${entityId}/interactions`).catch(() => []),
         api.get<any>('/leads', { entity_id: entityId, limit: 20 }).catch(() => null),
       ]);
-      const out: Interaction[] = rowsOf(entData).map((r: any) => fromWire(r, code, 'Entity'));
+      // THE ENTITY TIMELINE ALREADY CONTAINS THE LEAD ROWS. The register's Entity
+      // timeline is a ROLL-UP — "every interaction rolled up to the entity" — so a note
+      // logged against a lead of this company comes back from BOTH calls. Pushing both
+      // showed one capture twice: the same text, the same minute, once plain and once
+      // badged LEAD PHASE, with the header counting two. Key by the interaction's own
+      // id and let the per-lead pass OVERWRITE the roll-up copy: the row is identical
+      // either way, but the lead-sourced one knows which lead it came from, which is
+      // what earns the badge. A row with no id (mock/offline shapes) falls back to a
+      // composite key rather than collapsing into its neighbours.
+      const byId = new Map<string, Interaction>();
+      const keyOf = (i: Interaction, r: any) =>
+        String(r?.id || `${i.occurredAt}|${i.person}|${i.interactionType}|${i.notes}`);
+      rowsOf(entData).forEach((r: any) => {
+        const i = fromWire(r, code, 'Entity');
+        byId.set(keyOf(i, r), i);
+      });
       const leadRows = rowsOf(leadData);
       const perLead = await Promise.all(leadRows.map((l: any) =>
         api.get<any>(`/leads/${l.id}/interactions`).then(rowsOf).catch(() => [])));
-      perLead.forEach((rows, i) => out.push(
-        ...rows.map((r: any) => fromWire(r, leadRows[i].lead_no || code, 'Lead'))));
+      perLead.forEach((rows, i) => rows.forEach((r: any) => {
+        const it = fromWire(r, leadRows[i].lead_no || code, 'Lead');
+        byId.set(keyOf(it, r), it);
+      }));
+      const out: Interaction[] = [...byId.values()];
       out.sort((a, b) =>
         ((b.occurredAt || '') + (b.loggedAt || '')).localeCompare((a.occurredAt || '') + (a.loggedAt || '')));
       return out;
