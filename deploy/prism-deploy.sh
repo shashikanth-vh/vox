@@ -3,6 +3,7 @@
 # PRISM — upgrade / rollback for a Docker Compose deployment on one VM.
 #
 #   ./prism-deploy.sh upgrade  ~/prism-9bdda8b.zip   # backup → build → swap → verify
+#                                                    # .tar / .tar.gz / .tgz also accepted
 #   ./prism-deploy.sh rollback                       # back to the previous release
 #   ./prism-deploy.sh rollback --with-db             # …and the database with it
 #   ./prism-deploy.sh status                         # what is live, what can be rolled back to
@@ -101,6 +102,35 @@ dc() {                      # docker compose, against a tree, with profiles + pr
   mapfile -t files < <(compose_files "$tree")
   for p in $PROFILES; do profs+=(--profile "$p"); done
   docker compose -p "$PROJECT" "${files[@]}" "${profs[@]}" "$@"
+}
+
+# ── release archives ─────────────────────────────────────────────────────────
+# zip, tar, tar.gz and tgz are all accepted, and the KIND IS SNIFFED FROM THE CONTENT
+# rather than the extension: a release renamed by a mail client or re-wrapped by someone
+# passing it along is still the same release, and refusing it on the strength of its
+# name would be theatre. GNU tar detects its own compression, so one branch covers the
+# three tar spellings.
+archive_kind() {
+  local f="$1"
+  if tar -tf "$f" >/dev/null 2>&1; then echo tar
+  elif command -v unzip >/dev/null && unzip -l "$f" >/dev/null 2>&1; then echo zip
+  else die "$(basename "$f") is neither a readable tar nor a zip (corrupt, or not a release archive)"
+  fi
+}
+
+unpack() {                  # unpack "$archive" "$dest"
+  local f="$1" dest="$2"
+  case "$(archive_kind "$f")" in
+    tar) run tar -xf "$f" -C "$dest" ;;
+    zip) command -v unzip >/dev/null || die "unzip is not installed (needed for a .zip release)"
+         run unzip -q "$f" -d "$dest" ;;
+  esac
+}
+
+release_name() {            # a directory-safe name, with every archive suffix stripped
+  local b; b="$(basename "$1")"
+  b="${b%.zip}"; b="${b%.tgz}"; b="${b%.tar}"; b="${b%.gz}"; b="${b%.tar}"
+  echo "$b"
 }
 
 edge_http_port() {          # the port the edge publishes, for the health probe
@@ -222,23 +252,36 @@ wait_healthy() {
 
 # ── prune ────────────────────────────────────────────────────────────────────
 prune_old() {
-  local n
-  n="$(find "$RELEASES" -maxdepth 1 -mindepth 1 -type d | wc -l)"
+  # THE ROLLBACK TARGET IS NEVER PRUNED. Trimming by age alone will eventually delete
+  # the tree `.previous` points at — and the failure is silent until the day someone
+  # needs it, when rollback reports "nothing to roll back to" while the symlink sits
+  # there pointing at a directory that no longer exists. Whatever else goes, that stays.
+  local keep; keep="$(readlink -f "$RELEASES/.previous" 2>/dev/null || true)"
+  local -a candidates=()
+  local d
+  while IFS= read -r d; do
+    [[ -n "$keep" && "$d" == "$keep" ]] && continue
+    candidates+=("$d")
+  done < <(find "$RELEASES" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %p\n' |
+           sort -n | cut -d' ' -f2-)
+  local n=${#candidates[@]}
   if (( n > KEEP_RELEASES )); then
-    find "$RELEASES" -maxdepth 1 -mindepth 1 -type d -printf '%T@ %p\n' | sort -n |
-      head -n "$(( n - KEEP_RELEASES ))" | cut -d' ' -f2- |
-      while read -r d; do say "  removing old release $(basename "$d")"; rm -rf "$d"; done
+    for d in "${candidates[@]:0:$((n - KEEP_RELEASES))}"; do
+      say "  removing old release $(basename "$d")"
+      rm -rf "$d"
+    done
   fi
   ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
 }
 
 # ── commands ─────────────────────────────────────────────────────────────────
 cmd_upgrade() {
-  local zip="${1:-}"
-  [[ -n "$zip" ]] || die "usage: $0 upgrade <prism-<hash>.zip>"
-  [[ -f "$zip" ]] || die "no such file: $zip"
+  local archive="${1:-}"
+  [[ -n "$archive" ]] || die "usage: $0 upgrade <release archive: .zip | .tar | .tar.gz | .tgz>"
+  [[ -f "$archive" ]] || die "no such file: $archive"
   preflight
-  command -v unzip >/dev/null || die "unzip is not installed"
+  local kind; kind="$(archive_kind "$archive")"
+  say "  release archive: $(basename "$archive") ($kind, $(du -h "$archive" | cut -f1))"
 
   local db_backup secrets_backup image_map
   db_backup="$(backup_db)"
@@ -246,13 +289,13 @@ cmd_upgrade() {
   image_map="$(snapshot_images)"
 
   # Unpack into a staging tree. The zip contains a top-level `prism/` directory.
-  local rel; rel="$RELEASES/$STAMP-$(basename "$zip" .zip)"
-  step "Unpacking $(basename "$zip") → $rel"
+  local rel; rel="$RELEASES/$STAMP-$(release_name "$archive")"
+  step "Unpacking $(basename "$archive") → $rel"
   rm -rf "$rel.tmp"; mkdir -p "$rel.tmp"
-  run unzip -q "$zip" -d "$rel.tmp"
+  unpack "$archive" "$rel.tmp"
   local inner; inner="$(find "$rel.tmp" -maxdepth 2 -name docker-compose.yml -path '*/deploy/compose/*' | head -1)"
   [[ -n "$inner" ]] || inner="$(find "$rel.tmp" -maxdepth 4 -name docker-compose.yml -path '*/deploy/compose/*' | head -1)"
-  [[ -n "$inner" ]] || die "that zip has no deploy/compose/docker-compose.yml — wrong archive?"
+  [[ -n "$inner" ]] || die "that archive has no deploy/compose/docker-compose.yml — wrong file?"
   local newtree; newtree="$(cd "$(dirname "$inner")/../.." && pwd)"
   mv "$newtree" "$rel"; rm -rf "$rel.tmp"
 
@@ -305,7 +348,15 @@ cmd_upgrade() {
 do_rollback() {             # $1: "--with-db" to restore the pre-upgrade dump as well
   local with_db="${1:-}"
   local prev; prev="$(readlink -f "$RELEASES/.previous" 2>/dev/null || true)"
-  [[ -n "$prev" && -d "$prev" ]] || die "no previous release recorded — nothing to roll back to"
+  if [[ -z "$prev" || ! -L "$RELEASES/.previous" ]]; then
+    die "no previous release recorded — nothing to roll back to"
+  fi
+  # A recorded-but-missing target is a different fault from never having upgraded, and
+  # it needs a different answer: the tree is gone, so the way back is the release
+  # archive plus a database restore, not this command.
+  [[ -d "$prev" ]] || die "the recorded previous release is MISSING: $prev
+   Roll back by re-running 'upgrade' with the older release archive.
+   Its database backup is under $BACKUPS (see: $0 status)."
 
   step "Rolling back to $(basename "$prev")"
   local failed="$RELEASES/failed-$STAMP"
