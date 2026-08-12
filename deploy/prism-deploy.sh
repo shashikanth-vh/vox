@@ -139,6 +139,25 @@ edge_http_port() {          # the port the edge publishes, for the health probe
   echo "${port:-80}"
 }
 
+# ── schema ───────────────────────────────────────────────────────────────────
+# Migrations run FORWARD by themselves: register and access both boot through
+# `alembic upgrade head` before they serve, so a release carrying a new revision applies
+# it during the `up`. There is no reverse gear — this script never runs `downgrade`, and
+# a rollback therefore leaves the NEW schema under the OLD code. That is usually fine
+# (an added column the old code ignores) and occasionally not (a dropped or renamed one).
+# Either way the operator should learn it BEFORE the swap, not while rolling back.
+migration_delta() {         # revisions present in $2 but not in $1
+  local old_tree="$1" new_tree="$2" d
+  for d in services/register/migrations/versions services/access/migrations/versions; do
+    [[ -d "$new_tree/$d" ]] || continue
+    local f
+    for f in "$new_tree/$d"/*.py; do
+      [[ -e "$f" ]] || continue
+      [[ -e "$old_tree/$d/$(basename "$f")" ]] || echo "${d%%/migrations*}: $(basename "$f")"
+    done
+  done
+}
+
 # ── preflight ────────────────────────────────────────────────────────────────
 preflight() {
   step "Preflight"
@@ -306,6 +325,22 @@ cmd_upgrade() {
   done
   [[ -f "$rel/deploy/compose/.env" ]] || die "the new tree has no .env after restore — stopping"
 
+  # SAY IT NOW, not later. A release that carries new revisions changes what a rollback
+  # means, and the moment to know that is before anything moves.
+  local schema; schema="$(migration_delta "$LIVE" "$rel")"
+  if [[ -n "$schema" ]]; then
+    step "This release carries SCHEMA CHANGES"
+    say "$(printf '%s\n' "$schema" | sed 's/^/    /')"
+    say ""
+    say "  They apply automatically when the services start (alembic upgrade head)."
+    say "  ${c_ylw}A plain rollback does NOT undo them${c_off} — it puts the old code on the new"
+    say "  schema. That is safe for an added column and unsafe for a dropped one."
+    say "  If you need the old schema back too: ./prism-deploy.sh rollback --with-db"
+  else
+    say ""
+    say "  No schema changes in this release — rollback is fully symmetric."
+  fi
+
   # BUILD BEFORE SWAPPING. A failure here must leave the running stack untouched.
   step "Building the new images (the live stack keeps serving)"
   if ! dc "$rel" build; then
@@ -322,6 +357,7 @@ cmd_upgrade() {
   ln -sfn "$prev" "$RELEASES/.previous"
   printf '%s\n' "$db_backup" > "$RELEASES/.previous-db"
   printf '%s\n' "$image_map"  > "$RELEASES/.previous-images"
+  printf '%s\n' "$schema"     > "$RELEASES/.previous-migrations"
 
   step "Starting the new release"
   if ! dc "$LIVE" up -d; then
@@ -363,6 +399,14 @@ do_rollback() {             # $1: "--with-db" to restore the pre-upgrade dump as
   [[ -d "$LIVE" ]] && mv "$LIVE" "$failed"
   mv "$prev" "$LIVE"
   rm -f "$RELEASES/.previous"
+
+  local schema; schema="$(cat "$RELEASES/.previous-migrations" 2>/dev/null || true)"
+  if [[ -n "${schema// /}" && "$with_db" != "--with-db" ]]; then
+    warn "the release being rolled back ADDED schema revisions:"
+    say "$(printf '%s\n' "$schema" | sed 's/^/    /')"
+    warn "the database keeps them — the old code will run against the newer schema."
+    warn "if that release dropped or renamed anything, stop and use: $0 rollback --with-db"
+  fi
 
   local map; map="$(cat "$RELEASES/.previous-images" 2>/dev/null || true)"
   if [[ -n "$map" ]] && restore_images "$map"; then
