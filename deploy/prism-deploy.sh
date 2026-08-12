@@ -57,6 +57,7 @@ MIN_FREE_GB="${PRISM_MIN_FREE_GB:-8}"
 # The three secret locations that live INSIDE the tree and must survive a swap.
 SECRET_PATHS=(deploy/compose/.env deploy/vocx-secrets deploy/nginx/certs)
 
+INVOCATION="$*"             # what the operator actually typed, for copy-pasteable advice
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOCK="$ROOT/.prism-deploy.lock"
 LOG="$BACKUPS/deploy-$STAMP.log"
@@ -167,7 +168,35 @@ preflight() {
   [[ -d "$LIVE" ]] || die "no live tree at $LIVE"
   [[ -f "$LIVE/deploy/compose/docker-compose.yml" ]] || die "$LIVE is not a PRISM tree"
   [[ -f "$LIVE/deploy/compose/.env" ]] || die "no deploy/compose/.env in the live tree — refusing to continue"
-  mkdir -p "$BACKUPS" "$RELEASES"
+  mkdir -p "$BACKUPS" "$RELEASES" 2>/dev/null ||
+    die "cannot create $BACKUPS / $RELEASES as $(id -un) — run the deploy with sudo"
+  # AND THE TREES MUST BE MOVABLE. Swapping releases is two `mv`s inside $ROOT, so write
+  # permission there is as load-bearing as read permission on the secrets — and finding
+  # out at the swap means a full build was spent first.
+  local -a needwrite=("$ROOT" "$BACKUPS" "$RELEASES")
+  local d
+  for d in "${needwrite[@]}"; do
+    [[ -w "$d" ]] || die "cannot write to $d as $(id -un) — run the deploy with sudo, or fix ownership of $ROOT"
+  done
+
+  # THE SECRETS MUST BE READABLE BY WHOEVER IS RUNNING THIS. A TLS key is root-owned and
+  # mode 600 by every sane convention, so an unprivileged run cannot snapshot it — and
+  # discovering that AFTER the database dump, as this script used to, wastes the operator's
+  # nerve at the exact moment they are watching a production deploy. Checked first, named
+  # precisely, with both ways out.
+  local unreadable
+  unreadable="$(find "${SECRET_PATHS[@]/#/$LIVE/}" ! -readable -print 2>/dev/null || true)"
+  if [[ -n "$unreadable" ]]; then
+    say "${c_red}✗ these secret files cannot be read as $(id -un):${c_off}"
+    say "$(printf '%s\n' "$unreadable" | sed 's/^/    /')"
+    say ""
+    say "  Run the whole deploy with sudo (simplest, and what the certs expect):"
+    say "      sudo $0 ${INVOCATION:-upgrade <archive>}"
+    say "  …or hand ownership to your user once:"
+    say "      sudo chown -R $(id -un):$(id -gn) $LIVE/deploy/nginx/certs $LIVE/deploy/vocx-secrets"
+    die "refusing to continue — a snapshot that silently skipped a key would restore a tree that cannot serve TLS"
+  fi
+
   local free_gb
   free_gb="$(df -BG --output=avail "$ROOT" | tail -1 | tr -dc '0-9')"
   (( free_gb >= MIN_FREE_GB )) ||
@@ -198,7 +227,10 @@ backup_secrets() {
   local -a present=()
   for p in "${SECRET_PATHS[@]}"; do [[ -e "$LIVE/$p" ]] && present+=("$p"); done
   (( ${#present[@]} )) || die "none of the secret paths exist in $LIVE"
-  tar -czf "$tarball" -C "$LIVE" "${present[@]}" 2>>"$LOG" || die "could not archive the secrets"
+  if ! tar -czf "$tarball" -C "$LIVE" "${present[@]}" 2>>"$LOG"; then
+    say "$(tail -5 "$LOG" | sed 's/^/    /')"
+    die "could not archive the secrets — see above and $LOG"
+  fi
   chmod 600 "$tarball"
   say "  ${#present[@]} location(s): ${present[*]}"
   echo "$tarball"
@@ -481,7 +513,21 @@ cmd_verify() {
 }
 
 # ── entry ────────────────────────────────────────────────────────────────────
-mkdir -p "$BACKUPS"
+# THE DIAGNOSIS MUST SURVIVE THE FAULT IT IS DIAGNOSING. Running as a user who cannot
+# write $ROOT means the log file cannot be opened either — and `say` piping into a dead
+# `tee` used to kill the script on its first line, so the operator saw a broken pipe
+# instead of "you need sudo". Degrade to stderr-only and let preflight do the talking.
+mkdir -p "$BACKUPS" 2>/dev/null || true
+if ! : >>"$LOG" 2>/dev/null; then
+  LOG=/dev/null
+  printf '%s\n' "${c_ylw}! cannot write a deploy log under $BACKUPS — continuing to the terminal only${c_off}" >&2
+fi
+# Checked BEFORE the exec, not around it: a failed redirection on `exec` kills a
+# non-interactive shell outright, so `if ! exec 9>…` exits silently — which is how an
+# unprivileged run ended with no output at all instead of the one line that helps.
+[[ -w "$ROOT" ]] || die "cannot write to $ROOT as $(id -un).
+   Run the deploy with sudo:  sudo $0 ${INVOCATION:-upgrade <archive>}
+   …or take ownership once:   sudo chown -R $(id -un):$(id -gn) $ROOT"
 exec 9>"$LOCK"
 flock -n 9 || die "another deploy is running (lock: $LOCK)"
 trap 'say "${c_red}✗ aborted at line $LINENO${c_off} — log: $LOG"' ERR
