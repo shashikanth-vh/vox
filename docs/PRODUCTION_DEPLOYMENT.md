@@ -130,11 +130,22 @@ off-VM (any file backup of `/var/lib/docker/volumes/…_pgbackups` works, or
 docker compose exec pgbackup ls -lh /backups
 # restore everything (stop app services first so nothing writes mid-restore).
 # The pgbackup container holds both the dumps and the connection env — run it there:
-docker compose stop register access gateway workflows-worker temporal
+# Stop EVERY service that holds a connection — `pg_dumpall --clean` drops the
+# databases, and an open session makes the DROP fail half-way through.
+docker compose stop register access gateway atlas vocx pulse \
+  workflows notifier orchestrator temporal temporal-ui
 docker compose exec -T pgbackup sh -c \
   'gunzip -c /backups/prism-<timestamp>.sql.gz | psql -d postgres'
-docker compose start register access gateway workflows-worker temporal
+docker compose start register access gateway atlas vocx pulse \
+  workflows notifier orchestrator temporal temporal-ui
 ```
+
+Restoring is a REPLACEMENT, so make it reversible: dump the current state first
+(`pg_dumpall -U prism | gzip > /root/prism-backup/pre-restore.sql.gz`) before piping an
+older one in. And note the restore covers the DATABASES ONLY — `miniodata` (document
+bytes) and `vocx_state` (per-RM Google tokens) are not rolled back with it, so files
+uploaded after the chosen backup survive as orphans with no row pointing at them.
+Harmless, but they are still on disk.
 
 Documents: `miniodata` is plain files — back the volume up the same way. The in-app
 **Admin → Tools → Export ledger / Backup** flows add a business-level export on top.
