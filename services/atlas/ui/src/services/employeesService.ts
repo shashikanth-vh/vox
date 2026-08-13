@@ -279,9 +279,24 @@ export const employeesService = {
    * person still able to log in.)
    */
   async update(name: string, patch: Partial<Employee>, by: string): Promise<void> {
-    const p = this.find(name); if (!p) return;
+    // THE GRID IS BUILT FROM ACCESS, NOT FROM THIS STORE. A person can be on screen and
+    // absent here — an Access sign-in with no register roster row is the ordinary case,
+    // and the union in list() puts them in the table precisely so they are visible. But
+    // `find()` searches the local roster only, and a bare `if (!p) return` then made
+    // every edit on such a person a silent no-op: no write, no error, no audit line.
+    // Someone changing a role watched the dialog close and nothing happen, twice.
+    //
+    // The row the dialog is editing already carries the identity it needs (accessId and
+    // e-mail come straight from Access), so fall back to the patch itself.
+    const p = this.find(name) ?? ({ ...(patch as Employee) });
     if (USE_REAL_API) {
+      let touched = false;
+      // Tracked SEPARATELY from `touched`: a roster-only person has a register row, so
+      // the people PATCH succeeds and the edit looks saved — while the role, which lives
+      // only in Access, quietly did not move. The roster write must not vouch for it.
+      let rolesApplied = false;
       if (p.registerId) {
+        touched = true;
         await api.patch('/people/' + p.registerId, toPersonBody(patch))
           .catch((e) => { throw new Error('The roster refused the edit: '
             + ((e?.response?.data && errText(e.response.data)) || e?.message || e)); });
@@ -308,13 +323,26 @@ export const employeesService = {
           heldRoles = hit?.roles;
         }
         if (id) {
+          touched = true;
           if (Object.keys(accessPatch).length) await accessService.updateUser(id, accessPatch);
-          if (wantRoles) await accessService.setRoles(id, wantRoles, heldRoles ?? []);
+          if (wantRoles) { await accessService.setRoles(id, wantRoles, heldRoles ?? []); rolesApplied = true; }
         } else if (accessPatch.is_active === false) {
           // Refusing to pretend: a deactivation that cannot reach the sign-in is not done.
           throw new Error('Could not find this person\'s sign-in identity in Access — '
             + 'their access was NOT revoked. Check their e-mail and try again.');
         }
+      }
+      // NOTHING REACHED A SERVER — say so rather than closing on a change that was never
+      // made. Roles live in Access and are reachable only through a sign-in identity, so
+      // this is what a role change on a roster-only person must look like.
+      if (wantRoles && !rolesApplied) {
+        throw new Error('The role was NOT changed: this person has no sign-in identity in '
+          + 'Access, and roles are granted against the sign-in rather than the roster row. '
+          + 'Add their @evamfinance.com e-mail first, then set the role.');
+      }
+      if (!touched) {
+        throw new Error('Nothing was saved: this person has neither a roster record nor a '
+          + 'sign-in identity to update.');
       }
     }
     Object.assign(p, patch); writeAudit(by, 'Employee updated', name, Object.keys(patch).join(','));

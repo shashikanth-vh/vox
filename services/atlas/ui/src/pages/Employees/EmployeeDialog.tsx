@@ -5,12 +5,20 @@ import { FieldGrid, TextFld, SelectFld, MultiSelectFld } from '../../components/
 import { employeesService } from '../../services/employeesService';
 import { useAuth } from '../../auth/AuthContext';
 import type { Employee } from './employee.types';
+import { ROLES, ROLE_RANK, type Role } from '../../auth/rbac';
 
-// The 10 RBAC roles (ATLAS_RBAC_v3.1). Role drives all access — it's the RBAC join key.
-const ROLES = ['Admin', 'Management', 'BD Head', 'BDRM', 'Credit Head', 'Deal Analyst', 'Syn Head', 'Syn RM', 'AM Head', 'AM RM'];
-// Forms spec: Reports-to is MANDATORY for ICs, optional for Heads. The leadership +
-// Head-tier roles are the "heads"; the ICs (BDRM, Deal Analyst, Syn RM, AM RM) need one.
-const HEAD_ROLES = ['Admin', 'Management', 'BD Head', 'Credit Head', 'Syn Head', 'AM Head'];
+// THE ROLE LIST IS NOT COPIED HERE. It used to be, and it went stale: the servicing pair
+// (LMS Operator, LMS Management) joined the platform and this list kept the older ten, so
+// the two roles could not be assigned at all — and anyone who already held one could not
+// be edited, because their own role was not among the options.
+//
+// Reports-to is mandatory for an IC and optional for a head, and headship is DERIVED from
+// the same rank the rest of the app uses (70+ = leads people) rather than a second list
+// that can drift out of step with the first. LMS Management ranks with the other heads;
+// LMS Operator ranks with the ICs — which is exactly what the servicing desk expects, and
+// what the hardcoded list got wrong by omitting both.
+const HEAD_RANK = 70;
+const isHead = (r: string) => (ROLE_RANK[r as Role] ?? 0) >= HEAD_RANK;
 
 export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
   emp: Employee | null; mode: 'add' | 'edit'; onClose: () => void; onDone: () => void;
@@ -66,7 +74,7 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
   // Role stacking: the Role field holds a comma-separated list. Reports-to is mandatory
   // only when NONE of the held roles is a Head-tier role.
   const roleList = (f.role || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const anyHead = roleList.some((r) => HEAD_ROLES.includes(r));
+  const anyHead = roleList.some(isHead);
 
   // Forms spec (Employee record): Full name & Email MANDATORY; Email must be an
   // @evamfinance.com address (SSO integrity); Role MANDATORY; Reports-to MANDATORY
@@ -110,7 +118,12 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
           <TextFld label="Full name" required value={f.full} onChange={(v) => set('full', v)} />
           <TextFld label="Email" required value={f.email} onChange={(v) => set('email', v)} placeholder="name@evamfinance.com" />
           <TextFld label="Phone" value={f.phone} onChange={(v) => set('phone', v)} />
-          <MultiSelectFld label="Role" required value={roleList} onChange={(arr) => set('role', arr.join(', '))} options={ROLES} />
+          {/* A role the person already holds is always offered, even if it is not in the
+              canonical list (an alias, or a role retired since they were granted it) —
+              otherwise opening the dialog would quietly drop it on the next save. */}
+          <MultiSelectFld label="Role" required value={roleList}
+            onChange={(arr) => set('role', arr.join(', '))}
+            options={[...ROLES, ...roleList.filter((r) => !ROLES.includes(r as Role))]} />
           <SelectFld label="Reports to" required={!anyHead} value={f.reportsTo} onChange={(v) => set('reportsTo', v)} options={reportOptions} blank />
           <TextFld label="Geography covered" value={f.geography} onChange={(v) => set('geography', v)} placeholder="e.g. Karnataka, Tamil Nadu" />
           <TextFld label="Sector specialisation" value={f.sectors} onChange={(v) => set('sectors', v)} placeholder="e.g. Solar, EV" />
