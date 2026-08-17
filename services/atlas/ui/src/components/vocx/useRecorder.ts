@@ -14,13 +14,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * capture path alone. Stopping AT the limit keeps the audio recorded so far; a clip that
  * simply ran on would be refused after the user had finished speaking.
  *
- * TWO minutes, not three. Decode time scales with the clip, and three minutes of speech
- * sat close enough to the wait every hop allows that a slow deployment could turn a
- * finished recording into a timeout. Two leaves real headroom — and a field note that
- * needs longer than two minutes is two notes.
+ * THE CAP IS DEPLOYMENT CONFIGURATION, not a constant, because the right number depends
+ * on how fast THAT deployment decodes. `VITE_VOCX_MAX_SECONDS` sets it at build time (the
+ * ui image takes it as a build arg); three minutes is the default.
+ *
+ * Raising it is only safe while a clip of that length still finishes inside VocX's
+ * transcription budget (`stt.api.budget_s`, 240s by default) — past that the capture comes
+ * back as a timeout instead of a note, which is the failure this number exists to avoid.
+ * Measure before raising: time a full-length capture, and compare against the budget.
+ *
+ * Clamped to 30..600s. Below thirty seconds the cap fights the user; above ten minutes no
+ * hop in the chain is willing to wait, whatever is configured here.
  */
 
-export const MAX_SECONDS = 120;
+const _envCap = Number(import.meta.env.VITE_VOCX_MAX_SECONDS);
+export const MAX_SECONDS = Number.isFinite(_envCap) && _envCap > 0
+  ? Math.min(600, Math.max(30, Math.round(_envCap)))
+  : 180;
 
 export type RecorderState = 'idle' | 'requesting' | 'recording' | 'finishing';
 

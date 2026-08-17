@@ -44,10 +44,15 @@ ARG VITE_USE_REAL_API="true"
 # bundled mock instead (that masquerade cost two debugging rounds). Demo builds may
 # set 'true' to restore the soft fallback.
 ARG VITE_MOCK_FALLBACK="false"
+# How long ONE voice capture may run, in seconds (default 180 = three minutes). Raise it
+# only while a clip of that length still decodes inside VocX's transcription budget
+# (stt.api.budget_s, 240s) — beyond that the capture returns a timeout instead of a note.
+ARG VITE_VOCX_MAX_SECONDS="180"
 ENV VITE_PULSE_URL=$VITE_PULSE_URL \
     VITE_PRISM_BASE_URL=$VITE_PRISM_BASE_URL \
     VITE_API_BASE_URL=$VITE_API_BASE_URL \
     VITE_MOCK_FALLBACK=$VITE_MOCK_FALLBACK \
+    VITE_VOCX_MAX_SECONDS=$VITE_VOCX_MAX_SECONDS \
     VITE_ACCESS_URL=$VITE_ACCESS_URL \
     VITE_ORCHESTRATOR_URL=$VITE_ORCHESTRATOR_URL \
     VITE_VOCX_URL=$VITE_VOCX_URL \

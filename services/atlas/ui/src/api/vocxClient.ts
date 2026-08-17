@@ -15,7 +15,7 @@ import { PRISM_BASE_URL } from './axiosClient';
  * inherit the register prefix.
  *
  * The capture timeout is deliberately long. A clip is transcribed SYNCHRONOUSLY by the
- * STT service on CPU, and two minutes of speech legitimately takes minutes to decode;
+ * STT service on CPU, and minutes of speech legitimately take minutes to decode;
  * the 15s the other clients use would abandon a capture the user had already recorded.
  * It matches the window the edge and the gateway carry for the same path — the shortest
  * hop in the chain is the one that decides, so all three are set together.

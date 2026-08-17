@@ -59,7 +59,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
     // route), the strip must not sit on "Uploading" forever — after ~8s of silence it
     // steps aside for the plain status line.
     //
-    // BUT VocX cannot report a stage until the whole clip has ARRIVED, and a two-minute
+    // BUT VocX cannot report a stage until the whole clip has ARRIVED, and a long
     // recording takes longer than eight seconds to go up on a phone. Counting silence
     // from the moment the take ends therefore retired the strip mid-upload — the longer
     // the recording, the likelier it happened, which is exactly backwards. The patience
@@ -71,7 +71,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
     // Belt and braces: if the browser reports no upload progress at all (an adapter that
     // does not emit it), the strip must still be able to stand down rather than claim
     // "Uploading" for the whole decode. A minute is far longer than any real upload of a
-    // two-minute clip and far shorter than the capture's own timeout.
+    // full-length clip and far shorter than the capture's own timeout.
     const uploadCeiling = setTimeout(() => { uploaded = true; }, 60_000);
     pollRef.current = setInterval(() => {
       void vocxService.captureStatus(cid).then((s) => {
@@ -153,7 +153,7 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           surface's own green the whole time, and the state is carried by animation —
           an expanding cyan ripple for as long as the take runs, the level ring tracking
           the live input (so a dead microphone is visible before the user has spoken for
-          two minutes into nothing), and the icon itself breathing. An alarm colour on
+          minutes into nothing), and the icon itself breathing. An alarm colour on
           the fill made a normal, wanted state look like something going wrong.
           Reduced-motion users get a static cyan ring instead — with the animation gone,
           colour is the one channel left to say the mic is open. */}

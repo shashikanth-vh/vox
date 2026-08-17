@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0
     # For the few paths that are slow BY DESIGN — a speech capture is transcribed
-    # synchronously (a two-minute clip on CPU outlasts the ordinary budget), and a
+    # synchronously (a multi-minute clip on CPU outlasts the ordinary budget), and a
     # full CAM generation reads the template + prompt + documents and streams an
     # 11-section memo back, which honestly runs past five minutes. Scoped in
     # _SLOW_PATHS so nothing else inherits a minutes-long window. Keep it >= the STT
