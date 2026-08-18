@@ -71,16 +71,30 @@ export async function fillCompanyFromEntity<T extends { _name?: string; code?: s
   return rows;
 }
 
-/** Tracker grids: fill GROUP CODE + COMPANY from the row's deal_id. Mutates in place. */
-export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string }>(rows: T[]): Promise<T[]> {
-  if (rows.some((r) => r.dealId && (!r._name || !r.code))) {
+/**
+ * Tracker grids: fill GROUP CODE + COMPANY from the row's deal_id, FALLING BACK to the
+ * row's own entity_id.
+ *
+ * The deal is only ever a shortcut. A tracker row always carries entity_id — the register
+ * requires it — but deal_id is set only when that company also has a row on the Deals
+ * sheet, so a mandate for a company that was never a deal arrived with deal_id NULL and
+ * rendered a blank Company. On the asset-monetisation grid that is not an edge case: a
+ * land parcel listed under its own name ("Axel Renewable Private Limited (Land in
+ * Solapur)") is its own company and rarely has a deal, so whole pages of the register
+ * looked nameless while the data was complete underneath.
+ *
+ * Mutates in place, and still fails soft: an unresolvable row keeps its blanks rather
+ * than failing the grid.
+ */
+export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string; entityId?: string }>(rows: T[]): Promise<T[]> {
+  if (rows.some((r) => (r.dealId || r.entityId) && (!r._name || !r.code))) {
     await ensure();
     rows.forEach((r) => {
       const ref = r.dealId ? dealRefs.get(String(r.dealId)) : undefined;
-      if (!ref) return;
-      const ent = ref.entityId ? entities.get(ref.entityId) : undefined;
+      // The deal's entity when there is a deal; the row's own entity when there is not.
+      const ent = entities.get(String(ref?.entityId || r.entityId || ''));
       // Prefer the company's group code; a deal number is not what the drawer opens on.
-      if (!r.code) r.code = ent?.code || ref.code;
+      if (!r.code) r.code = ent?.code || ref?.code || '';
       if (!r._name) r._name = ent?.name || '';
     });
   }

@@ -39,6 +39,7 @@ export function toAmRow(r: any): AmRow {
   return {
     id: r?.id || '',
     dealId: r?.deal_id,
+    entityId: r?.entity_id,
     // The "Group Code" column: the deal's human number, not a UUID.
     code: r?.deal_no || r?.code || '',
     _name: r?.company || r?.entity_name || r?.display_name || '',
