@@ -12,7 +12,7 @@ change did, and what to follow when filling the sheet going forward.
 | sheet | one row per | lifecycle column(s) |
 | --- | --- | --- |
 | **Leads** | prospect company | `Status` = Hot / Warm / Cold *(a temperature, not a lifecycle)* |
-| **Deals** | company in the origination funnel | `Stage` = New Inquiry · In Screening · In Pipeline · Screened Out · Closed Won · Closed Lost · On Hold; `Status` = Hot/Warm/Cold |
+| **Deals** | company in the origination funnel | `Stage` = New Inquiry · In Screening · In Pipeline · Screened Out · Closed Won · Closed Lost · Dropped · On Hold; `Status` = Hot/Warm/Cold |
 | **Lending Tracker** | credit facility being executed | `Stage` = Data Awaited · Diligence · Note Circulated · Sanctioned · … (the bank pipeline) |
 | **Syndication** | (company, bank) pair | `Deal Status` = Deal Live / Dropped / Closed *(coarse)*; `Status` = IM Circulated · Queries Received · IP Received · … *(the bank's real position)* |
 | **Asset Mon** | asset-sale mandate — **one row per MANDATE**, a company may have several | `Status` = Teaser Prepared · In Discussion · NBO Received · Dropped |
@@ -98,7 +98,8 @@ the credit book), but with two mismatches for v4:
 wording does):
 
 - Deals `Stage`: `New Inquiry` · `In Screening` · `In Pipeline` · `Screened Out` ·
-  `Closed Won` · `Closed Lost` · `On Hold`
+  `Closed Won` · `Closed Lost` · `Dropped` · `On Hold`
+  (`Dropped` = Evam walked away; `Closed Lost` = Evam wanted it and did not get it)
 - Lending `Stage`: `Data Awaited` · `Diligence` · `Note Circulated` · `Sanctioned` ·
   `CP/CS Completed` · `Ready for Disbursement` · `Disbursed` · `Rejected` · `On Hold`
   (legacy `Documentation` auto-maps to `CP/CS Completed`; a `Disbursed` row's proposed

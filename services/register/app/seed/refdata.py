@@ -61,7 +61,8 @@ REF_VALUES: dict[str, list[str]] = {
     # dimension from the credit pipeline below; see rbac.DEAL_FUNNEL_STAGES.
     "Deal Funnel Stage": [
         "New Inquiry", "In Screening", "In Pipeline", "On Hold",
-        "Screened Out", "Closed Won", "Closed Lost",
+        # Three terminals: the screen stopped it, Evam walked away, or Evam lost it.
+        "Screened Out", "Closed Won", "Closed Lost", "Dropped",
     ],
     "Lending Stage": [
         "Data Awaited", "Diligence", "Note Circulated", "Sanctioned",

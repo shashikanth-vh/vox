@@ -249,7 +249,7 @@ class LeadRead(ReadModel):
 # lives on the lending tracker line. The deprecated deal-level credit stage is parked in
 # the DB as credit_stage_legacy and deliberately absent from these API models.
 DealFunnelStage = Literal["New Inquiry", "In Screening", "In Pipeline", "On Hold",
-                          "Screened Out", "Closed Won", "Closed Lost"]
+                          "Screened Out", "Closed Won", "Closed Lost", "Dropped"]
 
 
 class DealCreate(CreateModel):

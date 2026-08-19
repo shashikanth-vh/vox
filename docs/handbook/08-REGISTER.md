@@ -218,7 +218,7 @@ flowchart TB
 | Subject | Field | Values |
 | --- | --- | --- |
 | Lead | `status` | Active · On Hold · Dropped · Converted |
-| Deal | `stage` | New Inquiry · In Screening · In Pipeline · On Hold · Screened Out · Closed Won · Closed Lost |
+| Deal | `stage` | New Inquiry · In Screening · In Pipeline · On Hold · Screened Out · Closed Won · Closed Lost · Dropped |
 | Lending | `stage` | Data Awaited · Diligence · Note Circulated · Sanctioned · CP/CS Completed · Ready for Disbursement · Disbursed · Rejected · On Hold |
 | Syndication | `status` | Deal Sourced · Docs Pending · IM in Prep · IM Circulated · Queries Received · IP Received · Sanctioned · Disbursed · On Hold · Withdrawn · Rejected · Dropped |
 | AssetMonetisation | `status` | Teaser Prepared · Teaser Shared · In Discussion · NBO Received · BO Received · SPA / Documentation · Closed · Dropped |

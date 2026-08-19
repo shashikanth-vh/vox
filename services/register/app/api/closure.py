@@ -11,11 +11,11 @@ record still owes answers:
   closed out from under its own pipeline.
 
 The close itself then runs through the SAME lifecycle policy as any stage change (the
-Deal funnel's transition graph — Closed Won / Closed Lost are terminal), with the
-closure note and the validation snapshot on the audit record.
+Deal funnel's transition graph — Closed Won / Closed Lost / Dropped are terminal), with
+the closure note and the validation snapshot on the audit record.
 
     GET  /v1/deals/{id}/open-items     the validation report (what still blocks closure)
-    POST /v1/deals/{id}/close          close (outcome won|lost, note mandatory)
+    POST /v1/deals/{id}/close          close (outcome won|lost|dropped, note mandatory)
 
 Facility-level servicing closure (post-disbursement repayment/release) is outside the
 Release-1 product scope — 'Disbursed' is the lending pipeline's terminal stage.
@@ -52,12 +52,16 @@ _LINE_TERMINALS: dict[str, set[str]] = {
     "AssetMonetisation": {"Closed", "Dropped"},
 }
 
-_OUTCOME_STAGE = {"won": "Closed Won", "lost": "Closed Lost"}
+# Three outcomes, because the funnel keeps three terminals. 'dropped' is Evam's own
+# decision to walk away; 'lost' is a deal Evam wanted and did not get. Without the third
+# verb the only governed way to record a walk-away would be to file it as a competitive
+# loss — which is precisely the distortion the funnel exists to avoid.
+_OUTCOME_STAGE = {"won": "Closed Won", "lost": "Closed Lost", "dropped": "Dropped"}
 
 
 class CloseIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    outcome: str = Field(pattern="^(won|lost)$")
+    outcome: str = Field(pattern="^(won|lost|dropped)$")
     note: str = Field(min_length=1, max_length=4000)
 
 

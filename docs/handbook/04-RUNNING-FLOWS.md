@@ -19,6 +19,7 @@ flowchart LR
         F1["New Inquiry"] --> F2["In Screening"] --> F3["In Pipeline"] --> F4["Closed Won"]
         F3 --> F5["Closed Lost"]
         F2 --> F6["Screened Out"]
+        F3 --> F7["Dropped"]
     end
     subgraph credit["Lending line — the CREDIT pipeline"]
         C1["Data Awaited"] --> C2["Diligence"] --> C3["Note Circulated"] --> C4["Sanctioned"]
@@ -32,6 +33,20 @@ flowchart LR
 
 A deal-level credit stage is **deprecated**; historical values are parked in
 `deals.credit_stage_legacy`.
+
+### The funnel has three terminals, and the difference is the point
+
+| Terminal | Means |
+| --- | --- |
+| **Screened Out** | Never entered the pipeline — the screen did its job |
+| **Dropped** | **Evam walked away** from a deal it could have had. A judgement call |
+| **Closed Lost** | Evam wanted the deal and did not get it. A competitive outcome |
+
+Collapsing `Dropped` into `Closed Lost` would still answer *"how many did we not close?"*
+while making *"and how many of those were our own decision?"* unanswerable — which is the
+question a head of origination actually asks. `Dropped` is reachable from every working
+stage (the decision can be taken whenever it is taken) but **not** from `Screened Out`, and
+like the other closed terminals it is final: a revived opportunity is a new deal.
 
 ### The three product pipelines
 

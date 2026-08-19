@@ -82,7 +82,9 @@ PATCH — for humans or machines).
 Entry: `New Inquiry | In Screening | In Pipeline | On Hold` (terminals are outcomes, never a birth
 state). Graph: forward one step (`New Inquiry → In Screening → In Pipeline → Closed Won/Closed
 Lost`), back one step for rework, `On Hold` ↔ any working stage, `Screened Out` re-openable to
-`In Screening`; the CLOSED terminals are final. **A deal carries NO credit lifecycle** — the
+`In Screening`; the CLOSED terminals are final. `Dropped` — Evam walking away, as distinct from
+`Closed Lost` (Evam wanted it and lost it) — is reachable from every working stage and is itself
+final. **A deal carries NO credit lifecycle** — the
 funnel measures origination, and every credit control below runs on the LENDING line (this is
 the release baseline schema; there is no deal-level credit-stage column).
 

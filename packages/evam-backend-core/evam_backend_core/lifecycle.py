@@ -44,8 +44,17 @@ _AM_STATUSES = ("Teaser Prepared", "Teaser Shared", "In Discussion", "NBO Receiv
 # The structuring workflow, evidence gates and committee governance are bound to the
 # LENDING line's credit stages — a deal-level credit stage is DEPRECATED (the historical
 # values are parked in deals.credit_stage_legacy until a later removal migration).
+#
+# THREE terminals, not two, because the desk's own ledger keeps three and the difference is
+# the point of measuring a funnel at all:
+#   Screened Out — never entered the pipeline; the screen did its job.
+#   Dropped      — EVAM walked away from a deal it could have had. A judgement call.
+#   Closed Lost  — Evam wanted the deal and did not get it. A competitive outcome.
+# Collapsing Dropped into Closed Lost would answer "how many did we not close?" while making
+# "and how many of those were our own decision?" unanswerable — which is the question a head
+# of origination actually asks.
 DEAL_FUNNEL_STAGES = ("New Inquiry", "In Screening", "In Pipeline", "On Hold",
-                      "Screened Out", "Closed Won", "Closed Lost")
+                      "Screened Out", "Closed Won", "Closed Lost", "Dropped")
 
 STAGE_VOCAB: dict[str, tuple[str, frozenset[str]]] = {
     "Lead":              ("status", frozenset(_LEAD_STATUSES)),
@@ -64,7 +73,8 @@ INITIAL_STATUS: dict[str, tuple[str, frozenset[str]]] = {
     "Lead":              ("status", frozenset({"Active", "On Hold", "Dropped"})),
     # A deal is BORN somewhere in the working funnel (an RM may well first log a deal already
     # in screening, or one committed straight into the pipeline — e.g. a lead conversion). The
-    # funnel TERMINALS (Screened Out / Closed Won / Closed Lost) are outcomes, never a birth state.
+    # funnel TERMINALS (Screened Out / Closed Won / Closed Lost / Dropped) are outcomes, never
+    # a birth state.
     "Deal":              ("stage",  frozenset({"New Inquiry", "In Screening", "In Pipeline",
                                                "On Hold"})),
     "Lending":           ("stage",  frozenset({"Data Awaited", "Diligence"})),
@@ -158,14 +168,23 @@ ALLOWED_TRANSITIONS: dict[tuple[str, str], dict[str, set[str]]] = {
     # CLOSED terminals are final (a revived opportunity is a NEW deal — the funnel measures
     # conversion, and resurrecting a closed row would silently rewrite history).
     ("Deal", "stage"): {
-        "New Inquiry":  {"In Screening", "Screened Out", "On Hold", "Closed Lost"},
-        "In Screening": {"In Pipeline", "New Inquiry", "Screened Out", "On Hold", "Closed Lost"},
-        "In Pipeline":  {"Closed Won", "Closed Lost", "In Screening", "On Hold"},
+        # 'Dropped' — Evam walking away — is reachable from every WORKING stage, because the
+        # decision can be taken the moment the desk learns whatever it learns. It is not
+        # reachable from 'Screened Out': a deal that never entered the pipeline was not one
+        # Evam walked away from, it was one the screen stopped.
+        "New Inquiry":  {"In Screening", "Screened Out", "On Hold", "Closed Lost", "Dropped"},
+        "In Screening": {"In Pipeline", "New Inquiry", "Screened Out", "On Hold", "Closed Lost",
+                         "Dropped"},
+        "In Pipeline":  {"Closed Won", "Closed Lost", "In Screening", "On Hold", "Dropped"},
         "On Hold":      {"New Inquiry", "In Screening", "In Pipeline", "Screened Out",
-                         "Closed Lost"},
+                         "Closed Lost", "Dropped"},
         "Screened Out": {"In Screening", "On Hold"},
         "Closed Won":   set(),
         "Closed Lost":  set(),
+        # Final, like the other closed terminals: a deal Evam walked away from and later
+        # revives is a NEW deal. Reopening this row would silently rewrite the conversion
+        # history the funnel exists to measure.
+        "Dropped":      set(),
     },
     ("Lending", "stage"): dict(_CREDIT_PIPELINE),
     ("Syndication", "status"): dict(_SYN_PIPELINE),

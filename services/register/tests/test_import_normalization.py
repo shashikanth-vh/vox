@@ -85,3 +85,36 @@ def test_funnel_vocabulary_matches_schema_literal():
     from app.schemas.resources import DealCreate
     for value in DEAL_FUNNEL_STAGES:
         assert DealCreate(entity_id=uuid.uuid4(), stage=value).stage == value
+
+
+def test_dropped_is_a_funnel_terminal_distinct_from_closed_lost():
+    """'Dropped' (Evam walked away) and 'Closed Lost' (Evam wanted it and did not get it)
+    are DIFFERENT outcomes. The desk's ledger has always kept both; collapsing them would
+    make "how many did we walk away from?" unanswerable, which is the question the funnel
+    exists to answer. Pinned here so a later tidy-up cannot quietly merge them."""
+    from evam_backend_core.lifecycle import ALLOWED_TRANSITIONS, INITIAL_STATUS
+
+    assert "Dropped" in DEAL_FUNNEL_STAGES
+    assert "Closed Lost" in DEAL_FUNNEL_STAGES
+    assert _canon_funnel("Dropped") == "Dropped"          # imports verbatim, no translation
+    assert _canon_funnel("dropped") == "Dropped"          # case-insensitive
+
+    moves = ALLOWED_TRANSITIONS[("Deal", "stage")]
+    # Reachable from every WORKING stage — the decision can be taken whenever it is taken.
+    for working in ("New Inquiry", "In Screening", "In Pipeline", "On Hold"):
+        assert "Dropped" in moves[working], working
+    # …but not from Screened Out: the screen stopped that one, Evam did not walk away.
+    assert "Dropped" not in moves["Screened Out"]
+    # Final, like the other closed terminals — a revived opportunity is a NEW deal.
+    assert moves["Dropped"] == set()
+    # An outcome, never a birth state.
+    assert "Dropped" not in INITIAL_STATUS["Deal"][1]
+
+
+def test_close_endpoint_can_record_all_three_terminals():
+    """The governed close path must be able to say 'we walked away'. Without the third
+    verb the only way to record it would be to file it as a competitive loss."""
+    from app.api.closure import _OUTCOME_STAGE
+    assert _OUTCOME_STAGE == {"won": "Closed Won", "lost": "Closed Lost",
+                              "dropped": "Dropped"}
+    assert set(_OUTCOME_STAGE.values()) <= set(DEAL_FUNNEL_STAGES)
