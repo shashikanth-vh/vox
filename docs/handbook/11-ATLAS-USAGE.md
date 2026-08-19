@@ -92,6 +92,28 @@ transition map the server enforces. You cannot be offered a move that will be re
 
 The lane is per-desk: an AM RM sees no lending stage-change button.
 
+### Close deal
+
+Ends the deal and records **how** it ended:
+
+| Outcome | Means | Recorded as |
+| --- | --- | --- |
+| **Won** | The deal was done | `Closed Won` |
+| **Lost** | We wanted it and did not get it | `Closed Lost` |
+| **Dropped** | We walked away — our own decision | `Dropped` |
+
+That distinction is the point. Collapsed into one word, the book could still say how many
+deals did not close, but not how many of those were Evam's own call.
+
+A closing note is mandatory, and the close is **refused while the deal still owes answers** —
+open EWS cases, unresolved covenant observations, or product lines still mid-pipeline. The
+dialog names each blocker before you commit, and a deal cannot be closed out from under its
+own pipeline.
+
+The button appears only for the stage-change approval authority (Admin, Management or a
+vertical Head), and disappears once the deal has already reached a terminal. Closing is
+final — a revived opportunity is a new deal.
+
 ---
 
 ## 4. The three product boards
@@ -280,6 +302,7 @@ VocX is fully usable on a phone; that is the point of it.
 | Turn a lead into a deal | **Leads** → the row → **Push to Deals** (an approval follows) |
 | Add a product line | **Deals** → company → **Add product** |
 | Move a stage | **Deals** → company → **Stage change** (only legal moves are offered) |
+| Close a deal (Won / Lost / Dropped) | **Deals** → company → **Close deal** |
 | Record a conversation | 🎤 in the header |
 | Log a typed interaction | **Deals** → company → **Log interaction** |
 | Upload a document | **Deals** → company → **Data Register** |

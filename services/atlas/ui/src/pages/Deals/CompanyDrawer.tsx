@@ -16,6 +16,7 @@ import { notesService } from '../../services/notesService';
 import LogInteractionDialog from './LogInteractionDialog';
 import DataRegisterDialog from './DataRegisterDialog';
 import StageChangeDialog from './StageChangeDialog';
+import CloseDealDialog from './CloseDealDialog';
 import { canRequestLine, type StageLine } from '../../services/stageRequestService';
 import { useAuth } from '../../auth/AuthContext';
 import { USE_REAL_API, isRegisterId } from '../../api/http';
@@ -26,6 +27,11 @@ import InteractionRow from '../../components/common/InteractionRow';
 import { tokens } from '../../theme';
 
 const LIFE_STAGES = ['Prospect', 'Onboarded', 'Active', 'Serviced', 'Vistaar — Expansion', 'Dormant'];
+// The funnel terminals. A deal that has already ended has nothing left to close, so the
+// action is withdrawn rather than offered and then refused. Mirrors the register's
+// ALLOWED_TRANSITIONS, where all three are final.
+const CLOSED_STAGES = new Set(['Closed Won', 'Closed Lost', 'Dropped']);
+
 // Field-lock triggers (Forms spec v2.1). Syndication amt/type lock once the deal is
 // sanctioned / the mandate is executed; lending amount + sanction date lock on Sanctioned.
 const SYN_SANCTIONED = ['Sanctioned', 'Disbursed'];
@@ -51,6 +57,10 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   // scoped PER LINE: a desk asks about its own line only (an AM RM never requests a
   // lending stage move; review feedback).
   const canRequest = can(user.roles, 'requestStageChange');
+  // Closing a deal is a stage-change AUTHORITY action, never an RM convenience — the
+  // register gates /close on approve_stage_change, so the button is offered to exactly
+  // the roles whose click will succeed.
+  const canClose = can(user.roles, 'approveRequest');
   const canRequestFor = (line: StageLine) => canRequest && canRequestLine(user.roles, line);
   // Assigning the Deal Analyst is Credit Head's action (Admin/Mgmt override) — not the
   // BD Head who owns the rest of the Ownership section.
@@ -68,6 +78,7 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   const [ints, setInts] = useState<ReturnType<typeof interactionService.for>>([]);
   const [regOpen, setRegOpen] = useState(false);
   const [stageReq, setStageReq] = useState<{ line: StageLine; refId: string; current: string } | null>(null);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
   const bump = () => { force((n) => n + 1); onChanged(); };
   // The drawer reads the company and its product lines out of the shared store, which is
@@ -315,12 +326,20 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
       <Box sx={{ p: 2, display: 'flex', gap: 1, flexWrap: 'wrap', flexShrink: 0 }}>
         <Button variant="outlined" onClick={() => setRegOpen(true)}>📁 Data Register</Button>
         {canProduct && onAddProduct && <Button startIcon={<AddIcon />} variant="outlined" onClick={() => onAddProduct(code)}>Add product</Button>}
+        {/* Only once the company HAS a deal to close, and only for the authority that may.
+            A deal already at a funnel terminal has nothing left to close. */}
+        {canClose && (d as any)?.apiId && !CLOSED_STAGES.has(String((d as any)?.stage || '')) && (
+          <Button variant="outlined" color="warning" onClick={() => setCloseOpen(true)}>Close deal</Button>
+        )}
         <Box sx={{ flex: 1 }} />
         <Button variant="outlined" onClick={onClose}>Done</Button>
       </Box>
 
       <LogInteractionDialog code={code} refType={refType} entityId={((db().clients[code] || {}) as any).entityId} open={logOpen} onClose={() => setLogOpen(false)} onDone={bump} />
       <DataRegisterDialog code={code} open={regOpen} onClose={() => setRegOpen(false)} />
+      <CloseDealDialog open={closeOpen} code={code} apiId={(d as any)?.apiId}
+        currentStage={(d as any)?.stage} onClose={() => setCloseOpen(false)}
+        onDone={() => { bump(); onChanged(); }} />
       <StageChangeDialog open={!!stageReq} code={code} presetLine={stageReq?.line} refId={stageReq?.refId} currentStage={stageReq?.current} onClose={() => setStageReq(null)} onDone={bump} />
     </Drawer>
   );

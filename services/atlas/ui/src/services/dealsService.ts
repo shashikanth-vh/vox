@@ -157,6 +157,59 @@ export const dealsService = {
     writeAudit(by, 'Product added', code, `${product} ₹${amt} Cr`);
     return { ok: true };
   },
+  /**
+   * What still blocks this deal from closing — open EWS cases, unresolved covenant
+   * observations, product lines that have not reached a terminal stage. Read BEFORE the
+   * close so the dialog can name each item, rather than offering a button that fails.
+   */
+  async openItems(apiId: string): Promise<{
+    blocked: boolean; ews_cases: any[]; covenants: any[]; lines: any[];
+  } | null> {
+    if (!USE_REAL_API || !apiId) return null;
+    try {
+      return await api.get<any>('/deals/' + apiId + '/open-items');
+    } catch {
+      // Advisory only: a failed pre-check must not stop someone closing a deal. The
+      // register runs the same validation again and is the one that decides.
+      return null;
+    }
+  },
+
+  /**
+   * Close the deal, recording HOW it ended.
+   *
+   * The three outcomes are not decoration. 'lost' is a deal Evam wanted and did not get;
+   * 'dropped' is one Evam walked away from. Collapsing them would leave the book able to
+   * say how many deals did not close but not how many of those were our own decision —
+   * and that is the question the funnel exists to answer.
+   *
+   * AWAITED, never fire-and-forget: the register refuses a close while the deal still
+   * owes answers, and that refusal is the whole point of the endpoint. A silent failure
+   * would show the desk a closed deal that is still open on the book.
+   */
+  async close(code: string, outcome: 'won' | 'lost' | 'dropped', note: string, by: string):
+      Promise<{ ok: boolean; error?: string; stage?: string }> {
+    const d = this.find(code);
+    const apiId = (d as any)?.apiId;
+    const STAGE = { won: 'Closed Won', lost: 'Closed Lost', dropped: 'Dropped' } as const;
+    if (USE_REAL_API) {
+      if (!apiId) {
+        return { ok: false, error: `${code} is not a register deal yet — nothing to close.` };
+      }
+      try {
+        const r = await api.post<any>('/deals/' + apiId + '/close', { outcome, note });
+        if (d) (d as any).stage = r?.stage || STAGE[outcome];
+        writeAudit(by, 'Deal closed', code, `${STAGE[outcome]} — ${note}`);
+        return { ok: true, stage: r?.stage || STAGE[outcome] };
+      } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data) || 'The register refused the close.' };
+      }
+    }
+    if (d) (d as any).stage = STAGE[outcome];
+    writeAudit(by, 'Deal closed', code, `${STAGE[outcome]} — ${note}`);
+    return { ok: true, stage: STAGE[outcome] };
+  },
+
   // Delete a deal row (Admin only — gated at the page). Removes the deal record; the
   // product-line registers (Lending / Syn / AM) keep their own rows.
   remove(code: string, by: string) {
