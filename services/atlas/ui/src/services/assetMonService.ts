@@ -27,9 +27,26 @@ export const AM_NEXT: Record<string, string[]> = {
   'Dropped': [],
 };
 
-/** The choices a status dropdown should offer from `current` (current first). */
+/**
+ * The ENTRY states — what the register accepts when a mandate's status is set for the
+ * FIRST time. Mirrors INITIAL_STATUS['AssetMonetisation']: a row may be born at the start
+ * of its lifecycle, never part-way along it.
+ */
+export const AM_ENTRY = ['Teaser Prepared', 'Teaser Shared', 'In Discussion'];
+
+/**
+ * The choices a status dropdown should offer from `current` (current first).
+ *
+ * A mandate with NO status yet is NOT stuck. The desk creates placeholder rows — a company
+ * flagged Asset Mon on the Deals sheet with no tracker entry behind it — and the import
+ * lands them with the status blank. Setting a blank status is an INITIAL set, which the
+ * register governs by the entry allowlist rather than the forward graph, so those are the
+ * choices to offer. Returning [] left every such mandate with a dropdown that was empty AND
+ * (being <= 1 option) disabled: the one screen for the job refused to do it.
+ */
 export const amStatusOptions = (current: string): string[] =>
-  [current, ...(AM_NEXT[current] ?? [])].filter((s, i, a) => s && a.indexOf(s) === i);
+  (current ? [current, ...(AM_NEXT[current] ?? [])] : AM_ENTRY)
+    .filter((s, i, a) => s && a.indexOf(s) === i);
 
 /**
  * An API asset-monetisation line read back as the row the grid renders. The wire is
