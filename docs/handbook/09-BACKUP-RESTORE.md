@@ -172,7 +172,7 @@ sequenceDiagram
     S->>PG: pg_dumpall NOW → db-before-restore-<stamp>.sql.gz
     S->>S: gzip -t the safety dump — refuse to restore over an unverified one
     S->>S: STOP every service holding a connection
-    Note over S,PG: pg_dumpall --clean DROPS the databases;<br/>an open session makes the DROP fail half-way
+    Note over S,PG: pg_dumpall --clean DROPS the databases —<br/>an open session makes the DROP fail half-way
     S->>PG: gunzip -c <dump> | psql -U prism -d postgres
     S->>S: start the services again
     S->>S: wait_healthy

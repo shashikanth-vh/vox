@@ -25,6 +25,7 @@ paraphrased so they stay checkable.
 | 13 | [Operations](13-OPERATIONS.md) | Health checks, logs, symptom → cause → fix, routine checks |
 | 14 | [Configuration](14-CONFIGURATION.md) | Every variable, compose vs Helm, the production checklist |
 | 15 | [Data model & ERD](15-DATA-MODEL.md) | Every table, the shared row spine, FK policy, RLS, migrations |
+| — | [Publishing](PUBLISHING.md) | Building the PDF and mirroring the handbook into Confluence |
 
 ---
 

@@ -18,37 +18,45 @@ flowchart LR
         GW["gateway"]
     end
 
-    ACC["access"]
-    REG["register"]
-    ATL["atlas (BFF)"]
-    VOX["vocx"]
-    STT["stt"]
-    PLS["pulse"]
-    ORC["orchestrator"]
+    subgraph fronted["Fronted by the gateway, no public port"]
+        ATL["atlas (BFF)"]
+        VOX["vocx"]
+        PLS["pulse"]
+        ORC["orchestrator"]
+    end
+
+    subgraph behind["Behind everything"]
+        REG["register"]
+        ACC["access"]
+        STT["stt"]
+        TMP[("temporal")]
+    end
+
     WF["workflows worker"]
     NOT["notifier"]
-    TMP[("temporal")]
 
     UI -->|"bearer"| GW
-    GW -->|"resolve(email)"| ACC
-    GW -->|"signed ctx + svc key"| REG
-    GW -->|"prefix /access"| ACC
-    GW -->|"prefix /atlas"| ATL
-    GW -->|"prefix /vocx"| VOX
-    GW -->|"prefix /pulse"| PLS
-    GW -->|"prefix /orchestrator"| ORC
+    GW --> ATL
+    GW --> VOX
+    GW --> PLS
+    GW --> ORC
+    GW -->|"signed ctx"| REG
+    GW -->|"resolve"| ACC
 
-    ATL -->|"svc key"| REG
-    ATL -->|"view check"| ACC
-    VOX -->|"svc_vox"| REG
-    VOX -->|"transcribe"| STT
-    PLS -->|"svc_pulse"| REG
-    ORC -->|"start / signal"| TMP
-    ORC -->|"authority recheck"| ACC
-    WF -->|"poll"| TMP
-    WF -->|"svc_workflows"| REG
-    NOT -->|"outbox drain"| REG
+    ATL --> REG
+    ATL --> ACC
+    VOX --> REG
+    VOX --> STT
+    PLS --> REG
+    ORC --> TMP
+    ORC --> ACC
+    WF --> TMP
+    WF --> REG
+    NOT --> REG
 ```
+
+Which credential each of those edges carries, and what happens when the callee is down, is
+the table in §2 — the labels are left off here so the shape stays readable.
 
 **There are no other edges.** In particular: the browser never talks to anything but the
 gateway (and the static UI bundle); no service calls another service's *database*; and
@@ -90,7 +98,7 @@ sequenceDiagram
     participant R as Register
 
     B->>N: Authorization: Bearer <id_token>
-    Note over N: strips nothing;<br/>adds X-Request-ID, X-Forwarded-*
+    Note over N: strips nothing —<br/>adds X-Request-ID, X-Forwarded-*
     N->>G: same bearer
     Note over G: STRIPS every identity header<br/>a client might have injected
     G->>G: verify token: signature, iss, aud, exp, allowed domain

@@ -52,3 +52,6 @@ node_modules/
 
 # VocX capture archive written by a local test run — recordings are never committed.
 services/vocx/captures/
+
+# Generated docs artefact (scripts/build_handbook_pdf.mjs)
+PRISM-Handbook.pdf

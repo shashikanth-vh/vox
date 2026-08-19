@@ -77,7 +77,7 @@ sequenceDiagram
     participant R as Register
 
     RM->>UI: press record
-    UI->>UI: MediaRecorder; auto-stop at MAX_SECONDS (default 180)
+    UI->>UI: MediaRecorder — auto-stop at MAX_SECONDS, default 180
     RM->>UI: stop (or auto-stop)
     UI->>N: POST /vocx/v1/capture (raw audio blob)
     Note over UI,N: browser 300s · nginx 305s · gateway 600s
