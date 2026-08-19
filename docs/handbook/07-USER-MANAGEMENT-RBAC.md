@@ -12,10 +12,10 @@ Three things decide what a person can do, and they are deliberately different th
 
 ```mermaid
 flowchart TB
-    A["**ATLAS RBAC workbook**<br/>the approved DESIGN-TIME policy"] -->|"compiled baseline<br/>rbac.py OPERATIONS"| B
-    B["**PostgreSQL access_grants**<br/>(Access service)<br/>the RUNTIME authority"] -->|"resolve once"| C
-    C["**Signed authorization context**<br/>minted by the gateway"] -->|"verified + enforced"| D["Register and every<br/>downstream service"]
-    E["**Code**<br/>rbac_catalog · service_policy · lifecycle"] -.->|"non-editable<br/>invariants"| D
+    A["ATLAS RBAC workbook<br/>the approved DESIGN-TIME policy"] -->|"compiled baseline<br/>rbac.py OPERATIONS"| B
+    B["PostgreSQL access_grants<br/>(Access service)<br/>the RUNTIME authority"] -->|"resolve once"| C
+    C["Signed authorization context<br/>minted by the gateway"] -->|"verified + enforced"| D["Register and every<br/>downstream service"]
+    E["Code<br/>rbac_catalog · service_policy · lifecycle"] -.->|"non-editable<br/>invariants"| D
 ```
 
 | Layer | What it is | Changed by |

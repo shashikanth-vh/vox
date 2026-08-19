@@ -77,21 +77,21 @@ $CHECKOUT/deploy/prism-deploy.sh ← works too; ROOT resolves two levels up
 
 ```mermaid
 flowchart TB
-    P["**preflight**<br/>docker · tree · .env · writability<br/>secret readability · free disk"] --> B1
-    B1["**backup_db**<br/>pg_dumpall → gzip -t → size check"] --> B2
-    B2["**backup_secrets**<br/>tar .env + vocx-secrets + certs, chmod 600"] --> B3
-    B3["**snapshot_images**<br/>tag every running image as<br/>prism-rollback/&lt;svc&gt;:&lt;stamp&gt;"] --> U
-    U["**unpack** the archive into releases/&lt;stamp&gt;-&lt;name&gt;"] --> R
-    R["**restore secrets** into the NEW tree<br/>hard-fail if .env is missing"] --> M
-    M["**migration_delta**<br/>announce schema changes NOW"] --> BLD
-    BLD{"**build** the new images"} -->|"fail"| STOP["running stack untouched<br/>exit 1"]
-    BLD -->|"ok"| SW["**swap**: mv live → previous, mv new → live<br/>record .previous / -db / -images / -migrations"]
-    SW --> UP{"**compose up -d**"}
-    UP -->|"fail"| RB["**do_rollback**"]
-    UP -->|"ok"| RE["**reload_edge** — nginx re-resolves"]
-    RE --> H{"**wait_healthy**<br/>containers + /healthz + /ui/"}
+    P["preflight<br/>docker · tree · .env · writability<br/>secret readability · free disk"] --> B1
+    B1["backup_db<br/>pg_dumpall → gzip -t → size check"] --> B2
+    B2["backup_secrets<br/>tar .env + vocx-secrets + certs, chmod 600"] --> B3
+    B3["snapshot_images<br/>tag every running image as<br/>prism-rollback/&lt;svc&gt;:&lt;stamp&gt;"] --> U
+    U["unpack the archive into releases/&lt;stamp&gt;-&lt;name&gt;"] --> R
+    R["restore secrets into the NEW tree<br/>hard-fail if .env is missing"] --> M
+    M["migration_delta<br/>announce schema changes NOW"] --> BLD
+    BLD{"build the new images"} -->|"fail"| STOP["running stack untouched<br/>exit 1"]
+    BLD -->|"ok"| SW["swap: mv live → previous, mv new → live<br/>record .previous / -db / -images / -migrations"]
+    SW --> UP{"compose up -d"}
+    UP -->|"fail"| RB["do_rollback"]
+    UP -->|"ok"| RE["reload_edge — nginx re-resolves"]
+    RE --> H{"wait_healthy<br/>containers + /healthz + /ui/"}
     H -->|"no"| RB
-    H -->|"yes"| PR["**prune_old**<br/>never the rollback target"]
+    H -->|"yes"| PR["prune_old<br/>never the rollback target"]
     PR --> DONE["complete"]
 ```
 

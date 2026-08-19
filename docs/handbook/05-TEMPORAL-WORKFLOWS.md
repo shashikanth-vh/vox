@@ -28,11 +28,11 @@ FastAPI route.
 ```mermaid
 flowchart LR
     UI["ATLAS UI"] -->|"POST /orchestrator/v1/workflows/…"| GW["gateway"]
-    GW --> ORC["**orchestrator**<br/>(app/api.py)<br/>HTTP front"]
-    ORC -->|"start / signal / query"| TMP[("**temporal**<br/>server + history in Postgres")]
-    WRK["**workflows worker**<br/>(app/worker.py)"] -->|"long-poll task queue<br/>prism-workflows"| TMP
+    GW --> ORC["orchestrator<br/>(app/api.py)<br/>HTTP front"]
+    ORC -->|"start / signal / query"| TMP[("temporal<br/>server + history in Postgres")]
+    WRK["workflows worker<br/>(app/worker.py)"] -->|"long-poll task queue<br/>prism-workflows"| TMP
     WRK -->|"activities"| REG["register"]
-    NOT["**notifier**"] -->|"drains outbox"| REG
+    NOT["notifier"] -->|"drains outbox"| REG
 ```
 
 | Component | Process | Responsibility |
@@ -204,9 +204,9 @@ stateDiagram-v2
     [*] --> AwaitingDecision
     AwaitingDecision --> AwaitingDecision: sla_reminder (n+1)
     AwaitingDecision --> AwaitingDecision: sla_escalation (once)
-    AwaitingDecision --> ReturnedForInformation: verified control "return"
-    ReturnedForInformation --> AwaitingDecision: verified control "resubmit"<br/>(SLA clock fully restarts)
-    AwaitingDecision --> Cancelled: verified control "cancel"
+    AwaitingDecision --> ReturnedForInformation: verified control — return
+    ReturnedForInformation --> AwaitingDecision: verified control — resubmit<br/>(SLA clock fully restarts)
+    AwaitingDecision --> Cancelled: verified control — cancel
     AwaitingDecision --> Decided: verified approve / reject
     Decided --> [*]
     Cancelled --> [*]

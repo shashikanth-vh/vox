@@ -88,6 +88,11 @@ See **[`BACKEND_STANDARDS.md`](BACKEND_STANDARDS.md)** and **[`CONTRIBUTING.md`]
 
 ## Quality & onboarding
 
+- **The handbook:** [`docs/handbook/`](docs/handbook/) — fifteen documents covering the
+  architecture, deployment, module interaction, running flows, Temporal workflows, the code
+  map, RBAC, the Register, backup, upgrade, ATLAS usage, VocX, operations, configuration and
+  the data model. Start at [`docs/handbook/README.md`](docs/handbook/README.md), which lists
+  a reading path per role.
 - **New here?** [`CONTRIBUTING.md`](CONTRIBUTING.md) — zero-to-productive setup + how-to.
 - **Why it's built this way?** [`docs/adr/`](docs/adr/) — architecture decision records.
 - **Gate:** `make ci` runs `ruff` (lint) + `mypy` (types, green) + `pytest` (63 tests, real

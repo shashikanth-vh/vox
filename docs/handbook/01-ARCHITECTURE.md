@@ -218,14 +218,14 @@ is two operations.
 
 ```mermaid
 flowchart TB
-    REG["**register** — sole writer of business data"]
+    REG["register — sole writer of business data"]
     PG[("PostgreSQL<br/>~43 tables")]
     MIN[("MinIO<br/>documents, CAM PDFs")]
 
-    ACC["**access** — sole writer of identity data"]
+    ACC["access — sole writer of identity data"]
     APG[("users, role grants,<br/>matrix overrides")]
 
-    VOX["**vocx** — files only"]
+    VOX["vocx — files only"]
     FS[("audio archive,<br/>Google OAuth tokens")]
 
     REG --> PG

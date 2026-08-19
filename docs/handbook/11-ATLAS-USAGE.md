@@ -65,9 +65,9 @@ flowchart TB
     D --> TL["Timeline — every interaction, newest first"]
     D --> DOC["Data Register — documents, financials, contracts"]
     D --> INT["Intel — PULSE items, RED/AMBER/GREEN"]
-    D --> AP["**Add product**"]
-    D --> LI["**Log interaction**"]
-    D --> SC["**Stage change**"]
+    D --> AP["Add product"]
+    D --> LI["Log interaction"]
+    D --> SC["Stage change"]
 ```
 
 ### Add product
@@ -134,8 +134,8 @@ The mic in the header opens the VocX panel.
 ```mermaid
 flowchart LR
     L["🎤 launcher in the header"] --> P["VocX panel"]
-    P --> R["**Record** tab"]
-    P --> RP["**Reports** tab — past captures, playback"]
+    P --> R["Record tab"]
+    P --> RP["Reports tab — past captures, playback"]
     R --> REC["press the big mic → speak → stop"]
     REC --> ST["uploading % → transcribing → structuring"]
     ST --> OK{"company recognised?"}

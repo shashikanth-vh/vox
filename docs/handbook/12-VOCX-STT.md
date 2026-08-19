@@ -27,7 +27,7 @@ creates:
 ```mermaid
 flowchart TB
     B["Browser: MediaRecorder"] -->|"POST /vocx/v1/capture<br/>raw audio, real codec"| V["VocX"]
-    V --> AR["**archive the audio first**<br/>MinIO + local archive"]
+    V --> AR["archive the audio first<br/>MinIO + local archive"]
     AR --> S["STT service<br/>faster-whisper on CPU"]
     S -->|"{text, language, duration, segments}"| E["1) extract<br/>transcript → structured fields"]
     E --> R["2) resolve<br/>EntityResolver → register entity"]
