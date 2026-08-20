@@ -251,3 +251,24 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
         await session.commit()
     await dispose_engine()
     clear_tenant_cache()
+
+
+async def test_a_revoked_role_can_be_granted_back(client: AsyncClient):
+    """The dead end the desk hit restoring a deactivated admin. Revocation soft-deletes
+    the user_roles row, but user_roles_unique covers deleted rows too — so a blind
+    INSERT on re-grant answered 409 for any role the user EVER held. The grant must
+    restore the buried row instead, and the audit shows revoke and re-grant both."""
+    r = await client.post("/v1/users", headers=ADMIN, json={
+        "email": "regrant@evamfinance.com", "full_name": "Regrant Test",
+        "roles": ["Admin"]})
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    assert (await client.delete(f"/v1/users/{uid}/roles/Admin",
+                                headers=ADMIN)).status_code == 200
+    # The whole point: granting it back is a restore, not a constraint violation.
+    r = await client.post(f"/v1/users/{uid}/roles", headers=ADMIN, json={"role": "Admin"})
+    assert r.status_code == 201, r.text
+    assert r.json()["roles"] == ["Admin"]
+    # A LIVE duplicate is still refused — the restore path must not eat the 409.
+    assert (await client.post(f"/v1/users/{uid}/roles", headers=ADMIN,
+                              json={"role": "Admin"})).status_code == 409

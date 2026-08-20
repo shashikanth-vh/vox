@@ -159,13 +159,31 @@ async def grant_role(user_id: uuid.UUID, payload: RoleGrant,
     require_governance(ctx, "grant role")
     role = _validate_role(payload.role)
     obj = await _get_user(ctx, user_id)
-    if role in await _roles_of(ctx, user_id):
+    # Revocation is a SOFT delete, but user_roles_unique covers every row — deleted
+    # included. Inserting blind therefore 409s on any role this user EVER held: a
+    # revoked role could never be granted back (the desk hit exactly this restoring a
+    # deactivated admin). The grant must look for the buried row and restore it — the
+    # audit trail keeps both the old revocation and this fresh grant.
+    existing = (
+        await ctx.session.execute(
+            select(UserRole).where(UserRole.tenant_id == ctx.tenant_id,
+                                   UserRole.user_id == user_id, UserRole.role == role)
+        )
+    ).scalar_one_or_none()
+    if existing is not None and existing.deleted_at is None:
         raise ConflictError(f"User already holds role '{role}'.")
-    ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user_id, role=role,
-                             granted_by=ctx.actor, created_by=ctx.actor, updated_by=ctx.actor))
+    if existing is not None:
+        existing.deleted_at = None
+        existing.granted_by = ctx.actor
+        existing.updated_by = ctx.actor
+    else:
+        ctx.session.add(UserRole(tenant_id=ctx.tenant_id, user_id=user_id, role=role,
+                                 granted_by=ctx.actor, created_by=ctx.actor,
+                                 updated_by=ctx.actor))
     obj.permissions_epoch += 1
     mx.audit(ctx.session, ctx.tenant_id, ctx.actor, "role.grant", item=obj.email,
-             detail={"role": role, "epoch": obj.permissions_epoch})
+             detail={"role": role, "epoch": obj.permissions_epoch,
+                     **({"regrant": True} if existing is not None else {})})
     await ctx.session.flush()
     await ctx.session.refresh(obj)   # the epoch UPDATE touched onupdate columns
     return await _user_read(ctx, obj)
