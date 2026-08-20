@@ -190,47 +190,53 @@ is the pattern for any external sourcing partner.
 ## 6. The employee-management use-cases (stepwise)
 
 All of these are Admin/Management actions; everyone else sees the directory
-read-only. API calls go to the **Access** service (`/access/v1/...`); the register's
-people directory syncs from it for the pickers.
+read-only. **The UI is the primary path** — Masters → Employees covers the whole
+lifecycle; the API calls are noted for automation (Postman) and bulk work.
 
-### 6.1 Onboard a new employee
+### 6.1 Onboard a new employee — Masters → Employees → Add employee
 
-1. Masters → Employees → **Add employee** (or `POST /access/v1/users` with
-   `email`, `full_name`, `short_name`, `is_active`, `roles`).
-2. Email is the identity — it must match what Dex/SSO will assert at sign-in, and it
-   is unique per tenant **forever** (even a deactivated user keeps their address).
-3. Grant the role that matches the desk (§5), not the widest one that works.
-4. First sign-in needs nothing else: the account exists, the roles resolve, the
-   signed context carries them.
+1. Fill the dialog: short name, **full name**, **e-mail** (the identity — it must
+   match what SSO will assert at sign-in, and it stays unique per tenant forever),
+   phone, geography, sectors.
+2. **Role** is a multi-select — stack deliberately (§7). **Reports to** offers the
+   whole active roster and is *required for IC roles* — the dialog refuses an IC
+   with no manager, because the team-scope door (§4) hangs off it.
+3. Save. The dialog creates the Access user with the roles and the roster entry
+   together; the person can sign in immediately and appears in every directory.
+4. *API:* `POST /access/v1/users` with `email, full_name, short_name, roles`.
 
-### 6.2 Change someone's roles
+### 6.2 Change someone's roles — edit the same dialog
 
-* Grant: `POST /access/v1/users/{id}/roles {"role": "..."}` — stacking allowed.
-* Revoke: `DELETE /access/v1/users/{id}/roles/{role}`.
-* Both bump the user's `permissions_epoch`, so already-issued sessions lose the old
-  authority at the next sensitive operation — no waiting for token expiry.
-* **Re-granting a previously revoked role works** (fixed 2026-08-20; earlier builds
-  answered 409 `user_roles_unique` because the revoked grant was soft-deleted and
-  still held the unique slot — the grant now restores it).
+Open the employee → change the **Role** multi-select → Save. The service diffs the
+selection and issues the individual grants and revokes (each one audited, each one
+bumping the user's `permissions_epoch`, so stale sessions lose old authority at the
+next sensitive operation). **Re-granting a previously revoked role works** (fixed
+2026-08-20; earlier builds answered 409 because the revoked grant still held the
+unique slot).
+*API:* `POST /access/v1/users/{id}/roles {"role": "..."}` ·
+`DELETE /access/v1/users/{id}/roles/{role}`.
 
-### 6.3 Offboard / deactivate — and why there is no delete
+### 6.3 Offboard — the leaver flow, not a delete
 
-`PATCH /access/v1/users/{id} {"is_active": false}` (or the Employees toggle).
-There is deliberately **no DELETE**: the audit trail and every `granted_by`,
-`approved_by`, `updated_by` on record must keep pointing at a real person. A
-deactivated user cannot sign in, drops out of the default directory listing, and
-their email stays reserved. To see them again: `GET /access/v1/users?include_inactive=true`.
-Reactivation is the same PATCH with `true` — a `user.reactivate` audit event and an
-epoch bump.
+The Employees screen's remove action is deliberately a **revoke + retire + hand
+over**: it deactivates the sign-in immediately and moves the leaver's whole world —
+every lead, deal and tracker line naming them, plus their active assignments — to a
+successor you pick, in one register call. Nothing sits ownerless and the audit
+trail keeps pointing at a real person, which is why there is **no hard delete**
+anywhere. The **Active** toggle alone (without handover) is right for a temporary
+suspension. Deactivated people reappear via the inactive filter
+(*API:* `GET /access/v1/users?include_inactive=true`); reactivation is the same
+toggle back — audited, epoch-bumped.
 
 ### 6.4 The two directories — why Employees shows "no sign-in"
 
 * **Access users** = accounts: email, roles, active flag. Permissions live here.
-* **Register people** = the roster the workbook imports: full names, the handles the
-  trackers store, the RM/Analyst dropdown contents.
-* The Employees tab merges them by email. A register person with no access user
-  (DSA Sanjay) shows **no sign-in**; that person can be picked in history but holds
-  no permissions. Creating the access user later joins the two automatically.
+* **Register people** = the roster the workbook imports: full names, the handles
+  the trackers store, the RM/Analyst dropdown contents.
+* The Employees tab merges them by e-mail. A register person with no access user
+  (DSA Sanjay) shows the **no sign-in** chip — pickable in history, holds no
+  permissions, cannot log in. Add an employee with that same e-mail later and the
+  two join automatically.
 
 ### 6.5 Who approves what — reading a refusal
 
@@ -238,8 +244,6 @@ When the platform refuses with "Role(s) [...] may not perform '...'", the operat
 name maps to a row in §3. Two frequent ones:
 * `approve_stage_change` — the six approval seats (Admin, Management, four Heads).
 * `approve_cpcs_checklist` — credit seniors only, and never the preparer.
-
----
 
 ## 7. A caution from the live roster — role stacking flattens the matrix
 
@@ -271,12 +275,15 @@ missing (Archana, Bhavana, Ananda), one grant to add it.
 Everything in this section is **configuration**: Admin actions through the running
 platform, no code change, no redeploy. Pick the lever by the shape of the ask.
 
-| You want… | Lever | Where |
+| You want… | Lever | Primary path |
 |---|---|---|
-| a whole ROLE to see (or edit) a module differently | **matrix override** | `PATCH /access/v1/access` |
-| one PERSON to reach another desk's world | **role stacking** | `POST /access/v1/users/{id}/roles` |
-| several people on the SAME book / company | **assignments** | `POST /v1/assignments` (register) |
-| a senior to see their TEAM's books | **reports_to** | `PATCH /access/v1/users/{id}` |
+| one PERSON to reach another desk's world | **role stacking** | UI: Employees → edit → Role multi-select |
+| several people on the SAME book / company | **assignments** | UI: the line's drawer (analyst / RM pickers) |
+| a senior to see their TEAM's books | **reports_to** | UI: Employees → edit → Reports to |
+| a whole ROLE to see (or edit) a module differently | **matrix override** | API only: `PATCH /access/v1/access` |
+
+Three of the four are ordinary ATLAS screens; only the matrix override — the rarest
+and most consequential — is API-only, deliberately.
 
 ### 8.1 Matrix override — change what a role means, live
 
@@ -311,11 +318,11 @@ Rules of the lever:
 
 ### 8.2 Role stacking — widen one person, not the role
 
-If only *Prateek* should see syndication, do not touch the matrix — grant him
-`Syn RM`. Stacking takes the max per cell, so he gains the Syn RM column (Platform
-Deals scoped, chases on his own mandates) while every other analyst stays unchanged.
-This is the per-person lever; the matrix is the per-role lever. §7's caution is the
-same lever over-used.
+If only *Prateek* should see syndication, do not touch the matrix — open his row in
+**Masters → Employees** and add `Syn RM` in the Role multi-select. Stacking takes
+the max per cell, so he gains the Syn RM column (Platform Deals scoped, chases on
+his own mandates) while every other analyst stays unchanged. This is the per-person
+lever; the matrix is the per-role lever. §7's caution is the same lever over-used.
 
 ### 8.3 Assignments — several people on the same book
 
@@ -329,6 +336,12 @@ syndication mandate. Assign Bhavana (Deal Analyst) on the lending line, Grishma
 three read Zeon's entire story** — every line, the timeline, the documents — through
 the *connected-company* door, while each can **write only the line they hold**.
 That is "multiple persons on the same book": reads pool, writes stay owned.
+
+**From the UI:** open the line and set the picker — the **Deal Analyst** field in
+the lending drawer, the **RM** on a mandate, **Allot analyst** at Push-to-Deals.
+Who may set it is the same authority matrix: a Credit Head changes the analyst
+directly; an IC's change goes up as a request that the Head approves from Today's
+queue. *API (automation/bulk):*
 
 ```json
 POST /v1/assignments
@@ -349,7 +362,8 @@ POST /v1/assignments
 
 ### 8.4 reports_to — team visibility for a senior
 
-Set the reporting line on the Access user:
+Set the reporting line in **Masters → Employees → edit → Reports to** (the same
+field the Add dialog requires for every IC). *API:*
 `PATCH /access/v1/users/{prateek-id} {"reports_to": "<pranay-id>"}`.
 Access resolves the **transitive** tree at sign-in and forwards it; the register's
 *team* door then puts every report's book inside the senior's scope, with the
