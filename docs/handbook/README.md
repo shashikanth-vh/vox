@@ -1,6 +1,6 @@
 # The PRISM Handbook
 
-Sixteen documents covering how PRISM is built, deployed, operated and used. Every claim
+Seventeen documents covering how PRISM is built, deployed, operated and used. Every claim
 here was read out of the code it cites, and code excerpts are quoted rather than
 paraphrased so they stay checkable.
 
@@ -26,6 +26,7 @@ paraphrased so they stay checkable.
 | 14 | [Configuration](14-CONFIGURATION.md) | Every variable, compose vs Helm, the production checklist |
 | 15 | [Data model & ERD](15-DATA-MODEL.md) | Every table, the shared row spine, FK policy, RLS, migrations |
 | 16 | [The credit pipeline](16-CREDIT-PIPELINE.md) | The three gates, what approval and rejection each do, the walk-back, how lines and deals conclude |
+| 17 | [User management in practice](17-USER-MANAGEMENT-USECASES.md) | Role by role: what each can do and see, scoped vs full, maker-checker pairs, the employee use-cases, the live-roster caution |
 | — | [Publishing](PUBLISHING.md) | Building the PDF and mirroring the handbook into Confluence |
 
 ---
