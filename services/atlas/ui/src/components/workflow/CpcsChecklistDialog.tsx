@@ -150,12 +150,25 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         const raw = await api.get<any>('/internal/cpcs-checklists', { lending_id: lid })
           .catch(() => []);
         const lists: any[] = Array.isArray(raw) ? raw : (raw?.items ?? []);
+        // The register lists checklists NEWEST FIRST — taking the LAST element read the
+        // OLDEST version. One version in, that is the same row; the moment a line had
+        // history (a v1 the checker rejected, then an approved v2) this picked the
+        // rejected v1: CS saves bounced off "get the CP checklist approved first" with
+        // the approval sitting right there, and would have targeted the wrong row even
+        // when the status happened to pass. CS progress belongs to the APPROVED
+        // checklist (the register enforces exactly that), so prefer the
+        // highest-version approved one; a maker re-preparing after a return/reject
+        // gets the highest version outright — their newest work.
+        const ver = (x: any) => Number(x?.checklist_version) || 0;
+        const newest = lists.reduce((a, b) => (ver(b) >= ver(a) ? b : a), lists[0]);
+        const approved = lists.filter((x) => String(x?.status) === 'Approved')
+          .reduce((a: any, b: any) => (!a || ver(b) >= ver(a) ? b : a), null);
+        const target = approved ?? newest;
         if (alive && lists.length) {
-          const last = lists[lists.length - 1];
-          setLatestId(String(last.id || ''));
-          setLatestStatus(String(last.status || ''));
+          setLatestId(String(target.id || ''));
+          setLatestStatus(String(target.status || ''));
         }
-        let seeded: any[] = lists.length ? (lists[lists.length - 1].items || []) : [];
+        let seeded: any[] = lists.length ? (target.items || []) : [];
         if (!seeded.length) {
           const { camService } = await import('../../services/camService');
           const t = await camService.terms(lid).catch(() => null);
