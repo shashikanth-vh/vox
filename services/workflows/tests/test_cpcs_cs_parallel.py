@@ -240,3 +240,42 @@ async def test_a_deferred_item_that_has_since_been_worked_counts_once(monkeypatc
          "deferred_from": "CP"},
     ], status="Approved")
     assert by_key["cpcs.update-cs"]["label"].endswith("(0/1)")
+
+
+async def test_a_rejected_checklist_reopens_the_cp_step_even_when_fully_ticked(monkeypatch):
+    """The dead end the desk actually hit: every CP marked Completed, submitted, and the
+    checker REJECTED it. The count rule read the rejected version's own ticks as "all
+    satisfied — nothing left to work here" and shut the button, while 'Move to CP/CS
+    Completed' demands an approval that could now never exist. A rejection voids the
+    ticks: the maker must be able to prepare the next version."""
+    for verdict in ("Rejected", "Returned"):
+        by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+            {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+            {"key": "cp2", "condition_type": "CP", "status": "Completed"},
+        ], status=verdict)
+        cp = by_key["cpcs.prepare"]
+        assert cp["label"].endswith("(2/2)"), "the tally still tells the truth"
+        assert cp["enabled"] is True, f"{verdict}: {cp.get('reason')}"
+        get_settings.cache_clear()
+
+
+async def test_a_fully_ticked_draft_stays_open_for_its_own_submission(monkeypatch):
+    """A Draft with every box ticked is not a settled step — it has not even reached the
+    checker. Locking it left the maker unable to submit their own finished work."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+    ], status="Draft")
+    assert by_key["cpcs.prepare"]["enabled"] is True
+    get_settings.cache_clear()
+
+
+async def test_a_fully_ticked_checklist_with_the_checker_stays_shut(monkeypatch):
+    """The lock's legitimate case, pinned: while the completed version is awaiting the
+    checker, re-opening the preparer's screen invites a parallel version nobody asked
+    for. The button waits for the verdict."""
+    by_key = await _actions(monkeypatch, {"id": LID, "stage": "Sanctioned"}, [
+        {"key": "cp1", "condition_type": "CP", "status": "Completed"},
+    ], status="Completed")
+    cp = by_key["cpcs.prepare"]
+    assert cp["enabled"] is False and "satisfied" in cp["reason"]
+    get_settings.cache_clear()

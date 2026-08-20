@@ -3802,7 +3802,15 @@ def create_app() -> FastAPI:
                     # button stops inviting a click. It reads as a completed step rather
                     # than an open one — and re-opening a satisfied checklist is how a
                     # settled condition gets accidentally re-typed.
-                    if done == len(rel) and enabled:
+                    # ONLY while the checker agrees, though. A RETURNED or REJECTED
+                    # verdict voids the ticks — "all satisfied" is that version's claim,
+                    # which the checker has refused — and with every box already ticked
+                    # this count was the one thing standing between the maker and the
+                    # next version: the line sat stuck short of 'CP/CS Completed', which
+                    # needs an approval that could now never exist. A Draft is likewise
+                    # still the maker's to finish and submit, not a settled step.
+                    if (done == len(rel) and enabled
+                            and latest_checklist_status in ("Completed", "Approved")):
                         enabled, reason = False, (
                             f"All {len(rel)} condition"
                             f"{'s' if len(rel) > 1 else ''} "
