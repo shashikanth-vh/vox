@@ -266,7 +266,108 @@ missing (Archana, Bhavana, Ananda), one grant to add it.
 
 ---
 
-## 8. Where to verify all of this
+## 8. Widening visibility at runtime — the four levers
+
+Everything in this section is **configuration**: Admin actions through the running
+platform, no code change, no redeploy. Pick the lever by the shape of the ask.
+
+| You want… | Lever | Where |
+|---|---|---|
+| a whole ROLE to see (or edit) a module differently | **matrix override** | `PATCH /access/v1/access` |
+| one PERSON to reach another desk's world | **role stacking** | `POST /access/v1/users/{id}/roles` |
+| several people on the SAME book / company | **assignments** | `POST /v1/assignments` (register) |
+| a senior to see their TEAM's books | **reports_to** | `PATCH /access/v1/users/{id}` |
+
+### 8.1 Matrix override — change what a role means, live
+
+Every cell of §2 and §3 is runtime data (`access_grants`); Admin edits one cell at a
+time and the change applies tenant-wide to everyone holding that role:
+
+```json
+PATCH /access/v1/access
+{ "kind": "view", "item": "leads", "role": "Deal Analyst", "access": "READ" }
+```
+
+*Use case:* the credit desk keeps asking BD what is coming down the funnel. This one
+call makes the Leads tab appear for every Deal Analyst — **read-only**: they see the
+funnel, and every write verb (`add_lead`, `edit_lead`, `push_lead_to_deals`) still
+answers 403 because the operations cells are untouched. To widen an operation
+instead, use `"kind": "operation"` — e.g. `{"kind": "operation", "item":
+"log_chase", "role": "Deal Analyst", "access": "FULL"}` lets analysts log
+syndication chases beyond their own lines.
+
+Rules of the lever:
+
+* **Four guardrail cells refuse even Admin** (spec hard rules): `delete_row`,
+  `backup_restore`, the `audit` view, the `activity_log` view. Everything else is
+  editable.
+* Overrides are tagged `origin: "override"` and audited (`matrix.edit`, with the
+  before/after). `GET /access/v1/drift` reports every divergence from the approved
+  baseline — run it after editing so the change is a decision on record, not a
+  mystery later.
+* Levels are the same five words: `NONE`, `READ`, `SCOPED`, `FULL`, `APPROVE`.
+  Granting `APPROVE` on `approve_stage_change` to a role adds an approval seat —
+  that is a governance change; treat it like one.
+
+### 8.2 Role stacking — widen one person, not the role
+
+If only *Prateek* should see syndication, do not touch the matrix — grant him
+`Syn RM`. Stacking takes the max per cell, so he gains the Syn RM column (Platform
+Deals scoped, chases on his own mandates) while every other analyst stays unchanged.
+This is the per-person lever; the matrix is the per-role lever. §7's caution is the
+same lever over-used.
+
+### 8.3 Assignments — several people on the same book
+
+"Belonging to a book" is not a role at all — it is an **assignment row** on a line,
+and a line or company can carry several at once. The scope doors of §4 then do the
+work:
+
+*Use case — shared coverage of one client:* Zeon Electric has a lending line and a
+syndication mandate. Assign Bhavana (Deal Analyst) on the lending line, Grishma
+(Syn RM) on the mandate, with Shubh already the BDRM on the deal. Result: **all
+three read Zeon's entire story** — every line, the timeline, the documents — through
+the *connected-company* door, while each can **write only the line they hold**.
+That is "multiple persons on the same book": reads pool, writes stay owned.
+
+```json
+POST /v1/assignments
+{ "user_id": "<bhavana's access-user uuid>",
+  "subject_type": "Lending", "subject_id": "<line-uuid>",
+  "assignment_role": "Deal Analyst", "note": "covering Zeon with Shubh" }
+```
+
+* **Who may assign is itself a matrix** (`ASSIGNMENT_AUTHORITY`): analysts are
+  placed by Credit Head (or leadership); Syn RMs by Syn Head / BD Head; BDRMs on
+  leads and deals by BD Head. An RM cannot self-assign onto a book.
+* A second analyst on the SAME line is allowed — coverage during leave is exactly
+  this: assign the substitute, and end the assignment
+  (`POST /v1/assignments/{id}/end`) when the owner returns. Ending keeps the row as
+  history; the register never forgets who held a book.
+* The assignee must be a real, active user allowed to hold that assignment role —
+  the register checks with Access before accepting.
+
+### 8.4 reports_to — team visibility for a senior
+
+Set the reporting line on the Access user:
+`PATCH /access/v1/users/{prateek-id} {"reports_to": "<pranay-id>"}`.
+Access resolves the **transitive** tree at sign-in and forwards it; the register's
+*team* door then puts every report's book inside the senior's scope, with the
+senior's own access level. *Use case:* Pranay (Credit Head) automatically sees and
+works every line his analysts hold — no assignment on each line needed. This also
+feeds the Employees grid's "Reports to" column.
+
+### 8.5 How fast each takes effect
+
+The gateway caches the identity answer for **60 seconds** (hard cap 5 minutes), so
+matrix edits, role grants and `reports_to` changes reach every service within about
+a minute — and role changes bump the user's `permissions_epoch`, which sensitive
+operations re-check immediately. Assignments are read fresh per request in the
+register: effective on the next click.
+
+---
+
+## 9. Where to verify all of this
 
 * The enforced matrices: `packages/evam-backend-core/evam_backend_core/rbac.py`
   (`VIEW_ACCESS`, `OPERATIONS`) — policy version stamped in every signed context.
