@@ -2,6 +2,10 @@ import { api, apiErr, listAll } from '../api/http';
 import { newestByTime } from '../api/latest';
 import { orchestrator } from '../api/orchestratorClient';
 
+// Session-lived cache of engine reads, keyed per (document, credit note) — see
+// extractTerms. A filed letter is immutable, so a repeat read is a repeat answer.
+const extractCache = new Map<string, any>();
+
 /**
  * The CAM workbench + sanction terms — the client half of lending increments ① and ②.
  *
@@ -282,17 +286,27 @@ export const camService = {
 
   /** Engine-read the sanction letter (plus the committee's credit note when given):
    *  CP / CS / covenant lists AND the numeric terms, as data for the forms to pre-fill.
-   *  The analyst reviews before anything is seeded. */
+   *  The analyst reviews before anything is seeded.
+   *
+   *  CACHED PER DOCUMENT for the session: the letter is immutable once filed (a revised
+   *  letter is a NEW document with a new id), so the engine's read never changes — and
+   *  the checklist auto-fills on open now, which would otherwise pay the engine's
+   *  seconds-long read on every single open of the same letter. */
   async extractTerms(docId: string, creditNote?: string): Promise<{
     engine: string; cp_items: string[];
     cs_items: { label: string; timeline?: string }[];
     covenants: { name: string; frequency: string; timeline?: string }[];
     terms: Record<string, string | number>;
   }> {
+    const cacheKey = `${docId}:${creditNote || ''}`;
+    const hit = extractCache.get(cacheKey);
+    if (hit) return hit;
     try {
-      return await orchestrator.post<any>('/v1/cam/extract-terms',
+      const out = await orchestrator.post<any>('/v1/cam/extract-terms',
         { doc_id: docId, ...(creditNote ? { credit_note: creditNote } : {}) },
         { timeoutMs: 620_000 });
+      extractCache.set(cacheKey, out);
+      return out;
     } catch (e) { throw new Error(msg(e, 'read the terms out of the letter')); }
   },
 
