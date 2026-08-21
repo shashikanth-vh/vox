@@ -29,13 +29,18 @@ export const CURSOR_PARAM = 'next_cursor';
 export const LIST_MAX_LIMIT = 200;
 
 /**
- * Query params for a cursor-paged list: one page's worth. The total row count comes back
- * on its own, so with_total is not sent — every param here is one the endpoint accepts,
- * which matters when unrecognised ones fail the whole request.
+ * Query params for a cursor-paged list: one page's worth, with the exact dataset count
+ * (with_total) so the pager can say "1-10 of 112" and keep Next alive. Every param here
+ * is one the endpoint accepts, which matters when unrecognised ones fail the whole
+ * request.
  */
 export function toCursorParams(q: TableQuery): Record<string, any> {
   const p: Record<string, any> = {
     limit: Math.min(Math.max(1, q.pageSize || 25), LIST_MAX_LIMIT),
+    // The register computes the exact dataset count only when asked. Never asking is
+    // why every pager read "1-10 of 10" whatever the book held — totalOf fell back to
+    // the page length, and MRT greyed Next on a "complete" page.
+    with_total: 'true',
   };
   if (q.cursor) p[CURSOR_PARAM] = q.cursor;
   const search = q.globalFilter?.trim();
