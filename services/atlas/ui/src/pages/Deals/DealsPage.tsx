@@ -22,7 +22,8 @@ export default function DealsPage() {
 
   const columns = useMemo<MRT_ColumnDef<DealRow>[]>(() => [
     { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
-    { accessorKey: '_name', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: '_name', header: 'Company', size: 220,
+      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'temp', header: 'Temp', size: 90, meta: { filterParam: 'temperature' }, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
     { accessorKey: 'lens', header: 'Lens', size: 80, Cell: ({ row }) => <LensPill lens={(row.original as any).lens} /> },
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },

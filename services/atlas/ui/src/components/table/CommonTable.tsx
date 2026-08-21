@@ -393,18 +393,6 @@ export default function CommonTable<T extends Record<string, any>>(
   // The committed facets, translated to the register's own query params via each
   // column's meta.filterParam — what the live fetch actually sends. columnFilters keeps
   // the UI ids for the mock path.
-  const serverFilters = useMemo(
-    () =>
-      Object.entries(colFilters)
-        .filter(([, v]) => v && v.length)
-        .map(([id, values]) => {
-          const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
-          const param = col ? filterParamOf(col) : undefined;
-          return param ? { param, values } : null;
-        })
-        .filter((x): x is { param: string; values: string[] } => x !== null),
-    [colFilters, columns],
-  );
 
   // The per-table search box takes precedence; otherwise the navbar search applies.
   // (MRT can hand back `undefined` when the box is cleared — coerce to a string.)
@@ -518,15 +506,24 @@ export default function CommonTable<T extends Record<string, any>>(
   // derive distinct values per column. In mock mode this is just a store read.
   const facetQuery = useQuery({
     queryKey: ["facets", ...queryKey],
-    queryFn: () =>
-      fetcher({
-        pageIndex: 0,
-        pageSize: 100000,
-        globalFilter: "",
-        sorting: [],
-        columnFilters: [],
-        searchFields,
-      }),
+    // The register serves at most one capped page per request, so "everything" is a
+    // WALK: follow the cursor chain (bounded) and pool the rows. A facet built from
+    // one page offered a silently partial option list the moment the dataset outgrew
+    // the cap — the exact dishonesty that kept Company columns facet-less.
+    queryFn: async () => {
+      const rows: T[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < 25; i++) {
+        const page = await fetcher({
+          pageIndex: 0, pageSize: 100000, globalFilter: "",
+          sorting: [], columnFilters: [], searchFields, cursor,
+        });
+        rows.push(...page.rows);
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      return { rows };
+    },
     staleTime: 5 * 60 * 1000,
   });
   const facetRows = facetQuery.data?.rows ?? [];
@@ -550,6 +547,32 @@ export default function CommonTable<T extends Record<string, any>>(
       .find((v) => v !== undefined && v !== null);
     return typeof sample !== "object";
   };
+  const serverFilters = useMemo(
+    () =>
+      Object.entries(colFilters)
+        .filter(([, v]) => v && v.length)
+        .map(([id, values]) => {
+          const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
+          const param = col ? filterParamOf(col) : undefined;
+          if (!col || !param) return null;
+          // A JOINED column (Company) displays a name the server cannot filter by; its
+          // meta.filterRowValue reads the row's underlying key (entity_id) instead, so
+          // the facet stays on names while the request carries ids.
+          const rowValue = (col.meta as any)?.filterRowValue as ((r: T) => string) | undefined;
+          const out = rowValue
+            ? values
+                .map((display) => {
+                  const hit = facetRows.find((r) => String(columnValue(r, col)) === display);
+                  return hit ? String(rowValue(hit) || "") : "";
+                })
+                .filter(Boolean)
+            : values;
+          return out.length ? { param, values: out } : null;
+        })
+        .filter((x): x is { param: string; values: string[] } => x !== null),
+    [colFilters, columns, facetRows],
+  );
+
   const distinctValues = (c: MRT_ColumnDef<T>): string[] => {
     const seen = new Set<string>();
     facetRows.forEach((r) => {
@@ -563,10 +586,9 @@ export default function CommonTable<T extends Record<string, any>>(
         .filter(Boolean)
         .forEach((tok) => seen.add(tok));
     });
-    // v12 caps the checkbox list at 45 distinct values.
     return Array.from(seen)
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-      .slice(0, 45);
+      ;
   };
 
   // The phone has no column headers to hang a funnel on, so the same per-column filters

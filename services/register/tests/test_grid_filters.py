@@ -83,3 +83,21 @@ async def test_an_unknown_filter_param_still_fails_closed(client):
     r = await client.get("/v1/lending", params={"bogus": "x"}, headers=ADMIN)
     assert r.status_code == 422
     assert "Filterable" in r.text
+
+
+async def test_leads_filter_by_company_and_lead_no(client):
+    """The Company facet: unique-per-row, but the desk narrows to ONE company all the
+    time — the facet's Contains box finds it, the register filters it."""
+    import uuid as _uuid
+    tag = _uuid.uuid4().hex[:6]
+    for nm in (f"Facet Co {tag}", f"Other Co {tag}"):
+        r = await client.post("/v1/leads", json={"company": nm}, headers=ADMIN)
+        assert r.status_code == 201, r.text
+        if nm.startswith("Facet"):
+            lead_no = r.json()["lead_no"]
+    got = await client.get("/v1/leads", params={"company": f"Facet Co {tag}"}, headers=ADMIN)
+    assert got.status_code == 200, got.text
+    rows = got.json().get("items", [])
+    assert {x["company"] for x in rows} == {f"Facet Co {tag}"}
+    by_no = await client.get("/v1/leads", params={"lead_no": lead_no}, headers=ADMIN)
+    assert by_no.status_code == 200 and len(by_no.json().get("items", [])) == 1

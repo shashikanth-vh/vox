@@ -33,8 +33,8 @@ export default function LeadsPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['leads'] });
 
   const columns = useMemo<MRT_ColumnDef<Lead>[]>(() => [
-    { accessorKey: 'id', header: 'ID', size: 90, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
-    { accessorKey: 'company', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'id', header: 'ID', size: 90, meta: { filterParam: 'lead_no' }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: 'company', header: 'Company', size: 220, meta: { filterParam: 'company' }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'sector', header: 'Sector', meta: { filterParam: 'sector' } },
     { accessorKey: 'lens', header: 'Lens', size: 80, meta: { filterParam: 'lens' }, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
     { accessorKey: 'source', header: 'Source', size: 100, meta: { filterParam: 'source' } },

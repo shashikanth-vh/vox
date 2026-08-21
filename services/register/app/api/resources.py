@@ -67,9 +67,11 @@ _SPECS: list[ResourceSpec] = [
         name="lead", prefix="/v1/leads", tags=["Leads"],
         repo=CRUDRepository(Lead, searchable=["company", "contact", "rm", "notes"],
                             filterable=["status", "temperature", "sector", "rm", "source", "lens",
+                                        "company", "lead_no",
                                         "entity_id", "converted_deal_id"]),
         create_schema=s.LeadCreate, update_schema=s.LeadUpdate, read_schema=s.LeadRead,
-        filterable=["status", "temperature", "sector", "rm", "source", "lens", "entity_id",
+        filterable=["status", "temperature", "sector", "rm", "source", "lens", "company",
+                    "lead_no", "entity_id",
                     "converted_deal_id"],
         subject_type="Lead", view_name="leads",
         # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.

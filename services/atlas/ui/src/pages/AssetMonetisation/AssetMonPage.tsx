@@ -36,7 +36,8 @@ export default function AssetMonPage() {
   // Columns mirror v12 vAM(): company · state · value · MW · nature · deal type ·
   // investor · investor type · status · date teaser shared · notes.
   const columns = useMemo<MRT_ColumnDef<AmRow>[]>(() => [
-    { accessorKey: '_name', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
+    { accessorKey: '_name', header: 'Company', size: 220,
+      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 170, maxWidth: 330 } } },
     { accessorKey: 'state', header: 'State', size: 120, meta: { filterParam: 'state' } },
     { accessorKey: 'val', header: 'Indicative Value (₹ Cr)', size: 160, ...numCell, Cell: ({ cell }) => fmt(cell.getValue()) },
