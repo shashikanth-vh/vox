@@ -18,6 +18,8 @@ import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import SearchIcon from "@mui/icons-material/Search";
 import TuneIcon from "@mui/icons-material/Tune";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -777,6 +779,53 @@ export default function CommonTable<T extends Record<string, any>>(
     </Stack>
   );
 
+  // ---- Hidden-column navigation (desktop) -------------------------------------
+  // A wide grid scrolls horizontally beneath the pinned Actions tray. Two quiet
+  // chevrons make the hidden columns one click away: › floats at the tray's edge
+  // while columns are hidden to the right, ‹ at the grid's left edge once scrolled.
+  // Both disappear the moment everything fits — a wide screen never sees them.
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [colNav, setColNav] = useState({ left: false, right: false, tray: 0 });
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc || isMobile) return;
+    const update = () => {
+      const tray = sc.querySelector("thead th:last-child") as HTMLElement | null;
+      const max = sc.scrollWidth - sc.clientWidth;
+      const next = {
+        left: sc.scrollLeft > 4,
+        right: sc.scrollLeft < max - 4,
+        tray: tray?.offsetWidth ?? 0,
+      };
+      setColNav((prev) =>
+        prev.left === next.left && prev.right === next.right && prev.tray === next.tray
+          ? prev
+          : next);
+    };
+    update();
+    sc.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(sc);
+    return () => { sc.removeEventListener("scroll", update); ro.disconnect(); };
+  }, [isMobile, rows, columns]);
+  const scrollColumns = (toEnd: boolean) => {
+    const sc = scrollerRef.current;
+    if (!sc) return;
+    sc.scrollTo({ left: toEnd ? sc.scrollWidth : 0, behavior: "smooth" });
+  };
+  const colArrowSx = {
+    position: "absolute" as const,
+    top: "48%",
+    zIndex: 4,
+    width: 30,
+    height: 30,
+    bgcolor: "rgba(255,255,255,.95)",
+    color: tokens.teal,
+    border: "1.5px solid #B9C9CF",
+    boxShadow: "0 2px 7px rgba(10,40,45,.22)",
+    "&:hover": { bgcolor: "#EEF6F4", borderColor: tokens.teal },
+  };
+
   const table = useMaterialReactTable<T>({
     columns: sizedColumns,
     layoutMode: "grid",
@@ -858,7 +907,15 @@ export default function CommonTable<T extends Record<string, any>>(
             "& .Mui-TableHeadCell-Content": { justifyContent: "center" },
           },
         },
-        muiTableBodyCellProps: { align: "center", sx: { px: 0.5 } },
+        muiTableBodyCellProps: {
+          align: "center",
+          sx: {
+            px: 0.5,
+            // Same boundary as the header: the tray is a surface, not an overlap.
+            borderLeft: "2px solid #C9D4DA",
+            boxShadow: "-8px 0 10px -6px rgba(15,40,50,.25)",
+          },
+        },
       },
     },
     // MRT paints the head row (and again for the sticky header) over the cell, so the
@@ -938,6 +995,7 @@ export default function CommonTable<T extends Record<string, any>>(
     // (maxHeight:none) so no vertical scrollbar ever appears. The HORIZONTAL scrollbar
     // is left visible so wide tables can be scrolled sideways.
     muiTableContainerProps: {
+      ref: scrollerRef,
       sx: { maxHeight: "none" },
     },
     muiTableBodyCellProps: {
@@ -1292,7 +1350,29 @@ export default function CommonTable<T extends Record<string, any>>(
   // Provider so each header's funnel can read/write our column-filter state.
   return (
     <FilterContext.Provider value={filterCtx}>
-      <MaterialReactTable table={table} />
+      <Box sx={{ position: "relative" }}>
+        <MaterialReactTable table={table} />
+        {colNav.right && (
+          <IconButton
+            aria-label="Show the remaining columns"
+            onClick={() => scrollColumns(true)}
+            sx={{ ...colArrowSx, right: colNav.tray + 10 }}
+            size="small"
+          >
+            <ChevronRightIcon fontSize="small" />
+          </IconButton>
+        )}
+        {colNav.left && (
+          <IconButton
+            aria-label="Back to the first columns"
+            onClick={() => scrollColumns(false)}
+            sx={{ ...colArrowSx, left: 10 }}
+            size="small"
+          >
+            <ChevronLeftIcon fontSize="small" />
+          </IconButton>
+        )}
+      </Box>
     </FilterContext.Provider>
   );
 }
