@@ -28,6 +28,7 @@ import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "../../context/SearchContext";
 import { tokens } from "../../theme";
+import { USE_REAL_API } from "../../api/http";
 import type { Paged, TableQuery } from "../../services/types";
 
 // v12 `th` background (ATLAS_EVAM_v12.html line 97).
@@ -383,6 +384,28 @@ export default function CommonTable<T extends Record<string, any>>(
     [colFilters],
   );
 
+  // Which register query param carries this column's facet. Declared per column
+  // (meta.filterParam) because the UI's field names are not the wire's ("an" is the
+  // register's "analyst").
+  const filterParamOf = (c: MRT_ColumnDef<T>): string | undefined =>
+    (c.meta as any)?.filterParam;
+
+  // The committed facets, translated to the register's own query params via each
+  // column's meta.filterParam — what the live fetch actually sends. columnFilters keeps
+  // the UI ids for the mock path.
+  const serverFilters = useMemo(
+    () =>
+      Object.entries(colFilters)
+        .filter(([, v]) => v && v.length)
+        .map(([id, values]) => {
+          const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
+          const param = col ? filterParamOf(col) : undefined;
+          return param ? { param, values } : null;
+        })
+        .filter((x): x is { param: string; values: string[] } => x !== null),
+    [colFilters, columns],
+  );
+
   // The per-table search box takes precedence; otherwise the navbar search applies.
   // (MRT can hand back `undefined` when the box is cleared — coerce to a string.)
   const gf = globalFilter ?? "";
@@ -426,6 +449,7 @@ export default function CommonTable<T extends Record<string, any>>(
         globalFilter: effectiveSearch,
         sorting,
         columnFilters,
+        serverFilters,
         searchFields,
         cursor,
       }),
@@ -516,6 +540,11 @@ export default function CommonTable<T extends Record<string, any>>(
   const isFilterable = (c: MRT_ColumnDef<T>): boolean => {
     if (c.enableColumnFilter === false) return false;
     if (!c.accessorKey && !c.accessorFn) return false;
+    // The platform's grids are server-paged, so a facet is honest only if the register
+    // can apply it — a column with no filterParam mapping gets no funnel rather than a
+    // checkbox that silently filters nothing. (Mock mode filters client-side and keeps
+    // every primitive column filterable, as before.)
+    if (USE_REAL_API && !filterParamOf(c)) return false;
     const sample = facetRows
       .map((r) => columnValue(r, c))
       .find((v) => v !== undefined && v !== null);

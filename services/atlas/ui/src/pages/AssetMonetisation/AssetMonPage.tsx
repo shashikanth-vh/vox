@@ -38,15 +38,15 @@ export default function AssetMonPage() {
   const columns = useMemo<MRT_ColumnDef<AmRow>[]>(() => [
     { accessorKey: '_name', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 170, maxWidth: 330 } } },
-    { accessorKey: 'state', header: 'State', size: 120 },
+    { accessorKey: 'state', header: 'State', size: 120, meta: { filterParam: 'state' } },
     { accessorKey: 'val', header: 'Indicative Value (₹ Cr)', size: 160, ...numCell, Cell: ({ cell }) => fmt(cell.getValue()) },
     { accessorKey: 'mw', header: 'Size (MW)', size: 100, ...numCell, Cell: ({ cell }) => (cell.getValue() ? fmt(cell.getValue(), 1) : '') },
-    { accessorKey: 'nature', header: 'Nature', size: 110 },
-    { accessorKey: 'dtype', header: 'Deal Type', size: 140 },
+    { accessorKey: 'nature', header: 'Nature', size: 110, meta: { filterParam: 'nature' } },
+    { accessorKey: 'dtype', header: 'Deal Type', size: 140, meta: { filterParam: 'deal_type' } },
     { accessorKey: 'inv', header: 'Investor', size: 180, ...truncCell(55) },
-    { accessorKey: 'itype', header: 'Investor Type', size: 140 },
+    { accessorKey: 'itype', header: 'Investor Type', size: 140, meta: { filterParam: 'investor_type' } },
     {
-      accessorKey: 'status', header: 'Status', size: 160,
+      accessorKey: 'status', header: 'Status', size: 160, meta: { filterParam: 'status' },
       // Offers only the register's legal moves (forward one step, back one step,
       // Dropped from any live state; Closed from SPA / Documentation) — the full
       // vocabulary just bounced illegal picks off the server's 422.

@@ -238,6 +238,7 @@ async def import_workbook(
     events) to this one import, for lineage. All exceptions are collected in ``report``."""
     from datetime import UTC, datetime
 
+    from evam_backend_core.crud import allocate_suffixed
     from evam_backend_core.policy import MANDATORY_FOR_STAGE, STAGE_VOCAB
 
     from app.models.reconciliation import ImportReconciliationItem
@@ -444,6 +445,7 @@ async def import_workbook(
         if e.code:
             codegen.used.add(e.code)
     entity_id_by: dict[str, uuid.UUID] = {}
+    entity_code_by_id: dict[uuid.UUID, str] = {}
     n_new, n_updated = 0, 0
     for k, nm in names.items():
         ent = existing_by_key.get(k)
@@ -483,6 +485,8 @@ async def import_workbook(
             ent.updated_by = "xlsx-import"
             n_updated += 1
         entity_id_by[k] = ent.id
+        if ent.code:
+            entity_code_by_id[ent.id] = ent.code
     counts["entities"] = n_new
     counts["entities_matched"] = n_updated
 
@@ -827,7 +831,14 @@ async def import_workbook(
             continue
         existing = deal_obj_by_entity.get(entity)
         if existing is None:
-            deal = Deal(tenant_id=tenant_id, deal_no=None, entity_id=entity,
+            # The deal's human number: the entity code (suffixed on a second facility),
+            # exactly what the interactive convert path allocates. Left blank, the Deals
+            # grid's server-side search — which covers `code`/`deal_no` — could never
+            # find an imported company by its Group Code.
+            stem = entity_code_by_id.get(entity)
+            deal_no = (await allocate_suffixed(session, Deal, tenant_id, "deal_no", stem)
+                       if stem else None)
+            deal = Deal(tenant_id=tenant_id, deal_no=deal_no, entity_id=entity,
                         created_by="xlsx-import", updated_by="xlsx-import", **fields)
             _note_stage_change(deal, "stage_history", "stage", None, fields["stage"], "Deals")
             session.add(deal)
@@ -841,6 +852,11 @@ async def import_workbook(
                 # flags are always meaningful; strings only overwrite when present.
                 if key.startswith("is_") or val is not None:
                     setattr(existing, key, val)
+            # A deal an earlier import left un-numbered gets its number now — the same
+            # entity-code stem the create path allocates.
+            if not existing.deal_no and entity_code_by_id.get(entity):
+                existing.deal_no = await allocate_suffixed(
+                    session, Deal, tenant_id, "deal_no", entity_code_by_id[entity])
             existing.updated_by = "xlsx-import"
             n_upd += 1
             obj = existing

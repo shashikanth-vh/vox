@@ -6,6 +6,13 @@ export interface TableQuery {
   globalFilter?: string;
   sorting?: MRT_SortingState;
   columnFilters?: MRT_ColumnFiltersState;
+  /**
+   * The committed facet selections TRANSLATED to the register's query-param names —
+   * built by CommonTable from each column's `meta.filterParam`. `columnFilters` above
+   * keeps the UI column ids for the mock path's applyQuery; this list is what the live
+   * path serialises onto the request (multi-select joins as a comma IN-list).
+   */
+  serverFilters?: { param: string; values: string[] }[];
   searchFields?: string[];
   /**
    * Cursor for the page being asked for — the `next_cursor` the previous page returned.

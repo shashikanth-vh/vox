@@ -40,6 +40,13 @@ export function toCursorParams(q: TableQuery): Record<string, any> {
   if (q.cursor) p[CURSOR_PARAM] = q.cursor;
   const search = q.globalFilter?.trim();
   if (search) p.q = search;
+  // The committed facet selections, already translated to the register's param names
+  // (CommonTable builds serverFilters from each column's meta.filterParam). Multi-select
+  // joins to a comma IN-list, which the register's filter layer splits. Dropping these
+  // on the floor is how every grid's checkbox filters were silently dead in live mode.
+  for (const f of q.serverFilters ?? []) {
+    if (f.param && f.values.length) p[f.param] = f.values.join(',');
+  }
   return p;
 }
 

@@ -35,12 +35,12 @@ export default function LeadsPage() {
   const columns = useMemo<MRT_ColumnDef<Lead>[]>(() => [
     { accessorKey: 'id', header: 'ID', size: 90, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: 'company', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
-    { accessorKey: 'sector', header: 'Sector' },
+    { accessorKey: 'sector', header: 'Sector', meta: { filterParam: 'sector' } },
     { accessorKey: 'lens', header: 'Lens', size: 80, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
-    { accessorKey: 'source', header: 'Source', size: 100 },
-    { accessorKey: 'rm', header: 'RM', size: 100 },
-    { accessorKey: 'temp', header: 'Temp', size: 90, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
-    { accessorKey: 'status', header: 'Status', size: 100 },
+    { accessorKey: 'source', header: 'Source', size: 100, meta: { filterParam: 'source' } },
+    { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
+    { accessorKey: 'temp', header: 'Temp', size: 90, meta: { filterParam: 'temperature' }, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
+    { accessorKey: 'status', header: 'Status', size: 100, meta: { filterParam: 'status' } },
     { accessorKey: 'last', header: 'Last touch', size: 110 },
     { accessorKey: 'next', header: 'Next action', size: 220 },
   ], []);

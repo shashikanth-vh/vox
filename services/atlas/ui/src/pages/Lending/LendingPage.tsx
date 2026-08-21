@@ -54,10 +54,10 @@ export default function LendingPage() {
     { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: '_name', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'amt', header: '₹ Cr', size: 90, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
-    { accessorKey: 'rm', header: 'RM', size: 100 },
-    { accessorKey: 'an', header: 'Analyst', size: 110 },
+    { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
+    { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' } },
     {
-      accessorKey: 'stage', header: 'Stage', size: 160,
+      accessorKey: 'stage', header: 'Stage', size: 160, meta: { filterParam: 'stage' },
       // inline stage edit stamps the date automatically (template behaviour)
       Cell: ({ row }) => (
         <TextField select size="small" value={row.original.stage} disabled={ro} variant="outlined"

@@ -281,7 +281,15 @@ class CRUDRepository(Generic[M]):
                 raise ValueError(
                     f"'{key}' is not a filterable column for {self.model.__name__} "
                     f"(allowed: {sorted(self.filterable)})")
-            conds.append(self._col(key) == self._coerce_filter(key, value))
+            # A comma-separated value is an IN list — the grids' multi-select facets
+            # ("Stage: Sanctioned or Disbursed") arrive as one param. None of the
+            # filterable vocabularies contain a comma (stages, statuses, people's
+            # names), so the split is unambiguous; a single value keeps plain equality.
+            if isinstance(value, str) and "," in value:
+                parts = [self._coerce_filter(key, p) for p in value.split(",") if p != ""]
+                conds.append(self._col(key).in_(parts))
+            else:
+                conds.append(self._col(key) == self._coerce_filter(key, value))
 
         if q and self.searchable:
             like = f"%{q}%"
