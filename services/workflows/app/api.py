@@ -403,6 +403,31 @@ _EVIDENCE_LABEL: dict[str, str] = {
 _SANCTION_FAMILY = ("Sanctioned", "CP/CS Completed", "Ready for Disbursement", "Disbursed")
 
 
+def _checklist_half(items: list, want: str, checklist_status: str) -> tuple[int, int]:
+    """``(done, total)`` for one half of the latest checklist version.
+
+    A CP the checker DEFERRED AS A CS is done-for-CP and open-as-CS — that is what the
+    deferral MEANS — but ONLY while the version's claim stands (Draft / Completed /
+    Approved). A REJECTED or RETURNED version's deferral was refused along with
+    everything else on it: counting it as settled let the maker re-send the exact claim
+    the checker had just refused (the CP read 9/9, the item sat on the CS side, and the
+    rejection changed nothing on screen). Once refused, the item is OPEN CP WORK again —
+    the maker re-decides deliberately: complete it, waive it, or propose the deferral
+    afresh for the next checker to judge."""
+    claim_stands = checklist_status in ("Draft", "Completed", "Approved")
+    deferred = ([i for i in items
+                 if str(i.get("status")) == "Deferred as CS"
+                 and str(i.get("condition_type")) != "CS"] if claim_stands else [])
+    if want == "CP":
+        rel = [i for i in items if str(i.get("condition_type")) == "CP"]
+        done_states = {"Completed", "Waived"} | (
+            {"Deferred as CS"} if claim_stands else set())
+    else:
+        rel = [i for i in items if str(i.get("condition_type")) == "CS"] + deferred
+        done_states = {"Completed", "Waived"}
+    return sum(1 for i in rel if str(i.get("status")) in done_states), len(rel)
+
+
 def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
                       checklist_status: str, checklist_items: list,
                       cam_ready: bool, package_status: str,
@@ -467,9 +492,8 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     else:
         cp = ("pending", "Opens at Sanctioned")
     if cp_items and cp[0] in ("active", "done"):
-        done_n = sum(1 for i in cp_items
-                     if str(i.get("status")) in ("Completed", "Waived", "Deferred as CS"))
-        cp = (cp[0], f"{done_n}/{len(cp_items)} — {cp[1]}")
+        done_n, total_n = _checklist_half(checklist_items, "CP", checklist_status)
+        cp = (cp[0], f"{done_n}/{total_n} — {cp[1]}")
 
     # Disbursement — the money, in parallel with the CS chase.
     drawn = float(row.get("disbursed_amount") or 0)
@@ -485,17 +509,12 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
         disb = ("pending", "Follows the CP approval")
 
     # CP/CS — conditions subsequent, INCLUDING the CPs the checker deferred as CS
-    # (done as a CP, open as a CS — that is what the deferral means).
-    deferred = [i for i in checklist_items
-                if str(i.get("status")) == "Deferred as CS"
-                and str(i.get("condition_type")) != "CS"]
-    cs_items = [i for i in checklist_items
-                if str(i.get("condition_type")) == "CS"] + deferred
-    if checklist_status == "Approved" and cs_items:
-        cs_done = sum(1 for i in cs_items
-                      if str(i.get("status")) in ("Completed", "Waived"))
-        cs = ("done" if cs_done == len(cs_items) else "active",
-              f"{cs_done}/{len(cs_items)} conditions subsequent closed")
+    # (done as a CP, open as a CS — that is what an APPROVED deferral means; a refused
+    # version's deferral has already returned to the CP side via _checklist_half).
+    cs_done, cs_total = _checklist_half(checklist_items, "CS", checklist_status)
+    if checklist_status == "Approved" and cs_total:
+        cs = ("done" if cs_done == cs_total else "active",
+              f"{cs_done}/{cs_total} conditions subsequent closed")
     elif checklist_status == "Approved":
         cs = ("done", "No conditions subsequent to chase")
     else:
@@ -3895,27 +3914,13 @@ def create_app() -> FastAPI:
                         f"Fully disbursed — {drawn:g} of {ceiling:g} Cr is on the book.")
             if latest_checklist_items and spec["key"] in ("cpcs.prepare", "cpcs.update-cs"):
                 want = "CP" if spec["key"] == "cpcs.prepare" else "CS"
-                # A CP the checker DEFERRED AS A CS is done as a CP and open as a CS —
-                # that is what the deferral MEANS. Splitting on the stored
-                # `condition_type` alone (still "CP" until the first CS progress flips
-                # it) made such an item invisible to BOTH halves: the CP read 9/9, the
-                # CS read 8/8, both buttons shut, while Today's chase — which counts
-                # every item not Completed or Waived — said 2 outstanding with nowhere
-                # to go and work them.
-                deferred = [i for i in latest_checklist_items
-                            if str(i.get("status")) == "Deferred as CS"
-                            and str(i.get("condition_type")) != "CS"]
-                if want == "CP":
-                    rel = [i for i in latest_checklist_items
-                           if str(i.get("condition_type")) == "CP"]
-                    done_states = {"Completed", "Waived", "Deferred as CS"}
-                else:
-                    rel = [i for i in latest_checklist_items
-                           if str(i.get("condition_type")) == "CS"] + deferred
-                    done_states = {"Completed", "Waived"}
-                if rel:
-                    done = sum(1 for i in rel if str(i.get("status")) in done_states)
-                    label = f"{label} ({done}/{len(rel)})"
+                # Deferral semantics (done-for-CP / open-as-CS, but only while the
+                # version's claim stands) live in _checklist_half — one place, so the
+                # button counts, the pipeline strip and the dialog can never disagree.
+                done, total = _checklist_half(latest_checklist_items, want,
+                                              latest_checklist_status)
+                if total:
+                    label = f"{label} ({done}/{total})"
                     # A finished half is a finished half: nothing is left to work, so the
                     # button stops inviting a click. It reads as a completed step rather
                     # than an open one — and re-opening a satisfied checklist is how a
@@ -3927,11 +3932,11 @@ def create_app() -> FastAPI:
                     # next version: the line sat stuck short of 'CP/CS Completed', which
                     # needs an approval that could now never exist. A Draft is likewise
                     # still the maker's to finish and submit, not a settled step.
-                    if (done == len(rel) and enabled
+                    if (done == total and enabled
                             and latest_checklist_status in ("Completed", "Approved")):
                         enabled, reason = False, (
-                            f"All {len(rel)} condition"
-                            f"{'s' if len(rel) > 1 else ''} "
+                            f"All {total} condition"
+                            f"{'s' if total > 1 else ''} "
                             f"{'precedent are' if want == 'CP' else 'subsequent are'} "
                             "satisfied — nothing left to work here.")
             actions.append({

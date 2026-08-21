@@ -169,6 +169,17 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           setLatestStatus(String(target.status || ''));
         }
         let seeded: any[] = lists.length ? (target.items || []) : [];
+        // A REJECTED or RETURNED version's deferral was refused along with everything
+        // else on it. Carrying it forward as settled smuggled the refused claim into
+        // the next version — the CP read 9/9, the item sat on the CS tab, and the
+        // checker's "no" changed nothing on screen. It comes back as OPEN CP work
+        // (reason and satisfy-by kept for context): the maker re-decides deliberately —
+        // complete it, waive it, or propose the deferral afresh for the next checker.
+        if (lists.length && ['Rejected', 'Returned'].includes(String(target?.status))) {
+          seeded = seeded.map((s: any) => (
+            s.status === 'Deferred as CS' && s.condition_type !== 'CS'
+              ? { ...s, status: 'Pending' } : s));
+        }
         if (!seeded.length) {
           const { camService } = await import('../../services/camService');
           const t = await camService.terms(lid).catch(() => null);

@@ -15,7 +15,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.api import _evaluate_action, _IDENTITY_FOR, _lending_pipeline, _MAKER_ACTIONS
+from app.api import (_checklist_half, _evaluate_action, _IDENTITY_FOR,
+                     _lending_pipeline, _MAKER_ACTIONS)
 from app.config import get_settings
 
 pytestmark = pytest.mark.asyncio
@@ -227,6 +228,32 @@ def test_pipeline_paints_the_rejections_red_where_they_happened():
     s = _strip(stage="Sanctioned", cam_ready=True, checklist_status="Rejected",
                on_file={"credit_committee_approval", "sanction_letter"})
     assert s["sanction"]["state"] == "done" and s["cp"]["state"] == "rejected"
+
+
+def test_a_refused_deferral_returns_to_the_cp_side():
+    """Deferred-as-CS becomes a CS obligation ONLY through the checker's approval.
+    While the version's claim stands the deferral is done-for-CP and open-as-CS; the
+    moment the checker REJECTS (or returns) it, the deferral was refused with the rest
+    of the version — the item is open CP work again and leaves the CS side, so the
+    maker completes it (or re-proposes) and re-sends, looping until approved."""
+    items = [{"condition_type": "CP", "status": "Completed"},
+             {"condition_type": "CP", "status": "Deferred as CS"},
+             {"condition_type": "CS", "status": "Pending"}]
+    # Claim standing (sent, awaiting the checker): CP 2/2, CS carries the deferral.
+    assert _checklist_half(items, "CP", "Completed") == (2, 2)
+    assert _checklist_half(items, "CS", "Completed") == (0, 2)
+    # Refused: CP back to 1/2 — the deferred item is open again — and CS holds only
+    # the native condition from the sanction letter.
+    for verdict in ("Rejected", "Returned"):
+        assert _checklist_half(items, "CP", verdict) == (1, 2), verdict
+        assert _checklist_half(items, "CS", verdict) == (0, 1), verdict
+    # Approval ratifies the deferral: from here the CS chase owns it.
+    assert _checklist_half(items, "CS", "Approved") == (0, 2)
+    # And the pipeline agrees: a rejected checklist leaves the CS box shut.
+    s = _strip(stage="Sanctioned", cam_ready=True, checklist_status="Rejected",
+               checklist_items=items,
+               on_file={"credit_committee_approval", "sanction_letter"})
+    assert s["cp"]["state"] == "rejected" and s["cs"]["state"] == "pending"
 
 
 def test_pipeline_trusts_imported_history():
