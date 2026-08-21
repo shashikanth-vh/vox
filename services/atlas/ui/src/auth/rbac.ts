@@ -47,7 +47,9 @@ const VIEW_ROWS: Record<string, Access[]> = {
   syn:      [F, F, R, R, R, S, F, S, R, R, N, N],
   am:       [F, F, R, R, R, S, R, R, F, S, N, N],
   fi:       [F, F, R, R, R, R, F, R, R, R, N, N],
-  clients:  [F, F, R, N, R, N, R, N, R, N, R, R],
+  // Firm-wide visibility: the client directory is readable by every desk — it is
+  // the join source for every grid's company names.
+  clients:  [F, F, R, R, R, R, R, R, R, R, R, R],
   emp:      [F, F, R, R, R, R, R, R, R, R, R, R],
   audit:    [F, N, N, N, N, N, N, N, N, N, N, N],
   activity: [F, N, N, N, N, N, N, N, N, N, N, N],

@@ -44,6 +44,12 @@ VISIBILITY_READ: tuple[tuple[str, str], ...] = tuple(
         "lending": ("BDRM", "Deal Analyst"),
         "syndication": ("BDRM", "Credit Head", "Deal Analyst", "Syn RM"),
         "asset_monetisation": ("BDRM", "Credit Head", "Deal Analyst", "AM RM"),
+        # The two directories every grid JOINS its names from. Without them a widened
+        # desk reads the book but not who it belongs to: lending rows rendered with
+        # blank Group Code / Company for exactly the roles the layer had just widened,
+        # because the entity lookup stayed scoped to their own (empty) book.
+        "clients": ("BDRM", "Syn Head", "Syn RM", "AM Head", "AM RM"),
+        "fi_master": ("Credit Head", "Deal Analyst", "Syn RM"),
     }.items()
     for role in roles
 )
