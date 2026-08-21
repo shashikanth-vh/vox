@@ -21,6 +21,33 @@ from app.models import AccessAudit, AccessGrant, MatrixVersion
 ACCESS_LEVELS = {a.name for a in Access}
 
 # Cells that may never be edited, even by Admin (kind, item). The spec's hard rules.
+# FIRM-WIDE VISIBILITY (deployment policy, 2026-08): every desk SEES every record —
+# reading only. These view cells are held at READ by the seed on every start, so the
+# policy ships with the build and an `upgrade` applies it to a running database with
+# no operator step. Three deliberate properties:
+#
+#   * The WRITE gate is untouched. can_write_line evaluates ownership against the
+#     transcribed spec matrix, not these cells — a desk reads the whole book and still
+#     edits only its own rows. (That is also why the spec matrix itself is NOT edited:
+#     baking READ into it would revoke every RM's write on their own lines.)
+#   * An Admin override still wins. The seed refreshes only rows whose origin is
+#     'baseline'; a cell an Admin has PATCHed (origin='override') is never touched.
+#   * Today/Dashboard stay scoped (personal work queues) and the two guardrail views
+#     stay Admin-only — neither appears here.
+VISIBILITY_READ: tuple[tuple[str, str], ...] = tuple(
+    (item, role)
+    for item, roles in {
+        "deals": ("BDRM", "Credit Head", "Deal Analyst",
+                  "Syn Head", "Syn RM", "AM Head", "AM RM"),
+        "leads": ("BDRM", "Credit Head", "Deal Analyst",
+                  "Syn Head", "Syn RM", "AM Head", "AM RM"),
+        "lending": ("BDRM", "Deal Analyst"),
+        "syndication": ("BDRM", "Credit Head", "Deal Analyst", "Syn RM"),
+        "asset_monetisation": ("BDRM", "Credit Head", "Deal Analyst", "AM RM"),
+    }.items()
+    for role in roles
+)
+
 IMMUTABLE_ITEMS: set[tuple[str, str]] = {
     ("operation", "delete_row"),       # IRREVERSIBLE — Admin ONLY
     ("operation", "backup_restore"),   # restore can wipe the book — Admin ONLY
@@ -50,14 +77,41 @@ async def seed_matrix(session: AsyncSession, tenant_id: uuid.UUID) -> int:
                                         role=role, access=access.name, origin="baseline",
                                         created_by="seed", updated_by="seed"))
                 added += 1
+    # The firm-wide visibility layer: hold the listed view cells at READ. Freshly
+    # inserted cells above may carry the spec value — refresh them here the same way
+    # an upgrade refreshes a long-running database. origin='baseline' only: a cell an
+    # Admin has overridden stays exactly as the Admin left it.
+    refreshed: list[str] = []
+    await session.flush()   # the maker runs autoflush=False — make this run's inserts visible
+    vis_rows = (
+        await session.execute(select(AccessGrant).where(
+            AccessGrant.tenant_id == tenant_id, AccessGrant.kind == "view"))
+    ).scalars().all()
+    by_key = {(g.item, g.role): g for g in vis_rows}
+    for item, role in VISIBILITY_READ:
+        row = by_key.get((item, role))
+        if row is None or row.origin != "baseline" or row.access == "READ":
+            continue
+        refreshed.append(f"{item}:{role}:{row.access}->READ")
+        row.access = "READ"
+        row.updated_by = "seed"
+        row.deleted_at = None
     ver = (
         await session.execute(select(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id))
     ).scalar_one_or_none()
     if ver is None:
         session.add(MatrixVersion(tenant_id=tenant_id, version=1))
+    elif refreshed:
+        await session.execute(
+            update(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id)
+            .values(version=MatrixVersion.version + 1)
+        )
     if added:
         audit(session, tenant_id, "seed", "matrix.seed", item=None,
               detail={"cells_added": added, "fingerprint": policy_fingerprint()})
+    if refreshed:
+        audit(session, tenant_id, "seed", "matrix.visibility", item=None,
+              detail={"cells": refreshed})
     await session.flush()
     return added
 
@@ -169,6 +223,11 @@ async def drift_report(session: AsyncSession, tenant_id: uuid.UUID) -> dict:
                     missing.append({"kind": kind, "item": item, "role": role,
                                     "baseline": access.name})
                 elif got != access.name:
+                    # The shipped visibility layer holds these exact cells at READ —
+                    # that is the deployment's policy, not drift.
+                    if (kind == "view" and (item, role) in VISIBILITY_READ
+                            and got == "READ"):
+                        continue
                     differing.append({"kind": kind, "item": item, "role": role,
                                       "baseline": access.name, "live": got,
                                       "origin": origin_of.get((kind, item, role), "?")})

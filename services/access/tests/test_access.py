@@ -272,3 +272,44 @@ async def test_a_revoked_role_can_be_granted_back(client: AsyncClient):
     # A LIVE duplicate is still refused — the restore path must not eat the 409.
     assert (await client.post(f"/v1/users/{uid}/roles", headers=ADMIN,
                               json={"role": "Admin"})).status_code == 409
+
+
+async def test_the_visibility_layer_is_seeded_and_survives_reseeding(client):
+    """Firm-wide visibility ships with the build: the seed holds the VISIBILITY_READ
+    view cells at READ on every start — which is how an `upgrade` applies the policy
+    to a long-running database — while an Admin's own override always wins."""
+    from sqlalchemy import select
+
+    from app.matrix import VISIBILITY_READ
+
+    r = await client.get("/v1/access")
+    assert r.status_code == 200, r.text
+    views = r.json()["views"]
+    for item, role in VISIBILITY_READ:
+        assert views[item][role] == "READ", f"{item}×{role} should seed to READ"
+
+    # An Admin decision beats the shipped layer: override one cell back to SCOPED,
+    # re-run the seed (exactly what the next service start does), and the override
+    # stands — origin='override' rows are never refreshed.
+    edit = await client.patch("/v1/access", json={
+        "kind": "view", "item": "deals", "role": "BDRM", "access": "SCOPED"})
+    assert edit.status_code == 200, edit.text
+
+    from evam_backend_core.db.session import get_sessionmaker
+
+    from app.matrix import seed_matrix
+    from app.models import Tenant
+
+    sm = get_sessionmaker()
+    async with sm() as session:
+        tid = (await session.execute(select(Tenant.id).where(Tenant.code == "EVAM"))
+               ).scalar_one()
+        await seed_matrix(session, tid)
+        await session.commit()
+
+    views = (await client.get("/v1/access")).json()["views"]
+    assert views["deals"]["BDRM"] == "SCOPED", "the Admin override must survive a re-seed"
+    for item, role in VISIBILITY_READ:
+        if (item, role) == ("deals", "BDRM"):
+            continue
+        assert views[item][role] == "READ"

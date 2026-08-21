@@ -37,7 +37,11 @@ const F: Access = 'full', S: Access = 'scoped', R: Access = 'read', N: Access = 
 const VIEW_ROWS: Record<string, Access[]> = {
   today:    [F, F, S, S, S, S, S, S, S, S, S, S],
   dash:     [F, F, S, N, S, N, S, N, S, N, N, N],
-  leads:    [F, F, F, S, N, N, N, N, N, N, N, N],
+  // Firm-wide visibility (deployment policy, 2026-08): every desk SEES every module —
+  // the access service seeds the live matrix to match (matrix.py VISIBILITY_READ), and
+  // this row opens the Leads tab for the roles the spec left at none. Reading only:
+  // every edit is still gated by the operations map + the register's ownership check.
+  leads:    [F, F, F, S, R, R, R, R, R, R, N, N],
   deals:    [F, F, F, S, S, S, S, S, S, S, R, R],
   lend:     [F, F, R, R, F, S, R, R, R, R, R, R],
   syn:      [F, F, R, R, R, S, F, S, R, R, N, N],
