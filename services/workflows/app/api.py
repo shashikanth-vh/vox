@@ -398,6 +398,119 @@ _EVIDENCE_LABEL: dict[str, str] = {
     "advaya_acknowledgement": "Advaya's acknowledgement",
 }
 
+# Stages at or beyond the sanction milestone — the pipeline reads them as "the committee
+# said yes", whether the line got there on-platform or arrived there from the MIS import.
+_SANCTION_FAMILY = ("Sanctioned", "CP/CS Completed", "Ready for Disbursement", "Disbursed")
+
+
+def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
+                      checklist_status: str, checklist_items: list,
+                      cam_ready: bool, package_status: str,
+                      row: dict) -> list[dict]:
+    """The credit pipeline as ONE READABLE STRIP — CAM → CCR → Sanction → CP, forking to
+    Disbursement ∥ CP/CS — each step coloured from facts the platform already holds (stage,
+    evidence on file, checklist verdicts, run status). Pure presentation of server truth:
+    nothing here grants or gates anything, so a step's state can never disagree with the
+    verbs below it. States: done / active / rejected / pending.
+
+    Derivations are STAGE-TOLERANT for imported history: a line the MIS landed at
+    'Sanctioned' shows its CAM/CCR/Sanction boxes done even though those artefacts predate
+    the platform — the evidence store, not this strip, is the audit."""
+    past_sanction = stage in _SANCTION_FAMILY
+    dead = stage == "Rejected"
+
+    # CAM — the workbench artefact. Green once one exists (or history has moved past it),
+    # blue while the desk is working toward the committee without one.
+    if cam_ready or past_sanction or "credit_committee_approval" in on_file:
+        cam = ("done", "CAM on file" if cam_ready else "Passed — imported history")
+    elif stage in ("Data Awaited", "Diligence", "Note Circulated"):
+        cam = ("active", "Prepare the CAM in the workbench")
+    else:
+        cam = ("pending", "Prepared before the committee reads the file")
+
+    # CCR — the committee's verdict. A live run is blue whatever else is on file; the
+    # rejection reading survives a reopen because a fresh approval overrides it.
+    if run_state == "live":
+        ccr = ("active", "Committee decision awaited")
+    elif run_state == "returned":
+        ccr = ("active", "Returned for revision — amend the note and resubmit")
+    elif "credit_committee_approval" in on_file or past_sanction:
+        ccr = ("done", "Committee approved")
+    elif dead:
+        ccr = ("rejected", "Committee rejected" if "credit_committee_rejection" in on_file
+               else "Rejected at the desk")
+    elif "credit_committee_rejection" in on_file:
+        ccr = ("rejected", "Committee rejected — revise the CAM and re-send")
+    else:
+        ccr = ("pending", "Send to credit committee once the CAM is ready")
+
+    # Sanction — a milestone, not a task: green at/beyond it, grey before.
+    if past_sanction:
+        san = ("done", "Sanctioned — letter on file" if "sanction_letter" in on_file
+               else "Sanctioned")
+    else:
+        san = ("pending", "Reached through the committee's approval")
+
+    # CP — the latest checklist version's verdict rules; progress counts ride the note.
+    cp_items = [i for i in checklist_items if str(i.get("condition_type")) == "CP"]
+    if checklist_status == "Approved" or stage in _SANCTION_FAMILY[1:]:
+        cp = ("done", "CP checklist approved")
+    elif checklist_status == "Rejected":
+        cp = ("rejected", "Checker rejected — prepare the next version")
+    elif checklist_status == "Completed":
+        cp = ("active", "Sent — awaiting the checker")
+    elif checklist_status in ("Draft", "Returned"):
+        cp = ("active", "Being prepared" if checklist_status == "Draft"
+              else "Returned — amend and resubmit")
+    elif stage == "Sanctioned":
+        cp = ("active", "Prepare the CP checklist from the sanction letter")
+    else:
+        cp = ("pending", "Opens at Sanctioned")
+    if cp_items and cp[0] in ("active", "done"):
+        done_n = sum(1 for i in cp_items
+                     if str(i.get("status")) in ("Completed", "Waived", "Deferred as CS"))
+        cp = (cp[0], f"{done_n}/{len(cp_items)} — {cp[1]}")
+
+    # Disbursement — the money, in parallel with the CS chase.
+    drawn = float(row.get("disbursed_amount") or 0)
+    ceiling = float(row.get("proposed_disbursement_amount") or row.get("amount_cr") or 0)
+    if stage == "Disbursed" and (not ceiling or drawn + 1e-9 >= ceiling):
+        disb = ("done", f"Fully disbursed — {drawn:g} Cr on the book")
+    elif stage == "Disbursed":
+        disb = ("active", f"{drawn:g} of {ceiling:g} Cr drawn — later tranches open")
+    elif stage in ("CP/CS Completed", "Ready for Disbursement"):
+        disb = ("active", f"Package {package_status}" if package_status
+                else "Prepare the disbursement request")
+    else:
+        disb = ("pending", "Follows the CP approval")
+
+    # CP/CS — conditions subsequent, INCLUDING the CPs the checker deferred as CS
+    # (done as a CP, open as a CS — that is what the deferral means).
+    deferred = [i for i in checklist_items
+                if str(i.get("status")) == "Deferred as CS"
+                and str(i.get("condition_type")) != "CS"]
+    cs_items = [i for i in checklist_items
+                if str(i.get("condition_type")) == "CS"] + deferred
+    if checklist_status == "Approved" and cs_items:
+        cs_done = sum(1 for i in cs_items
+                      if str(i.get("status")) in ("Completed", "Waived"))
+        cs = ("done" if cs_done == len(cs_items) else "active",
+              f"{cs_done}/{len(cs_items)} conditions subsequent closed")
+    elif checklist_status == "Approved":
+        cs = ("done", "No conditions subsequent to chase")
+    else:
+        cs = ("pending", "Opens with the CP approval")
+
+    return [
+        {"key": "cam", "label": "CAM", "state": cam[0], "note": cam[1]},
+        {"key": "ccr", "label": "CCR", "state": ccr[0], "note": ccr[1]},
+        {"key": "sanction", "label": "Sanction", "state": san[0], "note": san[1]},
+        {"key": "cp", "label": "CP", "state": cp[0], "note": cp[1]},
+        {"key": "disbursement", "label": "Disbursement", "state": disb[0],
+         "note": disb[1], "parallel": True},
+        {"key": "cs", "label": "CP/CS", "state": cs[0], "note": cs[1], "parallel": True},
+    ]
+
 
 # The signed internal context is BOUND to the route it was minted for, and the register
 # compares it against `request.url.path` — which never carries a query string. Minting it
@@ -3654,6 +3767,7 @@ def create_app() -> FastAPI:
         latest_checklist_status = ""
         latest_checklist_items: list = []
         cam_ready = True
+        cam_on_file = False
         if subject_type == "Lending":
             existing, ver_problem = await _register_get_as(
                 request, f"/v1/internal/cpcs-checklists?lending_id={subject_id}&limit=50",
@@ -3679,8 +3793,12 @@ def create_app() -> FastAPI:
                 request, f"/v1/internal/cam-reports?lending_id={subject_id}", who, caller)
             if cam_err is None and isinstance(cams, list):
                 cam_ready = any(r.get("draft_md") or r.get("document_id") for r in cams)
+                # The pipeline strip shows FACTS, so unlike the fail-open gate it only
+                # calls the CAM done when one was actually read off the register.
+                cam_on_file = cam_ready
             else:
                 cam_ready = True
+                cam_on_file = False
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
@@ -3836,12 +3954,22 @@ def create_app() -> FastAPI:
                 **({"reason": reason} if not enabled else {}),
                 "body": body, "form": form,
             })
-        return {
+        payload: dict[str, Any] = {
             "subject": {"type": subject_type, "id": subject_id, "stage": stage},
             "run": run_info,
             "scoped_to": {"email": who, "roles": sorted(roles)},
             "actions": actions,
         }
+        # The credit pipeline at a glance — lending only (the other books have no
+        # committee spine). Derived here, from the same facts that gated the actions
+        # above, so the strip and the buttons can never tell two different stories.
+        if subject_type == "Lending":
+            payload["pipeline"] = _lending_pipeline(
+                stage=stage, run_state=run_state, on_file=on_file,
+                checklist_status=latest_checklist_status,
+                checklist_items=latest_checklist_items,
+                cam_ready=cam_on_file, package_status=package_status, row=row)
+        return payload
 
     @app.get("/v1/workflows/pending", tags=["Workflows"],
              summary="Every run parked awaiting an approval, tenant-wide (the Today list)")

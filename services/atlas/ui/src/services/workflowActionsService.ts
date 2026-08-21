@@ -58,11 +58,26 @@ export interface WorkflowAction {
   form: ActionField[];
 }
 
+/**
+ * One box of the credit-pipeline strip, coloured server-side from the same facts that
+ * gate the actions — the client renders it blind and can never disagree with the verbs.
+ */
+export interface PipelineStep {
+  key: string;
+  label: string;
+  state: 'done' | 'active' | 'rejected' | 'pending';
+  note?: string;
+  /** The steps after the fork — Disbursement and CP/CS run side by side. */
+  parallel?: boolean;
+}
+
 export interface SubjectActions {
   subject: { type: string; id: string; stage: string };
   run: { workflow_id: string; status: string; stage: string; status_url: string } | null;
   scoped_to: { email: string; roles: string[] };
   actions: WorkflowAction[];
+  /** Present for lending lines only — the other books have no committee spine. */
+  pipeline?: PipelineStep[];
 }
 
 export type SubjectType = 'Lending' | 'Syndication' | 'AssetMonetisation';

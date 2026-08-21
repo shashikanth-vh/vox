@@ -124,6 +124,20 @@ export const lendingService = {
         + 'refresh the page and try again.' };
     }
     if (USE_REAL_API) {
+      // NO STAGE EDITS WHILE AN APPROVAL RUN IS IN FLIGHT. The request the maker sent —
+      // committee, checklist — walks the stage itself when it concludes; a hand edit
+      // racing it makes the line tell two stories at once. One read of the actions plane
+      // at the moment of the edit (never per row) answers it; an unreachable plane
+      // fails OPEN, because bookkeeping must not wedge on a workflow outage.
+      try {
+        const { workflowActionsService } = await import('./workflowActionsService');
+        const d = await workflowActionsService.forSubject('Lending', id);
+        if (d.run) {
+          return { ok: false, error: 'An approval request is in flight for this line ('
+            + (d.run.stage || d.run.status)
+            + ') — the stage is locked until it is decided or withdrawn.' };
+        }
+      } catch { /* fail open */ }
       try {
         await api.patch('/lending/' + id, { stage });
       } catch (e: any) {

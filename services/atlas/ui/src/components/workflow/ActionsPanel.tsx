@@ -7,6 +7,7 @@ import ExecutedAgreementDialog from './ExecutedAgreementDialog';
 import CamWorkbenchDialog from './CamWorkbenchDialog';
 import DisburseDialog from './DisburseDialog';
 import SanctionTermsDialog from './SanctionTermsDialog';
+import PipelineStepper from './PipelineStepper';
 import { workflowActionsService, type SubjectActions, type SubjectType, type WorkflowAction }
   from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -44,6 +45,10 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
 
   return (
     <>
+      {/* The journey at a glance, before the verbs: where this line has been, where it
+          is, and where a checker said no — server-coloured, so it always agrees with
+          the buttons underneath. */}
+      {data.pipeline && <PipelineStepper steps={data.pipeline} />}
       {data.run && (
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.8 }}>
           Run in flight — <b>{data.run.stage || data.run.status}</b>

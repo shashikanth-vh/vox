@@ -15,7 +15,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.api import _evaluate_action, _IDENTITY_FOR, _MAKER_ACTIONS
+from app.api import _evaluate_action, _IDENTITY_FOR, _lending_pipeline, _MAKER_ACTIONS
 from app.config import get_settings
 
 pytestmark = pytest.mark.asyncio
@@ -162,6 +162,98 @@ async def test_actions_lists_available_and_blocked_side_by_side(monkeypatch):
     blocked = by_key["cpcs.prepare"]
     assert not blocked["enabled"]
     assert blocked["reason"] == "Available once the committee has sanctioned this facility."
+    get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------------- #
+# The pipeline strip — one readable row of server truth (CAM → CCR → Sanction → CP,
+# forking to Disbursement ∥ CP/CS), coloured from the same facts that gate the actions.
+# --------------------------------------------------------------------------------- #
+def _strip(**over) -> dict:
+    """The pipeline keyed by step, from sensible defaults each test overrides."""
+    base = dict(stage="Data Awaited", run_state="none", on_file=set(),
+                checklist_status="", checklist_items=[], cam_ready=False,
+                package_status="", row={})
+    base.update(over)
+    return {s["key"]: s for s in _lending_pipeline(**base)}
+
+
+def test_pipeline_walks_the_happy_path_box_by_box():
+    # Fresh line: the CAM is the working step, everything downstream waits.
+    s = _strip()
+    assert s["cam"]["state"] == "active"
+    assert [s[k]["state"] for k in ("ccr", "sanction", "cp", "disbursement", "cs")] \
+        == ["pending"] * 5
+
+    # CAM prepared, committee run in flight: CCR is the blue box.
+    s = _strip(stage="Note Circulated", cam_ready=True, run_state="live")
+    assert s["cam"]["state"] == "done" and s["ccr"]["state"] == "active"
+
+    # Approved and sanctioned: three greens, CP becomes the working step.
+    s = _strip(stage="Sanctioned", cam_ready=True,
+               on_file={"credit_committee_approval", "sanction_letter"})
+    assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["done"] * 3
+    assert s["cp"]["state"] == "active" and "letter" in s["sanction"]["note"]
+
+    # CP approved with a deferred item: the fork goes to work — disbursement live,
+    # the deferred CP counts as an OPEN condition subsequent (that is what deferral means).
+    items = [{"condition_type": "CP", "status": "Completed"},
+             {"condition_type": "CP", "status": "Deferred as CS"}]
+    s = _strip(stage="CP/CS Completed", cam_ready=True, checklist_status="Approved",
+               checklist_items=items,
+               on_file={"credit_committee_approval", "sanction_letter",
+                        "cp_cs_completion"})
+    assert s["cp"]["state"] == "done" and s["cp"]["note"].startswith("2/2")
+    assert s["disbursement"]["state"] == "active"
+    assert s["cs"]["state"] == "active" and s["cs"]["note"].startswith("0/1")
+
+    # Fully drawn: the book ends green on both forks.
+    s = _strip(stage="Disbursed", cam_ready=True, checklist_status="Approved",
+               checklist_items=[{"condition_type": "CS", "status": "Completed"}],
+               row={"disbursed_amount": 5, "proposed_disbursement_amount": 5})
+    assert s["disbursement"]["state"] == "done" and s["cs"]["state"] == "done"
+
+
+def test_pipeline_paints_the_rejections_red_where_they_happened():
+    # Committee rejected → the CCR box is the red one, and says what to do next.
+    s = _strip(stage="Rejected", cam_ready=True,
+               on_file={"credit_committee_rejection"})
+    assert s["ccr"]["state"] == "rejected" and "Committee rejected" in s["ccr"]["note"]
+    # A desk rejection with no committee verdict says so — it never invents one.
+    s = _strip(stage="Rejected")
+    assert s["ccr"]["state"] == "rejected" and "desk" in s["ccr"]["note"]
+    # A checker-rejected CP checklist reddens CP while the sanction STAYS green —
+    # the paperwork was refused, never the credit.
+    s = _strip(stage="Sanctioned", cam_ready=True, checklist_status="Rejected",
+               on_file={"credit_committee_approval", "sanction_letter"})
+    assert s["sanction"]["state"] == "done" and s["cp"]["state"] == "rejected"
+
+
+def test_pipeline_trusts_imported_history():
+    """A line the MIS landed at 'Sanctioned' has no on-platform CAM/committee artefacts;
+    the strip reads the milestones off the stage rather than accusing the history."""
+    s = _strip(stage="Sanctioned")
+    assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["done"] * 3
+    assert "imported history" in s["cam"]["note"]
+
+
+async def test_actions_carries_the_pipeline_for_lending(monkeypatch):
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _Http({"id": "22222222-2222-2222-2222-222222222222",
+                            "deal_id": "33333333-3333-3333-3333-333333333333",
+                            "stage": "Diligence"})
+    r = await _get(app, {"subject_type": "Lending",
+                         "subject_id": "22222222-2222-2222-2222-222222222222"})
+    assert r.status_code == 200, r.text
+    steps = r.json()["pipeline"]
+    assert [s["key"] for s in steps] == ["cam", "ccr", "sanction", "cp",
+                                         "disbursement", "cs"]
+    # Every step is renderable blind: a label, a known state, a note to show on hover.
+    for s in steps:
+        assert s["label"] and s["note"]
+        assert s["state"] in {"done", "active", "rejected", "pending"}
+    # The fork is declared, not guessed, by the client.
+    assert [s["key"] for s in steps if s.get("parallel")] == ["disbursement", "cs"]
     get_settings.cache_clear()
 
 
