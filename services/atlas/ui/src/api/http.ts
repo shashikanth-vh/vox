@@ -19,8 +19,13 @@ export function toParams(q: TableQuery): Record<string, any> {
 // the whole list rather than being ignored.
 // ---------------------------------------------------------------------------
 
-/** The query param that carries the cursor for the next page. */
-export const CURSOR_PARAM = 'next_cursor';
+/**
+ * The query param that carries the cursor for the next page. The RESPONSE field is
+ * `next_cursor`; the REQUEST param is `cursor` — the register fails closed on unknown
+ * params and 422s `next_cursor`, which the mock fallback then papered over as "page 2
+ * shows page 1 again" the first day the pager could actually reach page 2.
+ */
+export const CURSOR_PARAM = 'cursor';
 
 /**
  * Ceiling on `limit`. The table asks for a huge page size when it builds filter-option

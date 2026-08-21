@@ -36,7 +36,7 @@ export default function LeadsPage() {
     { accessorKey: 'id', header: 'ID', size: 90, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: 'company', header: 'Company', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'sector', header: 'Sector', meta: { filterParam: 'sector' } },
-    { accessorKey: 'lens', header: 'Lens', size: 80, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
+    { accessorKey: 'lens', header: 'Lens', size: 80, meta: { filterParam: 'lens' }, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
     { accessorKey: 'source', header: 'Source', size: 100, meta: { filterParam: 'source' } },
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
     { accessorKey: 'temp', header: 'Temp', size: 90, meta: { filterParam: 'temperature' }, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
