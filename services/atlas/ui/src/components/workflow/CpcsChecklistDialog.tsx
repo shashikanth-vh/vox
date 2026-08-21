@@ -186,13 +186,25 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
             s.status === 'Deferred as CS' && s.condition_type !== 'CS'
               ? { ...s, status: 'Pending' } : s));
         }
-        if (!seeded.length) {
+        // The sanction terms seeded these conditions once — they are the source for
+        // BOTH halves. This fallback used to fire only on a COMPLETELY empty record,
+        // so a checklist carrying just its CP items opened with a blank CS tab and
+        // the desk re-read the letter by hand for conditions the terms held all
+        // along. Fill per HALF instead: whichever half the record lacks appears
+        // automatically. (A read-only open stays faithful to the record — no merge.)
+        const hasCp = seeded.some((s: any) => s.condition_type !== 'CS');
+        const hasCs = seeded.some((s: any) => s.condition_type === 'CS');
+        if (!ro && (!hasCp || !hasCs)) {
           const { camService } = await import('../../services/camService');
           const t = await camService.terms(lid).catch(() => null);
-          seeded = [
-            ...(t?.cp_items || []).map((x: any) => ({ ...x, condition_type: 'CP' })),
-            ...(t?.cs_items || []).map((x: any) => ({ ...x, condition_type: 'CS' })),
-          ];
+          if (!hasCp) {
+            seeded = [...seeded,
+              ...(t?.cp_items || []).map((x: any) => ({ ...x, condition_type: 'CP' }))];
+          }
+          if (!hasCs) {
+            seeded = [...seeded,
+              ...(t?.cs_items || []).map((x: any) => ({ ...x, condition_type: 'CS' }))];
+          }
         }
         if (alive && seeded.length) {
           const loaded = seeded.map((s: any): CpcsItem => ({
