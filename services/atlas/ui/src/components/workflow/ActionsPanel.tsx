@@ -31,6 +31,8 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
 }) {
   const [data, setData] = useState<SubjectActions | null>(null);
   const [open, setOpen] = useState<WorkflowAction | null>(null);
+  // A settled CP / CP-CS box opens its recorded checklist to LOOK at, not to edit.
+  const [viewOnly, setViewOnly] = useState(false);
   const [done, setDone] = useState('');
 
   const load = useCallback(() => {
@@ -52,7 +54,7 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
     <>
       {data.pipeline && (
         <PipelineStepper steps={data.pipeline} actions={data.actions}
-          onOpen={(a) => setOpen(a)} />
+          onOpen={(a, ro) => { setViewOnly(!!ro); setOpen(a); }} />
       )}
       {data.run && (
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.8 }}>
@@ -81,7 +83,9 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
       <ActionFormDialog action={open && !open.screen ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <CpcsChecklistDialog action={open?.screen === 'cpcs-checklist' ? open : null}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        readOnly={viewOnly}
+        onClose={() => { setOpen(null); setViewOnly(false); }}
+        onDone={(m) => { setDone(m); load(); }} />
       <HandoverPackageDialog action={open?.screen === 'handover-package' ? open : null}
         code={code || ''} entityId={entityId}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />

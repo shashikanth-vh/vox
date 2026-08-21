@@ -46,12 +46,16 @@ const blank = (n: number, t: 'CP' | 'CS' = 'CP'): CpcsItem => ({
  * answered `requested_by: Field required` on the very first use: a bespoke screen that
  * re-derives what the catalogue already provides will always drift from it.
  */
-export default function CpcsChecklistDialog({ action, onClose, onDone }: {
+export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly = false }: {
   action: WorkflowAction | null;
   onClose: () => void;
   onDone: (message: string) => void;
+  /** VIEW the recorded checklist (a settled box on the pipeline strip): every field
+   *  frozen, no submit — the record is on display, not up for edits. */
+  readOnly?: boolean;
 }) {
   const open = !!action;
+  const ro = readOnly;
   // TWO steps share this screen: "Prepare CP checklist" works the pre-disbursement
   // conditions; "Update CS checklist" starts once disbursement is in motion and records
   // documents as they arrive. The OTHER half's items ride along unchanged (hidden), so
@@ -175,7 +179,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         // checker's "no" changed nothing on screen. It comes back as OPEN CP work
         // (reason and satisfy-by kept for context): the maker re-decides deliberately —
         // complete it, waive it, or propose the deferral afresh for the next checker.
-        if (lists.length && ['Rejected', 'Returned'].includes(String(target?.status))) {
+        // (A READ-ONLY open shows the record AS DECIDED — the reset is for re-preparing.)
+        if (!ro && lists.length
+            && ['Rejected', 'Returned'].includes(String(target?.status))) {
           seeded = seeded.map((s: any) => (
             s.status === 'Deferred as CS' && s.condition_type !== 'CS'
               ? { ...s, status: 'Pending' } : s));
@@ -347,8 +353,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
   return (
     <Dialog open onClose={busy ? undefined : onClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ fontSize: 16, pb: 1 }}>
-        {phase === 'CP' ? 'Prepare CP checklist' : 'Update CS checklist'}
-        {phase === 'CP' && (
+        {ro ? 'CP / CS checklist — on record'
+          : phase === 'CP' ? 'Prepare CP checklist' : 'Update CS checklist'}
+        {phase === 'CP' && !ro && (
           <TextField size="small" type="number" label="Version" value={version}
             onChange={(e) => setVersion(Math.max(1, Number(e.target.value) || 1))}
             sx={{ ml: 1.5, width: 104 }} inputProps={{ min: 1 }} />
@@ -363,7 +370,14 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         </Tabs>
       </DialogTitle>
       <DialogContent dividers>
-        {phase === 'CS' && latestStatus !== 'Approved' && (
+        {ro && (
+          <Alert severity="info" sx={{ mb: 1, py: 0.2, fontSize: 12.3 }}>
+            Viewing the checklist on record
+            {latestStatus ? <> — latest version is <b>{latestStatus}</b></> : null}.
+            Nothing here is editable.
+          </Alert>
+        )}
+        {!ro && phase === 'CS' && latestStatus !== 'Approved' && (
           <Alert severity="info" sx={{ mb: 1, py: 0.2, fontSize: 12.3 }}>
             Conditions subsequent are recorded on the APPROVED checklist — get the CP
             half approved first, then chase these here.
@@ -390,15 +404,16 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
         </Typography>
         {err && <Alert severity="warning" sx={{ mb: 1.2, py: 0, fontSize: 12 }}
           onClose={() => setErr('')}>{err}</Alert>}
-        <Button size="small" variant="outlined" disabled={parsing || busy}
+        <Button size="small" variant="outlined" disabled={parsing || busy || ro}
           onClick={() => void readLetter()} sx={{ textTransform: 'none', mb: 1.2 }}
           title={`The engine reads the ${phase === 'CP' ? 'Conditions Precedent' : 'Conditions Subsequent'} out of the filed sanction letter — one row each`}>
           {parsing ? 'Reading the letter…' : `Read ${phase} conditions from the sanction letter`}
         </Button>
         {items.length === 0 && (
           <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 1 }}>
-            No {phase} conditions yet — read them from the sanction letter above, or add
-            them by hand.
+            {ro ? `No ${phase} conditions on record.`
+              : `No ${phase} conditions yet — read them from the sanction letter above, `
+                + 'or add them by hand.'}
           </Typography>
         )}
 
@@ -406,15 +421,17 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
           <Box key={i} sx={{ border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.2, mb: 1 }}>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <TextField size="small" label="Condition" required value={r.label}
-                onChange={(e) => set(i, { label: e.target.value })}
+                disabled={ro} onChange={(e) => set(i, { label: e.target.value })}
                 sx={{ flex: '2 1 260px' }} />
               <TextField size="small" select label="Type" value={r.condition_type}
+                disabled={ro}
                 onChange={(e) => set(i, { condition_type: e.target.value as 'CP' | 'CS' })}
                 sx={{ width: 92 }}>
                 <MenuItem value="CP">CP</MenuItem>
                 <MenuItem value="CS">CS</MenuItem>
               </TextField>
               <TextField size="small" select label="Status" value={r.status}
+                disabled={ro}
                 onChange={(e) => set(i, { status: e.target.value as CpcsItem['status'] })}
                 sx={{ width: 160 }}>
                 {/* The CS tab offers Pending | Completed: deferring is a CP decision the
@@ -429,46 +446,56 @@ export default function CpcsChecklistDialog({ action, onClose, onDone }: {
                   .map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
               </TextField>
               <TextField size="small" select label="Required" value={r.required ? 'y' : 'n'}
-                onChange={(e) => set(i, { required: e.target.value === 'y' })}
+                disabled={ro} onChange={(e) => set(i, { required: e.target.value === 'y' })}
                 sx={{ width: 110 }}>
                 <MenuItem value="y">Required</MenuItem>
                 <MenuItem value="n">Optional</MenuItem>
               </TextField>
-              <IconButton size="small" onClick={() => drop(i)} disabled={items.length <= 1}
+              <IconButton size="small" onClick={() => drop(i)}
+                disabled={ro || items.length <= 1}
                 sx={{ mt: 0.4 }}><DeleteOutlineIcon fontSize="small" /></IconButton>
             </Box>
             <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
               <TextField size="small" label="Evidence reference" value={r.evidence_ref}
-                onChange={(e) => set(i, { evidence_ref: e.target.value })}
+                disabled={ro} onChange={(e) => set(i, { evidence_ref: e.target.value })}
                 placeholder="Document or filing reference" sx={{ flex: '1 1 240px' }} />
               <TextField size="small"
                 label={r.status === 'Waived' ? 'Why waived (required)'
                   : r.status === 'Deferred as CS' ? 'Why deferred (required)' : 'Reason / note'}
                 required={r.status === 'Waived' || r.status === 'Deferred as CS'}
-                value={r.reason}
+                value={r.reason} disabled={ro}
                 onChange={(e) => set(i, { reason: e.target.value })}
                 sx={{ flex: '2 1 300px' }} />
               {r.status === 'Deferred as CS' && (
                 <TextField size="small" type="date" label="Satisfy by (required)" required
-                  value={r.expiry_date} onChange={(e) => set(i, { expiry_date: e.target.value })}
+                  value={r.expiry_date} disabled={ro}
+                  onChange={(e) => set(i, { expiry_date: e.target.value })}
                   InputLabelProps={{ shrink: true }} sx={{ width: 190 }} />
               )}
             </Box>
           </Box>
         ))}
 
-        <Button size="small" startIcon={<AddIcon />} onClick={add}
-          sx={{ textTransform: 'none' }}>Add a condition</Button>
+        {!ro && (
+          <Button size="small" startIcon={<AddIcon />} onClick={add}
+            sx={{ textTransform: 'none' }}>Add a condition</Button>
+        )}
 
-        <TextField fullWidth multiline minRows={2} size="small" label="Note for the checker"
-          value={note} onChange={(e) => setNote(e.target.value)} sx={{ mt: 1.4 }} />
+        {!ro && (
+          <TextField fullWidth multiline minRows={2} size="small" label="Note for the checker"
+            value={note} onChange={(e) => setNote(e.target.value)} sx={{ mt: 1.4 }} />
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} variant="outlined" disabled={busy}>Cancel</Button>
-        <Button onClick={submit} variant="contained" disabled={busy}>
-          {busy ? (phase === 'CS' ? 'Saving…' : 'Sending…')
-            : phase === 'CS' ? 'Save updates' : 'Send for checking'}
+        <Button onClick={onClose} variant="outlined" disabled={busy}>
+          {ro ? 'Close' : 'Cancel'}
         </Button>
+        {!ro && (
+          <Button onClick={submit} variant="contained" disabled={busy}>
+            {busy ? (phase === 'CS' ? 'Saving…' : 'Sending…')
+              : phase === 'CS' ? 'Save updates' : 'Send for checking'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

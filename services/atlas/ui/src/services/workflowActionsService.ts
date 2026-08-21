@@ -75,6 +75,9 @@ export interface PipelineStep {
   note?: string;
   /** The steps after the fork — Disbursement and CP/CS run side by side. */
   parallel?: boolean;
+  /** A recorded artefact exists to SHOW even when nothing is actionable (CP / CP-CS:
+   *  the latest checklist) — the box opens it read-only instead of a refusal menu. */
+  viewable?: boolean;
 }
 
 export interface SubjectActions {

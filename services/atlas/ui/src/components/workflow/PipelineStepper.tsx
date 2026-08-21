@@ -26,15 +26,21 @@ const EDGE: Record<PipelineStep['state'], string> = {
 function StepBox({ s, verbs, onPick }: {
   s: PipelineStep;
   verbs: WorkflowAction[];
-  onPick: (a: WorkflowAction) => void;
+  onPick: (a: WorkflowAction, readOnly?: boolean) => void;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const pending = s.state === 'pending';
   const live = verbs.filter((v) => v.enabled);
+  // A viewable step with nothing actionable still opens its artefact — the recorded
+  // checklist, read-only — rather than a menu of refusals. The checklist screen is
+  // the carrier; the plane says whether there is anything on record to show.
+  const viewer = s.viewable && !live.length
+    ? verbs.find((v) => v.screen === 'cpcs-checklist') : undefined;
   const clickable = verbs.length > 0;
   const onClick = (e: React.MouseEvent<HTMLElement>) => {
     if (!clickable) return;
     if (live.length === 1) { onPick(live[0]); return; }
+    if (viewer) { onPick(viewer, true); return; }
     setAnchor(e.currentTarget);   // several live, or all gated: show the step's verbs
   };
   return (
@@ -81,13 +87,13 @@ export default function PipelineStepper({ steps, actions = [], onOpen }: {
   steps: PipelineStep[];
   /** The plane's verbs; each box lists the ones tagged with its `step`. */
   actions?: WorkflowAction[];
-  onOpen?: (a: WorkflowAction) => void;
+  onOpen?: (a: WorkflowAction, readOnly?: boolean) => void;
 }) {
   if (!steps?.length) return null;
   const line = steps.filter((s) => !s.parallel);
   const fork = steps.filter((s) => s.parallel);
   const verbsOf = (s: PipelineStep) => (onOpen ? actions.filter((a) => a.step === s.key) : []);
-  const pick = (a: WorkflowAction) => onOpen?.(a);
+  const pick = (a: WorkflowAction, ro?: boolean) => onOpen?.(a, ro);
   return (
     <Stack direction="row" spacing={0.7} alignItems="center" flexWrap="wrap" useFlexGap
       sx={{ mb: 1 }}>

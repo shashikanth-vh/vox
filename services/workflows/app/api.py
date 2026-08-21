@@ -524,14 +524,20 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     else:
         cs = ("pending", "Opens with the CP approval")
 
+    # A checklist on record means the CP / CP-CS boxes have something to SHOW even when
+    # nothing is actionable (approved and settled, or awaiting the checker) — the client
+    # opens the checklist read-only instead of a menu of refusals.
+    viewable = bool(checklist_items)
     return [
         {"key": "cam", "label": "CAM", "state": cam[0], "note": cam[1]},
         {"key": "ccr", "label": "CCR", "state": ccr[0], "note": ccr[1]},
         {"key": "sanction", "label": "Sanction", "state": san[0], "note": san[1]},
-        {"key": "cp", "label": "CP", "state": cp[0], "note": cp[1]},
+        {"key": "cp", "label": "CP", "state": cp[0], "note": cp[1],
+         "viewable": viewable},
         {"key": "disbursement", "label": "Disbursement", "state": disb[0],
          "note": disb[1], "parallel": True},
-        {"key": "cs", "label": "CP/CS", "state": cs[0], "note": cs[1], "parallel": True},
+        {"key": "cs", "label": "CP/CS", "state": cs[0], "note": cs[1], "parallel": True,
+         "viewable": viewable},
     ]
 
 

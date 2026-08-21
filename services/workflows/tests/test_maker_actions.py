@@ -275,6 +275,17 @@ def test_a_refused_deferral_returns_to_the_cp_side():
     assert s["cp"]["state"] == "rejected" and s["cs"]["state"] == "pending"
 
 
+def test_cp_and_cs_boxes_declare_when_there_is_a_record_to_show():
+    """A checklist on record makes the CP / CP-CS boxes VIEWABLE — the client opens the
+    recorded checklist read-only instead of a menu of refusals. No checklist, nothing
+    to show."""
+    with_items = _strip(stage="Sanctioned", checklist_status="Approved",
+                        checklist_items=[{"condition_type": "CP", "status": "Completed"}])
+    assert with_items["cp"]["viewable"] and with_items["cs"]["viewable"]
+    empty = _strip(stage="Diligence")
+    assert not empty["cp"].get("viewable") and not empty["cs"].get("viewable")
+
+
 def test_pipeline_trusts_imported_history():
     """A line the MIS landed at 'Sanctioned' has no on-platform CAM/committee artefacts;
     the strip reads the milestones off the stage rather than accusing the history."""
