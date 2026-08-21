@@ -77,12 +77,32 @@ async def seed_matrix(session: AsyncSession, tenant_id: uuid.UUID) -> int:
                                         role=role, access=access.name, origin="baseline",
                                         created_by="seed", updated_by="seed"))
                 added += 1
-    # The firm-wide visibility layer: hold the listed view cells at READ. Freshly
-    # inserted cells above may carry the spec value — refresh them here the same way
-    # an upgrade refreshes a long-running database. origin='baseline' only: a cell an
-    # Admin has overridden stays exactly as the Admin left it.
+    # The firm-wide visibility layer, applied to this run's freshly inserted cells the
+    # same way every later start applies it to a long-running database.
+    await apply_visibility(session, tenant_id)
+    ver = (
+        await session.execute(select(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id))
+    ).scalar_one_or_none()
+    if ver is None:
+        session.add(MatrixVersion(tenant_id=tenant_id, version=1))
+    if added:
+        audit(session, tenant_id, "seed", "matrix.seed", item=None,
+              detail={"cells_added": added, "fingerprint": policy_fingerprint()})
+    await session.flush()
+    return added
+
+
+async def apply_visibility(session: AsyncSession, tenant_id: uuid.UUID) -> list[str]:
+    """Hold the VISIBILITY_READ view cells at READ — the layer that ships with the
+    build. Runs on EVERY service start (the one matrix-writing exception to the
+    non-empty-database-is-report-only rule, alongside the default admin list), because
+    a policy that only fresh installs receive is not a shipped policy: the first
+    deployment of this layer proved that when a long-running production database kept
+    its SCOPED cells and every widened role kept seeing nothing. origin='baseline'
+    only — a cell an Admin has overridden stays exactly as the Admin left it; a cell
+    missing entirely (a vocabulary the old seed never knew) is inserted."""
     refreshed: list[str] = []
-    await session.flush()   # the maker runs autoflush=False — make this run's inserts visible
+    await session.flush()   # the maker runs autoflush=False — make pending inserts visible
     vis_rows = (
         await session.execute(select(AccessGrant).where(
             AccessGrant.tenant_id == tenant_id, AccessGrant.kind == "view"))
@@ -90,30 +110,27 @@ async def seed_matrix(session: AsyncSession, tenant_id: uuid.UUID) -> int:
     by_key = {(g.item, g.role): g for g in vis_rows}
     for item, role in VISIBILITY_READ:
         row = by_key.get((item, role))
-        if row is None or row.origin != "baseline" or row.access == "READ":
+        if row is None:
+            session.add(AccessGrant(tenant_id=tenant_id, kind="view", item=item,
+                                    role=role, access="READ", origin="baseline",
+                                    created_by="seed", updated_by="seed"))
+            refreshed.append(f"{item}:{role}:missing->READ")
+            continue
+        if row.origin != "baseline" or row.access == "READ":
             continue
         refreshed.append(f"{item}:{role}:{row.access}->READ")
         row.access = "READ"
         row.updated_by = "seed"
         row.deleted_at = None
-    ver = (
-        await session.execute(select(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id))
-    ).scalar_one_or_none()
-    if ver is None:
-        session.add(MatrixVersion(tenant_id=tenant_id, version=1))
-    elif refreshed:
+    if refreshed:
         await session.execute(
             update(MatrixVersion).where(MatrixVersion.tenant_id == tenant_id)
             .values(version=MatrixVersion.version + 1)
         )
-    if added:
-        audit(session, tenant_id, "seed", "matrix.seed", item=None,
-              detail={"cells_added": added, "fingerprint": policy_fingerprint()})
-    if refreshed:
         audit(session, tenant_id, "seed", "matrix.visibility", item=None,
               detail={"cells": refreshed})
     await session.flush()
-    return added
+    return refreshed
 
 
 async def compiled_matrix(

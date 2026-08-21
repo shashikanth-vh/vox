@@ -230,6 +230,16 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
             "(SELECT id FROM users WHERE email = 'tech@evamfinance.com')"))
         await session.execute(text(
             "DELETE FROM users WHERE email = 'tech@evamfinance.com'"))
+        # Simulate a LONG-RUNNING database from before the visibility layer shipped:
+        # one cell back to the spec's SCOPED (origin baseline), one narrowed by an
+        # Admin (origin override). The next start must refresh the first and leave
+        # the second exactly as the Admin set it.
+        await session.execute(text(
+            "UPDATE access_grants SET access='SCOPED', origin='baseline' "
+            "WHERE kind='view' AND item='leads' AND role='AM RM'"))
+        await session.execute(text(
+            "UPDATE access_grants SET access='SCOPED', origin='override' "
+            "WHERE kind='view' AND item='deals' AND role='Syn RM'"))
         await session.commit()
     await dispose_engine()
 
@@ -247,6 +257,16 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
             "SELECT role FROM user_roles WHERE user_id IN "
             "(SELECT id FROM users WHERE email = 'tech@evamfinance.com')"))).scalars().all()
         assert list(tech_roles) == ["Admin"]
+        # ...and the visibility layer re-applied to the stale baseline cell, while the
+        # Admin's own override stayed exactly as the Admin left it.
+        leads_amrm = (await session.execute(text(
+            "SELECT access FROM access_grants "
+            "WHERE kind='view' AND item='leads' AND role='AM RM'"))).scalar()
+        deals_synrm = (await session.execute(text(
+            "SELECT access, origin FROM access_grants "
+            "WHERE kind='view' AND item='deals' AND role='Syn RM'"))).first()
+        assert leads_amrm == "READ", "the shipped layer must apply on a non-empty start"
+        assert tuple(deals_synrm) == ("SCOPED", "override"), "an Admin override survives"
         await session.execute(text("UPDATE tenants SET name = 'Evam Finance'"))
         await session.commit()
     await dispose_engine()

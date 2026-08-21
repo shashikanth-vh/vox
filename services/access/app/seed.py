@@ -162,10 +162,21 @@ async def bootstrap_if_empty() -> int:
         )).scalar_one_or_none()
         if row is not None:
             admins = await ensure_admin_user(session, row.id)
+            # The shipped visibility layer (matrix.VISIBILITY_READ) applies on every
+            # start — the second additive exception beside the admin list. Without
+            # this, the layer reached only fresh installs: a long-running production
+            # database kept its SCOPED cells and every widened role kept seeing
+            # nothing, exactly what the first deployment demonstrated.
+            from app.matrix import apply_visibility
+
+            vis = await apply_visibility(session, row.id)
             await session.commit()
             if admins:
                 log.info("default admin users provisioned on start: +%d", admins)
                 print(f"Default admin users provisioned: {admins}.")
+            if vis:
+                log.info("visibility layer applied on start: %d cell(s)", len(vis))
+                print(f"Visibility layer applied: {len(vis)} cell(s) -> READ.")
     await dispose_engine()
     return await check()
 
