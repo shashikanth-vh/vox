@@ -195,7 +195,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
         const hasCp = seeded.some((s: any) => s.condition_type !== 'CS');
         const hasCs = seeded.some((s: any) => s.condition_type === 'CS');
         if (!ro && (!hasCp || !hasCs)) {
-          const { camService } = await import('../../services/camService');
+          const { camService, newestOf } = await import('../../services/camService');
           const t = await camService.terms(lid).catch(() => null);
           if (!hasCp) {
             seeded = [...seeded,
@@ -204,6 +204,36 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
           if (!hasCs) {
             seeded = [...seeded,
               ...(t?.cs_items || []).map((x: any) => ({ ...x, condition_type: 'CS' }))];
+          }
+          // Still short a half — the terms were never typed in (the sanction came
+          // through the committee flow with only the LETTER on file). The button's
+          // extraction runs by itself: the engine reads the letter, the conditions
+          // appear, and the button remains only for a deliberate re-read. Best-effort —
+          // no letter, or the engine down, leaves the empty state and the button.
+          const stillNoCp = !seeded.some((s: any) => s.condition_type !== 'CS');
+          const stillNoCs = !seeded.some((s: any) => s.condition_type === 'CS');
+          if (stillNoCp || stillNoCs) {
+            try {
+              const docs = await camService.lendingDocs(lid);
+              const letter = newestOf(docs, 'sanction_letter');
+              if (letter && alive) {
+                setParsing(true);
+                const out = await camService.extractTerms(letter.id);
+                const asItem = (label: string, half: 'CP' | 'CS') => ({
+                  key: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80),
+                  label, condition_type: half, required: true, status: 'Pending',
+                });
+                if (stillNoCp) {
+                  seeded = [...seeded,
+                    ...(out.cp_items || []).map((l) => asItem(l, 'CP'))];
+                }
+                if (stillNoCs) {
+                  seeded = [...seeded, ...(out.cs_items || []).map((c) =>
+                    asItem(c.label + (c.timeline ? ` (${c.timeline})` : ''), 'CS'))];
+                }
+              }
+            } catch { /* the read-the-letter button stays as the manual path */ }
+            if (alive) setParsing(false);
           }
         }
         if (alive && seeded.length) {
