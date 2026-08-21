@@ -135,7 +135,7 @@ _IDENTITY_FIELDS = ("requested_by", "by")
 _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
     "Lending": (
         {
-            "key": "cam.workbench",
+            "key": "cam.workbench", "step": "cam",
             "label": "CAM workbench",
             "method": "POST", "url": "/v1/cam/{subject_id}/generate",
             "roles": _CREDIT_MAKERS,
@@ -151,7 +151,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "form": [],
         },
         {
-            "key": "deal-structuring.start",
+            "key": "deal-structuring.start", "step": "ccr",
             "label": "Send to credit committee",
             "method": "POST", "url": "/v1/workflows/deal-structurings",
             "roles": _CREDIT_MAKERS, "run": "none",
@@ -167,7 +167,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _f("rm", "Relationship manager")],
         },
         {
-            "key": "deal-structuring.revise-credit-note",
+            "key": "deal-structuring.revise-credit-note", "step": "ccr",
             "label": "File a revised credit note",
             "method": "POST", "url": "/v1/workflows/{workflow_id}/revise-credit-note",
             "roles": _CREDIT_MAKERS, "run": "returned",
@@ -178,7 +178,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                         help_text="The SHA-256 of the revised note, if you have it.")],
         },
         {
-            "key": "run.resubmit",
+            "key": "run.resubmit", "step": "ccr",
             "label": "Send back for decision",
             "method": "POST", "url": "/v1/workflows/{workflow_id}/control",
             "roles": _CREDIT_MAKERS, "run": "returned",
@@ -187,7 +187,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "form": [_f("note", "What you changed", "textarea", required=True)],
         },
         {
-            "key": "sanction.terms",
+            "key": "sanction.terms", "step": "sanction",
             "label": "Enter sanction terms",
             "method": "POST", "url": "/v1/internal/sanction-terms",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
@@ -199,7 +199,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "form": [],
         },
         {
-            "key": "cpcs.prepare",
+            "key": "cpcs.prepare", "step": "cp",
             "label": "Conditions Precedent",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
@@ -218,7 +218,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # The CS half is its OWN step: it starts once disbursement is in motion and
             # a new version is filed each time documents arrive, until nothing is open —
             # the chase reminders on Today run off the latest APPROVED version.
-            "key": "cpcs.update-cs",
+            "key": "cpcs.update-cs", "step": "cs",
             "label": "Conditions Subsequent",
             "method": "POST", "url": "/v1/workflows/cpcs-checklists",
             "roles": _CREDIT_MAKERS,
@@ -237,7 +237,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # A FALLBACK only: the CP approval auto-moves the stage itself. This stays
             # for the rare case where that auto-move failed (register unreachable at the
             # moment of approval) — the evidence gate still guards it.
-            "key": "lending.cpcs-complete",
+            "key": "lending.cpcs-complete", "step": "cs",
             "label": "Move to CP/CS Completed",
             "method": "PATCH", "url": "/v1/lending/{subject_id}",
             "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
@@ -256,7 +256,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             # approval just landed, prepares the request package (unmet CPs in its
             # note), and marks it SENT. Generic over the partner — Advaya today,
             # PRISM's own arm tomorrow.
-            "key": "disburse",
+            "key": "disburse", "step": "disbursement",
             "label": "Disburse",
             "method": "POST", "url": "/v1/workflows/disburse",
             "roles": _CREDIT_MAKERS,
@@ -3937,6 +3937,11 @@ def create_app() -> FastAPI:
             actions.append({
                 "key": spec["key"], "label": label, "method": spec["method"],
                 "url": url, "enabled": enabled,
+                # WHICH PIPELINE BOX owns this verb. The strip's boxes are the doors to
+                # the actions, and the plane declares the mapping — a client that guessed
+                # it would orphan the run-control verbs (revise, resubmit) that belong to
+                # a step without being steps themselves.
+                **({"step": spec["step"]} if spec.get("step") else {}),
                 # WHICH SERVICE the url belongs to. The catalogue spans both planes —
                 # starting a workflow is the orchestrator's, filing evidence is the
                 # register's — and a client that assumed one of them sent every register

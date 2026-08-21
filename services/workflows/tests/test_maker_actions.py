@@ -237,6 +237,15 @@ def test_pipeline_trusts_imported_history():
     assert "imported history" in s["cam"]["note"]
 
 
+def test_every_lending_verb_belongs_to_a_pipeline_box():
+    """The strip's boxes are the doors to the actions. An unmapped verb would be
+    unreachable once the button row folds into the boxes — so the mapping is total,
+    and only over boxes that exist."""
+    boxes = {"cam", "ccr", "sanction", "cp", "disbursement", "cs"}
+    for spec in _MAKER_ACTIONS["Lending"]:
+        assert spec.get("step") in boxes, spec["key"]
+
+
 async def test_actions_carries_the_pipeline_for_lending(monkeypatch):
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
     app.state.http = _Http({"id": "22222222-2222-2222-2222-222222222222",

@@ -43,12 +43,17 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
 
   if (!data || !data.actions.length) return null;
 
+  // With a pipeline, the strip's boxes ARE the controls: each box opens its step's
+  // verb (or drops a menu of them, refusal reasons included). Only a verb the plane
+  // did not map to a box still renders as a button — nothing is ever unreachable.
+  const rowActions = data.pipeline ? data.actions.filter((a) => !a.step) : data.actions;
+
   return (
     <>
-      {/* The journey at a glance, before the verbs: where this line has been, where it
-          is, and where a checker said no — server-coloured, so it always agrees with
-          the buttons underneath. */}
-      {data.pipeline && <PipelineStepper steps={data.pipeline} />}
+      {data.pipeline && (
+        <PipelineStepper steps={data.pipeline} actions={data.actions}
+          onOpen={(a) => setOpen(a)} />
+      )}
       {data.run && (
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.8 }}>
           Run in flight — <b>{data.run.stage || data.run.status}</b>
@@ -57,7 +62,7 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
       {done && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }}
         onClose={() => setDone('')}>{done}</Alert>}
       <Stack direction="row" spacing={0.8} flexWrap="wrap" useFlexGap>
-        {data.actions.map((a) => (
+        {rowActions.map((a) => (
           // A disabled MUI button swallows pointer events, so the tooltip wraps a span.
           <Tooltip key={a.key} title={a.enabled ? '' : (a.reason || 'Not available yet')}
             placement="top" arrow>

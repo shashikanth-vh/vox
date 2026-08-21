@@ -46,6 +46,12 @@ export interface WorkflowAction {
   /** Named screen for a step a flat form cannot express; otherwise build from `form`. */
   screen?: 'cpcs-checklist' | 'handover-package' | 'executed-agreement'
     | 'cam-workbench' | 'sanction-terms' | 'disburse';
+  /**
+   * Which pipeline box owns this verb (cam | ccr | sanction | cp | disbursement | cs).
+   * The plane declares it so the strip's boxes can be the doors to the actions — the
+   * run-control verbs (revise, resubmit) belong to a step without being steps.
+   */
+  step?: string;
   /** Ids and constants the plane pre-filled; merged under the form's own values. */
   body: Record<string, any>;
   /**
