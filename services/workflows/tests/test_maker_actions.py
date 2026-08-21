@@ -50,6 +50,25 @@ def test_stage_gate_explains_the_sequence_rather_than_hiding_it():
     assert not ok and "not built yet" in reason
 
 
+def test_a_parked_line_is_told_how_to_reopen_not_that_it_is_past_the_point():
+    """After a committee reject the line sits at 'Rejected', and the CAM/committee
+    verbs' normal stage_reason ("already past that point") is nonsense there — the desk
+    needs the door back in, which is the stage move. Same for On Hold."""
+    cam = _action("cam.workbench")
+    start = _action("deal-structuring.start")
+    for spec in (cam, start):
+        ok, reason = _evaluate_action(spec, roles={"Credit Head"}, stage="Rejected",
+                                      run_state="none")
+        assert not ok and "reopen" in reason and "Diligence" in reason
+        ok, reason = _evaluate_action(spec, roles={"Credit Head"}, stage="On Hold",
+                                      run_state="none")
+        assert not ok and "Resume" in reason
+    # And once reopened, the loop is live again: CAM and committee both offer.
+    for spec in (cam, start):
+        assert _evaluate_action(spec, roles={"Credit Head"}, stage="Diligence",
+                                run_state="none")[0]
+
+
 def test_role_gate_names_who_does_the_step():
     """A refusal that names the role is actionable; "not permitted" is not."""
     disburse = _action("disburse")

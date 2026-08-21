@@ -462,8 +462,12 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     elif "credit_committee_approval" in on_file or past_sanction:
         ccr = ("done", "Committee approved")
     elif dead:
-        ccr = ("rejected", "Committee rejected" if "credit_committee_rejection" in on_file
-               else "Rejected at the desk")
+        ccr = ("rejected",
+               ("Committee rejected — reopen (stage back to Diligence) to revise "
+                "the CAM and re-send"
+                if "credit_committee_rejection" in on_file else
+                "Rejected at the desk — reopen (stage back to Diligence or Data "
+                "Awaited) to work it again"))
     elif "credit_committee_rejection" in on_file:
         ccr = ("rejected", "Committee rejected — revise the CAM and re-send")
     else:
@@ -568,6 +572,18 @@ def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
         return False, ("This step is done by " + ", ".join(sorted(needed)) + ".")
     stages = action.get("stages")
     if stages is not None and stage and stage not in stages:
+        # A PARKED line gets the reopen instruction, not the spec's sequencing text.
+        # "The CAM is prepared before the committee decision — this facility is already
+        # past that point" is TRUE at Sanctioned and NONSENSE at Rejected: the desk was
+        # told they were past a point they need to get back to, with no word on how.
+        # The stage moves are the door back in, so the refusal names them.
+        if stage == "Rejected":
+            return False, ("This line is Rejected. To rework it, reopen first — set the "
+                           "stage back to Diligence (or Data Awaited) — then this step "
+                           "is available again.")
+        if stage == "On Hold":
+            return False, ("This line is On Hold. Resume it — set the stage back to "
+                           "where the work continues — and this step opens again.")
         return False, action.get("stage_reason", f"Not available at stage '{stage}'.")
     waiting = action.get("needs_screen")
     if waiting:
