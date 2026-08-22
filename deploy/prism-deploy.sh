@@ -11,6 +11,7 @@
 #   ./prism-deploy.sh verify                         # health-check the running stack
 #   ./prism-deploy.sh restore-db <file.sql.gz>       # a specific dump, on purpose
 #   ./prism-deploy.sh restore-files <minio-*.tar.gz> # the document store (restore WITH its dump)
+#   ./prism-deploy.sh restore-secrets <secrets-*.tar.gz> # .env + VocX secrets + TLS certs
 #   ./prism-deploy.sh restore-plan                   # what protects this system, what exists,
 #                                                    # and exactly which files to restore from
 #
@@ -590,6 +591,36 @@ cmd_restore_files() {
   say "  objects reference each other and must come from the same moment."
 }
 
+cmd_restore_secrets() {
+  local tarball="${1:-}"
+  [[ -f "$tarball" ]] || die "usage: $0 restore-secrets <secrets-*.tar.gz>"
+  gzip -t "$tarball" || die "that snapshot is corrupt"
+  [[ -d "$LIVE" ]] || die "no live tree at $LIVE to restore into"
+
+  # A restore REPLACES. If anything is there now, snapshot it first — same contract as
+  # restore-db and restore-files: the restore is itself reversible.
+  local p present=0
+  for p in "${SECRET_PATHS[@]}"; do [[ -e "$LIVE/$p" ]] && present=1; done
+  (( present )) && backup_secrets >/dev/null
+
+  step "Restoring the secret locations from $(basename "$tarball") → $LIVE"
+  say "$(tar -tzf "$tarball" | head -12 | sed 's/^/    /')"
+  run tar -xzf "$tarball" -C "$LIVE"
+  for p in "${SECRET_PATHS[@]}"; do
+    [[ -e "$LIVE/$p" ]] || warn "still missing after the restore: $p"
+  done
+
+  # .env applies at container CREATION and the certs at nginx startup — restoring the
+  # files alone changes nothing running. Recreate what differs and re-resolve the edge.
+  if docker ps -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then
+    step "Re-applying (recreate against the restored .env, reload the edge)"
+    run dc "$LIVE" up -d || warn "compose up failed — check $LOG"
+    reload_edge
+  else
+    say "  stack not running — the restored secrets apply on the next start"
+  fi
+}
+
 # ── the DR answer sheet ──────────────────────────────────────────────────────
 # Run at 2am with the stack half-dead, this must still answer: every probe is guarded,
 # nothing dies, and what cannot be read becomes a warning inside the report.
@@ -684,7 +715,7 @@ cmd_restore_plan() {
   say "       a. install docker + the compose plugin on the new VM"
   say "       b. copy over: the release zip, this script, and the standby box's"
   say "          prism-offsite/deploy/ files (newest db-*, minio-*, secrets-*)"
-  say "       c. unzip the release → ./prism ; untar the secrets snapshot INTO ./prism"
+  say "       c. unzip the release → ./prism ; then:  sudo $0 restore-secrets <secrets-*.tar.gz>"
   say "       d. bring the stack up once (creates the empty volumes), then:"
   say "            sudo $0 restore-db    <newest db-*.sql.gz>"
   say "            sudo $0 restore-files <matching minio-*.tar.gz>"
@@ -741,6 +772,7 @@ case "${1:-}" in
   rollback)   shift; preflight; do_rollback "${1:-}" ;;
   restore-db) shift; cmd_restore_db "$@" ;;
   restore-files) shift; cmd_restore_files "$@" ;;
+  restore-secrets) shift; cmd_restore_secrets "$@" ;;
   restore-plan)  cmd_restore_plan ;;
   backup)     preflight; backup_db >/dev/null; backup_files >/dev/null
               backup_secrets >/dev/null; snapshot_images >/dev/null
