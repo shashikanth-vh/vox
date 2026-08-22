@@ -6,7 +6,7 @@ __pycache__/
 build/
 dist/
 # Local UI builds used to drive the shipped bundle in a browser — never shipped.
-dist-live/
+dist-*/
 .venv/
 venv/
 env/
