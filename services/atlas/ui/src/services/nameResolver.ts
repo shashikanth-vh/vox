@@ -10,7 +10,7 @@ import { listAll, USE_REAL_API } from '../api/http';
  */
 
 type DealRef = { code: string; entityId: string | null };
-type EntityRef = { name: string; code: string };
+type EntityRef = { name: string; code: string; lens: string };
 
 let entities = new Map<string, EntityRef>();
 let dealRefs = new Map<string, DealRef>();
@@ -30,7 +30,8 @@ async function load(): Promise<void> {
     // the company drawer is addressed by it. Without it a converted deal rendered a blank
     // Group Code and clicking the row opened nothing at all, because the drawer was being
     // asked to open '' — the deal was on the register and unreachable from the grid.
-    e.set(String(r.id), { name: r.display_name || r.legal_name || '', code: r.code || '' });
+    e.set(String(r.id), { name: r.display_name || r.legal_name || '', code: r.code || '',
+      lens: r.lens || '' });
   });
   const d = new Map<string, DealRef>();
   deals.forEach((r: any) => {
@@ -58,14 +59,20 @@ async function ensure(): Promise<void> {
  * drawer. A deal carries `deal_no` only when one was assigned, so on a converted deal
  * both were blank and the row was a dead end.
  */
-export async function fillCompanyFromEntity<T extends { _name?: string; code?: string; entityId?: string }>(rows: T[]): Promise<T[]> {
-  if (rows.some((r) => r.entityId && (!r._name || !r.code))) {
+export async function fillCompanyFromEntity<T extends { _name?: string; code?: string; entityId?: string; lens?: string }>(rows: T[]): Promise<T[]> {
+  if (rows.some((r) => r.entityId && (!r._name || !r.code || !r.lens))) {
     await ensure();
     rows.forEach((r) => {
       const ref = r.entityId ? entities.get(String(r.entityId)) : undefined;
       if (!ref) return;
       if (!r._name) r._name = ref.name;
       if (!r.code) r.code = ref.code;
+      // The climate lens is really a COMPANY attribute: a deal carries its own copy
+      // (from the lead at conversion, or the Leads sheet on import), but a deal-only
+      // company has no leads row to copy from and its column sat blank while the
+      // company profile said Mitigation right there in the drawer. Show the company's
+      // lens whenever the deal has none of its own.
+      if (!r.lens && ref.lens) r.lens = ref.lens;
     });
   }
   return rows;
