@@ -39,11 +39,12 @@ export default function ClientsPage() {
     // v12 marks this column `wrap` — long legal names run to a second line.
     { accessorKey: 'name', header: 'Legal name', size: 260, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal' } } },
-    { accessorKey: 'sector', header: 'Sector', size: 160 },
-    { accessorKey: 'lens', header: 'Lens', size: 80, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
-    { id: 'lifecycle', header: 'Lifecycle', size: 150, accessorFn: (r: any) => r.lifecycle || 'Prospect',
+    { accessorKey: 'sector', header: 'Sector', size: 160, meta: { localFilter: true } },
+    { accessorKey: 'lens', header: 'Lens', size: 80, meta: { localFilter: true }, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },
+    { id: 'lifecycle', header: 'Lifecycle', size: 150, meta: { localFilter: true },
+      accessorFn: (r: any) => r.lifecycle || 'Prospect',
       Cell: ({ cell }) => <LifePill stage={cell.getValue<string>()} /> },
-    { accessorKey: 'state', header: 'State', size: 120 },
+    { accessorKey: 'state', header: 'State', size: 120, meta: { localFilter: true } },
     // v12: `wrap` + trunc(about, 100) — wraps to a few lines, then ellipsis, full text on hover.
     { accessorKey: 'about', header: 'About', size: 330,
       Cell: ({ cell }) => {

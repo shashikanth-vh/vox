@@ -543,7 +543,12 @@ export default function CommonTable<T extends Record<string, any>>(
     // can apply it — a column with no filterParam mapping gets no funnel rather than a
     // checkbox that silently filters nothing. (Mock mode filters client-side and keeps
     // every primitive column filterable, as before.)
-    if (USE_REAL_API && !filterParamOf(c)) return false;
+    //
+    // EXCEPT the directory grids (Clients, Employees, FI Master): their services load
+    // the WHOLE book and page it client-side, so a client-side filter is complete and
+    // honest there — meta.localFilter says so, the funnel shows, and the filter rides
+    // columnFilters through applyQuery instead of the wire.
+    if (USE_REAL_API && !filterParamOf(c) && !(c.meta as any)?.localFilter) return false;
     const sample = facetRows
       .map((r) => columnValue(r, c))
       .find((v) => v !== undefined && v !== null);

@@ -68,7 +68,7 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
     },
     {
       // Role can hold several stacked roles ("Admin, Management") — render each as a chip.
-      accessorKey: 'role', header: 'Role', size: 170,
+      accessorKey: 'role', header: 'Role', size: 170, meta: { localFilter: true },
       Cell: ({ cell }) => (
         <Stack direction="row" gap={0.4} flexWrap="wrap">
           {String(cell.getValue() ?? '').split(',').map((s) => s.trim()).filter(Boolean).map((r) => (
@@ -77,10 +77,14 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
         </Stack>
       ),
     },
-    { accessorKey: 'geography', header: 'Geography', size: 150 },
-    { accessorKey: 'sectors', header: 'Sectors', size: 150 },
-    { accessorKey: 'reportsTo', header: 'Reports to', size: 130 },
-    { accessorKey: 'inactive', header: 'Status', size: 100, Cell: ({ cell }) => <Chip size="small" label={cell.getValue() ? 'Inactive' : 'Active'} color={cell.getValue() ? 'default' : 'success'} variant="outlined" /> },
+    { accessorKey: 'geography', header: 'Geography', size: 150, meta: { localFilter: true } },
+    { accessorKey: 'sectors', header: 'Sectors', size: 150, meta: { localFilter: true } },
+    { accessorKey: 'reportsTo', header: 'Reports to', size: 130, meta: { localFilter: true } },
+    // The STRING is the value ('Active'/'Inactive'), so the facet reads as words rather
+    // than true/false — and applyQuery matches the row by the same words.
+    { id: 'inactive', header: 'Status', size: 100, meta: { localFilter: true },
+      accessorFn: (r: any) => (r.inactive ? 'Inactive' : 'Active'),
+      Cell: ({ cell }) => <Chip size="small" label={cell.getValue<string>()} color={cell.getValue() === 'Inactive' ? 'default' : 'success'} variant="outlined" /> },
     {
       id: 'book', header: 'Book size', size: 100, enableSorting: false,
       muiTableHeadCellProps: { align: 'right' }, muiTableBodyCellProps: { align: 'right' },
