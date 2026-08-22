@@ -168,3 +168,28 @@ async def test_deals_filter_by_lens(client):
     assert got.status_code == 200, got.text
     rows = got.json()["items"]
     assert len(rows) == 1 and rows[0]["lens"] == "Adaptation"
+
+
+async def test_date_range_filters_bound_the_lending_book(client):
+    """'<col>__gte' / '<col>__lte' widen a filterable column into a RANGE — the grids'
+    date pickers. The base column must be whitelisted; the suffix never is a bypass."""
+    eid = await _entity(client, f"RNG{uuid.uuid4().hex[:5].upper()}")
+    for day in ("2026-08-01", "2026-08-10", "2026-08-20"):
+        r = await client.post("/v1/lending",
+                              json={"entity_id": eid, "stage": "Data Awaited",
+                                    "amount_cr": 1, "stage_updated_at": day},
+                              headers=ADMIN)
+        assert r.status_code == 201, r.text
+
+    mid = await client.get("/v1/lending",
+                           params={"entity_id": eid,
+                                   "stage_updated_at__gte": "2026-08-05",
+                                   "stage_updated_at__lte": "2026-08-15"},
+                           headers=ADMIN)
+    assert mid.status_code == 200, mid.text
+    rows = mid.json()["items"]
+    assert [r["stage_updated_at"] for r in rows] == ["2026-08-10"]
+
+    # The suffix widens the OPERATOR, never the whitelist.
+    bad = await client.get("/v1/lending", params={"remarks__gte": "x"}, headers=ADMIN)
+    assert bad.status_code == 422, bad.text

@@ -49,7 +49,7 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
 
   const columns = useMemo<MRT_ColumnDef<Employee>[]>(() => [
     {
-      accessorKey: 'name', header: 'Name', size: 210,
+      accessorKey: 'name', header: 'Name', size: 210, meta: { localFilter: true },
       Cell: ({ row }) => (
         <span>
           {(row.original as any).noSignIn ? (

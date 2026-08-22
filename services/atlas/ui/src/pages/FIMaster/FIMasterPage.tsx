@@ -54,13 +54,13 @@ export default function FIMasterPage({ mode: modeProp, onModeChange }: { mode?: 
 
   // Columns mirror v12 vFI() table mode.
   const columns = useMemo<MRT_ColumnDef<FiRow>[]>(() => [
-    { accessorKey: 'name', header: 'Bank', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'name', header: 'Bank', size: 220, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { id: 'inactive', header: 'Status', size: 100, meta: { localFilter: true },
       accessorFn: (r: any) => (r.inactive ? 'INACTIVE' : 'ACTIVE'),
       Cell: ({ cell }) => <Chip size="small" variant="outlined" label={cell.getValue<string>()}
         color={cell.getValue() === 'INACTIVE' ? 'default' : 'success'} /> },
     { accessorKey: 'type', header: 'Type', size: 130, meta: { localFilter: true } },
-    { id: 'sectors', header: 'Preferred sectors', size: 240,
+    { id: 'sectors', header: 'Preferred sectors', size: 240, meta: { localFilter: true },
       accessorFn: (r) => r.preferredSectors || r.sectors || '',
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 170, maxWidth: 330 } } },
     num('pursued', '# Pursued'),

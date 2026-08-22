@@ -19,6 +19,23 @@ export function applyQuery<T extends Record<string, any>>(rows: T[], q: TableQue
   (q.columnFilters ?? []).forEach((cf) => {
     const v: any = cf.value;
     if (v && typeof v === 'object' && !Array.isArray(v)) {
+      // DATE RANGE: {from,to} bounds compared on the DAY (ISO slices compare
+      // lexicographically), so '2026-08-22 03:49' sits inside a from/to of
+      // '2026-08-22'. Either side may stay open.
+      if (v.from !== undefined || v.to !== undefined) {
+        const from = String(v.from || '');
+        const to = String(v.to || '');
+        if (from || to) {
+          out = out.filter((r) => {
+            const day = String(r[cf.id] ?? '').slice(0, 10);
+            if (!day) return false;
+            if (from && day < from) return false;
+            if (to && day > to) return false;
+            return true;
+          });
+        }
+        return;
+      }
       const needle = String(v.q ?? '').toLowerCase();
       if (needle) out = out.filter((r) => String(r[cf.id] ?? '').toLowerCase().includes(needle));
       const vals: string[] = v.vals ?? [];

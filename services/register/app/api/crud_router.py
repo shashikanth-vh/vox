@@ -578,8 +578,11 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
 
         _reserved = {"q", "limit", "cursor", "include_deleted", "include_reconciliation",
                      "with_total", "scope", "order_by", "order_dir", "offset"}
+        def _filter_base(k: str) -> str:
+            # '<col>__gte' / '<col>__lte' are RANGE forms of a filterable column.
+            return k[:-5] if k.endswith(("__gte", "__lte")) else k
         unknown = [k for k in request.query_params
-                   if k not in spec.filterable and k not in _reserved]
+                   if _filter_base(k) not in spec.filterable and k not in _reserved]
         if unknown:
             from app.core.errors import ValidationAppError
 
@@ -587,7 +590,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                 f"Unknown query parameter(s) {unknown} for {spec.name}. "
                 f"Filterable: {sorted(spec.filterable)}.")
         filters = {
-            k: request.query_params[k] for k in spec.filterable if k in request.query_params
+            k: v for k, v in request.query_params.items()
+            if k not in _reserved and _filter_base(k) in spec.filterable
         }
         # Sorting is validated HERE, by name, before the repository sees it — the same
         # loud-refusal contract the filters have: an unknown sort must never silently

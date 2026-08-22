@@ -91,9 +91,10 @@ _SPECS: list[ResourceSpec] = [
         name="lending record", prefix="/v1/lending", tags=["Lending Tracker"],
         repo=CRUDRepository(LendingTracker, searchable=["tracker_no", "rm", "analyst", "remarks"],
                             filterable=["stage", "pending_with", "entity_id", "deal_id", "rm",
-                                        "analyst"]),
+                                        "analyst", "stage_updated_at"]),
         create_schema=s.LendingCreate, update_schema=s.LendingUpdate, read_schema=s.LendingRead,
-        filterable=["stage", "pending_with", "entity_id", "deal_id", "rm", "analyst"],
+        filterable=["stage", "pending_with", "entity_id", "deal_id", "rm", "analyst",
+                    "stage_updated_at"],
         subject_type="Lending", view_name="lending",
     ),
     ResourceSpec(

@@ -57,7 +57,7 @@ export default function ActivityPage() {
   }, [all]);
 
   const columns = useMemo<MRT_ColumnDef<ActivityRow>[]>(() => [
-    { accessorKey: 't', header: 'When', size: 150,
+    { accessorKey: 't', header: 'When', size: 150, meta: { localFilter: true, dateFilter: true },
       muiTableBodyCellProps: { sx: { whiteSpace: 'nowrap', color: tokens.muted } } },
     { accessorKey: 'by', header: 'Who', size: 140, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'area', header: 'Area', size: 130, Cell: ({ cell }) => <AreaPill area={cell.getValue<string>()} /> },

@@ -18,7 +18,7 @@ export default function SynRegisterView({ onOpenBank }: { onOpenBank: (name: str
   });
 
   const columns = useMemo<MRT_ColumnDef<BankRow>[]>(() => [
-    { accessorKey: 'name', header: 'Bank', size: 220, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'name', header: 'Bank', size: 220, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { id: 'dots', header: 'Status distribution', size: 200, enableSorting: false, enableColumnFilter: false,
       Cell: ({ row }) => (
         <Box sx={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center' }}>

@@ -35,9 +35,9 @@ export default function ClientsPage() {
 
   // Columns mirror v12's vClients(): code · name · sector · lens · lifecycle · state · about.
   const columns = useMemo<MRT_ColumnDef<ClientRow>[]>(() => [
-    { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: 'code', header: 'Group Code', size: 120, meta: { localFilter: true }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     // v12 marks this column `wrap` — long legal names run to a second line.
-    { accessorKey: 'name', header: 'Legal name', size: 260, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
+    { accessorKey: 'name', header: 'Legal name', size: 260, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal' } } },
     { accessorKey: 'sector', header: 'Sector', size: 160, meta: { localFilter: true } },
     { accessorKey: 'lens', header: 'Lens', size: 80, meta: { localFilter: true }, Cell: ({ cell }) => <LensPill lens={cell.getValue<string>()} /> },

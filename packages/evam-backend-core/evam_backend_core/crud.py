@@ -22,6 +22,7 @@ from typing import Any, Generic, TypeVar
 
 from sqlalchemy import (
     Boolean,
+    Date,
     Integer,
     Numeric,
     and_,
@@ -161,6 +162,9 @@ class CRUDRepository(Generic[M]):
                 return int(value)
             if isinstance(col_type, Numeric):
                 return float(value)
+            if isinstance(col_type, Date):
+                from datetime import date as _date
+                return _date.fromisoformat(value.strip())
         except ValueError:
             kind = ("a UUID" if isinstance(col_type, PGUUID)
                     else "an integer" if isinstance(col_type, Integer) else "a number")
@@ -276,6 +280,23 @@ class CRUDRepository(Generic[M]):
 
         for key, value in (filters or {}).items():
             if value is None:
+                continue
+            # RANGE filters: '<column>__gte' / '<column>__lte' bound the column from
+            # either side (the grids' date-range pickers). The BASE column must be
+            # filterable — the suffix widens the operator, never the whitelist.
+            base, op = key, "eq"
+            if key.endswith("__gte"):
+                base, op = key[:-5], "gte"
+            elif key.endswith("__lte"):
+                base, op = key[:-5], "lte"
+            if op != "eq":
+                if base not in self.filterable:
+                    raise ValueError(
+                        f"'{base}' is not a filterable column for {self.model.__name__} "
+                        f"(allowed: {sorted(self.filterable)})")
+                bound = self._coerce_filter(base, value)
+                conds.append(self._col(base) >= bound if op == "gte"
+                             else self._col(base) <= bound)
                 continue
             if key not in self.filterable:
                 # NEVER drop a filter silently: a caller that asked for

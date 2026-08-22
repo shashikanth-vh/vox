@@ -212,6 +212,55 @@ function FilterBody({
   );
 }
 
+// A DATE column's popover: a from/to pair instead of a checkbox list. The value is
+// committed as ['from','to'] (either side may stay open); comparison happens on the
+// DAY, so times inside a bound day always match. Same contract as the facet body:
+// Done commits, closing without Done discards, Clear removes the filter.
+function DateFilterBody({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: string[] | undefined;
+  onChange: (v: string[] | undefined) => void;
+  onClose: () => void;
+}) {
+  const [from, setFrom] = useState<string>(value?.[0] ?? "");
+  const [to, setTo] = useState<string>(value?.[1] ?? "");
+  const dateInput = {
+    width: "100%",
+    border: "1px solid #E2E7EA",
+    borderRadius: "6px",
+    padding: "6px 8px",
+    fontSize: "12.3px",
+    boxSizing: "border-box" as const,
+  };
+  return (
+    <Box sx={{ width: 230, fontSize: "12.3px", p: "11px" }}
+      onClick={(e) => e.stopPropagation()}>
+      <Box sx={{ color: "#5F6E76", mb: "3px" }}>From</Box>
+      <input type="date" value={from} style={dateInput}
+        onChange={(e) => setFrom(e.target.value)} />
+      <Box sx={{ color: "#5F6E76", m: "7px 0 3px" }}>To</Box>
+      <input type="date" value={to} style={dateInput}
+        onChange={(e) => setTo(e.target.value)} />
+      <Box sx={{ display: "flex", gap: "7px", justifyContent: "flex-end", mt: "11px" }}>
+        <button style={SEC_BTN}
+          onClick={() => { setFrom(""); setTo(""); onChange(undefined); onClose(); }}>
+          Clear
+        </button>
+        <button style={PRI_BTN}
+          onClick={() => {
+            onChange(from || to ? [from, to] : undefined);
+            onClose();
+          }}>
+          Done
+        </button>
+      </Box>
+    </Box>
+  );
+}
+
 // v12 header: the label plus a funnel that opens the filter popover. Sorting is
 // left to MRT's native sort icon (we only add the funnel here). The funnel turns
 // teal when the column is filtered.
@@ -220,11 +269,13 @@ function FilterHeader({
   label,
   options,
   canFilter,
+  dateMode = false,
 }: {
   colId: string;
   label: string;
   options: string[];
   canFilter: boolean;
+  dateMode?: boolean;
 }) {
   const ctx = useContext(FilterContext);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -276,12 +327,20 @@ function FilterHeader({
               },
             }}
           >
+            {dateMode ? (
+              <DateFilterBody
+                value={value}
+                onChange={(v) => ctx.set(colId, v)}
+                onClose={() => setAnchor(null)}
+              />
+            ) : (
             <FilterBody
               value={value}
               options={options}
               onClose={() => setAnchor(null)}
               onChange={(v) => ctx.set(colId, v)}
             />
+            )}
           </Popover>
         </>
       )}
@@ -382,8 +441,16 @@ export default function CommonTable<T extends Record<string, any>>(
     () =>
       Object.entries(colFilters)
         .filter(([, v]) => v && v.length)
-        .map(([id, value]) => ({ id, value })) as MRT_ColumnFiltersState,
-    [colFilters],
+        .map(([id, value]) => {
+          const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
+          // A DATE filter is a RANGE, not a membership list — hand the query engine
+          // the {from,to} pair it understands instead of a checkbox value set.
+          if ((col?.meta as any)?.dateFilter) {
+            return { id, value: { from: value[0] || "", to: value[1] || "" } };
+          }
+          return { id, value };
+        }) as MRT_ColumnFiltersState,
+    [colFilters, columns],
   );
 
   // Which register query param carries this column's facet. Declared per column
@@ -598,6 +665,13 @@ export default function CommonTable<T extends Record<string, any>>(
           const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
           const param = col ? filterParamOf(col) : undefined;
           if (!col || !param) return null;
+          // A DATE range rides as the register's __gte/__lte forms of the same param.
+          if ((col.meta as any)?.dateFilter) {
+            const out: { param: string; values: string[] }[] = [];
+            if (values[0]) out.push({ param: `${param}__gte`, values: [values[0]] });
+            if (values[1]) out.push({ param: `${param}__lte`, values: [values[1]] });
+            return out.length ? out : null;
+          }
           // A JOINED column (Company) displays a name the server cannot filter by; its
           // meta.filterRowValue reads the row's underlying key (entity_id) instead, so
           // the facet stays on names while the request carries ids.
@@ -612,7 +686,8 @@ export default function CommonTable<T extends Record<string, any>>(
             : values;
           return out.length ? { param, values: out } : null;
         })
-        .filter((x): x is { param: string; values: string[] } => x !== null),
+        .filter((x): x is { param: string; values: string[] } | { param: string; values: string[] }[] => x !== null)
+        .flat(),
     [colFilters, columns, facetRows],
   );
 
@@ -643,7 +718,8 @@ export default function CommonTable<T extends Record<string, any>>(
       ? columns.filter(isFilterable).map((c) => ({
           id: String(c.id ?? c.accessorKey),
           label: String(c.header ?? ""),
-          options: distinctValues(c),
+          date: !!(c.meta as any)?.dateFilter,
+          options: (c.meta as any)?.dateFilter ? [] : distinctValues(c),
         }))
       : []),
     [isMobile, columns, facetRows],
@@ -744,7 +820,8 @@ export default function CommonTable<T extends Record<string, any>>(
       columns.map((c, i) => {
         const last = i === columns.length - 1;
         const canFilter = isFilterable(c);
-        const options = canFilter ? distinctValues(c) : [];
+        const dateMode = !!(c.meta as any)?.dateFilter;
+        const options = canFilter && !dateMode ? distinctValues(c) : [];
         // On a server-paged grid, only a column the register can ORDER BY gets sort
         // arrows — an arrow that reorders nothing teaches the user not to trust the
         // grid. Local grids sort every column through applyQuery, as always.
@@ -763,6 +840,7 @@ export default function CommonTable<T extends Record<string, any>>(
               label={String(c.header ?? "")}
               options={options}
               canFilter={canFilter}
+              dateMode={dateMode}
             />
           ),
         };
@@ -1341,12 +1419,20 @@ export default function CommonTable<T extends Record<string, any>>(
                   </IconButton>
                   <Typography sx={{ fontSize: 13.5, fontWeight: 700 }}>{sheetColDef.label}</Typography>
                 </Box>
-                <FilterBody
-                  value={colFilters[sheetColDef.id]}
-                  options={sheetColDef.options}
-                  onClose={() => setSheetCol(null)}
-                  onChange={(v) => filterCtx.set(sheetColDef.id, v)}
-                />
+                {sheetColDef.date ? (
+                  <DateFilterBody
+                    value={colFilters[sheetColDef.id]}
+                    onClose={() => setSheetCol(null)}
+                    onChange={(v) => filterCtx.set(sheetColDef.id, v)}
+                  />
+                ) : (
+                  <FilterBody
+                    value={colFilters[sheetColDef.id]}
+                    options={sheetColDef.options}
+                    onClose={() => setSheetCol(null)}
+                    onChange={(v) => filterCtx.set(sheetColDef.id, v)}
+                  />
+                )}
               </Box>
             ) : (
               <Box>

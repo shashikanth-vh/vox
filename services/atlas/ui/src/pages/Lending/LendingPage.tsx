@@ -69,7 +69,7 @@ export default function LendingPage() {
         </TextField>
       ),
     },
-    { accessorKey: 'updated', header: 'Stage updated', size: 120, meta: { sortParam: 'stage_updated_at' } },
+    { accessorKey: 'updated', header: 'Stage updated', size: 120, meta: { sortParam: 'stage_updated_at', filterParam: 'stage_updated_at', dateFilter: true } },
     { accessorKey: 'remarks', header: 'Remarks', size: 220 },
   ], [ro]);
 

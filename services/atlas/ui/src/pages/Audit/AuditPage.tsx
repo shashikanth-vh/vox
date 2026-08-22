@@ -22,13 +22,13 @@ export default function AuditPage() {
 
   // Columns mirror v12's vAudit(): When · Who · Action · Code · Detail.
   const columns = useMemo<MRT_ColumnDef<AuditRow>[]>(() => [
-    { accessorKey: 't', header: 'When', size: 150 },
+    { accessorKey: 't', header: 'When', size: 150, meta: { localFilter: true, dateFilter: true } },
     // v12: a.by || a.role || '' — older entries carry `role` instead of `by`.
     { id: 'by', header: 'Who', size: 140, meta: { localFilter: true }, accessorFn: (r) => r.by || r.role || '' },
     // 'evidence.attach' is the stored verb; 'Evidence attach' is what a person reads.
     { accessorKey: 'act', header: 'Action', size: 160, meta: { localFilter: true },
       Cell: ({ cell }) => <b>{humanKey(String(cell.getValue<string>() || '').replace(/\./g, ' '))}</b> },
-    { accessorKey: 'code', header: 'Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: 'code', header: 'Code', size: 120, meta: { localFilter: true }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     // v12 marks this column `wrap` — long detail strings run to multiple lines.
     { accessorKey: 'detail', header: 'Detail', size: 360,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', wordBreak: 'break-word' } } },
