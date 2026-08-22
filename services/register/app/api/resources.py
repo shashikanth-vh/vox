@@ -81,10 +81,10 @@ _SPECS: list[ResourceSpec] = [
         repo=CRUDRepository(Deal, searchable=["deal_no", "code", "rm", "analyst", "remarks"],
                             filterable=["product_type", "stage", "temperature", "is_lending",
                                         "is_syndication", "is_asset_mon", "entity_id", "rm", "code",
-                                        "analyst"]),
+                                        "analyst", "lens"]),
         create_schema=s.DealCreate, update_schema=s.DealUpdate, read_schema=s.DealRead,
         filterable=["product_type", "stage", "temperature", "is_lending", "is_syndication",
-                    "is_asset_mon", "entity_id", "rm", "code", "analyst"],
+                    "is_asset_mon", "entity_id", "rm", "code", "analyst", "lens"],
         subject_type="Deal", view_name="deals",
     ),
     ResourceSpec(

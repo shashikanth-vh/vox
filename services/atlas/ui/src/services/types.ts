@@ -12,6 +12,9 @@ export interface TableQuery {
    * keeps the UI column ids for the mock path's applyQuery; this list is what the live
    * path serialises onto the request (multi-select joins as a comma IN-list).
    */
+  /** The committed sort, translated to the register's column name (sortParam ??
+   *  filterParam). Present = sorted mode: offset pagination, no cursor. */
+  serverSort?: { param: string; desc: boolean };
   serverFilters?: { param: string; values: string[] }[];
   searchFields?: string[];
   /**

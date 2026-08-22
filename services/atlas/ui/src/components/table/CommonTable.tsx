@@ -391,6 +391,19 @@ export default function CommonTable<T extends Record<string, any>>(
   // register's "analyst").
   const filterParamOf = (c: MRT_ColumnDef<T>): string | undefined =>
     (c.meta as any)?.filterParam;
+  // Which register column carries this column's SORT. A facet param doubles as the
+  // sort key; meta.sortParam covers sortable-but-not-facetable columns (amounts,
+  // dates). No param on a server-paged grid = the arrow hides (same honesty rule as
+  // the funnels: never an arrow that silently reorders nothing).
+  const sortParamOf = (c: MRT_ColumnDef<T>): string | undefined => {
+    const m = c.meta as any;
+    if (m?.sortParam) return m.sortParam;
+    // A JOINED column (Company) facets by its underlying key (entity_id via
+    // filterRowValue) — but ORDERING by a raw id is not ordering by the name the
+    // user sees, so the filter param must never double as its sort key.
+    if (m?.filterRowValue) return undefined;
+    return m?.filterParam;
+  };
 
   // The committed facets, translated to the register's own query params via each
   // column's meta.filterParam — what the live fetch actually sends. columnFilters keeps
@@ -422,6 +435,18 @@ export default function CommonTable<T extends Record<string, any>>(
 
   const cursor = cursors[pagination.pageIndex];
 
+  // The committed sort, translated to the register's column name. Defined only when
+  // the sorted column HAS a server param — a local (full-dataset) grid sorts through
+  // applyQuery and needs nothing here.
+  const serverSort = useMemo(() => {
+    if (!USE_REAL_API || !sorting.length) return undefined;
+    const s = sorting[0];
+    const col = columns.find((c) => String(c.id ?? c.accessorKey) === s.id);
+    const param = col ? sortParamOf(col) : undefined;
+    return param ? { param, desc: !!s.desc } : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorting, columns]);
+
   // requirement 16: pagination/sorting/filtering are all server-driven
   const query = useQuery({
     queryKey: [
@@ -440,8 +465,9 @@ export default function CommonTable<T extends Record<string, any>>(
         sorting,
         columnFilters,
         serverFilters,
+        serverSort,
         searchFields,
-        cursor,
+        cursor: serverSort ? undefined : cursor,
       }),
     placeholderData: (prev) => prev,
   });
@@ -451,7 +477,17 @@ export default function CommonTable<T extends Record<string, any>>(
 
   // A source that returns nextCursor is cursor-paged; one that doesn't (the mock store)
   // keeps the ordinary jump-to-any-page controls.
-  const cursorMode = query.data?.nextCursor !== undefined;
+  // Sorted mode pages by offset, so the CLASSIC pager (page numbers against the
+  // exact total) takes over even on a cursor-paged source.
+  const cursorMode = !serverSort && query.data?.nextCursor !== undefined;
+
+  // Whether this grid's source is server-paged at all — observed from the response
+  // shape (a local full-dataset service never returns a nextCursor key). Drives the
+  // sort-arrow honesty gate below.
+  const [serverPaged, setServerPaged] = useState(false);
+  useEffect(() => {
+    if (query.data && query.data.nextCursor !== undefined) setServerPaged(true);
+  }, [query.data]);
   const nextCursor = query.data?.nextCursor ?? null;
 
   // Remember the cursor that opens the following page, so Next can ask for it.
@@ -709,8 +745,15 @@ export default function CommonTable<T extends Record<string, any>>(
         const last = i === columns.length - 1;
         const canFilter = isFilterable(c);
         const options = canFilter ? distinctValues(c) : [];
+        // On a server-paged grid, only a column the register can ORDER BY gets sort
+        // arrows — an arrow that reorders nothing teaches the user not to trust the
+        // grid. Local grids sort every column through applyQuery, as always.
+        const canSort = c.enableSorting === false
+          ? false
+          : (!serverPaged || !!sortParamOf(c));
         return {
           ...c,
+          enableSorting: canSort,
           grow: last,
           // Own the header content — v12's label + funnel. MRT still supplies the
           // native sort icon around it; our funnel drives our own filter state.
@@ -725,7 +768,7 @@ export default function CommonTable<T extends Record<string, any>>(
         };
       }),
     // facetRows drives the option lists; recompute when they arrive.
-    [columns, facetRows],
+    [columns, facetRows, serverPaged],
   );
 
   // The row's icon set — the grid's pinned Actions column and the phone card's footer

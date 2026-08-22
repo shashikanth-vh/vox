@@ -21,11 +21,11 @@ export default function DealsPage() {
   const refreshAll = () => { qc.invalidateQueries(); };
 
   const columns = useMemo<MRT_ColumnDef<DealRow>[]>(() => [
-    { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    { accessorKey: 'code', header: 'Group Code', size: 120, meta: { sortParam: 'deal_no' }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: '_name', header: 'Company', size: 220,
       meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'temp', header: 'Temp', size: 90, meta: { filterParam: 'temperature' }, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
-    { accessorKey: 'lens', header: 'Lens', size: 80, Cell: ({ row }) => <LensPill lens={(row.original as any).lens} /> },
+    { accessorKey: 'lens', header: 'Lens', size: 80, meta: { filterParam: 'lens' }, Cell: ({ row }) => <LensPill lens={(row.original as any).lens} /> },
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
     { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' } },
     { accessorKey: 'products', header: 'Products', size: 120, enableSorting: false, Cell: ({ row }) => <ProductFlags lend={row.original.lend} syn={row.original.syn} am={row.original.am} /> },

@@ -54,7 +54,7 @@ export default function LendingPage() {
     { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: '_name', header: 'Company', size: 220,
       meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
-    { accessorKey: 'amt', header: '₹ Cr', size: 90, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
+    { accessorKey: 'amt', header: '₹ Cr', size: 90, meta: { sortParam: 'amount_cr' }, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
     { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' } },
     {
@@ -69,7 +69,7 @@ export default function LendingPage() {
         </TextField>
       ),
     },
-    { accessorKey: 'updated', header: 'Stage updated', size: 120 },
+    { accessorKey: 'updated', header: 'Stage updated', size: 120, meta: { sortParam: 'stage_updated_at' } },
     { accessorKey: 'remarks', header: 'Remarks', size: 220 },
   ], [ro]);
 

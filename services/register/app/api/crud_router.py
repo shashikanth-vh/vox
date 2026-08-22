@@ -521,6 +521,12 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             description="Admin-only: include records still flagged reconciliation_status="
                         "'Required'. By default they are EXCLUDED from operational lists/totals."),
         with_total: bool = Query(default=False, description="Include exact total (slower)"),
+        order_by: str | None = Query(
+            default=None,
+            description="Sort by this column (offset pagination; mutually exclusive "
+                        "with cursor)"),
+        order_dir: str = Query(default="asc", pattern="^(asc|desc)$"),
+        offset: int = Query(default=0, ge=0),
     ) -> Any:
         from app.authz.engine import enforce_service_read
         enforce_service_read(spec.prefix, ctx.user)
@@ -571,7 +577,7 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                                    else and_(scope_condition, exclude))
 
         _reserved = {"q", "limit", "cursor", "include_deleted", "include_reconciliation",
-                     "with_total", "scope"}
+                     "with_total", "scope", "order_by", "order_dir", "offset"}
         unknown = [k for k in request.query_params
                    if k not in spec.filterable and k not in _reserved]
         if unknown:
@@ -583,6 +589,21 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
         filters = {
             k: request.query_params[k] for k in spec.filterable if k in request.query_params
         }
+        # Sorting is validated HERE, by name, before the repository sees it — the same
+        # loud-refusal contract the filters have: an unknown sort must never silently
+        # fall back to the default order and let a caller misread a ranked list.
+        if order_by is not None and order_by not in spec.repo.model.__table__.columns:
+            from app.core.errors import ValidationAppError
+
+            raise ValidationAppError(
+                f"'{order_by}' is not a sortable column for {spec.name}. "
+                f"Sortable: {sorted(spec.repo.model.__table__.columns.keys())}.")
+        if order_by is not None and cursor:
+            from app.core.errors import ValidationAppError
+
+            raise ValidationAppError(
+                "order_by and cursor are mutually exclusive — sorted lists page by "
+                "offset.")
         rows, next_cursor, total = await repo.list(
             ctx.session,
             ctx.tenant_id,
@@ -593,6 +614,9 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             include_deleted=include_deleted,
             with_total=with_total,
             condition=scope_condition,
+            order_by=order_by,
+            order_desc=(order_dir == "desc"),
+            offset=offset,
         )
         items = [spec.read_schema.model_validate(r) for r in rows]
         return Page(items=items, count=len(items), next_cursor=next_cursor, total=total)

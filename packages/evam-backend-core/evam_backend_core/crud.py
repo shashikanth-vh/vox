@@ -259,6 +259,9 @@ class CRUDRepository(Generic[M]):
         with_total: bool = False,
         id_in: list | None = None,
         condition: Any = None,
+        order_by: str | None = None,
+        order_desc: bool = False,
+        offset: int = 0,
     ) -> tuple[list[M], str | None, int | None]:
         conds = [self.model.tenant_id == tenant_id]
         if not include_deleted:
@@ -300,6 +303,31 @@ class CRUDRepository(Generic[M]):
             total = (
                 await session.execute(select(func.count()).select_from(self.model).where(and_(*conds)))
             ).scalar_one()
+
+        # SORTED MODE: an explicit ORDER BY switches to classic offset pagination.
+        # The keyset cursor encodes (created_at, id) and nothing else, so it cannot
+        # resume an arbitrary ordering — mixing the two silently mis-pages, which is
+        # why they are mutually exclusive rather than quietly combined. NULLS LAST in
+        # both directions: a sorted grid must not open on a page of blanks. The id
+        # tiebreak keeps equal keys in a stable order across pages.
+        if order_by is not None:
+            if cursor:
+                raise ValueError("order_by and cursor are mutually exclusive — "
+                                 "sorted lists page by offset")
+            if order_by not in self.model.__table__.columns:
+                raise ValueError(
+                    f"'{order_by}' is not a sortable column for {self.model.__name__}")
+            col = getattr(self.model, order_by)
+            direction = col.desc() if order_desc else col.asc()
+            stmt = (
+                select(self.model)
+                .where(and_(*conds))
+                .order_by(direction.nulls_last(), self.model.id.desc())
+                .offset(max(0, offset))
+                .limit(limit)
+            )
+            rows = list((await session.execute(stmt)).scalars().all())
+            return rows, None, total
 
         # Keyset pagination on (created_at, id) descending — stable and O(1) at depth.
         if cursor:

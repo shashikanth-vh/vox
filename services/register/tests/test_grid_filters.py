@@ -101,3 +101,70 @@ async def test_leads_filter_by_company_and_lead_no(client):
     assert {x["company"] for x in rows} == {f"Facet Co {tag}"}
     by_no = await client.get("/v1/leads", params={"lead_no": lead_no}, headers=ADMIN)
     assert by_no.status_code == 200 and len(by_no.json().get("items", [])) == 1
+
+
+# --------------------------------------------------------------------------------- #
+# Server-side SORTING — the arrows that used to reorder nothing
+# --------------------------------------------------------------------------------- #
+async def test_sorted_mode_orders_pages_by_offset_and_puts_nulls_last(client):
+    """order_by switches the list to classic offset pagination: an explicit ORDER BY
+    with NULLS LAST both ways, a stable id tiebreak, no cursor. The keyset cursor
+    cannot resume an arbitrary order, so the two are refused together."""
+    eid = await _entity(client, f"SRT{uuid.uuid4().hex[:5].upper()}")
+    for amt in (30, 10, None, 20):
+        r = await client.post("/v1/lending",
+                              json={"entity_id": eid, "stage": "Data Awaited",
+                                    **({"amount_cr": amt} if amt is not None else {})},
+                              headers=ADMIN)
+        assert r.status_code == 201, r.text
+
+    asc = await client.get("/v1/lending",
+                           params={"entity_id": eid, "order_by": "amount_cr",
+                                   "order_dir": "asc", "with_total": "true"},
+                           headers=ADMIN)
+    assert asc.status_code == 200, asc.text
+    body = asc.json()
+    amounts = [r["amount_cr"] and float(r["amount_cr"]) for r in body["items"]]
+    assert amounts == [10.0, 20.0, 30.0, None]      # ascending, the blank LAST
+    assert body["next_cursor"] is None and body["total"] == 4
+
+    desc = await client.get("/v1/lending",
+                            params={"entity_id": eid, "order_by": "amount_cr",
+                                    "order_dir": "desc"},
+                            headers=ADMIN)
+    amounts = [r["amount_cr"] and float(r["amount_cr"]) for r in desc.json()["items"]]
+    assert amounts == [30.0, 20.0, 10.0, None]      # descending, the blank STILL last
+
+    # Offset paging walks the SAME ordering.
+    page2 = await client.get("/v1/lending",
+                             params={"entity_id": eid, "order_by": "amount_cr",
+                                     "order_dir": "asc", "limit": 2, "offset": 2},
+                             headers=ADMIN)
+    amounts = [r["amount_cr"] and float(r["amount_cr"]) for r in page2.json()["items"]]
+    assert amounts == [30.0, None]
+
+    # Fail-closed, both ways: an unknown column and a cursor+sort mix refuse loudly.
+    bad = await client.get("/v1/lending",
+                           params={"order_by": "no_such_column"}, headers=ADMIN)
+    assert bad.status_code == 422 and "sortable" in bad.text
+    mixed = await client.get("/v1/lending",
+                             params={"order_by": "amount_cr", "cursor": "abc"},
+                             headers=ADMIN)
+    assert mixed.status_code == 422 and "mutually exclusive" in mixed.text
+
+
+async def test_deals_filter_by_lens(client):
+    """The Deals grid's Lens facet — deal.lens is register-filterable now."""
+    eid = await _entity(client, f"LNS{uuid.uuid4().hex[:5].upper()}")
+    for lens in ("Mitigation", "Adaptation"):
+        r = await client.post("/v1/deals",
+                              json={"entity_id": eid, "stage": "In Pipeline",
+                                    "lens": lens, "is_lending": True},
+                              headers=ADMIN)
+        assert r.status_code == 201, r.text
+    got = await client.get("/v1/deals",
+                           params={"entity_id": eid, "lens": "Adaptation"},
+                           headers=ADMIN)
+    assert got.status_code == 200, got.text
+    rows = got.json()["items"]
+    assert len(rows) == 1 and rows[0]["lens"] == "Adaptation"

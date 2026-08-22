@@ -446,6 +446,10 @@ async def import_workbook(
             codegen.used.add(e.code)
     entity_id_by: dict[str, uuid.UUID] = {}
     entity_code_by_id: dict[uuid.UUID, str] = {}
+    # The company's lens AS THE REGISTER NOW HOLDS IT — including a value the desk set
+    # in the drawer that this import deliberately preserved. The deals sheet has no
+    # lens column, so the deal's copy falls back to this when the Leads sheet is silent.
+    entity_lens_by_id: dict[uuid.UUID, str] = {}
     n_new, n_updated = 0, 0
     for k, nm in names.items():
         ent = existing_by_key.get(k)
@@ -487,6 +491,8 @@ async def import_workbook(
         entity_id_by[k] = ent.id
         if ent.code:
             entity_code_by_id[ent.id] = ent.code
+        if ent.lens:
+            entity_lens_by_id[ent.id] = ent.lens
     counts["entities"] = n_new
     counts["entities_matched"] = n_updated
 
@@ -808,7 +814,7 @@ async def import_workbook(
             # The Deals grid shows these at deal level; the ledger carries them on the
             # LEADS sheet (Mitigation/Adaptation) and the TRACKER lines (Credit
             # Analyst) — copy them across so the columns aren't born empty.
-            "lens": lens_by.get(_key(nm)),
+            "lens": lens_by.get(_key(nm)) or entity_lens_by_id.get(entity),
             "analyst": analyst_by.get(_key(nm)),
             "stage": funnel, "temperature": temp,
             "source": _s(r.get("Source")), "source_detail": _s(r.get("Source Detail")),

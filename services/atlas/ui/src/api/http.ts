@@ -47,7 +47,14 @@ export function toCursorParams(q: TableQuery): Record<string, any> {
     // the page length, and MRT greyed Next on a "complete" page.
     with_total: 'true',
   };
-  if (q.cursor) p[CURSOR_PARAM] = q.cursor;
+  // SORTED MODE: an explicit column sort pages by offset — the register's keyset
+  // cursor encodes (created_at, id) and cannot resume an arbitrary order, so the two
+  // are mutually exclusive and the cursor stays home while a sort is active.
+  if (q.serverSort) {
+    p.order_by = q.serverSort.param;
+    p.order_dir = q.serverSort.desc ? 'desc' : 'asc';
+    p.offset = (q.pageIndex || 0) * (q.pageSize || 25);
+  } else if (q.cursor) p[CURSOR_PARAM] = q.cursor;
   const search = q.globalFilter?.trim();
   if (search) p.q = search;
   // The committed facet selections, already translated to the register's param names
