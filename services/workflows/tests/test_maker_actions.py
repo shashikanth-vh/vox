@@ -131,12 +131,18 @@ def test_every_action_can_be_rendered_by_a_client():
 # The endpoint
 # --------------------------------------------------------------------------------- #
 class _Http:
-    """Stands in for the Register: serves the one subject row under test."""
+    """Stands in for the Register: serves the one subject row under test. Optional
+    `cams` answers the CAM-report lookup with a real list, so the committee gate can
+    be exercised (the single-row default is not a list, which the endpoint reads as
+    'unknown — fail open')."""
 
-    def __init__(self, row: dict) -> None:
+    def __init__(self, row: dict, cams: list | None = None) -> None:
         self.row = row
+        self.cams = cams
 
     async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        if self.cams is not None and "cam-reports" in url:
+            return httpx.Response(200, json=self.cams, request=httpx.Request("GET", url))
         return httpx.Response(200, json=self.row, request=httpx.Request("GET", url))
 
 
@@ -320,6 +326,28 @@ async def test_actions_carries_the_pipeline_for_lending(monkeypatch):
         assert s["state"] in {"done", "active", "rejected", "pending"}
     # The fork is declared, not guessed, by the client.
     assert [s["key"] for s in steps if s.get("parallel")] == ["disbursement", "cs"]
+    get_settings.cache_clear()
+
+
+async def test_no_cam_no_committee(monkeypatch):
+    """The committee decides ON the CAM: with none on the line, 'Send to credit
+    committee' is refused with the instruction — no request wasted on a file the
+    committee cannot read, no credit-note number burned on it. With a CAM drafted,
+    the door opens."""
+    row = {"id": "22222222-2222-2222-2222-222222222222",
+           "deal_id": "33333333-3333-3333-3333-333333333333", "stage": "Diligence"}
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.http = _Http(row, cams=[])
+    r = await _get(app, {"subject_type": "Lending",
+                         "subject_id": "22222222-2222-2222-2222-222222222222"})
+    send = {a["key"]: a for a in r.json()["actions"]}["deal-structuring.start"]
+    assert not send["enabled"] and "Prepare the CAM first" in send["reason"]
+
+    app.state.http = _Http(row, cams=[{"draft_md": "# CAM v1"}])
+    r = await _get(app, {"subject_type": "Lending",
+                         "subject_id": "22222222-2222-2222-2222-222222222222"})
+    send = {a["key"]: a for a in r.json()["actions"]}["deal-structuring.start"]
+    assert send["enabled"]
     get_settings.cache_clear()
 
 

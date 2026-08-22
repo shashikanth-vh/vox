@@ -2666,7 +2666,12 @@ def create_app() -> FastAPI:
         if rr.status_code >= 300:
             return {}, _problem(rr.status_code if rr.status_code < 500 else 502,
                                 "Register refused the read", _upstream_detail(rr))
-        return (rr.json() or {}), None
+        data = rr.json()
+        # `data or {}` here coerced an EMPTY LIST to {} — and an empty list is a real
+        # answer: "zero CAM reports on this line". The CAM-before-committee gate reads
+        # a non-list as "could not check → fail open", so the coercion held the door
+        # open for precisely the line the gate exists to stop. Only None becomes {}.
+        return ({} if data is None else data), None
 
     async def _register_post_as(request: Request, path: str, who: str, caller: CallerContext,
                                 body: dict) -> Any:
