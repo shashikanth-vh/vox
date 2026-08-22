@@ -700,6 +700,33 @@ services:
         done
     restart: unless-stopped
 
+  # The document store's nightly counterpart to pgbackup: the MinIO volume tarred into
+  # the SAME backups volume, on the same cadence and retention, so a disaster restore
+  # has the objects the freshly-restored rows reference. MinIO renames objects into
+  # place atomically, so a live tar sees each object whole (old or new, never half).
+  filebackup:
+    logging: *default-logging
+    image: alpine:3.20
+    profiles: ["backup"]
+    depends_on:
+      - minio
+    environment:
+      KEEP_DAYS: "${PGBACKUP_KEEP:-14}"
+    volumes:
+      - miniodata:/data:ro
+      - pgbackups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d-%H%M%S)
+          echo "[filebackup] $$ts archiving the document store..."
+          tar -czf "/backups/minio-$$ts.tar.gz" -C /data .             && echo "[filebackup] wrote /backups/minio-$$ts.tar.gz"             || echo "[filebackup] ARCHIVE FAILED"
+          find /backups -name 'minio-*.tar.gz' -mtime "+$$KEEP_DAYS" -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
 volumes:
   pgdata:
   miniodata:

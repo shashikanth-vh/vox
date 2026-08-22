@@ -7,9 +7,10 @@
 #   ./prism-deploy.sh rollback                       # back to the previous release
 #   ./prism-deploy.sh rollback --with-db             # …and the database with it
 #   ./prism-deploy.sh status                         # what is live, what can be rolled back to
-#   ./prism-deploy.sh backup                         # a dump + secrets snapshot, nothing else
+#   ./prism-deploy.sh backup                         # dump + document store + secrets, nothing else
 #   ./prism-deploy.sh verify                         # health-check the running stack
 #   ./prism-deploy.sh restore-db <file.sql.gz>       # a specific dump, on purpose
+#   ./prism-deploy.sh restore-files <minio-*.tar.gz> # the document store (restore WITH its dump)
 #
 # THE RULES THIS SCRIPT EXISTS TO ENFORCE
 #
@@ -236,6 +237,30 @@ backup_secrets() {
   echo "$tarball"
 }
 
+# THE DOCUMENT BYTES LIVE IN MINIO — the register holds references, the objects hold
+# the sanction letters, CAMs and evidence files. A database backup without the object
+# store restores a book that swears documents are on file which no longer exist, so the
+# store is captured with the same guarantees as the dump: verified archive, written
+# outside the tree, rotated on the same schedule. MinIO renames objects into place
+# atomically, so a tar of the live volume sees each object whole (old or new, never
+# half) — good enough for a nightly cadence on a document store.
+backup_files() {
+  local tarball="$BACKUPS/minio-$STAMP.tar.gz"
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_miniodata" || true)"
+  if [[ -z "$vol" ]]; then
+    warn "no ${PROJECT}_miniodata volume — document store not captured (inline storage?)"
+    return 0
+  fi
+  step "Backing up the document store ($vol) → $tarball"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$tarball")" -C /data . 2>>"$LOG" || die "document-store backup failed"
+  gzip -t "$tarball" 2>>"$LOG" || die "the document archive is corrupt (gzip -t failed): $tarball"
+  local bytes; bytes="$(stat -c%s "$tarball")"
+  (( bytes > 500 )) || warn "the document archive is only ${bytes} bytes — is the store empty?"
+  say "  $(du -h "$tarball" | cut -f1) written and verified"
+  echo "$tarball"
+}
+
 # Tag the CURRENT images so a rollback never has to rebuild. A tagged image is not
 # dangling, so `docker image prune` leaves it alone — which is the whole point: the
 # rollback path must not depend on an untagged layer nobody promised to keep.
@@ -346,6 +371,7 @@ prune_old() {
     done
   fi
   ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
+  ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
 }
 
 # ── commands ─────────────────────────────────────────────────────────────────
@@ -357,8 +383,9 @@ cmd_upgrade() {
   local kind; kind="$(archive_kind "$archive")"
   say "  release archive: $(basename "$archive") ($kind, $(du -h "$archive" | cut -f1))"
 
-  local db_backup secrets_backup image_map
+  local db_backup files_backup secrets_backup image_map
   db_backup="$(backup_db)"
+  files_backup="$(backup_files)"
   secrets_backup="$(backup_secrets)"
   image_map="$(snapshot_images)"
 
@@ -411,6 +438,7 @@ cmd_upgrade() {
   mv "$rel" "$LIVE"
   ln -sfn "$prev" "$RELEASES/.previous"
   printf '%s\n' "$db_backup" > "$RELEASES/.previous-db"
+  printf '%s\n' "$files_backup" > "$RELEASES/.previous-files"
   printf '%s\n' "$image_map"  > "$RELEASES/.previous-images"
   printf '%s\n' "$schema"     > "$RELEASES/.previous-migrations"
 
@@ -477,6 +505,14 @@ do_rollback() {             # $1: "--with-db" to restore the pre-upgrade dump as
     [[ -f "$dump" ]] || die "no pre-upgrade dump recorded; restore by hand with restore-db"
     warn "restoring the database from $dump — everything written since then will be lost"
     cmd_restore_db "$dump"
+    # The document store goes back WITH its database: the rows reference the objects,
+    # and restoring one without the other leaves a book pointing at files that are
+    # newer or missing.
+    local files; files="$(cat "$RELEASES/.previous-files" 2>/dev/null || true)"
+    if [[ -f "$files" ]]; then
+      warn "restoring the document store from $files to match the dump"
+      cmd_restore_files "$files"
+    fi
   fi
 
   wait_healthy || warn "the previous release is up but not reporting healthy — check: dc ps / logs"
@@ -515,6 +551,43 @@ cmd_restore_db() {
   say "  safety dump: $now"
 }
 
+cmd_restore_files() {
+  local tarball="${1:-}"
+  [[ -f "$tarball" ]] || die "usage: $0 restore-files <minio-*.tar.gz>"
+  gzip -t "$tarball" || die "that archive is corrupt"
+  preflight
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_miniodata" || true)"
+  [[ -n "$vol" ]] || die "no ${PROJECT}_miniodata volume — is the stack initialised?"
+
+  # A restore REPLACES. Snapshot the present store first so this step is itself
+  # reversible, exactly as restore-db does with its safety dump.
+  local now="$BACKUPS/minio-before-restore-$STAMP.tar.gz"
+  step "Snapshotting the CURRENT document store first → $now"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$now")" -C /data . 2>>"$LOG" ||
+    die "could not take a safety snapshot — refusing to restore over the store"
+
+  # MinIO (and the register, which writes through it) must be quiet while the volume
+  # is emptied and refilled — a write racing the untar corrupts an object.
+  step "Stopping MinIO and its writers"
+  run dc "$LIVE" stop minio register workflows || true
+
+  step "Restoring $tarball"
+  local abs; abs="$(readlink -f "$tarball")"
+  if ! docker run --rm -v "$vol":/data -v "$abs":/restore.tar.gz:ro alpine \
+      sh -c 'find /data -mindepth 1 -delete && tar -xzf /restore.tar.gz -C /data' 2>>"$LOG"; then
+    warn "the restore reported errors — see $LOG"
+    warn "the pre-restore store is at $now"
+  fi
+
+  step "Starting the services again"
+  run dc "$LIVE" start minio register workflows || dc "$LIVE" up -d
+  wait_healthy || warn "not healthy after the restore — check the log"
+  say "  safety snapshot: $now"
+  say "  restore the MATCHING database dump too if you have not — the rows and the"
+  say "  objects reference each other and must come from the same moment."
+}
+
 cmd_status() {
   preflight
   step "Live"
@@ -527,6 +600,8 @@ cmd_status() {
   step "Backups (newest first)"
   ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | head -5 |
     while read -r f; do say "  $(du -h "$f" | cut -f1)\t$f"; done || say "  (none)"
+  ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | head -3 |
+    while read -r f; do say "  $(du -h "$f" | cut -f1)\t$f"; done || true
   step "Data volumes"
   docker volume ls --filter "name=${PROJECT}_" --format '  {{.Name}}' | tee -a "$LOG" >&2 || true
 }
@@ -560,7 +635,9 @@ case "${1:-}" in
   upgrade)    shift; cmd_upgrade "$@" ;;
   rollback)   shift; preflight; do_rollback "${1:-}" ;;
   restore-db) shift; cmd_restore_db "$@" ;;
-  backup)     preflight; backup_db >/dev/null; backup_secrets >/dev/null; snapshot_images >/dev/null
+  restore-files) shift; cmd_restore_files "$@" ;;
+  backup)     preflight; backup_db >/dev/null; backup_files >/dev/null
+              backup_secrets >/dev/null; snapshot_images >/dev/null
               say "${c_grn}backup complete${c_off} → $BACKUPS" ;;
   status)     cmd_status ;;
   verify)     cmd_verify ;;
