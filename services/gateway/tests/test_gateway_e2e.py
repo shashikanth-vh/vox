@@ -28,7 +28,10 @@ async def test_cf1_me_composes_identity_and_assignments(gw: AsyncClient, access_
     await _mk_user(access_direct, "bdrm.e2e@evamfinance.com", ["BDRM"])
     me = (await gw.get("/v1/me", headers={"X-User-Email": "bdrm.e2e@evamfinance.com"})).json()
     assert me["roles"] == ["BDRM"]
-    assert me["views"]["leads"] == "SCOPED" and me["views"]["audit"] == "NONE"
+    # 'leads' is READ, not the spec's SCOPED: the firm-wide VISIBILITY layer widens the
+    # live matrix on every Access start (reads only — writes still evaluate against the
+    # spec). 'audit' is a guardrail cell the layer never touches.
+    assert me["views"]["leads"] == "READ" and me["views"]["audit"] == "NONE"
     assert me["operations"]["add_lead"] == "FULL"
     assert me["assignments"] == []
     assert me["matrix_version"] >= 1
