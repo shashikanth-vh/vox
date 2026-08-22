@@ -59,10 +59,10 @@ export default function ActivityPage() {
   const columns = useMemo<MRT_ColumnDef<ActivityRow>[]>(() => [
     { accessorKey: 't', header: 'When', size: 150,
       muiTableBodyCellProps: { sx: { whiteSpace: 'nowrap', color: tokens.muted } } },
-    { accessorKey: 'by', header: 'Who', size: 140, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+    { accessorKey: 'by', header: 'Who', size: 140, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'area', header: 'Area', size: 130, Cell: ({ cell }) => <AreaPill area={cell.getValue<string>()} /> },
     { accessorKey: 'text', header: 'Activity', size: 420 },
-    { accessorKey: 'company', header: 'Company', size: 200,
+    { accessorKey: 'company', header: 'Company', size: 200, meta: { localFilter: true },
       Cell: ({ row }) => {
         const { code, company } = row.original;
         if (!code) return '—';
