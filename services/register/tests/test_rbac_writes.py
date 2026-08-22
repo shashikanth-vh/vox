@@ -117,8 +117,11 @@ async def test_closed_lead_cannot_be_converted(client: AsyncClient):
 async def test_conversion_is_idempotent(client: AsyncClient):
     eid = (await client.post("/v1/entities",
                              json={"code": "PW-ID", "legal_name": "ID"})).json()["id"]
+    # Rated Hot: the register converts only a qualified lead (the desk's own gate),
+    # and this test is about replay behaviour, not the temperature rule.
     lead = (await client.post("/v1/leads",
-                              json={"company": "ID", "entity_id": eid})).json()
+                              json={"company": "ID", "entity_id": eid,
+                                    "temperature": "Hot"})).json()
     key = {"Idempotency-Key": f"conv-{uuid.uuid4()}"}
     r1 = await client.post(f"/v1/leads/{lead['id']}/convert",
                            json={"is_lending": True, "amount_cr": 2},

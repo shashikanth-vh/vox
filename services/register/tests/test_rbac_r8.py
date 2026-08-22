@@ -97,10 +97,14 @@ async def test_approval_path_enforces_allowed_transitions(client: AsyncClient):
 # --------------------------------------------------------------------------- #
 async def test_convert_idempotency_is_bound_to_lead(client: AsyncClient):
     eid = await _entity(client, "R8-IDEM")
+    # Rated Hot: the register converts only a qualified lead (the desk's own gate),
+    # and this test is about idempotency binding, not the temperature rule.
     lead1 = (await client.post("/v1/leads",
-                               json={"company": "R8 A", "entity_id": eid})).json()
+                               json={"company": "R8 A", "entity_id": eid,
+                                     "temperature": "Hot"})).json()
     lead2 = (await client.post("/v1/leads",
-                               json={"company": "R8 B", "entity_id": eid})).json()
+                               json={"company": "R8 B", "entity_id": eid,
+                                     "temperature": "Hot"})).json()
     key = {"Idempotency-Key": f"r8-{uuid.uuid4()}"}
     body = {"is_lending": True}
 
