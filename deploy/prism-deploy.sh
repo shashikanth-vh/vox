@@ -11,6 +11,8 @@
 #   ./prism-deploy.sh verify                         # health-check the running stack
 #   ./prism-deploy.sh restore-db <file.sql.gz>       # a specific dump, on purpose
 #   ./prism-deploy.sh restore-files <minio-*.tar.gz> # the document store (restore WITH its dump)
+#   ./prism-deploy.sh restore-plan                   # what protects this system, what exists,
+#                                                    # and exactly which files to restore from
 #
 # THE RULES THIS SCRIPT EXISTS TO ENFORCE
 #
@@ -588,6 +590,109 @@ cmd_restore_files() {
   say "  objects reference each other and must come from the same moment."
 }
 
+# ── the DR answer sheet ──────────────────────────────────────────────────────
+# Run at 2am with the stack half-dead, this must still answer: every probe is guarded,
+# nothing dies, and what cannot be read becomes a warning inside the report.
+cmd_restore_plan() {
+  step "How this deployment is protected"
+  say "  live tree        : $LIVE"
+  say "  backups (host)   : $BACKUPS"
+  say "                     written by 'backup' and by EVERY 'upgrade' (before anything moves);"
+  say "                     keeps the newest $KEEP_BACKUPS of each family"
+  local vol vpath="" keep_days=""
+  vol="$(docker volume ls -q 2>/dev/null | grep -x "${PROJECT}_pgbackups" || true)"
+  [[ -n "$vol" ]] && vpath="$(docker volume inspect -f '{{.Mountpoint}}' "$vol" 2>/dev/null || true)"
+  [[ -f "$LIVE/deploy/compose/.env" ]] &&
+    keep_days="$(grep -E '^PGBACKUP_KEEP=' "$LIVE/deploy/compose/.env" | tail -1 | cut -d= -f2- || true)"
+  if [[ -n "$vpath" ]]; then
+    say "  nightly (volume) : $vpath"
+    say "                     pgbackup (database) + filebackup (documents) sidecars, DAILY,"
+    say "                     keeping ${keep_days:-14} day(s)"
+  else
+    warn "nightly: no ${PROJECT}_pgbackups volume found — are the sidecars (profile 'backup') running?"
+  fi
+  local cronline
+  cronline="$(crontab -l 2>/dev/null | grep -F 'prism-offsite.sh sync' || true)"
+  if [[ -n "$cronline" ]]; then
+    say "  offsite (standby): $cronline"
+  else
+    warn "offsite: no prism-offsite.sh entry in this crontab — install it, or re-run this with sudo to see root's"
+  fi
+
+  step "What exists right now"
+  report_family() {   # $1 dir  $2 glob  $3 label
+    local n newest
+    n="$(find "$1" -maxdepth 1 -name "$2" 2>/dev/null | wc -l)"
+    newest="$(ls -1t "$1"/$2 2>/dev/null | head -1 || true)"
+    if (( n )); then
+      say "  $3: $n file(s), newest $(basename "$newest") ($(du -h "$newest" | cut -f1))"
+    else
+      say "  $3: ${c_ylw}none${c_off}"
+    fi
+  }
+  report_family "$BACKUPS" 'db-*.sql.gz'      "database dumps    "
+  report_family "$BACKUPS" 'minio-*.tar.gz'   "document archives "
+  report_family "$BACKUPS" 'secrets-*.tar.gz' "secret snapshots  "
+  if [[ -n "$vpath" && -d "$vpath" ]]; then
+    report_family "$vpath" 'prism-*.sql.gz'  "nightly dumps     "
+    report_family "$vpath" 'minio-*.tar.gz'  "nightly documents "
+  fi
+
+  step "The restore set to use (newest matched pair)"
+  local db minio stamp
+  # Newest BY STAMP, not by mtime — a copied or re-synced file carries a fresh mtime,
+  # and the stamp in the name is the actual chronology.
+  db="$(ls -1 "$BACKUPS"/db-*.sql.gz 2>/dev/null | sort -r | head -1 || true)"
+  if [[ -z "$db" ]]; then
+    warn "no database dump under $BACKUPS — fall back to the nightly volume above, or the"
+    warn "standby box (prism-offsite/deploy + /nightly hold the same files, synced nightly)"
+  else
+    stamp="$(basename "$db")"; stamp="${stamp#db-}"; stamp="${stamp%.sql.gz}"
+    say "  database : $db"
+    minio="$BACKUPS/minio-$stamp.tar.gz"
+    if [[ -f "$minio" ]]; then
+      say "  documents: $minio"
+      say "             (same stamp $stamp — a CONSISTENT pair: rows and objects from one moment)"
+    else
+      minio="$(ls -1 "$BACKUPS"/minio-*.tar.gz 2>/dev/null | sort -r | head -1 || true)"
+      if [[ -n "$minio" ]]; then
+        warn "no document archive carries stamp $stamp — nearest is $(basename "$minio")."
+        warn "documents recorded between the two stamps may not match the rows; prefer a"
+        warn "same-stamp pair (any 'backup' or 'upgrade' since the document machinery shipped)"
+      else
+        warn "NO document archive at all — run 'sudo $0 backup' now to capture one"
+      fi
+    fi
+    if [[ -f "$BACKUPS/secrets-$stamp.tar.gz" ]]; then
+      say "  secrets  : $BACKUPS/secrets-$stamp.tar.gz"
+    else
+      say "  secrets  : $(ls -1 "$BACKUPS"/secrets-*.tar.gz 2>/dev/null | sort -r | head -1 || echo "${c_ylw}none${c_off}")"
+    fi
+  fi
+
+  step "Which mechanism, for which disaster"
+  say "  1. BAD DATA (mistaken import / mass edit — the code is fine):"
+  say "       sudo $0 restore-db    <db-STAMP.sql.gz>"
+  say "       sudo $0 restore-files <minio-STAMP.tar.gz>      # the SAME stamp"
+  say "     Each takes its own safety snapshot first, so the restore is itself reversible."
+  say ""
+  say "  2. BAD RELEASE (an upgrade went wrong — the data is fine):"
+  say "       sudo $0 rollback                # previous code, keeps everything written today"
+  say "       sudo $0 rollback --with-db      # …and the pre-upgrade database + documents pair"
+  say ""
+  say "  3. LOST SERVER (rebuild on a fresh VM from the standby copies):"
+  say "       a. install docker + the compose plugin on the new VM"
+  say "       b. copy over: the release zip, this script, and the standby box's"
+  say "          prism-offsite/deploy/ files (newest db-*, minio-*, secrets-*)"
+  say "       c. unzip the release → ./prism ; untar the secrets snapshot INTO ./prism"
+  say "       d. bring the stack up once (creates the empty volumes), then:"
+  say "            sudo $0 restore-db    <newest db-*.sql.gz>"
+  say "            sudo $0 restore-files <matching minio-*.tar.gz>"
+  say ""
+  say "  RPO: at most ONE DAY (nightly sidecars + offsite sync); effectively zero for"
+  say "       anything after a manual 'backup'. RTO: 1–2 in minutes, 3 in 30–60 minutes."
+}
+
 cmd_status() {
   preflight
   step "Live"
@@ -636,6 +741,7 @@ case "${1:-}" in
   rollback)   shift; preflight; do_rollback "${1:-}" ;;
   restore-db) shift; cmd_restore_db "$@" ;;
   restore-files) shift; cmd_restore_files "$@" ;;
+  restore-plan)  cmd_restore_plan ;;
   backup)     preflight; backup_db >/dev/null; backup_files >/dev/null
               backup_secrets >/dev/null; snapshot_images >/dev/null
               say "${c_grn}backup complete${c_off} → $BACKUPS" ;;
