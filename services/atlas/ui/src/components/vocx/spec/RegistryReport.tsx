@@ -100,11 +100,11 @@ function FieldRow({ def, cell, path, readOnly, flash, onCell, onConfirm }: Field
     body = (
       <Box>
         {items.map((it, i) => (
-          <Box key={i} sx={{ display: 'flex', gap: 0.8, mb: 0.7 }}>
-            <TextField size="small" sx={{ ...input, flex: 2 }} disabled={readOnly}
+          <Box key={i} sx={{ display: 'flex', gap: 0.8, mb: 0.7, flexWrap: 'wrap' }}>
+            <TextField size="small" sx={{ ...input, flex: '1 1 100%' }} disabled={readOnly}
               value={it.action || ''} placeholder="Action"
               onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))} />
-            <TextField size="small" sx={{ ...input, flex: 1 }} disabled={readOnly}
+            <TextField size="small" sx={{ ...input, flex: '1 1 120px' }} disabled={readOnly}
               value={it.owner || ''} placeholder="Owner"
               onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, owner: e.target.value } : x)))} />
             <TextField size="small" type="date" sx={{ ...input, width: 150 }} disabled={readOnly}
