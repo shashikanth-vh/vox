@@ -16,7 +16,7 @@ dependencies = [
     "python-json-logger==3.2.1",
     "orjson==3.10.12",
     # Voice pipeline (app/vocx): Claude extraction + per-RM Google Calendar/Drive.
-    "anthropic>=0.40",
+    "anthropic>=0.40,<1",  # 1.0 changed Messages.create() (temperature kw) — pin the proven line
     "google-api-python-client>=2.140",
     "google-auth-oauthlib>=1.2",
     "boto3==1.35.99",            # MinIO/S3 — recorded-audio bytes (same pin as the Register)

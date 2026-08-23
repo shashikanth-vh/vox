@@ -476,12 +476,16 @@ class VocxApp:
                 client = anthropic.Anthropic(
                     api_key=os.environ[os.environ.get("VOCX_ANTHROPIC_KEY_ENV",
                                                       "ANTHROPIC_API_KEY")])
-                msg = client.messages.create(
-                    model=model, max_tokens=8000, system=system,
+                kwargs: dict = dict(model=model, max_tokens=8000, system=system,
+                                    messages=[{"role": "user", "content": user}])
+                try:
                     # deterministic extraction: shape drift between runs is noise
                     # the contract then has to fight — temperature 0 removes it
-                    temperature=0.0,
-                    messages=[{"role": "user", "content": user}])
+                    msg = client.messages.create(temperature=0.0, **kwargs)
+                except TypeError:
+                    # an SDK line without the keyword (anthropic 1.0 dropped it):
+                    # determinism is preferred, never required
+                    msg = client.messages.create(**kwargs)
                 return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
 
             self._vox_runner = PipelineRunner(register, transcribe, ask_model,
