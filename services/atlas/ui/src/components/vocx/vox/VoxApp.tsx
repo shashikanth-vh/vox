@@ -233,24 +233,38 @@ function AllScreen({ go, openConversation, openDossier }: {
   openConversation: (id: string) => void;
   openDossier: (subject: { entityId?: string; leadId?: string }) => void;
 }) {
+  const { user } = useAuth();
   const [items, setItems] = useState<VoxConversation[]>([]);
   const [uc, setUc] = useState('');
-  // Mine is the default desk; Everyone is the firm's shared memory and shows
-  // the APPROVED record — colleagues' drafts stay out of the feed unless the
-  // reader explicitly widens to in-progress (default, not a wall).
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
-  const [inflight, setInflight] = useState(false);
+  // The feed defaults to the FIRM (the blueprint's "every conversation, newest
+  // first"): everyone's approved record merged with your own items in every
+  // state — a colleague's half-processed draft stays out, yours never does.
+  // The Mine pill flips to just your desk, and the title says whose feed it is.
+  const [mineOnly, setMineOnly] = useState(false);
   const [q, setQ] = useState(() => sessionStorage.getItem('vox.q') || '');
   const names = useNames(items);
   useEffect(() => {
-    const t = setTimeout(() => {
-      void voxService.list({ q: q.trim() || undefined, use_case: uc || undefined,
-        mine: scope === 'mine',
-        status: scope === 'all' && !inflight ? 'submitted' : undefined,
-        limit: 60 }).then((r) => setItems(r.items)).catch(() => {});
+    const t = setTimeout(async () => {
+      try {
+        const term = q.trim() || undefined;
+        if (mineOnly) {
+          const r = await voxService.list({ q: term, use_case: uc || undefined,
+            mine: true, limit: 60 });
+          setItems(r.items);
+          return;
+        }
+        const [firm, own] = await Promise.all([
+          voxService.list({ q: term, use_case: uc || undefined, status: 'submitted', limit: 60 }),
+          voxService.list({ q: term, use_case: uc || undefined, mine: true, limit: 60 }),
+        ]);
+        const seen = new Set<string>();
+        setItems([...own.items, ...firm.items]
+          .filter((c) => !seen.has(c.id) && seen.add(c.id))
+          .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')));
+      } catch { setItems([]); }
     }, q ? 300 : 0);
     return () => clearTimeout(t);
-  }, [q, uc, scope, inflight]);
+  }, [q, uc, mineOnly]);
   const groups = useMemo(() => {
     const by: { head: string; rows: VoxConversation[] }[] = [];
     for (const c of items) {
@@ -266,8 +280,8 @@ function AllScreen({ go, openConversation, openDossier }: {
     <div className="app-body">
       <button className="review-back" onClick={() => go('memory')}>‹ Memory</button>
       <div className="home-greet" style={{ paddingBottom: 12 }}>
-        <div className="small">Every conversation · newest first</div>
-        <div className="big">All conversations</div>
+        <div className="small">{mineOnly ? 'Your conversations · newest first' : 'Every conversation · newest first'}</div>
+        <div className="big">{mineOnly ? `${user.full.split(' ')[0]}'s conversations` : 'All conversations'}</div>
       </div>
       <div className="memory-search">
         <Ic i="i-search" />
@@ -275,20 +289,14 @@ function AllScreen({ go, openConversation, openDossier }: {
           onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="filter-row">
-        <div className={`filter-pill${scope === 'mine' ? ' active' : ''}`}
-          onClick={() => setScope('mine')}>Mine</div>
-        <div className={`filter-pill${scope === 'all' ? ' active' : ''}`}
-          onClick={() => setScope('all')}>Everyone</div>
-        {scope === 'all' && (
-          <div className={`filter-pill${inflight ? ' active' : ''}`}
-            onClick={() => setInflight((v) => !v)}
-            title="Everyone shows approved records; widen to see in-progress items too">
-            + in-progress</div>
-        )}
+        <div className={`filter-pill${!uc ? ' active' : ''}`}
+          onClick={() => setUc('')}>All use cases</div>
         {UCS.map((u) => (
           <div key={u} className={`filter-pill${uc === u ? ' active' : ''}`}
             onClick={() => setUc(uc === u ? '' : u)}>{UC_SHORT[u]}</div>
         ))}
+        <div className={`filter-pill${mineOnly ? ' active' : ''}`}
+          onClick={() => setMineOnly((v) => !v)}>Mine</div>
       </div>
       {groups.map((g) => (
         <div key={g.head}>
