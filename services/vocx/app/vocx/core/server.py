@@ -316,6 +316,20 @@ class VocxApp:
             return 200, "application/json", _j({"types": self.store.interaction_types})
         if method == "GET" and path == "/v1/capabilities":
             return 200, "application/json", _j(self._capabilities())
+        if method == "GET" and path == "/v1/spec":
+            # The registry-driven contract (Phase 0): the review renderer draws its
+            # blocks from THIS, so adding a field needs zero renderer changes.
+            from ..spec import RegistryError, latest_prompt_version, load_registry
+            v = _one(query, "version") or None
+            try:
+                reg = load_registry(v)
+            except RegistryError as exc:
+                return 404, "application/json", _j({"ok": False, "error": str(exc)})
+            return 200, "application/json", _j({
+                "registry": reg,
+                "registry_version": reg["registry_version"],
+                "prompt_version": latest_prompt_version(),
+            })
         if method == "GET" and path == "/v1/interactions":
             return 200, "application/json", _j(self.search.search(**_search_args(query)))
         if method == "GET" and path == "/v1/facets":
