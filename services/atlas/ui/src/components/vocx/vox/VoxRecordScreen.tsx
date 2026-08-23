@@ -15,8 +15,14 @@ import { deleteTake, loadUnsentTake, saveTake } from '../spec/takeStore';
 import type { StoredTake } from '../spec/takeStore';
 import { Ic } from './VoxApp';
 
-const CAP_SECONDS = 180;
+const CAP_SECONDS = 180;          // Mode A — a post-meeting note is minutes, not a meeting
+const CAP_LIVE_SECONDS = 5400;    // Mode B — the blueprint's 90-minute live meeting
 const BARS = 44;
+
+/** The certification the tick stores — permanently, even if the audio is later
+ *  deleted (the consent record is write-once in the database itself). */
+const CONSENT_TEXT =
+  'I confirm that all attendees have been informed of the recording and have given their consent.';
 
 type Phase = 'idle' | 'recording' | 'paused' | 'uploading' | 'error';
 
@@ -33,6 +39,10 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const [segments, setSegments] = useState<number[]>([]);
   const [mode, setMode] = useState<'A' | 'B'>('A');
   const [modeNote, setModeNote] = useState('');
+  // Mode B's one hard gate: the tick that outlives the audio.
+  const [consentTick, setConsentTick] = useState(false);
+  const [consentBusy, setConsentBusy] = useState(false);
+  const consentIdRef = useRef<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
@@ -48,6 +58,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const elapsedRef = useRef(0);
   const finishingRef = useRef(false);
   const finishRef = useRef<() => Promise<void>>(async () => {});
+  const capRef = useRef(CAP_SECONDS);
 
   useEffect(() => () => {
     if (tickRef.current) clearInterval(tickRef.current);
@@ -68,7 +79,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     tickRef.current = setInterval(() => {
       elapsedRef.current += 1;
       setElapsed(elapsedRef.current);
-      if (elapsedRef.current >= CAP_SECONDS) void finishRef.current();
+      if (elapsedRef.current >= capRef.current) void finishRef.current();
     }, 1000);
     if (waveRef.current) clearInterval(waveRef.current);
     waveRef.current = setInterval(() => {
@@ -76,6 +87,23 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     }, 140);
   };
   const stopWave = () => { if (waveRef.current) { clearInterval(waveRef.current); waveRef.current = null; } };
+
+  /** Screen 04 — the one hard gate. The tick writes a PERMANENT consent
+   *  record (immutable in the database) before the recorder ever opens;
+   *  the live conversation later refuses to exist without it. */
+  const grantConsent = async () => {
+    setConsentBusy(true); setErr('');
+    try {
+      const r = await voxService.consent(CONSENT_TEXT, {
+        platform: navigator.platform,
+        app_version: 'vox-panel',
+      });
+      consentIdRef.current = r.id;
+      setConsentTick(false);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally { setConsentBusy(false); }
+  };
 
   const start = async () => {
     setErr('');
@@ -96,6 +124,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       rec.start(1000);
       recRef.current = rec;
       captureIdRef.current = `vox-${crypto.randomUUID()}`;
+      capRef.current = mode === 'B' ? CAP_LIVE_SECONDS : CAP_SECONDS;
       segStartRef.current = 0;
       elapsedRef.current = 0;
       finishingRef.current = false;
@@ -145,7 +174,9 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
     try {
       const out = await voxService.capture(blob, {
-        captureId: captureIdRef.current, mode: 'post_meeting',
+        captureId: captureIdRef.current,
+        mode: mode === 'B' ? 'live' : 'post_meeting',
+        consentId: consentIdRef.current || undefined,
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
@@ -167,7 +198,9 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       const blob = chunksRef.current.length === 1 && chunksRef.current[0] instanceof Blob
         ? (chunksRef.current[0] as Blob) : new Blob(chunksRef.current, { type: 'audio/webm' });
       const out = await voxService.capture(blob, {
-        captureId: captureIdRef.current, mode: 'post_meeting',
+        captureId: captureIdRef.current,
+        mode: mode === 'B' ? 'live' : 'post_meeting',
+        consentId: consentIdRef.current || undefined,
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
@@ -239,8 +272,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         <div className={`mode-tab${mode === 'B' ? ' active' : ''}${live ? ' locked' : ''}`}
           onClick={() => {
             if (live) return;
-            setModeNote('Live meeting (90:00, consented) arrives with the next round — Mode A carries the product today.');
-            setTimeout(() => setModeNote(''), 4000);
+            setMode('B');
+            setModeNote('');
           }}>Live meeting</div>
       </div>
       {modeNote && (
@@ -250,6 +283,43 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         <div style={{ fontSize: 12, color: 'var(--danger)', margin: '8px 2px 0' }}>{err}</div>
       )}
 
+      {mode === 'B' && !consentIdRef.current && phase === 'idle' ? (
+        <>
+          <div className="eyebrow" style={{ textAlign: 'center', color: 'var(--warn)', margin: '18px 0 0' }}>
+            Consent required
+          </div>
+          <div className="consent-header">
+            <div className="consent-badge"><Ic i="i-mic" /></div>
+            <div className="consent-title-block">
+              <div className="title">Live meeting recording</div>
+              <div className="sub">Up to 90 minutes · Requires connectivity</div>
+            </div>
+          </div>
+          <div className="consent-note">
+            They know this is being recorded. This tick is stored permanently,
+            even if you later delete the audio.
+          </div>
+          <div className={`consent-check${consentTick ? ' checked' : ''}`}
+            onClick={() => setConsentTick((v) => !v)}>
+            <div className="check-box" />
+            <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+              <strong>I confirm</strong> that all attendees have been informed of the
+              recording and have given their consent.
+            </div>
+          </div>
+          <div className="consent-hint">Tick the box to start.</div>
+          <div className="consent-audit">
+            <span className="label">Recording by:</span> {getSession()?.email || user.full}<br />
+            <span className="label">GPS &amp; device:</span> will be written when you start
+          </div>
+          <button className="btn btn-danger" disabled={!consentTick || consentBusy}
+            style={!consentTick ? { opacity: 0.45, cursor: 'default' } : undefined}
+            onClick={() => void grantConsent()}>
+            Continue to recorder
+          </button>
+        </>
+      ) : (
+      <>
       {recovered && phase === 'idle' && (
         <div className="card" style={{ marginTop: 14, borderColor: 'rgba(245,181,73,0.5)' }}>
           <div className="card-eyebrow" style={{ color: 'var(--warn)' }}>Unsent take recovered</div>
@@ -269,8 +339,12 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         <div className={`rec-state-label ${live ? 'live' : 'idle'}`}>{stateLabel}</div>
         <div className={`rec-timer ${live ? 'live' : 'idle'}`}>{mmss(elapsed)}</div>
         <div className="rec-timer-cap">
-          {live ? `SEGMENT ${segments.length + (phase === 'recording' ? 1 : 0) || 1} · ${mmss(CAP_SECONDS)} MAX`
-            : `TAP RECORD TO START · ${mmss(CAP_SECONDS)} MAX`}
+          {(() => {
+            const cap = mmss(mode === 'B' ? CAP_LIVE_SECONDS : CAP_SECONDS);
+            return live
+              ? `SEGMENT ${segments.length + (phase === 'recording' ? 1 : 0) || 1} · ${cap} MAX`
+              : `TAP RECORD TO START · ${cap} MAX`;
+          })()}
         </div>
         <div className={`waveform ${live && phase === 'recording' ? 'live' : 'idle'}`}>
           {bars.map((h, i) => (
@@ -318,6 +392,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
