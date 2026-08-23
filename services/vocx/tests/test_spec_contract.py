@@ -266,3 +266,11 @@ def test_details_without_a_subsector_are_refused():
     r["common"]["subsector"] = _cell(None, "n/a")
     r["subsector_details"] = {"operating_uc_capacity_mw": _cell("40 MW")}
     _expect_error(r, "present without a chosen subsector")
+
+
+def test_dict_entries_in_detected_use_cases_are_named_not_crashed():
+    """Field finding three: entries arrived as dicts and the duplicate check's set()
+    raised a raw TypeError. The violation must be NAMED so the repair round can fix it."""
+    r = _valid_report()
+    r["detected_use_cases"] = [{"use_case": "lending"}, "asset_monetisation"]
+    _expect_error(r, "entries must be plain use-case strings")

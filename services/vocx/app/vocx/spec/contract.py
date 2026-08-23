@@ -172,9 +172,15 @@ def validate_report(obj: Any, registry_version: str | None = None) -> dict:
         errors.append("detected_use_cases: at least one use case is required")
         detected = []
     else:
+        # type discipline FIRST — a dict in this list once crashed the duplicate
+        # check with a raw TypeError instead of a named violation
         for uc in detected:
-            if uc not in allowed_ucs:
+            if not isinstance(uc, str):
+                errors.append("detected_use_cases: entries must be plain use-case "
+                              "strings, e.g. \"lending\"")
+            elif uc not in allowed_ucs:
                 errors.append(f"detected_use_cases: {uc!r} not in the allowed enum")
+        detected = [uc for uc in detected if isinstance(uc, str)]
         if len(detected) != len(set(detected)):
             errors.append("detected_use_cases: duplicates")
 

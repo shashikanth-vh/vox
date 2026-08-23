@@ -478,6 +478,9 @@ class VocxApp:
                                                       "ANTHROPIC_API_KEY")])
                 msg = client.messages.create(
                     model=model, max_tokens=8000, system=system,
+                    # deterministic extraction: shape drift between runs is noise
+                    # the contract then has to fight — temperature 0 removes it
+                    temperature=0.0,
                     messages=[{"role": "user", "content": user}])
                 return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
 

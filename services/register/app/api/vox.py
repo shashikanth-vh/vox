@@ -363,7 +363,7 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         detected = payload.structured_report.get("detected_use_cases") or []
         await ctx.session.execute(delete(VoxConversationUseCase).where(
             VoxConversationUseCase.conversation_id == row.id))
-        for uc in dict.fromkeys(detected):
+        for uc in dict.fromkeys(u for u in detected if isinstance(u, str)):
             if uc in _USE_CASES:
                 ctx.session.add(VoxConversationUseCase(conversation_id=row.id, use_case=uc))
     row.updated_by = ctx.actor
