@@ -288,15 +288,24 @@ function AllScreen({ go, openConversation, openDossier }: {
         <input placeholder="Search every Evam conversation…" value={q}
           onChange={(e) => setQ(e.target.value)} />
       </div>
-      <div className="filter-row">
+      <div className="filter-row" style={{ alignItems: 'center' }}>
         <div className={`filter-pill${!uc ? ' active' : ''}`}
           onClick={() => setUc('')}>All use cases</div>
         {UCS.map((u) => (
           <div key={u} className={`filter-pill${uc === u ? ' active' : ''}`}
             onClick={() => setUc(uc === u ? '' : u)}>{UC_SHORT[u]}</div>
         ))}
-        <div className={`filter-pill${mineOnly ? ' active' : ''}`}
-          onClick={() => setMineOnly((v) => !v)}>Mine</div>
+        {/* Scope is not a use case — it gets a checkbox, apart from the pills
+            (the blueprint's rule: values on one row, dimensions on another).
+            Ticked, the headline says whose feed this is. */}
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 12, color: mineOnly ? 'var(--accent)' : 'var(--text-2)',
+          cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', padding: '4px 2px' }}>
+          <input type="checkbox" checked={mineOnly}
+            onChange={(e) => setMineOnly(e.target.checked)}
+            style={{ accentColor: 'var(--accent)', width: 14, height: 14, cursor: 'pointer' }} />
+          Self
+        </label>
       </div>
       {groups.map((g) => (
         <div key={g.head}>
