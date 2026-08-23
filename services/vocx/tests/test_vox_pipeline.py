@@ -661,3 +661,36 @@ def test_pipeline_workers_are_bounded(monkeypatch):
         _t.sleep(0.05)
     assert peak["done"] == 6            # everyone finishes
     assert peak["max"] <= 2             # never more than the ceiling at once
+
+
+def test_transcribe_budget_scales_with_the_take():
+    """A 90-minute live take on CPU STT honestly needs more than the 3-minute
+    note's allowance — the budget is duration-scaled, never below the floor."""
+    seen = {}
+
+    def slow_transcribe(audio_ref):
+        return {"text": "ok", "segments": [{"text": "ok"}], "language": "en"}
+
+    import app.vocx.pipeline.runner as runner_mod
+    orig = runner_mod._run_with_timeout
+
+    def spy(fn, stage, seconds):
+        seen[stage] = seconds
+        return orig(fn, stage, seconds)
+
+    runner_mod._run_with_timeout = spy
+    try:
+        reg = FakeRegister(duration_seconds=5400)
+        PipelineRunner(reg, slow_transcribe,
+                       lambda m, s, u: _valid_model_json()).process("c1")
+    finally:
+        runner_mod._run_with_timeout = orig
+    assert seen["transcribe"] == 5400 * 2 + 300      # scaled for the long take
+    seen.clear()
+    runner_mod._run_with_timeout = spy
+    try:
+        PipelineRunner(FakeRegister(duration_seconds=180), slow_transcribe,
+                       lambda m, s, u: _valid_model_json()).process("c1")
+    finally:
+        runner_mod._run_with_timeout = orig
+    assert seen["transcribe"] == 1800                # the floor holds for notes

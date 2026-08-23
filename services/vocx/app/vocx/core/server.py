@@ -38,6 +38,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # a malformed client (or an attack) from parking megabytes in the extraction path.
 MAX_TRANSCRIPT_CHARS = 40_000
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
+# The VOX door's own bound: a 90-minute live take at the recorder's 32 kbps
+# opus is ~22 MB, so 64 MB is generous headroom while still refusing a runaway
+# or malicious upload. (Mind the front proxy: nginx client_max_body_size must
+# be >= this or the edge rejects the take before this code ever sees it.)
+MAX_VOX_AUDIO_BYTES = 64 * 1024 * 1024
 
 
 def _gps_meta(get) -> dict:
@@ -585,6 +590,9 @@ class VocxApp:
             return 400, "application/json", _j({"ok": False, "error": "mode must be post_meeting|live"})
         if not body:
             return 400, "application/json", _j({"ok": False, "error": "no audio payload"})
+        if len(body) > MAX_VOX_AUDIO_BYTES:
+            return 413, "application/json", _j({"ok": False,
+                "error": "audio too large — recordings upload at ~22 MB per 90 minutes"})
         rm = _one(query, "rm") or "unknown"
         astore = self.audio_store()
         if astore is None:

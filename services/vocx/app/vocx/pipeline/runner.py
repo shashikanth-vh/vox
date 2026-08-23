@@ -145,8 +145,16 @@ class PipelineRunner:
         if not audio_ref:
             raise RuntimeError("transcribe: no audio_ref on the conversation")
         t0 = time.monotonic()
+        # The budget scales with the take: CPU transcription runs near realtime,
+        # so a 90-minute live meeting honestly needs more than a 3-minute note's
+        # allowance — twice the audio duration plus spin-up, never below the
+        # configured floor. Without this, every long take died at the fixed cap.
+        budget = self.timeouts["transcribe"]
+        dur = int(row.get("duration_seconds") or 0)
+        if dur:
+            budget = max(budget, dur * 2 + 300)
         result = _run_with_timeout(lambda: self.transcribe(audio_ref),
-                                   "transcribe", self.timeouts["transcribe"])
+                                   "transcribe", budget)
         segments = mark_suspect_segments(list(result.get("segments") or []))
         suspects = sum(1 for s in segments if s.get("suspect"))
         log.info("conversation %s transcribed in %.1fs (%d segments, %d suspect)",

@@ -11,7 +11,7 @@ import { useAuth } from '../../../auth/AuthContext';
 import { getSession } from '../../../auth/session';
 import { useVocx } from '../VocxProvider';
 import { voxService } from '../../../services/voxService';
-import { deleteTake, loadUnsentTake, saveTake } from '../spec/takeStore';
+import { appendTakeChunk, deleteTake, loadUnsentTake } from '../spec/takeStore';
 import type { StoredTake } from '../spec/takeStore';
 import { Ic } from './VoxApp';
 
@@ -112,14 +112,25 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       navigator.geolocation?.getCurrentPosition(
         (p) => { gpsRef.current = { lat: p.coords.latitude, lng: p.coords.longitude }; },
         () => {}, { timeout: 4000 });
-      const rec = new MediaRecorder(stream);
+      let rec: MediaRecorder;
+      try {
+        // 32 kbps opus is transparent for speech; the browser default (~128k)
+        // would make a 90-minute live take a 65-90 MB upload.
+        rec = new MediaRecorder(stream, { audioBitsPerSecond: 32_000 });
+      } catch {
+        rec = new MediaRecorder(stream);
+      }
       chunksRef.current = [];
+      const startedAt = new Date().toISOString();
       rec.ondataavailable = (e) => {
         if (!e.data.size) return;
+        const idx = chunksRef.current.length;
         chunksRef.current.push(e.data);
-        saveTake({ id: captureIdRef.current, startedAt: new Date().toISOString(),
+        // append-only: each chunk hits IndexedDB exactly once (the v1 full-array
+        // rewrite was quadratic — fatal for a 90-minute take)
+        appendTakeChunk({ id: captureIdRef.current, startedAt,
           elapsed: elapsedRef.current, mime: rec.mimeType || 'audio/webm',
-          rm: user.full, chunks: [...chunksRef.current] });
+          rm: user.full }, idx, e.data);
       };
       rec.start(1000);
       recRef.current = rec;

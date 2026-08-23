@@ -92,7 +92,9 @@ export const voxService = {
     try {
       const r = await vocxClient.post('/v1/vox/capture', await audio.arrayBuffer(), {
         headers: { 'Content-Type': 'application/octet-stream' },
-        timeout: 300_000,
+        // a 90-minute live take is ~22 MB — on field 4G that upload honestly
+        // needs more patience than a note's five minutes
+        timeout: 600_000,
         params: {
           capture_id: opts.captureId,
           mode: opts.mode || 'post_meeting',
