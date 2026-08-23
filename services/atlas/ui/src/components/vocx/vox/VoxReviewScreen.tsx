@@ -486,16 +486,24 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <>
             <div className="atlas-cand" style={{ marginBottom: 12 }}>
               <span className="as-heard">{lineChoice.name}</span>
-              This company has open lines. Pick the one this conversation belongs to.
+              {linkThenApprove
+                ? 'Belongs to one of these lines? Pick it — otherwise continue and it files on the company timeline.'
+                : 'This company has open lines. Pick the one this conversation belongs to.'}
             </div>
-            <div className="atlas-opt" onClick={() => !busy && void pinTo(
-              { entity_id: lineChoice.entityId, lead_id: '', deal_id: '' })}>
-              <div>
-                <div className="ao-name">Company level</div>
-                <div className="ao-meta">General relationship — files on the company timeline</div>
+            {linkThenApprove ? (
+              <button className="btn btn-primary" disabled={busy} style={{ marginBottom: 12 }}
+                onClick={() => void pinTo({ entity_id: lineChoice.entityId, lead_id: '', deal_id: '' })}>
+                Continue — file at company level</button>
+            ) : (
+              <div className="atlas-opt" onClick={() => !busy && void pinTo(
+                { entity_id: lineChoice.entityId, lead_id: '', deal_id: '' })}>
+                <div>
+                  <div className="ao-name">Company level</div>
+                  <div className="ao-meta">General relationship — files on the company timeline</div>
+                </div>
+                <div className="ao-score possible">Pick</div>
               </div>
-              <div className="ao-score possible">Pick</div>
-            </div>
+            )}
             {lineChoice.leads.map((l: any) => (
               <div key={l.id} className="atlas-opt" onClick={() => !busy && void pinTo(
                 { lead_id: String(l.id), entity_id: lineChoice.entityId, deal_id: '' })}>
