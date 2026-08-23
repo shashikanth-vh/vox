@@ -116,24 +116,6 @@ export function useNames(items: VoxConversation[]) {
   return names;
 }
 
-function Header({ saved, onLegacy }: { saved?: boolean; onLegacy: () => void }) {
-  return (
-    <div className="app-header">
-      <div className="lhs">
-        <div className="ah-logo">V</div>
-        <div className="ah-brand">
-          <div className="name">VOX</div>
-          <div className="tag">Evam · Conversation Intelligence</div>
-        </div>
-      </div>
-      <div className="ah-actions">
-        {saved && <span className="ah-saved"><Ic i="i-check" /> Saved</span>}
-        <span className="act" onClick={onLegacy} title="Legacy reports"><Ic i="i-gear" /></span>
-      </div>
-    </div>
-  );
-}
-
 function BottomNav({ screen, queueCount, go }: {
   screen: VoxScreen; queueCount: number; go: (s: VoxScreen) => void;
 }) {
@@ -413,7 +395,6 @@ export default function VoxApp() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [dossierEntity, setDossierEntity] = useState<string | null>(null);
   const [queueCount, setQueueCount] = useState(0);
-  const [saved, setSaved] = useState(false);
 
   const refreshQueueCount = useCallback(() => {
     void voxService.list({ status: 'processing_failed,failed_permanently', limit: 1 })
@@ -421,7 +402,7 @@ export default function VoxApp() {
   }, []);
   useEffect(() => { refreshQueueCount(); }, [screen, refreshQueueCount]);
 
-  const go = (s: VoxScreen) => { setScreen(s); if (s !== 'review') setSaved(false); };
+  const go = (s: VoxScreen) => setScreen(s);
   const openConversation = (id: string) => { setConversationId(id); setScreen('review'); };
   const openDossier = (entityId: string) => { setDossierEntity(entityId); setScreen('dossier'); };
 
@@ -430,9 +411,6 @@ export default function VoxApp() {
   return (
     <div className="vox-app">
       <div style={{ display: 'none' }} dangerouslySetInnerHTML={{ __html: `<svg>${VOX_SPRITE}</svg>` }} />
-      {screen !== 'record' && screen !== 'review' && (
-        <Header saved={saved} onLegacy={() => go('legacy')} />
-      )}
       <div className="screen active" data-screen={screen}>
         {screen === 'memory' && (
           <MemoryScreen go={go} openConversation={openConversation} openDossier={openDossier} />)}
@@ -453,7 +431,7 @@ export default function VoxApp() {
         {screen === 'review' && conversationId && (
           <VoxReviewScreen conversationId={conversationId}
             onBack={() => go('memory')} onQueue={() => go('queue')}
-            onDossier={openDossier} onSaved={setSaved}
+            onDossier={openDossier} onSaved={() => {}}
             onFiled={refreshQueueCount} />)}
       </div>
       {showTabs && <BottomNav screen={screen} queueCount={queueCount} go={go} />}

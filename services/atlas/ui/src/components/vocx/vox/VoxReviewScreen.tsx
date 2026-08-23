@@ -541,15 +541,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   return (
     <>
-      <div className="app-header">
-        <div className="lhs"><div className="ah-logo">V</div>
-          <div className="ah-brand"><div className="name">VOX</div><div className="tag">Evam · Conversation Intelligence</div></div></div>
-        <div className="ah-actions">
-          {!Object.keys(dirty).length && <span className="ah-saved"><Ic i="i-check" /> Saved</span>}
-        </div>
-      </div>
       <div className="app-body">
-        <button className="review-back" onClick={onBack}>‹ All conversations</button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button className="review-back" onClick={onBack}>‹ All conversations</button>
+          {!Object.keys(dirty).length
+            ? <span className="ah-saved"><Ic i="i-check" /> Saved</span>
+            : <span className="ah-saved" style={{ color: 'var(--muted)' }}>Saving…</span>}
+        </div>
         <div className={`status-pill ${readOnly ? 'approved' : 'ready'}`}>
           {row.erased_at ? 'Erased' : readOnly ? 'Approved' : 'Ready for review'}
         </div>

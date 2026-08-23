@@ -113,6 +113,10 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         }}
       >
         {!mobile && <DragIndicatorIcon sx={{ fontSize: 18, color: vx.mut }} />}
+        {/* the blueprint's V mark, moved up here so the brand lives once */}
+        <Box sx={{ width: 26, height: 26, borderRadius: '8px', bgcolor: '#2ED4A6',
+          color: '#001912', fontWeight: 800, fontSize: 15, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>V</Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography sx={{ fontSize: 17, fontWeight: 700, letterSpacing: '.02em', lineHeight: 1.05 }}>
             VOCX
