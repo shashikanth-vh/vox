@@ -625,3 +625,39 @@ def test_tool_schema_pins_judgement_confidence():
     # ordinary fields keep the full ladder
     assert common["location"]["properties"]["confidence"] == {
         "enum": ["high", "medium", "low", "n/a"]}
+
+
+def test_pipeline_workers_are_bounded(monkeypatch):
+    """150 finishes at once must not mean 150 transcriptions at once: the
+    semaphore holds work to VOCX_PIPELINE_WORKERS; the rest wait their turn.
+    Every conversation still completes."""
+    import threading
+    import time as _t
+    monkeypatch.setenv("VOCX_PIPELINE_WORKERS", "2")
+    from app.vocx.core.atlas import AtlasStore
+    from app.vocx.core.server import VocxApp
+
+    app = VocxApp(store=AtlasStore({}), config={"thresholds": {}, "scores": {}})
+
+    peak = {"now": 0, "max": 0, "done": 0}
+    gate = threading.Lock()
+
+    class SlowRunner:
+        def process(self, cid):
+            with gate:
+                peak["now"] += 1
+                peak["max"] = max(peak["max"], peak["now"])
+            _t.sleep(0.15)
+            with gate:
+                peak["now"] -= 1
+                peak["done"] += 1
+
+    app._vox_runner = SlowRunner()
+    for i in range(6):
+        code, _, _ = app._vox_process(json.dumps({"conversation_id": f"c{i}"}).encode())
+        assert code == 202
+    deadline = _t.time() + 5
+    while peak["done"] < 6 and _t.time() < deadline:
+        _t.sleep(0.05)
+    assert peak["done"] == 6            # everyone finishes
+    assert peak["max"] <= 2             # never more than the ceiling at once

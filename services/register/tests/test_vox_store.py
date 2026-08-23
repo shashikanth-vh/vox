@@ -453,3 +453,45 @@ async def test_list_filters_by_lead_for_the_lead_only_dossier(client: AsyncClien
                             params={"lead_id": lid, "status": "submitted"},
                             headers=RECORDER)).json()
     assert [i["id"] for i in got["items"]] == [row["id"]]
+
+
+# ------------------------------------------------------------- concurrency races
+
+async def test_parallel_approves_materialise_exactly_one_lead(client: AsyncClient):
+    """The 150-user finding: two simultaneous Approve taps both passed the
+    is-it-ready check and both created the proposed lead. The row lock makes
+    the second serialize behind the first and replay idempotently."""
+    import asyncio
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    company = f"Race Co {uuid.uuid4()}"
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "proposed_lead_company": company, "proposed_lead_rm": "Chetan Malik",
+    }, headers=RECORDER)
+    assert r.status_code == 200
+
+    results = await asyncio.gather(
+        client.post(f"/v1/vox/conversations/{cid}/approve", headers=RECORDER),
+        client.post(f"/v1/vox/conversations/{cid}/approve", headers=MGMT),
+    )
+    assert {r.status_code for r in results} == {200}
+    assert sum(1 for r in results if r.json().get("replayed")) == 1
+    leads = (await client.get("/v1/leads", params={"company": company},
+                              headers=RECORDER)).json()
+    assert len(leads["items"]) == 1        # one lead, not two
+
+
+async def test_parallel_duplicate_captures_replay_not_500(client: AsyncClient):
+    """Two simultaneous retries of the same upload race the existence check;
+    the unique constraint keeps the data single and the loser replays."""
+    import asyncio
+    cap = f"race-{uuid.uuid4()}"
+    body = {"recording_mode": "post_meeting", "capture_id": cap}
+    results = await asyncio.gather(
+        client.post("/v1/vox/conversations", json=body, headers=RECORDER),
+        client.post("/v1/vox/conversations", json=body, headers=RECORDER),
+    )
+    assert all(r.status_code == 201 for r in results), [r.text for r in results]
+    ids = {r.json()["id"] for r in results}
+    assert len(ids) == 1                   # same conversation for both

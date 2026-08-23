@@ -133,15 +133,21 @@ async def _use_cases_of(ctx: RequestContext, ids: list[uuid.UUID]) -> dict[str, 
     return out
 
 
-async def _get_row(ctx: RequestContext, conversation_id: str) -> VoxConversation:
+async def _get_row(ctx: RequestContext, conversation_id: str,
+                   *, for_update: bool = False) -> VoxConversation:
+    """``for_update=True`` takes the row lock, so two simultaneous mutations of
+    the same conversation serialize and the second SEES the first's outcome
+    (idempotent replay) instead of racing it — the concurrency finding was two
+    parallel approves both materialising the same proposed lead."""
     try:
         cid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise NotFoundError("No such conversation.") from exc
-    row = (await ctx.session.execute(
-        select(VoxConversation).where(VoxConversation.id == cid,
-                                      VoxConversation.tenant_id == ctx.tenant_id)
-    )).scalar_one_or_none()
+    stmt = select(VoxConversation).where(VoxConversation.id == cid,
+                                         VoxConversation.tenant_id == ctx.tenant_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    row = (await ctx.session.execute(stmt)).scalar_one_or_none()
     if row is None:
         raise NotFoundError("No such conversation.")
     return row
@@ -254,7 +260,23 @@ async def create_conversation(payload: ConversationIn,
         created_by=ctx.actor,
     )
     ctx.session.add(row)
-    await ctx.session.flush()
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await ctx.session.flush()
+    except IntegrityError:
+        # Two simultaneous retries of the same upload raced the existence check.
+        # The unique (tenant, capture_id) constraint kept the data single — the
+        # loser REPLAYS the winner's row instead of surfacing a 500.
+        await ctx.session.rollback()
+        if payload.capture_id:
+            existing = (await ctx.session.execute(
+                select(VoxConversation).where(
+                    VoxConversation.tenant_id == ctx.tenant_id,
+                    VoxConversation.capture_id == payload.capture_id)
+            )).scalar_one_or_none()
+            if existing is not None:
+                return {**_row_dict(existing, full=False), "replayed": True}
+        raise
     return _row_dict(row, full=False)
 
 
@@ -360,7 +382,7 @@ class PipelineIn(BaseModel):
 @router.patch("/v1/vox/conversations/{conversation_id}/pipeline")
 async def advance_pipeline(conversation_id: str, payload: PipelineIn,
                            ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
-    row = await _get_row(ctx, conversation_id)
+    row = await _get_row(ctx, conversation_id, for_update=True)
     if row.erased_at is not None:
         raise ConflictError("This conversation was erased; its content cannot return.")
 
@@ -441,7 +463,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     """ALL post-AI changes flow through here, in one transaction: the JSONB, the
     denormalised columns, the use-case join rows and one audit row per change move
     together or not at all (the spec's 12.3)."""
-    row = await _get_row(ctx, conversation_id)
+    row = await _get_row(ctx, conversation_id, for_update=True)
     if not _may_edit(ctx, row):
         raise ForbiddenError("Only the recorder or Management/Admin may edit this record.")
     if row.erased_at is not None:
@@ -545,7 +567,7 @@ async def regenerate_conversation(conversation_id: str,
     verbatim transcript never changes. Cells the reviewer explicitly
     overrode (user_override) are stashed on the row and re-applied when the
     fresh report lands, so their work survives the rebuild."""
-    row = await _get_row(ctx, conversation_id)
+    row = await _get_row(ctx, conversation_id, for_update=True)
     if not _may_edit(ctx, row):
         raise ForbiddenError("Only the recorder or Management/Admin may regenerate this record.")
     if row.erased_at is not None:
@@ -582,7 +604,7 @@ async def regenerate_conversation(conversation_id: str,
 @router.post("/v1/vox/conversations/{conversation_id}/approve")
 async def approve_conversation(conversation_id: str,
                                ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
-    row = await _get_row(ctx, conversation_id)
+    row = await _get_row(ctx, conversation_id, for_update=True)
     if not _may_edit(ctx, row):
         raise ForbiddenError("Only the recorder or Management/Admin may approve this record.")
     if row.status == "submitted":
@@ -640,7 +662,7 @@ async def erase_conversation(conversation_id: str,
     recorder's draft, so the recorder (or Management/Admin) may delete it.
     AFTER approval it is a firm record, and only Admin erasure — the
     authorised-request path — can remove its content."""
-    row = await _get_row(ctx, conversation_id)
+    row = await _get_row(ctx, conversation_id, for_update=True)
     if ctx.user is not None:
         roles = ctx.user.roles or set()
         if "Admin" not in roles:

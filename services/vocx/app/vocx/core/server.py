@@ -92,6 +92,15 @@ class VocxApp:
         self._vox_runner = None
         self._vox_inflight: set[str] = set()
         self._vox_lock = __import__("threading").Lock()
+        # Concurrency ceiling for pipeline WORK (transcription + structuring are
+        # CPU/API-heavy). Take 151 spawns 151 threads either way — cheap, blocked —
+        # but only this many run at once; the rest hold in `queued`/`processing`,
+        # which the status machine, Queue screen and resume logic already treat as
+        # normal life. Size to the box: ~half the cores when STT runs in-process
+        # (default 3 suits an 8-vCPU host sharing the whole stack), more when STT
+        # is a remote service.
+        workers = int(os.environ.get("VOCX_PIPELINE_WORKERS", "3") or 3)
+        self._vox_workers = __import__("threading").BoundedSemaphore(max(1, workers))
 
     def transcriber(self):
         if self._transcriber is None:
@@ -636,7 +645,9 @@ class VocxApp:
 
         def _work():
             try:
-                self.vox_runner().process(cid)
+                # The 202 has already been returned; waiting here is the queue.
+                with self._vox_workers:
+                    self.vox_runner().process(cid)
             except Exception:  # noqa: BLE001 — the runner logs; the set must clear
                 self.log.exception("VOX pipeline run for %s crashed", cid)
             finally:
