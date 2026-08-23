@@ -80,6 +80,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [linkThenApprove, setLinkThenApprove] = useState(false);
   /** The follow-up card's outcome line ("On your calendar", auth guidance…). */
   const [fuMsg, setFuMsg] = useState('');
+  /** Success collapses the card's actions to Done — a second Add would create
+   *  a DUPLICATE calendar event (Google's insert is not idempotent). */
+  const [fuDone, setFuDone] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(dirty);
@@ -386,6 +389,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       });
       if (r.data?.ok) {
         setFuMsg('On your calendar · reminder set 1 day before');
+        setFuDone(true);
+        // the job is done — show the confirmation for a beat, then leave on
+        // our own (field feedback: "I had to exit manually")
+        setTimeout(onBack, 2000);
       } else if (r.data?.needs_auth) {
         window.open(`${vocxClient.defaults.baseURL}${r.data.auth_url}`, '_blank');
         downloadIcs();
@@ -669,13 +676,21 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               <div className="fu-row"><span className="k">With</span><span className="v">{(((common.attendees_counterparty as any)?.value || [])[0]) || '—'}</span></div>
               <div className="fu-row"><span className="k">Reminder</span><span className="v">1 day before</span></div>
               {fuMsg && <div style={{ fontSize: 12, color: 'var(--accent)', margin: '8px 0 2px' }}>{fuMsg}</div>}
-              <div className="fu-actions">
-                <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={onBack}>Skip</button>
-                <button className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={busy}
-                  onClick={() => void addToCalendar()}>
-                  <Ic i="i-cal" /> Add to Calendar
-                </button>
-              </div>
+              {fuDone ? (
+                <div className="fu-actions">
+                  <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onBack}>
+                    <Ic i="i-check" /> Done — back to Memory
+                  </button>
+                </div>
+              ) : (
+                <div className="fu-actions">
+                  <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={onBack}>Skip</button>
+                  <button className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={busy}
+                    onClick={() => void addToCalendar()}>
+                    <Ic i="i-cal" /> Add to Calendar
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {!followUp && (
