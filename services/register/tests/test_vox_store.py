@@ -435,3 +435,21 @@ async def test_transcript_correction_refused_after_approval(client: AsyncClient)
     assert r.status_code == 409
     r = await client.post(f"/v1/vox/conversations/{cid}/regenerate", headers=RECORDER)
     assert r.status_code == 409
+
+
+async def test_list_filters_by_lead_for_the_lead_only_dossier(client: AsyncClient):
+    """A company that is still lead-only has no entity — its dossier is keyed by
+    the lead, so the list must filter by lead_id."""
+    lead = await client.post("/v1/leads", json={"company": f"LeadOnly {uuid.uuid4()}"},
+                             headers=MGMT)
+    assert lead.status_code == 201
+    lid = lead.json()["id"]
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                      json={"lead_id": lid}, headers=RECORDER)
+    await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    got = (await client.get("/v1/vox/conversations",
+                            params={"lead_id": lid, "status": "submitted"},
+                            headers=RECORDER)).json()
+    assert [i["id"] for i in got["items"]] == [row["id"]]

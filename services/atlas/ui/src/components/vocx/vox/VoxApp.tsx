@@ -20,7 +20,7 @@ import VoxReviewScreen from './VoxReviewScreen';
 import { VOX_SPRITE } from './sprite';
 import './voxMock.css';
 
-export type VoxScreen = 'memory' | 'all' | 'record' | 'review' | 'queue'
+export type VoxScreen = 'memory' | 'record' | 'review' | 'queue'
   | 'dossier' | 'legacy';
 
 export const Ic = ({ i, style }: { i: string; style?: React.CSSProperties }) => (
@@ -119,7 +119,7 @@ export function useNames(items: VoxConversation[]) {
 function BottomNav({ screen, queueCount, go }: {
   screen: VoxScreen; queueCount: number; go: (s: VoxScreen) => void;
 }) {
-  const memoryish = ['memory', 'all', 'dossier', 'legacy'].includes(screen);
+  const memoryish = ['memory', 'dossier', 'legacy'].includes(screen);
   return (
     <div className="bottom-nav">
       <div className={`bn-item${screen === 'record' ? ' active' : ''}`} onClick={() => go('record')}>
@@ -141,17 +141,38 @@ function BottomNav({ screen, queueCount, go }: {
 function MemoryScreen({ go, openConversation, openDossier }: {
   go: (s: VoxScreen) => void;
   openConversation: (id: string) => void;
-  openDossier: (entityId: string) => void;
+  openDossier: (subject: { entityId?: string; leadId?: string }) => void;
 }) {
   const { user } = useAuth();
   const [items, setItems] = useState<VoxConversation[]>([]);
   const [q, setQ] = useState('');
-  const names = useNames(items);
+  const [results, setResults] = useState<VoxConversation[] | null>(null);
+  const names = useNames(results ?? items);
   useEffect(() => {
-    // your desk, not the firm's: Recent shows YOUR recordings; the full shared
-    // memory (approved, everyone) lives one tap away in All conversations
+    // your desk, not the firm's: Recent shows YOUR recordings; a company's full
+    // story lives in its dossier, searching reaches the whole firm's memory
     void voxService.list({ mine: true, limit: 6 }).then((r) => setItems(r.items)).catch(() => {});
   }, []);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setResults(null); return; }
+    const t = setTimeout(async () => {
+      try {
+        // the firm's memory: everything of YOURS + everyone's APPROVED record —
+        // colleagues' drafts stay out of search the same way they stay out of feeds
+        const [mine, firm] = await Promise.all([
+          voxService.list({ q: term, mine: true, limit: 30 }),
+          voxService.list({ q: term, status: 'submitted', limit: 30 }),
+        ]);
+        const seen = new Set<string>();
+        const merged = [...mine.items, ...firm.items]
+          .filter((c) => !seen.has(c.id) && seen.add(c.id))
+          .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        setResults(merged);
+      } catch { setResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
   const now = new Date();
   const greet = now.getHours() < 12 ? 'Morning' : now.getHours() < 17 ? 'Afternoon' : 'Evening';
   return (
@@ -171,15 +192,20 @@ function MemoryScreen({ go, openConversation, openDossier }: {
       <div className="memory-search">
         <Ic i="i-search" />
         <input placeholder="Search every Evam conversation…" value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { sessionStorage.setItem('vox.q', q); go('all'); } }} />
+          onChange={(e) => setQ(e.target.value)} />
       </div>
-      <div className="section-h"><span>Recent</span><a onClick={() => { sessionStorage.removeItem('vox.q'); go('all'); }}>See all →</a></div>
-      {items.map((c) => (
+      <div className="section-h">
+        <span>{results !== null ? `Results · ${results.length}` : 'Recent'}</span>
+        {results !== null && <a onClick={() => setQ('')}>Clear ×</a>}
+      </div>
+      {(results ?? items).map((c) => (
         <div key={c.id} className="conv-card" onClick={() => openConversation(c.id)}>
           <div className="cc-top">
             <div className="cc-co" onClick={(e) => {
-              if (c.entity_id) { e.stopPropagation(); openDossier(c.entity_id); }
+              if (c.entity_id || c.lead_id) {
+                e.stopPropagation();
+                openDossier(c.entity_id ? { entityId: c.entity_id } : { leadId: c.lead_id! });
+              }
             }}>{titleOf(c, names)}</div>
             <div className="cc-time">{timeLabel(c.created_at)}</div>
           </div>
@@ -187,99 +213,15 @@ function MemoryScreen({ go, openConversation, openDossier }: {
           <ConvChips c={c} />
         </div>
       ))}
-      {!items.length && (
-        <div className="conv-card"><div className="cc-snip">Nothing yet — the firm remembers what gets recorded.</div></div>
+      {!(results ?? items).length && (
+        <div className="conv-card"><div className="cc-snip">
+          {results !== null ? 'No conversation matches that.' : 'Nothing yet — the firm remembers what gets recorded.'}
+        </div></div>
       )}
       <div className="section-h" style={{ marginTop: 18 }}>
         <span />
         <a onClick={() => go('legacy')}>Legacy reports →</a>
       </div>
-    </div>
-  );
-}
-
-function AllScreen({ go, openConversation, openDossier }: {
-  go: (s: VoxScreen) => void;
-  openConversation: (id: string) => void;
-  openDossier: (entityId: string) => void;
-}) {
-  const [items, setItems] = useState<VoxConversation[]>([]);
-  const [uc, setUc] = useState('');
-  // Mine is the default desk; Everyone is the firm's shared memory and shows
-  // the APPROVED record — colleagues' drafts stay out of the feed unless the
-  // reader explicitly widens to in-progress (default, not a wall).
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
-  const [inflight, setInflight] = useState(false);
-  const [q, setQ] = useState(() => sessionStorage.getItem('vox.q') || '');
-  const names = useNames(items);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      void voxService.list({ q: q.trim() || undefined, use_case: uc || undefined,
-        mine: scope === 'mine',
-        status: scope === 'all' && !inflight ? 'submitted' : undefined,
-        limit: 60 }).then((r) => setItems(r.items)).catch(() => {});
-    }, q ? 300 : 0);
-    return () => clearTimeout(t);
-  }, [q, uc, scope, inflight]);
-  const groups = useMemo(() => {
-    const by: { head: string; rows: VoxConversation[] }[] = [];
-    for (const c of items) {
-      const head = dayHead(c.created_at);
-      const last = by[by.length - 1];
-      if (last && last.head === head) last.rows.push(c);
-      else by.push({ head, rows: [c] });
-    }
-    return by;
-  }, [items]);
-  const UCS = ['lending', 'syndication', 'asset_monetisation', 'credit_diligence'];
-  return (
-    <div className="app-body">
-      <button className="review-back" onClick={() => go('memory')}>‹ Memory</button>
-      <div className="home-greet" style={{ paddingBottom: 12 }}>
-        <div className="small">Every conversation · newest first</div>
-        <div className="big">All conversations</div>
-      </div>
-      <div className="memory-search">
-        <Ic i="i-search" />
-        <input placeholder="Search every Evam conversation…" value={q}
-          onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div className="filter-row">
-        <div className={`filter-pill${scope === 'mine' ? ' active' : ''}`}
-          onClick={() => setScope('mine')}>Mine</div>
-        <div className={`filter-pill${scope === 'all' ? ' active' : ''}`}
-          onClick={() => setScope('all')}>Everyone</div>
-        {scope === 'all' && (
-          <div className={`filter-pill${inflight ? ' active' : ''}`}
-            onClick={() => setInflight((v) => !v)}
-            title="Everyone shows approved records; widen to see in-progress items too">
-            + in-progress</div>
-        )}
-        {UCS.map((u) => (
-          <div key={u} className={`filter-pill${uc === u ? ' active' : ''}`}
-            onClick={() => setUc(uc === u ? '' : u)}>{UC_SHORT[u]}</div>
-        ))}
-      </div>
-      {groups.map((g) => (
-        <div key={g.head}>
-          <div className="month-head">{g.head}</div>
-          {g.rows.map((c) => (
-            <div key={c.id} className="conv-card" onClick={() => openConversation(c.id)}>
-              <div className="cc-top">
-                <div className="cc-co" onClick={(e) => {
-                  if (c.entity_id) { e.stopPropagation(); openDossier(c.entity_id); }
-                }}>{titleOf(c, names)}</div>
-                <div className="cc-time">{timeLabel(c.created_at)?.replace(/^Today · /, '')} · {(c.recorder_name || c.recorder_email).split(' ')[0]}</div>
-              </div>
-              <div className="cc-snip">{snipOf(c)}</div>
-              <ConvChips c={c} />
-            </div>
-          ))}
-        </div>
-      ))}
-      {!items.length && (
-        <div className="conv-card"><div className="cc-snip">{q ? 'No matches — an empty result is a real answer.' : 'Nothing yet.'}</div></div>
-      )}
     </div>
   );
 }
@@ -332,22 +274,31 @@ function QueueScreen({ go, openConversation }: {
   );
 }
 
-function DossierScreen({ entityId, go, openConversation }: {
-  entityId: string;
+function DossierScreen({ subject, go, openConversation }: {
+  /** A client company (entityId) — or a company that is still LEAD-ONLY, whose
+   *  story is keyed by the lead until conversion creates the client. */
+  subject: { entityId?: string; leadId?: string };
   go: (s: VoxScreen) => void;
   openConversation: (id: string) => void;
 }) {
   const [entity, setEntity] = useState<any>(null);
+  const [lead, setLead] = useState<any>(null);
   const [items, setItems] = useState<VoxConversation[]>([]);
   const [uc, setUc] = useState('');
   useEffect(() => {
-    void api.get<any>(`/entities/${entityId}`).then(setEntity).catch(() => {});
-  }, [entityId]);
+    setEntity(null); setLead(null);
+    if (subject.entityId) {
+      void api.get<any>(`/entities/${subject.entityId}`).then(setEntity).catch(() => {});
+    } else if (subject.leadId) {
+      void api.get<any>(`/leads/${subject.leadId}`).then(setLead).catch(() => {});
+    }
+  }, [subject.entityId, subject.leadId]);
   useEffect(() => {
-    void voxService.list({ entity_id: entityId, use_case: uc || undefined,
-      status: 'submitted', limit: 100 })
+    void voxService.list({
+      entity_id: subject.entityId || undefined, lead_id: subject.leadId || undefined,
+      use_case: uc || undefined, status: 'submitted', limit: 100 })
       .then((r) => setItems(r.items)).catch(() => {});
-  }, [entityId, uc]);
+  }, [subject.entityId, subject.leadId, uc]);
   const team = new Set(items.map((c) => c.recorder_email)).size;
   const monthsSince = items.length
     ? Math.max(1, Math.round((Date.now() - new Date(items[items.length - 1].created_at || Date.now()).getTime()) / (30 * 86400e3)))
@@ -375,8 +326,15 @@ function DossierScreen({ entityId, go, openConversation }: {
         ))}
       </div>
       <div className="co-head">
-        <div className="co-name">{entity?.display_name || entity?.legal_name || '…'}</div>
-        <div className="co-meta">{[entity?.code, entity?.sector, entity?.state].filter(Boolean).join(' · ')}</div>
+        <div className="co-name">{entity?.display_name || entity?.legal_name || lead?.company || '…'}</div>
+        <div className="co-meta">
+          {entity
+            ? [entity.code, entity.sector, entity.state].filter(Boolean).join(' · ')
+            : lead
+              ? [lead.lead_no, lead.sector, lead.rm && `RM ${lead.rm}`, lead.temperature,
+                 'Lead — not yet a client'].filter(Boolean).join(' · ')
+              : ''}
+        </div>
       </div>
       <div className="co-stats">
         <div className="co-stat"><span className="n">{items.length}</span>Convos</div>
@@ -408,7 +366,8 @@ function DossierScreen({ entityId, go, openConversation }: {
 export default function VoxApp() {
   const [screen, setScreen] = useState<VoxScreen>('memory');
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [dossierEntity, setDossierEntity] = useState<string | null>(null);
+  const [dossierSubject, setDossierSubject] =
+    useState<{ entityId?: string; leadId?: string } | null>(null);
   const [queueCount, setQueueCount] = useState(0);
 
   const refreshQueueCount = useCallback(() => {
@@ -419,9 +378,12 @@ export default function VoxApp() {
 
   const go = (s: VoxScreen) => setScreen(s);
   const openConversation = (id: string) => { setConversationId(id); setScreen('review'); };
-  const openDossier = (entityId: string) => { setDossierEntity(entityId); setScreen('dossier'); };
+  const openDossier = (subject: { entityId?: string; leadId?: string }) => {
+    if (!subject.entityId && !subject.leadId) return;
+    setDossierSubject(subject); setScreen('dossier');
+  };
 
-  const showTabs = ['memory', 'all', 'queue', 'dossier', 'legacy'].includes(screen);
+  const showTabs = ['memory', 'queue', 'dossier', 'legacy'].includes(screen);
 
   return (
     <div className="vox-app">
@@ -429,12 +391,10 @@ export default function VoxApp() {
       <div className="screen active" data-screen={screen}>
         {screen === 'memory' && (
           <MemoryScreen go={go} openConversation={openConversation} openDossier={openDossier} />)}
-        {screen === 'all' && (
-          <AllScreen go={go} openConversation={openConversation} openDossier={openDossier} />)}
         {screen === 'queue' && (
           <QueueScreen go={go} openConversation={openConversation} />)}
-        {screen === 'dossier' && dossierEntity && (
-          <DossierScreen entityId={dossierEntity} go={go} openConversation={openConversation} />)}
+        {screen === 'dossier' && dossierSubject && (
+          <DossierScreen subject={dossierSubject} go={go} openConversation={openConversation} />)}
         {screen === 'legacy' && (
           <div className="app-body">
             <button className="review-back" onClick={() => go('memory')}>‹ Memory</button>

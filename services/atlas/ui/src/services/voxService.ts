@@ -121,7 +121,7 @@ export const voxService = {
 
   list(params: {
     status?: string; mine?: boolean; use_case?: string; q?: string;
-    entity_id?: string; date_from?: string; date_to?: string;
+    entity_id?: string; lead_id?: string; date_from?: string; date_to?: string;
     limit?: number; offset?: number;
   } = {}): Promise<{ items: VoxConversation[]; total: number }> {
     const clean = Object.fromEntries(

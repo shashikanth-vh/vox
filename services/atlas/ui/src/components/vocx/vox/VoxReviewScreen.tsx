@@ -35,7 +35,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   conversationId: string;
   onBack: () => void;
   onQueue: () => void;
-  onDossier: (entityId: string) => void;
+  onDossier: (subject: { entityId?: string; leadId?: string }) => void;
   onSaved: (v: boolean) => void;
   onFiled: () => void;
 }) {
@@ -784,7 +784,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             EDITING AN APPROVED RECORD — EVERY CHANGE IS LOGGED
           </div>
         )}
-        <div className="review-company" onClick={() => row.entity_id && onDossier(row.entity_id)}>
+        <div className="review-company" onClick={() => {
+          if (row.entity_id) onDossier({ entityId: row.entity_id });
+          else if (row.lead_id) onDossier({ leadId: row.lead_id });
+        }}>
           {entityName || leadName || row.proposed_lead_company || row.entity_candidates?.[0] || 'Unlinked conversation'}
           {!readOnly && (
             <span style={{ fontSize: 15, color: 'var(--muted)', marginLeft: 8, cursor: 'pointer' }}

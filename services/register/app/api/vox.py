@@ -265,6 +265,7 @@ async def list_conversations(
         recorder: str | None = Query(default=None),
         mine: bool = Query(default=False),
         entity_id: str | None = Query(default=None),
+        lead_id: str | None = Query(default=None),
         use_case: str | None = Query(default=None),
         q: str | None = Query(default=None, max_length=200),
         date_from: date | None = Query(default=None),
@@ -290,6 +291,10 @@ async def list_conversations(
         stmt = stmt.where(func.lower(VoxConversation.recorder_email) == recorder.lower())
     if entity_id:
         stmt = stmt.where(VoxConversation.entity_id == uuid.UUID(entity_id))
+    if lead_id:
+        # the dossier for a company that is still lead-only — no entity exists
+        # yet, so its story is keyed by the lead itself
+        stmt = stmt.where(VoxConversation.lead_id == uuid.UUID(lead_id))
     if use_case:
         if use_case not in _USE_CASES:
             raise ValidationAppError(f"use_case must be among {sorted(_USE_CASES)}")
