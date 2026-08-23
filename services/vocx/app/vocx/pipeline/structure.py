@@ -135,14 +135,22 @@ def structure_transcript(
     ask_model: Callable[[str, str, str], str],
     capture_ts: str | None = None,
     registry_version: str | None = None,
+    known_names: str | None = None,
 ) -> dict[str, Any]:
     """Run the structuring stage. ``ask_model(model, system, user)`` is injected so
     the pipeline is testable without a network and swappable without a rewrite.
 
+    ``known_names`` is the rendered KNOWN NAMES glossary block (see
+    pipeline.glossary): runtime context that lets the model repair STT-mangled
+    proper nouns. It rides in the user message so the canonical prompt — and
+    prompt_version — stay untouched.
+
     Returns {"report", "prompt_version", "registry_version", "model"}."""
     model = MODEL_LIVE if mode == "live" else MODEL_NOTE
     system = build_prompt(registry_version)
-    user = (f"Capture timestamp: {capture_ts or 'unknown'}\n\nTRANSCRIPT:\n{transcript}")
+    context = f"{known_names}\n\n" if known_names else ""
+    user = (f"Capture timestamp: {capture_ts or 'unknown'}\n\n"
+            f"{context}TRANSCRIPT:\n{transcript}")
 
     # The forced-tool-call schema: callables that accept it get the API's own
     # server-side validation (the outer wall); plain callables run text-only.

@@ -507,8 +507,16 @@ class VocxApp:
                 msg = _create()
                 return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
 
+            def known_names() -> str | None:
+                # Lender roster + the tenant's live company names (entities and
+                # open leads), so structuring can repair STT-mangled spellings.
+                from ..pipeline.glossary import build_known_names_block
+                names = [c.name for c in self.store.candidates() if c.name]
+                return build_known_names_block(names)
+
             self._vox_runner = PipelineRunner(register, transcribe, ask_model,
-                                              alert=lambda m: self.log.error("ADMIN ALERT: %s", m))
+                                              alert=lambda m: self.log.error("ADMIN ALERT: %s", m),
+                                              known_names=known_names)
         return self._vox_runner
 
     def _vox_capture(self, query, body: bytes):

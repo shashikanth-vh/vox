@@ -36,6 +36,10 @@ export interface VoxConversation {
   processing_error?: string | null;
   retry_count?: number;
   duration_seconds?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Rows in the append-only audit trail — served on the single-GET only. */
+  edits_count?: number;
   sector?: string | null;
   subsector?: string | null;
   meeting_date?: string | null;

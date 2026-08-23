@@ -89,6 +89,8 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         "processing_error": c.processing_error,
         "retry_count": c.retry_count,
         "duration_seconds": c.duration_seconds,
+        "latitude": c.latitude,
+        "longitude": c.longitude,
         "sector": c.sector,
         "subsector": c.subsector,
         "meeting_date": c.meeting_date.isoformat() if c.meeting_date else None,
@@ -313,7 +315,12 @@ async def get_conversation(conversation_id: str,
                            ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     row = await _get_row(ctx, conversation_id)
     tags = await _use_cases_of(ctx, [row.id])
-    return {**_row_dict(row, full=True), "use_cases": tags.get(str(row.id), [])}
+    # The audit strip's "Edits: N" — cheap COUNT on the append-only trail.
+    edits = (await ctx.session.execute(
+        select(func.count()).select_from(VoxConversationEdit)
+        .where(VoxConversationEdit.conversation_id == row.id))).scalar() or 0
+    return {**_row_dict(row, full=True), "use_cases": tags.get(str(row.id), []),
+            "edits_count": int(edits)}
 
 
 # ------------------------------------------------------------- the pipeline writes

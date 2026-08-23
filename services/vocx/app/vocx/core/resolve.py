@@ -12,7 +12,15 @@ Matching cascade, highest wins, evaluated per candidate over every spoken form
     exact       normName equal ................................ 1.00
     containment one normName contains the other ............... 0.85
     fuzzy       token-set ratio >= VOX_FUZZY_MIN .............. 0.75
+    phonetic    per-token sound-alike >= VOX_PHONETIC_MIN ..... 0.70
 Own-client boost: +VOX_OWN_CLIENT_BOOST if the candidate's RM is the speaker.
+
+The phonetic tier exists because the transcripts come from speech: a field
+recording of "Suryodaya" routinely arrives as "Sarvodaya", and the token-set
+ratio cannot see that they are the same word mis-heard. Its score (0.70) sits
+deliberately BELOW the confident-match threshold and ABOVE the new-lead
+ceiling, so a sound-alike is always surfaced as a suggestion for a human to
+confirm — never auto-linked, never silently dropped to "new company".
 
 Confidence gate (entity level):
     confident match  -> top >= VOX_ENTITY_MATCH_MIN AND gap-to-2nd >= gap
@@ -94,6 +102,44 @@ def token_set_ratio(a: str, b: str) -> float:
     return max(dice, seq)
 
 
+# Consonant skeleton: first character kept, later vowels dropped. STT mangles
+# vowels far more often than consonants ("Suryodaya" -> "Sarvodaya"), so two
+# skeletons agreeing is strong evidence of the same spoken word.
+_LATER_VOWELS = re.compile(r"(?<=.)[aeiou]")
+
+
+def _skeleton(tok: str) -> str:
+    return _LATER_VOWELS.sub("", tok)
+
+
+def _sound_alike(a: str, b: str) -> float:
+    """How likely two single tokens are the same word mis-heard: the better of
+    the raw character ratio and the consonant-skeleton ratio."""
+    raw = SequenceMatcher(None, a, b).ratio()
+    sk = SequenceMatcher(None, _skeleton(a), _skeleton(b)).ratio()
+    return max(raw, sk)
+
+
+def phonetic_ratio(spoken: str, cand_name: str) -> float:
+    """Mean best sound-alike score of each SPOKEN token against the candidate's
+    tokens. Averaged over the spoken side only, because a spoken form is often a
+    fragment of the full legal name ("Sarvodaya" vs "Suryodaya EPC Pvt Ltd") and
+    the extra candidate tokens must not dilute a clean per-word hit."""
+    ts, tc = tokens(spoken), tokens(cand_name)
+    if not ts or not tc:
+        return 0.0
+    per_token = sum(max(_sound_alike(s, c) for c in tc) for s in ts) / len(ts)
+    # STT also splits or merges words ("Chikballapur" -> "Chip Balapur"), which
+    # per-token pairing cannot see — so the space-stripped spoken join is scored
+    # against every contiguous span of candidate tokens ("chikballapur", then
+    # "chikballapursolar", ...) and the best span wins. Candidate names are a
+    # handful of tokens, so the span set stays tiny.
+    sj = "".join(ts)
+    joined = max(_sound_alike(sj, "".join(tc[i:j]))
+                 for i in range(len(tc)) for j in range(i + 1, len(tc) + 1))
+    return max(per_token, joined)
+
+
 class EntityResolver:
     def __init__(self, store: AtlasStore, config: dict[str, Any] | None = None):
         self.store = store
@@ -105,9 +151,11 @@ class EntityResolver:
         self.new_lead_max = th.get("VOX_NEW_LEAD_MAX", 0.55)
         self.boost = th.get("VOX_OWN_CLIENT_BOOST", 0.10)
         self.fuzzy_min = th.get("VOX_FUZZY_MIN", 0.80)
+        self.phonetic_min = th.get("VOX_PHONETIC_MIN", 0.78)
         self.s_exact = sc.get("exact", 1.0)
         self.s_contain = sc.get("containment", 0.85)
         self.s_fuzzy = sc.get("fuzzy", 0.75)
+        self.s_phonetic = sc.get("phonetic", 0.70)
         self._cands = store.candidates()
 
     # ---- per-candidate scoring --------------------------------------------
@@ -131,6 +179,10 @@ class EntityResolver:
             raw_fuzzy = max(raw_fuzzy, tr)
             if tr >= self.fuzzy_min and self.s_fuzzy > best:
                 best, how = self.s_fuzzy, "fuzzy"
+                continue
+            pr = phonetic_ratio(form, cand.name)
+            if pr >= self.phonetic_min and self.s_phonetic > best:
+                best, how = self.s_phonetic, "phonetic"
         return {"base": best, "how": how, "fuzzy_ratio": round(raw_fuzzy, 3)}
 
     # ---- public resolve ----------------------------------------------------

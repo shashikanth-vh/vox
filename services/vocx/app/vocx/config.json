@@ -9,12 +9,14 @@
     "VOX_ENTITY_AMBIGUITY_GAP": 0.1,
     "VOX_NEW_LEAD_MAX": 0.55,
     "VOX_OWN_CLIENT_BOOST": 0.1,
-    "VOX_FUZZY_MIN": 0.8
+    "VOX_FUZZY_MIN": 0.8,
+    "VOX_PHONETIC_MIN": 0.78
   },
   "scores": {
     "exact": 1.0,
     "containment": 0.85,
-    "fuzzy": 0.75
+    "fuzzy": 0.75,
+    "phonetic": 0.7
   },
   "ids": {
     "new_lead_prefix": "LD-V",
@@ -32,7 +34,7 @@
     "client_secret_file": "",
     "redirect_uri": "",
     "timezone": "Asia/Kolkata",
-    "_note": "drive_enabled off by default — the ATLAS log already carries the interaction; Drive only adds a note document + team folder + transcript archive. Turn it on (and add the drive scope below) if you want those.",
+    "_note": "drive_enabled off by default \u2014 the ATLAS log already carries the interaction; Drive only adds a note document + team folder + transcript archive. Turn it on (and add the drive scope below) if you want those.",
     "calendar_enabled": true,
     "drive_enabled": false,
     "scopes": [
@@ -49,7 +51,7 @@
     "tokens_dir": "vocx_tokens"
   },
   "stt": {
-    "_comment": "Speech-to-text. backend: api (the dedicated PRISM STT service — the compose/Helm default) | faster_whisper (in-process; needs the [stt] extra) | stub (tests). task translate = capture in ANY language, store ENGLISH (Whisper translates; the spoken language is still recorded). model_size only applies in-process; the STT service bakes its own model.",
+    "_comment": "Speech-to-text. backend: api (the dedicated PRISM STT service \u2014 the compose/Helm default) | faster_whisper (in-process; needs the [stt] extra) | stub (tests). task translate = capture in ANY language, store ENGLISH (Whisper translates; the spoken language is still recorded). model_size only applies in-process; the STT service bakes its own model.",
     "backend": "faster_whisper",
     "task": "translate",
     "model_size": "small",
@@ -103,7 +105,7 @@
       "offtaker"
     ]
   },
-  "_report_templates_note": "Extra Additional-details fields, composed from the matched business-line template + the matched sector template. axis=business_line matches report.business_line exactly; axis=sector matches if any 'match' token is a substring of report.sector (lowercased). Add/edit freely — the app renders these dynamically. field.type: text (default) | number | date | select(+options).",
+  "_report_templates_note": "Extra Additional-details fields, composed from the matched business-line template + the matched sector template. axis=business_line matches report.business_line exactly; axis=sector matches if any 'match' token is a substring of report.sector (lowercased). Add/edit freely \u2014 the app renders these dynamically. field.type: text (default) | number | date | select(+options).",
   "report_templates": [
     {
       "id": "lending",
@@ -343,8 +345,8 @@
       "Agri / Drone"
     ]
   },
-  "_integration_note": "PRISM VocX defaults. Deployment concerns (Google client secret path, redirect URI, tokens dir, STT backend, Anthropic key) come from VOCX_* / ANTHROPIC_API_KEY env vars via app.vocx.loader — never from this file. Thresholds/templates are tuning, edit freely.",
-  "_stt_vocabulary_note": "stt.vocabulary primes Whisper (initial_prompt) so domain terms and client names are HEARD correctly. VocX appends the live Register client/lead names after these terms (names last — Whisper reads only the prompt's tail). Edit freely; no rebuild needed beyond restart.",
+  "_integration_note": "PRISM VocX defaults. Deployment concerns (Google client secret path, redirect URI, tokens dir, STT backend, Anthropic key) come from VOCX_* / ANTHROPIC_API_KEY env vars via app.vocx.loader \u2014 never from this file. Thresholds/templates are tuning, edit freely.",
+  "_stt_vocabulary_note": "stt.vocabulary primes Whisper (initial_prompt) so domain terms and client names are HEARD correctly. VocX appends the live Register client/lead names after these terms (names last \u2014 Whisper reads only the prompt's tail). Edit freely; no rebuild needed beyond restart.",
   "glossary": [
     "Evam Finance is an Indian climate-finance intermediary. Amounts are in INR; 1 crore (Cr) = 10 million, 1 lakh = 100,000.",
     "Business lines: LENDING (Evam arranges/underwrites debt for a client; stages: Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, Handed Over to Advaya), SYNDICATION (Evam places a client's debt requirement with other lenders/NBFCs/banks; statuses: Deal Sourced, Docs Pending, IM in Prep, IM Circulated, Queries Received, IP Received, Sanctioned, Disbursed), ASSET MONETISATION (selling/monetising operating assets; statuses: Teaser Prepared, Teaser Shared, In Discussion, NBO Received).",
@@ -384,15 +386,15 @@
         },
         "report": {
           "title": "GreenVolt Energy",
-          "summary": "The RM met Suresh of GreenVolt Energy to discuss a ₹40 Cr, 12-year term loan (6-month moratorium) for their 25 MW Karnataka solar project. DSCR is comfortable at 1.4; the CAM goes to credit committee next week.",
+          "summary": "The RM met Suresh of GreenVolt Energy to discuss a \u20b940 Cr, 12-year term loan (6-month moratorium) for their 25 MW Karnataka solar project. DSCR is comfortable at 1.4; the CAM goes to credit committee next week.",
           "key_intel": [
-            "₹40 Cr term loan sought, 12-year tenor with 6-month moratorium (Suresh)",
+            "\u20b940 Cr term loan sought, 12-year tenor with 6-month moratorium (Suresh)",
             "25 MW solar project in Karnataka",
-            "DSCR 1.4 — comfortable coverage",
+            "DSCR 1.4 \u2014 comfortable coverage",
             "CAM to credit committee next week; audited financials due <Thursday resolved>"
           ],
           "loan_product": "Term Loan",
-          "ticket_size": "₹40 Cr",
+          "ticket_size": "\u20b940 Cr",
           "project_type": "Solar",
           "project_size": "25 MW",
           "location": "Karnataka",
@@ -409,7 +411,7 @@
     },
     {
       "label": "syndication lender chase",
-      "transcript": "Quick note — spoke to Axis about the Meghdoot Hydro IM we circulated. Queries came back on the offtaker PPA, they want the discom payment track record. Kotak has gone quiet, chase them Friday. Meghdoot side, nothing new.",
+      "transcript": "Quick note \u2014 spoke to Axis about the Meghdoot Hydro IM we circulated. Queries came back on the offtaker PPA, they want the discom payment track record. Kotak has gone quiet, chase them Friday. Meghdoot side, nothing new.",
       "extraction": {
         "company_mentioned": "Meghdoot Hydro",
         "company_aliases_heard": [
@@ -448,10 +450,10 @@
         },
         "report": {
           "title": "Meghdoot Hydro",
-          "summary": "Syndication update on Meghdoot Hydro: Axis returned queries on the circulated IM (offtaker PPA — they want the discom payment track record); Kotak is unresponsive and will be chased Friday.",
+          "summary": "Syndication update on Meghdoot Hydro: Axis returned queries on the circulated IM (offtaker PPA \u2014 they want the discom payment track record); Kotak is unresponsive and will be chased Friday.",
           "key_intel": [
-            "Axis queries on IM: offtaker PPA — discom payment track record requested",
-            "Kotak silent since IM circulation — chase <Friday resolved>"
+            "Axis queries on IM: offtaker PPA \u2014 discom payment track record requested",
+            "Kotak silent since IM circulation \u2014 chase <Friday resolved>"
           ],
           "business_line": "syndication",
           "opportunity_score": 3
@@ -489,14 +491,14 @@
         },
         "report": {
           "title": "Vertex Renewables",
-          "summary": "The Vertex Renewables CFO wants to monetise their operating 50 MW Tamil Nadu wind portfolio at ~₹300 Cr. Evam prepares the teaser by month end; two InvITs are already circling, so speed matters.",
+          "summary": "The Vertex Renewables CFO wants to monetise their operating 50 MW Tamil Nadu wind portfolio at ~\u20b9300 Cr. Evam prepares the teaser by month end; two InvITs are already circling, so speed matters.",
           "key_intel": [
-            "Monetising operating 50 MW wind portfolio, Tamil Nadu — expectation ~₹300 Cr",
+            "Monetising operating 50 MW wind portfolio, Tamil Nadu \u2014 expectation ~\u20b9300 Cr",
             "Teaser due <month end resolved>",
             "Competitive pressure: two InvITs already engaged"
           ],
           "nuances": [
-            "CFO signalling urgency — competing InvIT interest may compress timeline and pricing leverage"
+            "CFO signalling urgency \u2014 competing InvIT interest may compress timeline and pricing leverage"
           ],
           "project_type": "Wind",
           "project_size": "50 MW",
@@ -516,7 +518,7 @@
     "few_shot": true,
     "structured_output": true
   },
-  "_intelligence_note": "Feature flags for the Batch-1 intelligence upgrades — each independently switchable. In PRISM deployments the ENV VARS win (VOCX_STT_PRIMING, VOCX_EXTRACT_GLOSSARY, VOCX_EXTRACT_FEW_SHOT, VOCX_EXTRACT_STRUCTURED); this block is only the default for standalone/vendored use. Disabling a flag reverts that one feature to pre-Batch-1 behaviour.",
+  "_intelligence_note": "Feature flags for the Batch-1 intelligence upgrades \u2014 each independently switchable. In PRISM deployments the ENV VARS win (VOCX_STT_PRIMING, VOCX_EXTRACT_GLOSSARY, VOCX_EXTRACT_FEW_SHOT, VOCX_EXTRACT_STRUCTURED); this block is only the default for standalone/vendored use. Disabling a flag reverts that one feature to pre-Batch-1 behaviour.",
   "_completeness_note": "What a report must carry before it is filed, and what merely helps. The APPROVE screen reads this: a missing required field is named and blocks the default action; a missing optional one is named and can be waived. Declared here, not in the client, so the bar can be raised without shipping a new UI. 'path' is read from the extraction's report object unless it names another root; kind=list means non-empty.",
   "completeness": [
     {

@@ -413,3 +413,78 @@ def test_the_forced_tool_schema_reaches_a_schema_aware_model():
     lending = sch["properties"]["lending"]
     assert lending["additionalProperties"] is False
     assert "requirement_quantum_cr" in lending["required"]
+
+
+# ---------------------------------------------------------------- known names
+
+def test_known_names_glossary_reaches_the_structuring_prompt():
+    """Field finding six: 'SBI' arrived as 'Isbaya', 'Piramal' as 'Pyramid'.
+    The runner's known-names provider must land in the structuring user
+    message — lender roster, tenant companies, and the correction rules."""
+    seen = {}
+
+    def spy_model(model, system, user):
+        seen["user"] = user
+        return _valid_model_json()
+
+    from app.vocx.pipeline.glossary import build_known_names_block
+    runner = PipelineRunner(
+        FakeRegister(), good_transcribe, spy_model,
+        known_names=lambda: build_known_names_block(["Suryodaya EPC Pvt. Ltd."]))
+    row = runner.process("c1")
+    assert row["status"] == "ready"
+    u = seen["user"]
+    assert "KNOWN NAMES" in u
+    assert "SBI (State Bank of India)" in u
+    assert "Suryodaya EPC Pvt. Ltd." in u
+    assert "interest rate in percent" in u
+    # the transcript itself still travels untouched, after the context
+    assert u.index("KNOWN NAMES") < u.index("TRANSCRIPT:")
+
+
+def test_known_names_provider_failure_never_fails_the_take():
+    """The glossary improves extraction; it must never gate it."""
+    def boom():
+        raise RuntimeError("register temporarily unreachable")
+
+    row = PipelineRunner(FakeRegister(), good_transcribe,
+                         lambda m, s, u: _valid_model_json(),
+                         known_names=boom).process("c1")
+    assert row["status"] == "ready"
+
+
+def test_glossary_block_dedupes_and_caps_company_names():
+    from app.vocx.pipeline.glossary import MAX_COMPANY_NAMES, build_known_names_block
+    block = build_known_names_block(
+        ["Acme", "acme", "", None, *[f"Co {i}" for i in range(MAX_COMPANY_NAMES + 50)]])
+    assert block.count("Acme") == 1
+    assert f"Co {MAX_COMPANY_NAMES - 2}" in block
+    assert f"Co {MAX_COMPANY_NAMES + 20}" not in block
+
+
+# ------------------------------------------------------------- phonetic tier
+
+def test_phonetic_tier_surfaces_the_misheard_company_for_approval():
+    """The Suryodaya field test: STT heard 'Sarvodaya'. Token-set fuzzy cannot
+    see it; the phonetic tier must — as a needs-approval suggestion, never an
+    auto-link and never a silent 'new company'."""
+    from app.vocx.core.atlas import Candidate
+    from app.vocx.core.resolve import EntityResolver
+
+    class OneNameStore:
+        def candidates(self):
+            return [Candidate(ref_id="SURYODAYAEPC", name="Suryodaya EPC Pvt. Ltd.",
+                              kind="client", ref_type="Entity", rm="Ananda H")]
+
+    got = EntityResolver(OneNameStore()).resolve("Sarvodaya")
+    assert got["canonical_name"] == "Suryodaya EPC Pvt. Ltd."
+    assert got["match_type"] == "phonetic"
+    assert got["needs_approval"] is True          # suggested, not auto-linked
+    assert got["is_new_lead"] is False            # and not dropped to new-company
+
+
+def test_phonetic_tier_handles_split_words_and_rejects_strangers():
+    from app.vocx.core.resolve import phonetic_ratio
+    assert phonetic_ratio("Chip Balapur", "Chikballapur Solar Park") >= 0.78
+    assert phonetic_ratio("Meridian Textiles", "Suryodaya EPC") < 0.78
+    assert phonetic_ratio("Tata Power", "Tata Steel") < 0.78

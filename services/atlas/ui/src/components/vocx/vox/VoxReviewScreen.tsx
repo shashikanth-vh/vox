@@ -457,8 +457,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       const closed: string[] = def.closed_set || [];
       return (
         <div className="multi-select">
+          {/* the mock's stylesheet keys the lit state off `.on` (adds the ✓) */}
           {[...closed, ...chosen.filter((c) => !closed.includes(c))].map((c) => (
-            <div key={c} className={`ms-opt${chosen.includes(c) ? ' selected' : ''}`}
+            <div key={c} className={`ms-opt${chosen.includes(c) ? ' on' : ''}`}
               onClick={() => !readOnly && set(chosen.includes(c)
                 ? chosen.filter((x) => x !== c) : [...chosen, c])}>{c.replace(/_/g, ' ')}</div>
           ))}
@@ -797,7 +798,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 </div>
               )}
 
-              {attendees.length > 0 && (
+              {(attendees.length > 0 || row.recorder_email) && (
                 <>
                   <div className="fg-label" style={{ marginTop: 20 }}>Attendees</div>
                   {attendees.map((a) => (
@@ -807,6 +808,20 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                       <span className={`conf-dot ${dotCls((common.attendees_counterparty as any)?.confidence)}`} />
                     </div>
                   ))}
+                  {/* The recorder is in the room too — the blueprint lists them
+                      with a Recorder · Evam byline under the counterparties. */}
+                  {row.recorder_email && (
+                    <div className="attendee-row">
+                      <div className="att-init">
+                        {(row.recorder_name || row.recorder_email).split(/[\s(@]/)[0].slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="att-body">
+                        <div className="att-name">{row.recorder_name || row.recorder_email.split('@')[0]}</div>
+                        <div className="att-role">Recorder · Evam</div>
+                      </div>
+                      <span className="conf-dot high" />
+                    </div>
+                  )}
                 </>
               )}
               {flags.length > 0 && (
@@ -816,7 +831,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               )}
               <div className="audit-strip" style={{ marginTop: 16 }}>
                 <span className="k">Recorded by:</span> {row.recorder_email}<br />
-                <span className="k">Registry:</span> {row.registry_version || '—'} · <span className="k">Prompt:</span> {row.prompt_version || '—'}<br />
+                {row.latitude != null && row.longitude != null && (
+                  <><span className="k">GPS:</span> {Math.abs(row.latitude).toFixed(2)}°{row.latitude >= 0 ? 'N' : 'S'}, {Math.abs(row.longitude).toFixed(2)}°{row.longitude >= 0 ? 'E' : 'W'}<br /></>
+                )}
+                <span className="k">Registry:</span> {row.registry_version || '—'} · <span className="k">Prompt:</span> {row.prompt_version || '—'} · <span className="k">Edits:</span> {row.edits_count ?? 0}<br />
                 <span className="k">Readable by all Evam staff</span>
               </div>
             </div>

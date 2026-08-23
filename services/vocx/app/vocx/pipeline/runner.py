@@ -83,12 +83,17 @@ class PipelineRunner:
     def __init__(self, register, transcribe: Callable[[str], dict],
                  ask_model: Callable[[str, str, str], str],
                  alert: Callable[[str], None] | None = None,
-                 timeouts: dict[str, float] | None = None):
+                 timeouts: dict[str, float] | None = None,
+                 known_names: Callable[[], str | None] | None = None):
         self.register = register
         self.transcribe = transcribe
         self.ask_model = ask_model
         self.alert = alert or (lambda msg: log.error("ADMIN ALERT: %s", msg))
         self.timeouts = {**STAGE_TIMEOUTS, **(timeouts or {})}
+        # Provider of the KNOWN NAMES glossary block (lenders + the tenant's own
+        # company names) handed to structuring. A provider failure must never
+        # fail the pipeline — the glossary improves extraction, it doesn't gate it.
+        self.known_names = known_names
 
     # -------------------------------------------------------------- the one entry
 
@@ -162,6 +167,12 @@ class PipelineRunner:
                       else (row.get("raw_transcript") or ""))
         if not transcript.strip():
             raise StructuringError("structure: the transcript is empty")
+        glossary = None
+        if self.known_names is not None:
+            try:
+                glossary = self.known_names()
+            except Exception as exc:  # noqa: BLE001 — context, not a gate
+                log.warning("known-names provider failed (continuing without): %s", exc)
         t0 = time.monotonic()
         out = _run_with_timeout(
             lambda: structure_transcript(
@@ -169,6 +180,7 @@ class PipelineRunner:
                 mode=row.get("recording_mode") or "post_meeting",
                 ask_model=self.ask_model,
                 capture_ts=row.get("created_at"),
+                known_names=glossary,
             ),
             "structure", self.timeouts["structure"])
         log.info("conversation %s structured by %s in %.1fs",
