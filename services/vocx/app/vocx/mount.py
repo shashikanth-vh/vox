@@ -179,7 +179,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
         "/v1/capture", "/v1/capture_audio", "/v1/commit",
         "/v1/reports", "/v1/reports/get", "/v1/reports/print", "/v1/reports/pdf",
         "/v1/reports/save", "/v1/reports/delete",
-        "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test",
+        "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test", "/v1/vox/follow_up",
         "/v1/suggest", "/v1/template_fill",
     }
 
@@ -226,6 +226,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
         ("/v1/spec", ["GET"], "The field registry + versions (registry-driven renderer)"),
         ("/v1/vox/capture", ["POST"], "Audio in → conversation created → pipeline kicked"),
         ("/v1/vox/process", ["POST"], "Kick or retry processing for a conversation"),
+        ("/v1/vox/follow_up", ["POST"], "Create the detected follow-up on the RM\'s Google Calendar"),
     ]
 
     def _make_handler(route_path: str):

@@ -514,3 +514,33 @@ def test_structuring_prefers_the_corrected_transcript():
     assert "SURYODAYA EPC" in seen["user"]
     assert "sarvodaya" not in seen["user"]
     assert reg.row["raw_transcript"] == "met sarvodaya in whitefield"
+
+
+def test_calendar_event_carries_the_promised_reminder():
+    """The follow-up card says "Reminder · 1 day before" — the event body must
+    actually say it to Google."""
+    from app.vocx.google.workspace import CalendarWriter
+
+    class FakeEvents:
+        def insert(self, calendarId, body):
+            self.body = body
+            class _X:
+                def execute(_s):
+                    return {"id": "e1", "htmlLink": "http://cal/e1", "start": body["start"]}
+            return _X()
+
+    class FakeCal:
+        def __init__(self): self._e = FakeEvents()
+        def events(self): return self._e
+
+    fake = FakeCal()
+    w = CalendarWriter(fake)
+    r = w.create_event("Site visit", "2026-08-28", None, "site", "Chikballapur plot",
+                       reminder_minutes_before=1440)
+    assert r["id"] == "e1"
+    body = fake._e.body
+    assert body["reminders"] == {"useDefault": False,
+                                 "overrides": [{"method": "popup", "minutes": 1440}]}
+    # without the arg, calendar defaults stay untouched
+    w.create_event("Plain", "2026-08-28")
+    assert "reminders" not in fake._e.body

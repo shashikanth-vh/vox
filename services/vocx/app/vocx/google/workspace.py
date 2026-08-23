@@ -114,8 +114,11 @@ class CalendarWriter:
 
     def create_event(self, summary: str, date: str, time: str | None = None,
                      mode: str | None = None, description: str = "",
-                     duration_min: int = 45, calendar_id: str = "primary") -> dict[str, Any]:
-        """Create a follow-up event. Timed if `time` is given, else all-day."""
+                     duration_min: int = 45, calendar_id: str = "primary",
+                     reminder_minutes_before: int | None = None) -> dict[str, Any]:
+        """Create a follow-up event. Timed if `time` is given, else all-day.
+        ``reminder_minutes_before`` sets an explicit popup reminder (the VOX
+        follow-up card promises "1 day before"); None keeps calendar defaults."""
         if time:
             start_dt = f"{date}T{_hhmm(time)}:00"
             end_dt = f"{date}T{_add_minutes(_hhmm(time), duration_min)}:00"
@@ -129,6 +132,9 @@ class CalendarWriter:
         body = {"summary": summary, "description": description, "start": start, "end": end}
         if loc:
             body["location"] = loc
+        if reminder_minutes_before is not None:
+            body["reminders"] = {"useDefault": False, "overrides": [
+                {"method": "popup", "minutes": int(reminder_minutes_before)}]}
         created = self.calendar.events().insert(calendarId=calendar_id, body=body).execute()
         return {"id": created.get("id"), "link": created.get("htmlLink"),
                 "start": created.get("start")}

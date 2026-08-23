@@ -323,6 +323,8 @@ class VocxApp:
             return 200, "application/json", _j(self._capabilities())
         if method == "POST" and path == "/v1/vox/process":
             return self._vox_process(body)
+        if method == "POST" and path == "/v1/vox/follow_up":
+            return self._vox_follow_up(body)
         if method == "POST" and path == "/v1/vox/capture":
             return self._vox_capture(query, body)
         if method == "GET" and path == "/v1/spec":
@@ -523,6 +525,43 @@ class VocxApp:
                                               alert=lambda m: self.log.error("ADMIN ALERT: %s", m),
                                               known_names=known_names)
         return self._vox_runner
+
+    def _vox_follow_up(self, body: bytes):
+        """The Approved screen's "Add to Calendar": create the detected follow-up
+        on the recorder's CONNECTED Google Calendar with the promised 1-day-before
+        reminder. No token yet is a state, not an error — the response carries the
+        per-RM auth path and the panel falls back to the .ics download."""
+        from urllib.parse import quote
+        try:
+            data = json.loads(body or b"{}")
+        except Exception:  # noqa: BLE001
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON"})
+        rm = (data.get("rm") or "").strip() or "RM"
+        title = (data.get("title") or "Follow-up").strip()[:200]
+        date = (data.get("date") or "").strip()
+        if not date:
+            return 400, "application/json", _j({"ok": False, "error": "date required"})
+        needs_auth = {"ok": False, "needs_auth": True,
+                      "auth_url": f"/v1/auth/start?rm={quote(rm)}"}
+        if not self.writer_factory:
+            return 200, "application/json", _j({"ok": False, "google_off": True,
+                "error": "Google writes are off on this server — use the .ics."})
+        try:
+            writer = self.writer_factory(rm, self.store, self.config)
+        except Exception:  # noqa: BLE001 — no token for this RM yet
+            return 200, "application/json", _j(needs_auth)
+        cal = getattr(writer, "cal", None)
+        if cal is None:
+            return 200, "application/json", _j(needs_auth)
+        try:
+            r = cal.create_event(
+                title, date, (data.get("time") or "").strip() or None,
+                (data.get("mode") or "").strip() or None,
+                (data.get("description") or "").strip(),
+                reminder_minutes_before=1440)
+            return 200, "application/json", _j({"ok": True, "link": r.get("link")})
+        except Exception as e:  # noqa: BLE001 — API refusal is a told truth
+            return 200, "application/json", _j({"ok": False, "error": str(e)[:300]})
 
     def _vox_capture(self, query, body: bytes):
         """The new-flow capture door, one POST from the panel: store the audio

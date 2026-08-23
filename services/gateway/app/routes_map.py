@@ -57,6 +57,7 @@ _RAW: list[tuple[str, str, str]] = [
     ("POST",   r"^/v1/vox/conversations/[^/]+/erase$", "log_interaction"),
     ("POST",   r"^/v1/vox/conversations/[^/]+/regenerate$", "log_interaction"),
     ("POST",   r"^/vocx/v1/vox/process$", "log_interaction"),
+    ("POST",   r"^/vocx/v1/vox/follow_up$", "log_interaction"),
     # PULSE — news radar: triggering a scan / filing items is the intel-scan capability.
     ("POST",   r"^/pulse/v1/scan$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/items$", "run_news_scan"),

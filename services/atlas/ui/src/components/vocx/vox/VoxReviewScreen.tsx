@@ -78,6 +78,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   /** Approve tapped with nothing linked: the link screen opens first, and a
    *  successful pin resumes the approval automatically. */
   const [linkThenApprove, setLinkThenApprove] = useState(false);
+  /** The follow-up card's outcome line ("On your calendar", auth guidance…). */
+  const [fuMsg, setFuMsg] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(dirty);
@@ -366,6 +368,37 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
+  /** The mock's "Add to Calendar", for real: create the event on the RM's
+   *  connected Google Calendar with the 1-day-before reminder. Not connected is
+   *  a state, not an error — the auth tab opens and the .ics still downloads so
+   *  the follow-up is never lost. */
+  const addToCalendar = async () => {
+    const when = (common.follow_up_date as any)?.value;
+    if (!when) return;
+    setBusy(true); setFuMsg('');
+    try {
+      const r = await vocxClient.post('/v1/vox/follow_up', {
+        rm: user.full,
+        title: ((common.next_steps as any)?.value as string) || `Follow-up — ${entityName || leadName || 'VOX'}`,
+        date: when,
+        description: ((common.meeting_summary as any)?.value as string) || '',
+      });
+      if (r.data?.ok) {
+        setFuMsg('On your calendar · reminder set 1 day before');
+      } else if (r.data?.needs_auth) {
+        window.open(`${vocxClient.defaults.baseURL}${r.data.auth_url}`, '_blank');
+        downloadIcs();
+        setFuMsg('Connect Google in the new tab — the .ics downloaded meanwhile, so nothing is lost.');
+      } else {
+        downloadIcs();
+        setFuMsg('Calendar unavailable — the .ics downloaded instead.');
+      }
+    } catch {
+      downloadIcs();
+      setFuMsg('Calendar unavailable — the .ics downloaded instead.');
+    } finally { setBusy(false); }
+  };
+
   const downloadIcs = () => {
     const when = (common.follow_up_date as any)?.value;
     if (!when) return;
@@ -374,6 +407,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EVAM//VOX//EN', 'BEGIN:VEVENT',
       `UID:vox-${conversationId}@evam`, `DTSTART;VALUE=DATE:${d}`,
       `SUMMARY:${title}`, `DESCRIPTION:${((common.next_steps as any)?.value || '').replace(/\n/g, ' ')}`,
+      // the card promises "Reminder · 1 day before" — the .ics keeps that promise too
+      'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:${title}`, 'END:VALARM',
       'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
@@ -625,10 +660,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               <div className="fu-title">{(common.next_steps as any)?.value || 'Follow-up'}</div>
               <div className="fu-row"><span className="k">When</span><span className="v">{followUp}</span></div>
               <div className="fu-row"><span className="k">With</span><span className="v">{(((common.attendees_counterparty as any)?.value || [])[0]) || '—'}</span></div>
+              <div className="fu-row"><span className="k">Reminder</span><span className="v">1 day before</span></div>
+              {fuMsg && <div style={{ fontSize: 12, color: 'var(--accent)', margin: '8px 0 2px' }}>{fuMsg}</div>}
               <div className="fu-actions">
                 <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={onBack}>Skip</button>
-                <button className="btn btn-primary btn-sm" style={{ flex: 2 }} onClick={downloadIcs}>
-                  <Ic i="i-cal" /> Add to Calendar (.ics)
+                <button className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={busy}
+                  onClick={() => void addToCalendar()}>
+                  <Ic i="i-cal" /> Add to Calendar
                 </button>
               </div>
             </div>
