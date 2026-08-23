@@ -20,7 +20,7 @@ import VoxReviewScreen from './VoxReviewScreen';
 import { VOX_SPRITE } from './sprite';
 import './voxMock.css';
 
-export type VoxScreen = 'memory' | 'record' | 'review' | 'queue'
+export type VoxScreen = 'memory' | 'all' | 'record' | 'review' | 'queue'
   | 'dossier' | 'legacy';
 
 export const Ic = ({ i, style }: { i: string; style?: React.CSSProperties }) => (
@@ -119,7 +119,7 @@ export function useNames(items: VoxConversation[]) {
 function BottomNav({ screen, queueCount, go }: {
   screen: VoxScreen; queueCount: number; go: (s: VoxScreen) => void;
 }) {
-  const memoryish = ['memory', 'dossier', 'legacy'].includes(screen);
+  const memoryish = ['memory', 'all', 'dossier', 'legacy'].includes(screen);
   return (
     <div className="bottom-nav">
       <div className={`bn-item${screen === 'record' ? ' active' : ''}`} onClick={() => go('record')}>
@@ -196,7 +196,9 @@ function MemoryScreen({ go, openConversation, openDossier }: {
       </div>
       <div className="section-h">
         <span>{results !== null ? `Results · ${results.length}` : 'Recent'}</span>
-        {results !== null && <a onClick={() => setQ('')}>Clear ×</a>}
+        {results !== null
+          ? <a onClick={() => setQ('')}>Clear ×</a>
+          : <a onClick={() => go('all')}>See all →</a>}
       </div>
       {(results ?? items).map((c) => (
         <div key={c.id} className="conv-card" onClick={() => openConversation(c.id)}>
@@ -222,6 +224,95 @@ function MemoryScreen({ go, openConversation, openDossier }: {
         <span />
         <a onClick={() => go('legacy')}>Legacy reports →</a>
       </div>
+    </div>
+  );
+}
+
+function AllScreen({ go, openConversation, openDossier }: {
+  go: (s: VoxScreen) => void;
+  openConversation: (id: string) => void;
+  openDossier: (subject: { entityId?: string; leadId?: string }) => void;
+}) {
+  const [items, setItems] = useState<VoxConversation[]>([]);
+  const [uc, setUc] = useState('');
+  // Mine is the default desk; Everyone is the firm's shared memory and shows
+  // the APPROVED record — colleagues' drafts stay out of the feed unless the
+  // reader explicitly widens to in-progress (default, not a wall).
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [inflight, setInflight] = useState(false);
+  const [q, setQ] = useState(() => sessionStorage.getItem('vox.q') || '');
+  const names = useNames(items);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void voxService.list({ q: q.trim() || undefined, use_case: uc || undefined,
+        mine: scope === 'mine',
+        status: scope === 'all' && !inflight ? 'submitted' : undefined,
+        limit: 60 }).then((r) => setItems(r.items)).catch(() => {});
+    }, q ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [q, uc, scope, inflight]);
+  const groups = useMemo(() => {
+    const by: { head: string; rows: VoxConversation[] }[] = [];
+    for (const c of items) {
+      const head = dayHead(c.created_at);
+      const last = by[by.length - 1];
+      if (last && last.head === head) last.rows.push(c);
+      else by.push({ head, rows: [c] });
+    }
+    return by;
+  }, [items]);
+  const UCS = ['lending', 'syndication', 'asset_monetisation', 'credit_diligence'];
+  return (
+    <div className="app-body">
+      <button className="review-back" onClick={() => go('memory')}>‹ Memory</button>
+      <div className="home-greet" style={{ paddingBottom: 12 }}>
+        <div className="small">Every conversation · newest first</div>
+        <div className="big">All conversations</div>
+      </div>
+      <div className="memory-search">
+        <Ic i="i-search" />
+        <input placeholder="Search every Evam conversation…" value={q}
+          onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="filter-row">
+        <div className={`filter-pill${scope === 'mine' ? ' active' : ''}`}
+          onClick={() => setScope('mine')}>Mine</div>
+        <div className={`filter-pill${scope === 'all' ? ' active' : ''}`}
+          onClick={() => setScope('all')}>Everyone</div>
+        {scope === 'all' && (
+          <div className={`filter-pill${inflight ? ' active' : ''}`}
+            onClick={() => setInflight((v) => !v)}
+            title="Everyone shows approved records; widen to see in-progress items too">
+            + in-progress</div>
+        )}
+        {UCS.map((u) => (
+          <div key={u} className={`filter-pill${uc === u ? ' active' : ''}`}
+            onClick={() => setUc(uc === u ? '' : u)}>{UC_SHORT[u]}</div>
+        ))}
+      </div>
+      {groups.map((g) => (
+        <div key={g.head}>
+          <div className="month-head">{g.head}</div>
+          {g.rows.map((c) => (
+            <div key={c.id} className="conv-card" onClick={() => openConversation(c.id)}>
+              <div className="cc-top">
+                <div className="cc-co" onClick={(e) => {
+                  if (c.entity_id || c.lead_id) {
+                    e.stopPropagation();
+                    openDossier(c.entity_id ? { entityId: c.entity_id } : { leadId: c.lead_id! });
+                  }
+                }}>{titleOf(c, names)}</div>
+                <div className="cc-time">{timeLabel(c.created_at)?.replace(/^Today · /, '')} · {(c.recorder_name || c.recorder_email).split(' ')[0]}</div>
+              </div>
+              <div className="cc-snip">{snipOf(c)}</div>
+              <ConvChips c={c} />
+            </div>
+          ))}
+        </div>
+      ))}
+      {!items.length && (
+        <div className="conv-card"><div className="cc-snip">{q ? 'No matches — an empty result is a real answer.' : 'Nothing yet.'}</div></div>
+      )}
     </div>
   );
 }
@@ -383,7 +474,7 @@ export default function VoxApp() {
     setDossierSubject(subject); setScreen('dossier');
   };
 
-  const showTabs = ['memory', 'queue', 'dossier', 'legacy'].includes(screen);
+  const showTabs = ['memory', 'all', 'queue', 'dossier', 'legacy'].includes(screen);
 
   return (
     <div className="vox-app">
@@ -391,6 +482,8 @@ export default function VoxApp() {
       <div className="screen active" data-screen={screen}>
         {screen === 'memory' && (
           <MemoryScreen go={go} openConversation={openConversation} openDossier={openDossier} />)}
+        {screen === 'all' && (
+          <AllScreen go={go} openConversation={openConversation} openDossier={openDossier} />)}
         {screen === 'queue' && (
           <QueueScreen go={go} openConversation={openConversation} />)}
         {screen === 'dossier' && dossierSubject && (
