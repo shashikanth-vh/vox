@@ -361,3 +361,23 @@ def test_the_nested_subsector_details_shape_is_unwrapped_not_failed():
     assert row["status"] == "ready"
     assert row["structured_report"]["subsector_details"] == {
         "operating_uc_capacity_mw": {"value": "40 MW", "confidence": "high"}}
+
+
+def test_blocks_present_with_no_detected_tags_infer_the_tags():
+    """Field finding two: the model filled lending AND syndication blocks but left
+    detected_use_cases empty. The blocks are the declaration — infer, and ready."""
+    def undeclared_model(model, system, user):
+        obj = json.loads(_valid_model_json())
+        obj["detected_use_cases"] = []
+        obj["syndication"] = {
+            "facility_nature": {"value": "term_loan_syndication", "confidence": "medium"},
+            "deal_size_cr": {"value": None, "confidence": "n/a"},
+            "existing_lenders": {"value": None, "confidence": "n/a"},
+            "probable_lenders": {"value": "AIF appetite being explored", "confidence": "medium"},
+            "remarks": {"value": None, "confidence": "n/a"},
+        }
+        return json.dumps(obj)
+
+    row = PipelineRunner(FakeRegister(), good_transcribe, undeclared_model).process("c1")
+    assert row["status"] == "ready"
+    assert sorted(row["structured_report"]["detected_use_cases"]) == ["lending", "syndication"]

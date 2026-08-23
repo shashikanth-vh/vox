@@ -14,7 +14,9 @@ import { useAuth } from '../../../auth/AuthContext';
 import { useVocx } from '../VocxProvider';
 import { getSession } from '../../../auth/session';
 import { voxService } from '../../../services/voxService';
-import { banner, chip, pill, pillGhost, vx } from '../vocxStyles';
+import { banner, card, chip, microHeading, pill, pillGhost, pillPrimary, vx } from '../vocxStyles';
+import { deleteTake, loadUnsentTake, saveTake } from './takeStore';
+import type { StoredTake } from './takeStore';
 
 const CAP_SECONDS = 180; // Mode A: 3:00. Mode B (live, 90:00) arrives with Phase 2.
 
@@ -28,6 +30,8 @@ export default function VoxRecord({ onCaptured }: {
   const [phase, setPhase] = useState<Phase>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [segments, setSegments] = useState<number[]>([]); // seconds per closed segment
+  /** A take a previous page-load never sent — found in IndexedDB, offered back. */
+  const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -42,6 +46,18 @@ export default function VoxRecord({ onCaptured }: {
   const finishRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => () => { if (tickRef.current) clearInterval(tickRef.current); }, []);
+  useEffect(() => {
+    if (phase === 'idle') void loadUnsentTake().then((t) => setRecovered(t));
+  }, [phase]);
+  // The close guard stops the polite exits; this warns on the impolite ones (F5,
+  // tab close). The chunks are ALSO in IndexedDB, so even an ignored warning
+  // loses at most the last second.
+  useEffect(() => {
+    if (!['recording', 'paused', 'uploading', 'error'].includes(phase)) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [phase]);
 
   const start = async () => {
     setErr('');
@@ -52,7 +68,14 @@ export default function VoxRecord({ onCaptured }: {
         () => {}, { timeout: 4000 });
       const rec = new MediaRecorder(stream);
       chunksRef.current = [];
-      rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      rec.ondataavailable = (e) => {
+        if (!e.data.size) return;
+        chunksRef.current.push(e.data);
+        // every chunk lands in IndexedDB too — a refresh loses at most a second
+        saveTake({ id: captureIdRef.current, startedAt: new Date().toISOString(),
+          elapsed: elapsedRef.current, mime: rec.mimeType || 'audio/webm',
+          rm: user.full, chunks: [...chunksRef.current] });
+      };
       rec.start(1000);
       recRef.current = rec;
       captureIdRef.current = `vox-${crypto.randomUUID()}`;
@@ -98,6 +121,7 @@ export default function VoxRecord({ onCaptured }: {
   const discard = () => {
     if (!window.confirm('Discard this note? Nothing has been saved.')) return;
     stopStream();
+    void deleteTake(captureIdRef.current);
     chunksRef.current = [];
     setRecording(false);
     setPhase('idle'); setElapsed(0); elapsedRef.current = 0; setSegments([]);
@@ -128,6 +152,7 @@ export default function VoxRecord({ onCaptured }: {
         durationSeconds: elapsedRef.current,
         ...gpsRef.current,
       });
+      void deleteTake(captureIdRef.current);   // safely on the server
       setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);
@@ -153,10 +178,33 @@ export default function VoxRecord({ onCaptured }: {
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
+      void deleteTake(captureIdRef.current);
       setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);
     } catch (e: any) { setErr(String(e?.message || e)); setPhase('error'); }
+  };
+
+  const sendRecovered = async (take: StoredTake) => {
+    setPhase('uploading'); setErr('');
+    try {
+      const blob = new Blob(take.chunks, { type: take.mime || 'audio/webm' });
+      const out = await voxService.capture(blob, {
+        captureId: take.id, mode: 'post_meeting',
+        rm: user.full, email: getSession()?.email || '',
+        durationSeconds: take.elapsed, ...gpsRef.current,
+      });
+      await deleteTake(take.id);
+      setRecovered(null);
+      setPhase('done');
+      onCaptured(out.conversation_id);
+    } catch (e: any) { setErr(String(e?.message || e)); setPhase('idle'); }
+  };
+
+  const discardRecovered = async (take: StoredTake) => {
+    if (!window.confirm('Discard the recovered take? It cannot be brought back.')) return;
+    await deleteTake(take.id);
+    setRecovered(null);
   };
 
   finishRef.current = finish;
@@ -185,6 +233,20 @@ export default function VoxRecord({ onCaptured }: {
           ))}
           <Chip label={recording ? `seg ${segments.length + 1} …` : 'resume starts a new segment'}
             sx={{ ...chip(false, true), fontSize: 12, px: 1 }} />
+        </Box>
+      )}
+
+      {recovered && phase === 'idle' && (
+        <Box sx={{ ...card, textAlign: 'left', borderColor: '#4A3D1D' }}>
+          <Typography sx={{ ...microHeading, color: vx.amberInk }}>Unsent take recovered</Typography>
+          <Typography sx={{ fontSize: 13.5, mb: 1.2 }}>
+            {mmss(recovered.elapsed)} recorded {new Date(recovered.startedAt).toLocaleString()} —
+            the page closed before it was sent. Nothing was lost.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button sx={pillPrimary} onClick={() => void sendRecovered(recovered)}>Send it now</Button>
+            <Button sx={pillGhost} onClick={() => void discardRecovered(recovered)}>Discard…</Button>
+          </Box>
         </Box>
       )}
 
