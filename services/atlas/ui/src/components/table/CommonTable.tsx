@@ -270,12 +270,14 @@ function FilterHeader({
   options,
   canFilter,
   dateMode = false,
+  align = "left",
 }: {
   colId: string;
   label: string;
   options: string[];
   canFilter: boolean;
   dateMode?: boolean;
+  align?: "left" | "right";
 }) {
   const ctx = useContext(FilterContext);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -287,8 +289,9 @@ function FilterHeader({
       sx={{ display: "flex", alignItems: "center", gap: "4px", width: "100%", minWidth: 0 }}
     >
       {/* Label takes the leftover width and truncates with an ellipsis so the funnel
-          (fixed 20px, never shrinks) is always fully visible. */}
-      <Box sx={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</Box>
+          (fixed 20px, never shrinks) is always fully visible. A numeric column's
+          header follows its cells to the right edge. */}
+      <Box sx={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textAlign: align }}>{label}</Box>
       {canFilter && (
         <>
           {/* stopPropagation so clicking the funnel opens the filter, not sorts.
@@ -828,6 +831,12 @@ export default function CommonTable<T extends Record<string, any>>(
         const canSort = c.enableSorting === false
           ? false
           : (!serverPaged || !!sortParamOf(c));
+        // A column that right-aligns its cells (numbers) declares it via
+        // muiTableHeadCellProps; the custom header must honour it or the label
+        // floats left over right-aligned values.
+        const headProps = (c as any).muiTableHeadCellProps;
+        const align: "left" | "right" =
+          headProps && typeof headProps === "object" && headProps.align === "right" ? "right" : "left";
         return {
           ...c,
           enableSorting: canSort,
@@ -841,6 +850,7 @@ export default function CommonTable<T extends Record<string, any>>(
               options={options}
               canFilter={canFilter}
               dateMode={dateMode}
+              align={align}
             />
           ),
         };
