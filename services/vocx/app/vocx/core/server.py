@@ -421,6 +421,11 @@ class VocxApp:
                 score = min(1.0, score + resolver.boost)
             scored.append({"code": cand.ref_id, "name": cand.name, "kind": cand.kind,
                            "ref_type": cand.ref_type, "rm": cand.rm,
+                           # enough context to pick the right line without opening it:
+                           # sector/lens for companies, temperature for leads
+                           "sector": cand.sector or "",
+                           "lens": cand.lens or "",
+                           "temperature": (cand.raw or {}).get("temp") or "",
                            "score": round(score, 4), "match_type": got["how"]})
         scored.sort(key=lambda x: x["score"], reverse=True)
         matches = scored[:limit]

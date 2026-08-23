@@ -136,7 +136,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         // both are offered — a lead row links straight to that lead.
         setCands(raw.map((c: any) => ({
           name: c.name, code: c.code, entity_id: c.entity_id, kind: c.kind,
-          meta: [c.kind === 'lead' ? 'Lead' : c.code, c.rm && `RM ${c.rm}`]
+          meta: [c.kind === 'lead' ? 'Lead' : c.code, c.rm && `RM ${c.rm}`,
+                 c.sector, c.temperature, c.lens]
             .filter(Boolean).join(' · ') })));
       } catch { setCands([]); }
     }, 250);
@@ -258,6 +259,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       await api.post(`/vox/conversations/${conversationId}/regenerate`, {});
       await voxService.process(conversationId);
       setFixingTranscript(false);
+      // Drop the LOCAL report copy: polling deliberately never overwrites a
+      // non-null report (it would clobber in-flight edits), so the regenerated
+      // one can only land after the stale copy is let go. Field bug: the old
+      // report stayed on screen until a tab switch remounted the view.
+      setReport(null);
+      setDirty({});
+      setConfirmed(new Set());
       await refresh();
       startPolling();
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
@@ -295,10 +303,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       if (subject) {
         try {
           const kdp = ((common.key_discussion_points as any)?.value as string[]) || [];
+          // the lanes the reviewer selected ride on the interaction, so every
+          // timeline row says which business it belongs to
+          const lanes = (report?.detected_use_cases || approvedRow.use_cases || []) as string[];
           const tp = await vocxClient.post('/v1/touchpoints', {
             ...subject, interaction_type: 'VOX conversation',
             summary: kdp[0] || 'VOX conversation',
-            key_intel: kdp.length ? { points: kdp } : undefined,
+            key_intel: (kdp.length || lanes.length)
+              ? { ...(kdp.length ? { points: kdp } : {}),
+                  ...(lanes.length ? { use_cases: lanes } : {}) }
+              : undefined,
             transcript: row?.raw_transcript || undefined,
             performed_by: user.full, capture_id: `vox-conv:${conversationId}`,
           });
@@ -697,8 +711,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   return (
     <>
       <div className="app-body">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button className="review-back" onClick={onBack}>‹ All conversations</button>
+        {/* Sticky: on a long review the way back must not require scrolling
+            all the way up. The whole row (back + saved tick) pins to the top
+            of the scroll body — sticky on a nested child would be bounded by
+            this row's own height and quietly do nothing. */}
+        <div style={{ position: 'sticky', top: -16, zIndex: 5, background: 'var(--bg)',
+          margin: '-16px -16px 0', padding: '14px 16px 6px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button className="review-back" style={{ marginBottom: 0 }} onClick={onBack}>‹ All conversations</button>
           {!Object.keys(dirty).length
             ? <span className="ah-saved"><Ic i="i-check" /> Saved</span>
             : <span className="ah-saved" style={{ color: 'var(--muted)' }}>Saving…</span>}
@@ -761,7 +781,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         )}
 
         <div className="card">
-          <div className="card-h">Key intel</div>
+          <div className="card-h">Key intelligence</div>
           <div className="intel-list">
             {kdp.map((it, i) => (
               <div key={i} className="intel-row">
@@ -833,7 +853,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   <span className="h-action" onClick={() => {
                     setFixDraft(row.corrected_transcript || row.raw_transcript || '');
                     setFixingTranscript(true); setTranscriptOpen(false);
-                  }}><Ic i="i-edit" /> Correct</span>
+                  }}><Ic i="i-refresh" /> Re-analyze</span>
                 )}
                 <span className="h-action" onClick={() => setTranscriptOpen((v) => !v)}>
                   {transcriptOpen ? 'Hide' : 'Show original'}</span>
@@ -856,7 +876,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-primary" disabled={busy || !fixDraft.trim()}
-                    onClick={() => void correctAndRegenerate()}>Save correction &amp; regenerate</button>
+                    onClick={() => void correctAndRegenerate()}>Save &amp; re-analyze</button>
                   <button className="btn btn-ghost" style={{ width: 'auto' }}
                     onClick={() => setFixingTranscript(false)}>Cancel</button>
                 </div>

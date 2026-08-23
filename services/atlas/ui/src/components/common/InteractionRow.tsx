@@ -24,6 +24,8 @@ const SOURCE_BADGE: Record<string, [string, string]> = {
 
 // key_intel arrives in whatever shape its writer used: VocX a dict, its reports a
 // bullet list, older rows a plain string. Flatten every shape to label/text lines.
+// Two dict keys are structural, not intel: `points` is the bullet list itself
+// (each its own line), and `use_cases` is the lane tag set rendered as chips.
 function intelLines(ki: any): { label?: string; text: string }[] {
   if (!ki) return [];
   if (typeof ki === 'string') return ki.trim() ? [{ text: ki }] : [];
@@ -31,9 +33,26 @@ function intelLines(ki: any): { label?: string; text: string }[] {
     return ki.filter(Boolean).map((x) =>
       typeof x === 'string' ? { text: x } : { label: x?.label || x?.key, text: String(x?.text ?? x?.value ?? JSON.stringify(x)) });
   }
-  return Object.entries(ki)
+  const points: { label?: string; text: string }[] = Array.isArray(ki.points)
+    ? ki.points.filter(Boolean).map((p: any) => ({ text: String(p) })) : [];
+  const rest = Object.entries(ki)
+    .filter(([k]) => k !== 'points' && k !== 'use_cases')
     .filter(([, v]) => v != null && String(v).trim() !== '')
-    .map(([k, v]) => ({ label: k.replace(/_/g, ' '), text: Array.isArray(v) ? v.join('; ') : String(v) }));
+    .map(([k, v]) => ({ label: k.replace(/_/g, ' '), text: Array.isArray(v) ? (v as any[]).join('; ') : String(v) }));
+  return [...points, ...rest];
+}
+
+// The business lanes a VOX conversation was filed under — shown as chips on the
+// scan line so every timeline (deals, lending, syndication, asset monetisation,
+// leads) says at a glance which business the interaction belongs to.
+const LANE_LABEL: Record<string, string> = {
+  lending: 'LENDING', syndication: 'SYND', asset_monetisation: 'ASSET MON',
+};
+
+function laneChips(ki: any): string[] {
+  const lanes = ki && !Array.isArray(ki) && typeof ki === 'object' ? ki.use_cases : null;
+  if (!Array.isArray(lanes)) return [];
+  return lanes.map((u) => LANE_LABEL[String(u)] || String(u).replace(/_/g, ' ').toUpperCase());
 }
 
 const stepText = (s: any): string =>
@@ -62,6 +81,7 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
   const [open, setOpen] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const intel = intelLines(i.keyIntel);
+  const lanes = laneChips(i.keyIntel);
   const hasDepth = !!(intel.length || i.fullNotes || i.outcome || i.nextSteps?.length
     || i.transcript || i.attendees?.length || i.location || i.nextMeetingDate);
   const badge = i.source ? SOURCE_BADGE[i.source] : undefined;
@@ -76,6 +96,7 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
           {i.lenderName ? ` · ${i.lenderName}` : ''}{i.direction ? ` · ${i.direction}` : ''}
         </span>
         {badge && <Chip tone={badge[1]} color="#155E63">{badge[0]}</Chip>}
+        {lanes.map((l) => <Chip key={l} tone="#E8F0FE" color="#1A4B8F">{l}</Chip>)}
         {leadBadge && i.refType === 'Lead' && <Chip tone="#FFF3E0" color="#9A6A00">LEAD PHASE</Chip>}
         {!open && intel.length > 0 && <Chip tone="#FdF6E3" color="#8A6D00">💡 intel · {intel.length}</Chip>}
         {!open && (i.nextSteps?.length ?? 0) > 0 && <Chip>☑ steps · {i.nextSteps!.length}</Chip>}
