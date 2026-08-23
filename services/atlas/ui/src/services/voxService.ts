@@ -49,6 +49,9 @@ export interface VoxConversation {
   use_cases?: string[];
   snippet?: string | null;
   entity_candidates?: string[] | null;
+  /** "Create new lead" intent — held on the row, materialised by approve. */
+  proposed_lead_company?: string | null;
+  proposed_lead_rm?: string | null;
   raw_transcript?: string | null;
   structured_report?: VoxReport | null;
   erased_at?: string | null;
@@ -133,12 +136,19 @@ export const voxService = {
     use_cases?: string[];
   snippet?: string | null;
     entity_id?: string; lead_id?: string; deal_id?: string; interaction_id?: string;
+    proposed_lead_company?: string; proposed_lead_rm?: string;
   }): Promise<VoxConversation & { changed: number }> {
     return api.post(`/vox/conversations/${id}/edits`, payload);
   },
 
   approve(id: string): Promise<VoxConversation> {
     return api.post(`/vox/conversations/${id}/approve`, {});
+  },
+
+  /** Delete a draft (recorder/Management before approval) or erase an approved
+   *  record (Admin). Content is removed; the consent record and audit survive. */
+  erase(id: string): Promise<VoxConversation> {
+    return api.post(`/vox/conversations/${id}/erase`, {});
   },
 
   consent(certificationText: string, deviceMeta?: Record<string, any>): Promise<{ id: string }> {

@@ -67,6 +67,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [creating, setCreating] = useState(false);
   const [newLeadName, setNewLeadName] = useState('');
   const [newLeadRm, setNewLeadRm] = useState('');
+  /** A company can carry several open leads and live deals at once — after the
+   *  company is chosen, the recording still has to say WHICH line it is about. */
+  const [lineChoice, setLineChoice] =
+    useState<{ entityId: string; name: string; leads: any[]; deals: any[] } | null>(null);
+  const [dealRow, setDealRow] = useState<any>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(dirty);
@@ -111,6 +116,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     void api.get<any>(`/leads/${row.lead_id}`)
       .then((l) => { setLeadName(l.company || ''); setLeadRow(l); }).catch(() => {});
   }, [row?.lead_id]);
+  useEffect(() => {
+    if (!row?.deal_id) { setDealRow(null); return; }
+    void api.get<any>(`/deals/${row.deal_id}`).then(setDealRow).catch(() => {});
+  }, [row?.deal_id]);
 
   // atlas typeahead
   useEffect(() => {
@@ -118,11 +127,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     if (q.length < 2) { setCands([]); return; }
     const t = setTimeout(async () => {
       try {
-        const r = await vocxClient.get('/v1/suggest', { params: { q, limit: 6 } });
+        const r = await vocxClient.get('/v1/suggest', { params: { q, limit: 8 } });
         const raw = r.data?.matches || [];
-        setCands(raw.filter((c: any) => (c.kind || 'client') !== 'lead').map((c: any) => ({
+        // Companies AND their open leads: a recording can belong to either, so
+        // both are offered — a lead row links straight to that lead.
+        setCands(raw.map((c: any) => ({
           name: c.name, code: c.code, entity_id: c.entity_id, kind: c.kind,
-          meta: [c.code, c.rm && `RM ${c.rm}`].filter(Boolean).join(' · ') })));
+          meta: [c.kind === 'lead' ? 'Lead' : c.code, c.rm && `RM ${c.rm}`]
+            .filter(Boolean).join(' · ') })));
       } catch { setCands([]); }
     }, 250);
     return () => clearTimeout(t);
@@ -168,34 +180,79 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       .catch((e) => setErr(String(e?.message || e)));
   };
 
+  const closeAtlas = () => {
+    setSub('auto'); setResolveQ(''); setCands([]); setSelected(null); setLineChoice(null);
+  };
+
+  /** Pin the recording to a specific line — or to the company alone. */
+  const pinTo = async (pins: Record<string, string>) => {
+    setBusy(true); setErr('');
+    try {
+      await saveEdits({ proposed_lead_company: '', proposed_lead_rm: '', ...pins });
+      closeAtlas();
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
   const linkEntity = async (c: Candidate) => {
     setBusy(true); setErr('');
     try {
+      // A lead candidate links straight to that lead.
+      if (c.kind === 'lead' && c.code) {
+        await saveEdits({ lead_id: c.code, deal_id: '', entity_id: '',
+                          proposed_lead_company: '', proposed_lead_rm: '' });
+        closeAtlas(); return;
+      }
       let entityId = c.entity_id;
       if (!entityId && c.code) {
         const found = await api.get<any>('/entities', { code: c.code, limit: 1 });
         entityId = found?.items?.[0]?.id;
       }
       if (!entityId) throw new Error('That candidate has no register id yet — create it as a new lead.');
-      const changing = !!row?.entity_id && row.entity_id !== entityId;
-      await saveEdits({ entity_id: entityId, ...(changing ? { lead_id: '' } : {}) });
-      setSub('auto'); setResolveQ(''); setCands([]); setSelected(null);
+      // Survey the company's open lines: several leads and live deals can exist
+      // at once, and the recording has to say which one it belongs to.
+      const [byEntity, byName, ds] = await Promise.all([
+        api.get<any>('/leads', { entity_id: entityId, status: 'Active', limit: 50 }).catch(() => null),
+        api.get<any>('/leads', { company: c.name, status: 'Active', limit: 50 }).catch(() => null),
+        api.get<any>('/deals', { entity_id: entityId, limit: 50 }).catch(() => null),
+      ]);
+      const seen = new Set<string>();
+      const leads = [...(byEntity?.items || []), ...(byName?.items || [])]
+        .filter((l: any) => !l.converted_deal_id)
+        .filter((l: any) => !seen.has(String(l.id)) && seen.add(String(l.id)));
+      const deals = ds?.items || [];
+      if (!leads.length && !deals.length) {
+        await pinTo({ entity_id: entityId, lead_id: '', deal_id: '' });
+        return;
+      }
+      setLineChoice({ entityId, name: c.name, leads, deals });
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
-  const createLead = async () => {
+  /** "Create new lead" records the INTENT on the conversation — the register
+   *  gains the lead when the report is approved, never on this tap. */
+  const proposeLead = async () => {
     const name = newLeadName.trim();
     if (!name) { setErr('The new lead needs the company name.'); return; }
     setBusy(true); setErr('');
     try {
-      const lead = await api.post<any>('/leads', {
-        company: name, rm: newLeadRm || null,
-        sector: (common.sector as any)?.value || null,
-        source_name: 'VOX conversation',
+      await saveEdits({
+        proposed_lead_company: name, proposed_lead_rm: newLeadRm || '',
+        lead_id: '', deal_id: '',
+        ...(lineChoice ? { entity_id: lineChoice.entityId } : { entity_id: '' }),
       });
-      await saveEdits({ lead_id: String(lead.id), entity_id: '' });
-      setSub('auto'); setCreating(false);
-      setLeadName(name);
+      setCreating(false);
+      closeAtlas();
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
+  const deleteDraft = async () => {
+    if (!window.confirm('Delete this conversation? The recording, transcript and report '
+      + 'are removed for everyone. This cannot be undone.')) return;
+    setBusy(true); setErr('');
+    try {
+      await voxService.erase(conversationId);
+      setOverflow(false);
+      onBack();
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
@@ -205,11 +262,18 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     setBusy(true); setErr('');
     try {
       await saveEdits();
+      // The approve response is the truth: a proposed new lead materialises
+      // register-side during approve, so lead_id can be born right here.
       const approvedRow = await voxService.approve(conversationId);
       setRow(approvedRow);
-      const subject = approvedRow.entity_id
-        ? { subject_type: 'Entity', subject_id: approvedRow.entity_id }
-        : approvedRow.lead_id ? { subject_type: 'Lead', subject_id: approvedRow.lead_id } : null;
+      // The touchpoint files against the MOST SPECIFIC line the user pinned:
+      // a deal beats a lead beats the company timeline.
+      const subject = approvedRow.deal_id
+        ? { subject_type: 'Deal', subject_id: approvedRow.deal_id }
+        : approvedRow.lead_id
+          ? { subject_type: 'Lead', subject_id: approvedRow.lead_id }
+          : approvedRow.entity_id
+            ? { subject_type: 'Entity', subject_id: approvedRow.entity_id } : null;
       if (subject) {
         try {
           const kdp = ((common.key_discussion_points as any)?.value as string[]) || [];
@@ -335,51 +399,119 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <div className="atlas-cand"><span className="as-heard">As heard in the recording</span>
             {(row.entity_candidates || []).map((c) => `"${c}"`).join(' · ')}</div>
         )}
-        <div className="memory-search" style={{ marginBottom: 12 }}>
-          <Ic i="i-search" />
-          <input placeholder="Search the register…" value={resolveQ} autoFocus
-            onChange={(e) => setResolveQ(e.target.value)} />
-        </div>
-        {cands.map((c) => (
-          <div key={`${c.name}-${c.code}`}
-            className={`atlas-opt${selected?.code === c.code ? ' selected' : ''}`}
-            onClick={() => setSelected(c)}>
-            <div>
-              <div className="ao-name">{c.name}</div>
-              <div className="ao-meta">{c.meta || c.code}</div>
+        {lineChoice ? (
+          /* The company is chosen — now WHICH of its lines is this recording about? */
+          <>
+            <div className="atlas-cand" style={{ marginBottom: 12 }}>
+              <span className="as-heard">{lineChoice.name}</span>
+              This company has open lines. Pick the one this conversation belongs to.
             </div>
-            <div className={`ao-score${selected?.code === c.code ? '' : ' possible'}`}>
-              {selected?.code === c.code ? 'Selected' : 'Possible'}
+            <div className="atlas-opt" onClick={() => !busy && void pinTo(
+              { entity_id: lineChoice.entityId, lead_id: '', deal_id: '' })}>
+              <div>
+                <div className="ao-name">Company level</div>
+                <div className="ao-meta">General relationship — files on the company timeline</div>
+              </div>
+              <div className="ao-score possible">Pick</div>
             </div>
-          </div>
-        ))}
-        {!creating ? (
-          <button className="atlas-create" onClick={() => {
-            setCreating(true);
-            setNewLeadName(resolveQ.trim() || row.entity_candidates?.[0] || '');
-            setNewLeadRm(user.full);
-          }}><Ic i="i-plus" /> Neither — <strong>&nbsp;create new lead</strong></button>
+            {lineChoice.leads.map((l: any) => (
+              <div key={l.id} className="atlas-opt" onClick={() => !busy && void pinTo(
+                { lead_id: String(l.id), entity_id: lineChoice.entityId, deal_id: '' })}>
+                <div>
+                  <div className="ao-name">Lead {l.lead_no || ''}</div>
+                  <div className="ao-meta">{[l.rm && `RM ${l.rm}`, l.temperature, l.status]
+                    .filter(Boolean).join(' · ')}</div>
+                </div>
+                <div className="ao-score possible">Pick</div>
+              </div>
+            ))}
+            {lineChoice.deals.map((d: any) => (
+              <div key={d.id} className="atlas-opt" onClick={() => !busy && void pinTo(
+                { deal_id: String(d.id), entity_id: lineChoice.entityId, lead_id: '' })}>
+                <div>
+                  <div className="ao-name">Deal {d.deal_no || d.code || ''}</div>
+                  <div className="ao-meta">{[d.product_type, d.stage, d.rm && `RM ${d.rm}`]
+                    .filter(Boolean).join(' · ')}</div>
+                </div>
+                <div className="ao-score possible">Pick</div>
+              </div>
+            ))}
+            <button className="atlas-create" onClick={() => {
+              setCreating(true);
+              setNewLeadName(lineChoice.name);
+              setNewLeadRm(user.full);
+            }}><Ic i="i-plus" /> None of these — <strong>&nbsp;new lead for this company</strong></button>
+            {creating && (
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="card-eyebrow">New lead — created when you approve</div>
+                <div className="form-row"><div className="fr-label">Company name</div>
+                  <input className="input-field" value={newLeadName}
+                    onChange={(e) => setNewLeadName(e.target.value)} /></div>
+                <div className="form-row"><div className="fr-label">Relationship Manager</div>
+                  <select className="select-field" value={newLeadRm}
+                    onChange={(e) => setNewLeadRm(e.target.value)}>
+                    <option value="">RM — unassigned</option>
+                    {rms.map((o) => <option key={o} value={o}>{rmLabels[o] || o}</option>)}
+                    {user.full && !rms.includes(user.full) && <option value={user.full}>{user.full}</option>}
+                  </select></div>
+                <button className="btn btn-primary" disabled={busy} onClick={() => void proposeLead()}>
+                  Pin as new lead — created on approve</button>
+              </div>
+            )}
+            <div style={{ padding: '14px 0 8px' }}>
+              <button className="btn btn-ghost" onClick={() => setLineChoice(null)}>‹ Different company</button>
+            </div>
+          </>
         ) : (
-          <div className="card" style={{ marginTop: 12 }}>
-            <div className="card-eyebrow">New lead — set the RM</div>
-            <div className="form-row"><div className="fr-label">Company name</div>
-              <input className="input-field" value={newLeadName}
-                onChange={(e) => setNewLeadName(e.target.value)} /></div>
-            <div className="form-row"><div className="fr-label">Relationship Manager</div>
-              <select className="select-field" value={newLeadRm}
-                onChange={(e) => setNewLeadRm(e.target.value)}>
-                <option value="">RM — unassigned</option>
-                {rms.map((o) => <option key={o} value={o}>{rmLabels[o] || o}</option>)}
-                {user.full && !rms.includes(user.full) && <option value={user.full}>{user.full}</option>}
-              </select></div>
-            <button className="btn btn-primary" disabled={busy} onClick={() => void createLead()}>Create lead &amp; link</button>
-          </div>
+          <>
+            <div className="memory-search" style={{ marginBottom: 12 }}>
+              <Ic i="i-search" />
+              <input placeholder="Search the register…" value={resolveQ} autoFocus
+                onChange={(e) => setResolveQ(e.target.value)} />
+            </div>
+            {cands.map((c) => (
+              <div key={`${c.name}-${c.code}`}
+                className={`atlas-opt${selected?.code === c.code ? ' selected' : ''}`}
+                onClick={() => setSelected(c)}>
+                <div>
+                  <div className="ao-name">{c.name}</div>
+                  <div className="ao-meta">{c.meta || c.code}</div>
+                </div>
+                <div className={`ao-score${selected?.code === c.code ? '' : ' possible'}`}>
+                  {selected?.code === c.code ? 'Selected' : 'Possible'}
+                </div>
+              </div>
+            ))}
+            {!creating ? (
+              <button className="atlas-create" onClick={() => {
+                setCreating(true);
+                setNewLeadName(resolveQ.trim() || row.entity_candidates?.[0] || '');
+                setNewLeadRm(user.full);
+              }}><Ic i="i-plus" /> Neither — <strong>&nbsp;create new lead</strong></button>
+            ) : (
+              <div className="card" style={{ marginTop: 12 }}>
+                <div className="card-eyebrow">New lead — created when you approve</div>
+                <div className="form-row"><div className="fr-label">Company name</div>
+                  <input className="input-field" value={newLeadName}
+                    onChange={(e) => setNewLeadName(e.target.value)} /></div>
+                <div className="form-row"><div className="fr-label">Relationship Manager</div>
+                  <select className="select-field" value={newLeadRm}
+                    onChange={(e) => setNewLeadRm(e.target.value)}>
+                    <option value="">RM — unassigned</option>
+                    {rms.map((o) => <option key={o} value={o}>{rmLabels[o] || o}</option>)}
+                    {user.full && !rms.includes(user.full) && <option value={user.full}>{user.full}</option>}
+                  </select></div>
+                <button className="btn btn-primary" disabled={busy} onClick={() => void proposeLead()}>
+                  Pin as new lead — created on approve</button>
+              </div>
+            )}
+            <div style={{ padding: '24px 0 8px' }}>
+              <button className="btn btn-primary" disabled={!selected || busy}
+                onClick={() => selected && void linkEntity(selected)}>Link selected</button>
+            </div>
+          </>
         )}
         {err && <div style={{ color: 'var(--danger)', fontSize: 12, margin: '10px 2px' }}>{err}</div>}
-        <div style={{ padding: '24px 0 8px' }}>
-          <button className="btn btn-primary" disabled={!selected || busy}
-            onClick={() => selected && void linkEntity(selected)}>Link selected</button>
-        </div>
       </div>
     );
   }
@@ -563,7 +695,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           </div>
         )}
         <div className="review-company" onClick={() => row.entity_id && onDossier(row.entity_id)}>
-          {entityName || leadName || row.entity_candidates?.[0] || 'Unlinked conversation'}
+          {entityName || leadName || row.proposed_lead_company || row.entity_candidates?.[0] || 'Unlinked conversation'}
           {!readOnly && (
             <span style={{ fontSize: 15, color: 'var(--muted)', marginLeft: 8, cursor: 'pointer' }}
               onClick={(e) => { e.stopPropagation(); setSub('atlas'); }} title="Link or change the company">
@@ -693,21 +825,34 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           {showMore && (
             <div>
               <div className="company-field">
-                <div className="cf-label"><span className="lab">Company — {row.entity_id ? 'linked' : row.lead_id ? 'new lead' : 'not linked'}</span>
+                <div className="cf-label"><span className="lab">Company — {
+                  row.deal_id ? 'deal line' : row.lead_id ? 'lead'
+                    : row.proposed_lead_company ? 'new lead on approve'
+                      : row.entity_id ? 'linked' : 'not linked'}</span>
                   {!readOnly && <span className="edit" onClick={() => setSub('atlas')}><Ic i="i-edit" /> Edit</span>}
                 </div>
                 <div className="company-input-row">
-                  <input className="company-input" readOnly value={entityName || leadName || row.entity_candidates?.[0] || ''} />
-                  <span className={`atlas-badge ${row.entity_id ? 'found' : 'new'}`}>
-                    {row.entity_id ? 'In register' : row.lead_id ? 'New lead' : 'Unlinked'}
+                  <input className="company-input" readOnly
+                    value={entityName || leadName || row.proposed_lead_company || row.entity_candidates?.[0] || ''} />
+                  <span className={`atlas-badge ${row.entity_id || row.lead_id || row.deal_id ? 'found' : 'new'}`}>
+                    {row.deal_id ? 'Deal' : row.lead_id ? 'Lead'
+                      : row.proposed_lead_company ? 'On approve'
+                        : row.entity_id ? 'In register' : 'Unlinked'}
                   </span>
                 </div>
               </div>
-              {(leadRow || row.entity_id) && (
+              {(leadRow || dealRow || row.entity_id || row.proposed_lead_company) && (
                 <div className="atlas-detail">
                   {row.entity_id && <><span className="k">Register match:</span> {entityName}<br /></>}
+                  {dealRow && <><span className="k">Deal:</span> {dealRow.deal_no || dealRow.code} ·
+                    {' '}{[dealRow.product_type, dealRow.stage].filter(Boolean).join(' · ') || '—'}<br />
+                    <span className="k">Relationship Manager:</span> {dealRow.rm || '—'}</>}
                   {leadRow && <><span className="k">Lead:</span> {leadRow.lead_no} · {leadRow.company}<br />
                     <span className="k">Relationship Manager:</span> {leadRow.rm || '—'}</>}
+                  {!leadRow && !dealRow && row.proposed_lead_company && (
+                    <><span className="k">New lead:</span> {row.proposed_lead_company} — created when this
+                      report is approved<br />
+                      <span className="k">Relationship Manager:</span> {row.proposed_lead_rm || 'unassigned'}</>)}
                 </div>
               )}
               {leadRow && !readOnly && (user.roles.includes('Management') || user.roles.includes('Admin')) && (
@@ -882,6 +1027,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               <Ic i="i-download" /> Download as PDF</div>
             <div className="sheet-row" onClick={() => { setOverflow(false); setTranscriptOpen(true); }}>
               <Ic i="i-list" /> Show original transcript</div>
+            {/* A draft is still the recorder's to withdraw; an approved record is
+                the firm's and needs the Admin erasure path instead. */}
+            {!approvedRow && !row.erased_at && (
+              <div className="sheet-row" style={{ color: 'var(--danger)' }}
+                onClick={() => void deleteDraft()}>
+                <Ic i="i-trash" /> Delete conversation</div>
+            )}
           </div>
         </div>
       )}

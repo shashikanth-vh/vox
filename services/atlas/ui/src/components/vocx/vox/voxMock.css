@@ -305,7 +305,7 @@
 .vox-app .atlas-opt .ao-meta {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); margin-top:3px; letter-spacing:0.02em;}
 .vox-app .atlas-opt .ao-score {font-size:11px; color:var(--accent); font-weight:600; text-align:right;}
 .vox-app .atlas-opt .ao-score.possible {color:var(--muted);}
-.vox-app .atlas-create {display:flex; align-items:center; justify-content:center; gap:8px; padding:16px; border:1px dashed var(--line-2); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; margin-top:6px; width:100%;}
+.vox-app .atlas-create {display:flex; align-items:center; justify-content:center; gap:8px; padding:16px; border:1px dashed var(--line-2); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; margin-top:6px; width:100%; background:transparent; font-family:inherit; appearance:none;}
 .vox-app .atlas-create:hover {border-color:var(--accent); color:var(--text);}
 .vox-app .atlas-create strong {color:var(--accent); font-weight:600;}
 .vox-app /* SUBMITTED */

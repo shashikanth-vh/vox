@@ -102,6 +102,10 @@ class VoxConversation(RegisterBase):
     interaction_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True))
     # Candidate names the model heard, awaiting resolution (match/no-match/ambiguous).
     entity_candidates: Mapped[list | None] = mapped_column(JSONB)
+    # A "create new lead" chosen at review time is an INTENT until approval: the
+    # lead row is materialised by approve, never by the tap that proposed it.
+    proposed_lead_company: Mapped[str | None] = mapped_column(String(300))
+    proposed_lead_rm: Mapped[str | None] = mapped_column(String(120))
 
     recording_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     capture_id: Mapped[str | None] = mapped_column(String(120))

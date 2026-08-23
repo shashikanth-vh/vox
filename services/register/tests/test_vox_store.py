@@ -279,8 +279,11 @@ async def test_erasure_removes_content_but_consent_and_log_survive(client: Async
         "edits": [{"field_path": "lending.requirement_quantum_cr",
                    "new_value": {"value": 30, "confidence": "high"}}]}, headers=RECORDER)
 
+    approved = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert approved.status_code == 200
+
     denied = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=RECORDER)
-    assert denied.status_code == 403  # not an RM convenience
+    assert denied.status_code == 403  # an approved record is the firm's, not the RM's
 
     erased = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=ADMIN)
     assert erased.status_code == 200, erased.text
@@ -295,3 +298,85 @@ async def test_erasure_removes_content_but_consent_and_log_survive(client: Async
     assert r.status_code == 409
     again = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=ADMIN)
     assert again.status_code == 200 and again.json()["replayed"] is True
+
+
+# --------------------------------------------------- proposed lead / draft delete
+
+async def test_a_proposed_lead_materialises_only_on_approve(client: AsyncClient):
+    """Field feedback: 'create new lead' used to write the Lead the moment the
+    button was tapped. Now the intent rides on the conversation and the register
+    gains the lead exactly at approval."""
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "proposed_lead_company": "Adani Power", "proposed_lead_rm": "Chetan Malik",
+    }, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["proposed_lead_company"] == "Adani Power"
+    assert body["lead_id"] is None
+    # no lead exists yet
+    leads = (await client.get("/v1/leads", params={"company": "Adani Power"},
+                              headers=RECORDER)).json()
+    assert not leads["items"]
+    # approve births it, numbered, RM'd, sourced
+    r = await client.post(f"/v1/vox/conversations/{cid}/approve", headers=RECORDER)
+    assert r.status_code == 200, r.text
+    approved = r.json()
+    assert approved["lead_id"] is not None
+    assert approved["proposed_lead_company"] is None
+    lead = (await client.get(f"/v1/leads/{approved['lead_id']}", headers=RECORDER)).json()
+    assert lead["company"] == "Adani Power"
+    assert lead["rm"] == "Chetan Malik"
+    assert lead["source_name"] == "VOX conversation"
+    assert lead["lead_no"]  # auto-numbered like any lead
+
+
+async def test_a_pinned_line_wins_over_a_stale_proposal(client: AsyncClient):
+    """If the user proposed a lead but then pinned an existing line, approve must
+    not create anything."""
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    lead = await client.post("/v1/leads", json={"company": f"Existing {uuid.uuid4()}"},
+                             headers=MGMT)
+    assert lead.status_code == 201
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "proposed_lead_company": "Ghost Co", "lead_id": lead.json()["id"],
+    }, headers=RECORDER)
+    assert r.status_code == 200
+    approved = (await client.post(f"/v1/vox/conversations/{cid}/approve",
+                                  headers=RECORDER)).json()
+    assert approved["lead_id"] == lead.json()["id"]
+    ghosts = (await client.get("/v1/leads", params={"company": "Ghost Co"},
+                               headers=RECORDER)).json()
+    assert not ghosts["items"]
+
+
+async def test_recorder_deletes_their_draft_but_not_an_approved_record(client: AsyncClient):
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    # another RM cannot delete someone else's draft
+    r = await client.post(f"/v1/vox/conversations/{cid}/erase", headers=OTHER_RM)
+    assert r.status_code == 403
+    # the recorder can — and it leaves the feeds
+    r = await client.post(f"/v1/vox/conversations/{cid}/erase", headers=RECORDER)
+    assert r.status_code == 200 and r.json()["erased_at"]
+    listed = (await client.get("/v1/vox/conversations", headers=RECORDER)).json()
+    assert cid not in {i["id"] for i in listed["items"]}
+    listed_all = (await client.get("/v1/vox/conversations",
+                                   params={"include_erased": "true"},
+                                   headers=RECORDER)).json()
+    assert cid in {i["id"] for i in listed_all["items"]}
+    # an approved record refuses everyone but Admin
+    row2 = await _make(client)
+    await _to_ready(client, row2["id"])
+    await client.post(f"/v1/vox/conversations/{row2['id']}/approve", headers=RECORDER)
+    r = await client.post(f"/v1/vox/conversations/{row2['id']}/erase", headers=RECORDER)
+    assert r.status_code == 403
+    r = await client.post(f"/v1/vox/conversations/{row2['id']}/erase", headers=MGMT)
+    assert r.status_code == 403
+    r = await client.post(f"/v1/vox/conversations/{row2['id']}/erase", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["erased_at"]

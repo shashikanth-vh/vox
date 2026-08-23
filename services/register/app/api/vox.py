@@ -7,7 +7,9 @@
     PATCH /v1/vox/conversations/{id}/pipeline   machine path: the vocx worker advances the row
     POST  /v1/vox/conversations/{id}/edits      the atomic edit path (one transaction)
     POST  /v1/vox/conversations/{id}/approve    ready -> submitted (recorder or authority)
-    POST  /v1/vox/conversations/{id}/erase      authorised erasure (admin; consent survives)
+    POST  /v1/vox/conversations/{id}/erase      delete a draft (recorder/Management) or
+                                                erase an approved record (Admin); the
+                                                consent record survives either way
 
 Access, per the spec's D2 adapted to PRISM: every authenticated user in the tenant
 reads every conversation (the Queue is a workflow view, not a privacy tier); writing
@@ -96,6 +98,8 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         "meeting_date": c.meeting_date.isoformat() if c.meeting_date else None,
         "language_detected": c.language_detected,
         "entity_candidates": c.entity_candidates,
+        "proposed_lead_company": c.proposed_lead_company,
+        "proposed_lead_rm": c.proposed_lead_rm,
         "prompt_version": c.prompt_version,
         "registry_version": c.registry_version,
         "audio_ref": c.audio_ref,
@@ -266,8 +270,13 @@ async def list_conversations(
         date_to: date | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
+        include_erased: bool = Query(default=False),
 ) -> dict[str, Any]:
     stmt = select(VoxConversation).where(VoxConversation.tenant_id == ctx.tenant_id)
+    if not include_erased:
+        # A deleted draft (or an Admin-erased record) leaves the feeds; the row
+        # itself survives for audit and is reachable by id or with include_erased.
+        stmt = stmt.where(VoxConversation.erased_at.is_(None))
     if status:
         wanted = [s for s in status.split(",") if s in CONVERSATION_STATUSES]
         if not wanted:
@@ -401,6 +410,9 @@ class EditsIn(BaseModel):
     lead_id: str | None = None
     deal_id: str | None = None
     interaction_id: str | None = None
+    # "Create new lead" intent — recorded here, materialised by approve. '' clears.
+    proposed_lead_company: str | None = Field(default=None, max_length=300)
+    proposed_lead_rm: str | None = Field(default=None, max_length=120)
 
 
 @router.post("/v1/vox/conversations/{conversation_id}/edits")
@@ -470,6 +482,17 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                 _audit(f"links.{link}", str(old) if old else None, raw or None)
                 changed += 1
 
+    # The new-lead intent travels the same audited path as the link pins.
+    for field in ("proposed_lead_company", "proposed_lead_rm"):
+        raw = getattr(payload, field)
+        if raw is not None:
+            new_val = raw.strip() or None
+            old = getattr(row, field)
+            if old != new_val:
+                setattr(row, field, new_val)
+                _audit(f"links.{field}", old, new_val)
+                changed += 1
+
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)
@@ -488,12 +511,42 @@ async def approve_conversation(conversation_id: str,
         return {**_row_dict(row, full=False), "replayed": True}
     if row.status != "ready":
         raise ConflictError(f"Only a ready conversation can be approved (this one is {row.status}).")
+
+    # A "create new lead" chosen at review time materialises HERE — the register
+    # gains a lead exactly when the firm signs off on the conversation, never on
+    # the tap that proposed it (a discarded take must leave no stray lead behind).
+    created_lead_id: str | None = None
+    if row.proposed_lead_company and not (row.lead_id or row.deal_id):
+        from app.models.deals import Lead
+        from app.repositories.crud import CRUDRepository
+        lead = await CRUDRepository(Lead).create(ctx.session, ctx.tenant_id, ctx.actor, {
+            "company": row.proposed_lead_company,
+            "rm": row.proposed_lead_rm,
+            "sector": row.sector,
+            # A repeat opportunity for a company already in Atlas keeps its entity.
+            "entity_id": row.entity_id,
+            "source_name": "VOX conversation",
+        })
+        await ctx.session.flush()
+        row.lead_id = lead.id
+        created_lead_id = str(lead.id)
+        ctx.session.add(VoxConversationEdit(
+            tenant_id=ctx.tenant_id, conversation_id=row.id,
+            editor_email=_caller_email(ctx),
+            editor_name=ctx.user.full_name if ctx.user else None,
+            field_path="links.lead_id", old_value=None, new_value=created_lead_id))
+    if row.proposed_lead_company or row.proposed_lead_rm:
+        row.proposed_lead_company = None
+        row.proposed_lead_rm = None
+
     row.status = "submitted"
     row.updated_by = ctx.actor
     ctx.session.add(AuditLog(tenant_id=ctx.tenant_id, actor=ctx.actor, action="vox.approve",
                              resource_type="vox_conversations", resource_id=str(row.id),
                              request_id=request_id_ctx.get(),
-                             changes={"recorder": row.recorder_email}))
+                             changes={"recorder": row.recorder_email,
+                                      **({"created_lead_id": created_lead_id}
+                                         if created_lead_id else {})}))
     await ctx.session.flush()
     await ctx.session.refresh(row)
     return _row_dict(row, full=False)
@@ -504,10 +557,22 @@ async def erase_conversation(conversation_id: str,
                              ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     """Authorised erasure (16.3): hard-delete audio reference, transcript and
     structured content — while the consent record and an erasure log survive.
-    Admin-only; permanent-by-default is not undeletable, but it is not casual either."""
-    if ctx.user is not None and "Admin" not in (ctx.user.roles or set()):
-        raise ForbiddenError("Erasure is an Admin action, executed on an authorised request.")
+
+    Two doors, by lifecycle: BEFORE approval the recording is still the
+    recorder's draft, so the recorder (or Management/Admin) may delete it.
+    AFTER approval it is a firm record, and only Admin erasure — the
+    authorised-request path — can remove its content."""
     row = await _get_row(ctx, conversation_id)
+    if ctx.user is not None:
+        roles = ctx.user.roles or set()
+        if "Admin" not in roles:
+            if row.status == "submitted":
+                raise ForbiddenError(
+                    "An approved conversation is a firm record — erasure is an Admin "
+                    "action, executed on an authorised request.")
+            if not (_may_edit(ctx, row) or "Management" in roles):
+                raise ForbiddenError(
+                    "Only the recorder or Management/Admin may delete this draft.")
     if row.erased_at is not None:
         return {**_row_dict(row, full=False), "replayed": True}
     now = datetime.now(timezone.utc)
