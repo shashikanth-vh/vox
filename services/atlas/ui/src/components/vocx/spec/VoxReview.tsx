@@ -13,6 +13,7 @@ import vocxClient from '../../../api/vocxClient';
 import { api } from '../../../api/http';
 import { useAuth } from '../../../auth/AuthContext';
 import { needsYou, voxService } from '../../../services/voxService';
+import { referenceService } from '../../../services/referenceService';
 import type { VoxCell, VoxConversation, VoxRegistry, VoxReport } from '../../../services/voxService';
 import { banner, card, chip, microHeading, pill, pillGhost, pillPrimary, vx } from '../vocxStyles';
 import RegistryReport from './RegistryReport';
@@ -67,6 +68,13 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
   const [entityName, setEntityName] = useState('');
   /** The pencil next to the title reopens the company link even when already linked. */
   const [relinking, setRelinking] = useState(false);
+  /** Create-as-new-lead (the blueprint's Atlas-resolve escape hatch). */
+  const [creating, setCreating] = useState(false);
+  const [newLeadName, setNewLeadName] = useState('');
+  const [newLeadRm, setNewLeadRm] = useState('');
+  const [leadName, setLeadName] = useState('');
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [approved, setApproved] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -120,6 +128,13 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
     return () => clearTimeout(t);
   }, [resolveQ]);
 
+  // A lead-only conversation (created as a new lead) titles itself from the lead.
+  useEffect(() => {
+    if (!row?.lead_id) { setLeadName(''); return; }
+    void api.get<any>(`/leads/${row.lead_id}`)
+      .then((l) => setLeadName(l.company || '')).catch(() => setLeadName(''));
+  }, [row?.lead_id]);
+
   // When the company links and it runs several open leads, the recorder picks WHICH.
   useEffect(() => {
     if (!row?.entity_id) { setLeads([]); return; }
@@ -171,6 +186,23 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
+  const createLead = async () => {
+    const name = newLeadName.trim();
+    if (!name) { setErr('The new lead needs the company name.'); return; }
+    setBusy(true); setErr('');
+    try {
+      const lead = await api.post<any>('/leads', {
+        company: name,
+        rm: newLeadRm || null,
+        sector: (report?.common?.sector as any)?.value || null,
+        source_name: 'VOX conversation',
+      });
+      await saveEdits({ lead_id: String(lead.id) });
+      setCreating(false); setRelinking(false); setResolveQ(''); setCands([]);
+      setLeadName(name);
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
   const approve = async () => {
     if (strip.length > 0 && !window.confirm(
       `${strip.length} flagged field${strip.length > 1 ? 's are' : ' is'} still unreviewed — approve anyway?`)) {
@@ -179,15 +211,22 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
     setBusy(true); setErr('');
     try {
       await saveEdits();
-      const approved = await voxService.approve(conversationId);
-      setRow(approved);
+      const approvedRow = await voxService.approve(conversationId);
+      setRow(approvedRow);
       // File the timeline interaction through the proven idempotent touchpoint path;
-      // best-effort — the conversation is already the durable record.
-      if (approved.entity_id) {
+      // best-effort — the conversation is already the durable record. A company that
+      // exists files against the ENTITY; a brand-new one files against its LEAD, so
+      // the conversation shows on the lead's timeline from day one.
+      const subject = approvedRow.entity_id
+        ? { subject_type: 'Entity', subject_id: approvedRow.entity_id }
+        : approvedRow.lead_id
+          ? { subject_type: 'Lead', subject_id: approvedRow.lead_id }
+          : null;
+      if (subject) {
         try {
           const kdp = ((report?.common?.key_discussion_points?.value as string[]) || []);
           const tp = await vocxClient.post('/v1/touchpoints', {
-            subject_type: 'Entity', subject_id: approved.entity_id,
+            ...subject,
             interaction_type: 'VOX conversation',
             summary: kdp[0] || 'VOX conversation',
             key_intel: kdp.length ? { points: kdp } : undefined,
@@ -198,6 +237,7 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
           if (iid) await voxService.edits(conversationId, { interaction_id: String(iid) });
         } catch { /* the conversation row already holds everything */ }
       }
+      setApproved(true);
       onFiled?.();
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
@@ -237,6 +277,31 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
           }}>Retry now</Button>
         )}
         <Button sx={{ ...pillGhost, ml: 1 }} onClick={onClose}>Close</Button>
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------- approved: one beat
+  if (approved) {
+    const followUp = (report?.common?.follow_up_date as any)?.value;
+    return (
+      <Box sx={{ textAlign: 'center', pt: 3 }}>
+        <Typography sx={{ fontSize: 46, mb: 1 }}>✅</Typography>
+        <Typography sx={{ fontSize: 20, fontWeight: 700, mb: 0.5 }}>The firm now knows.</Typography>
+        <Typography sx={{ fontSize: 13.5, color: vx.mut, mb: 2 }}>
+          Filed to <b style={{ color: vx.ink }}>{entityName || leadName || 'the register'}</b> —
+          searchable by anyone, on the company timeline.
+        </Typography>
+        {followUp && (
+          <Box sx={{ ...card, textAlign: 'left' }}>
+            <Typography sx={microHeading}>Follow-up detected</Typography>
+            <Typography sx={{ fontSize: 14 }}>{followUp}</Typography>
+            <Typography sx={{ fontSize: 12, color: vx.mut, mt: 0.5 }}>
+              Calendar linking rides the Google-connect round — nothing is written silently.
+            </Typography>
+          </Box>
+        )}
+        <Button sx={{ ...pillGhost, mt: 1 }} onClick={onClose}>Back to Memory</Button>
       </Box>
     );
   }
@@ -354,9 +419,56 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
               <b>{c.name}</b> {c.code && <span style={{ color: vx.mut }}>· {c.code}</span>}
             </Box>
           ))}
+          {!creating ? (
+            <Button sx={{ ...pill, width: '100%', mt: 1.2 }} onClick={() => {
+              setCreating(true);
+              setNewLeadName(resolveQ.trim() || row.entity_candidates?.[0] || '');
+              setNewLeadRm(user.full);
+            }}>＋ Create “{(resolveQ.trim() || row.entity_candidates?.[0] || 'this company')}” as a new lead</Button>
+          ) : (
+            <Box sx={{ mt: 1.2, p: 1.2, border: `1px dashed ${vx.line}`, borderRadius: '12px' }}>
+              <Typography sx={{ ...microHeading }}>New lead — set the RM</Typography>
+              <TextField fullWidth size="small" placeholder="Company name" value={newLeadName}
+                onChange={(e) => setNewLeadName(e.target.value)}
+                sx={{ mb: 1, '& .MuiInputBase-root': { bgcolor: vx.card2, color: vx.ink,
+                  borderRadius: '10px' }, '& fieldset': { borderColor: vx.line } }} />
+              <TextField select fullWidth size="small" value={newLeadRm}
+                onChange={(e) => setNewLeadRm(e.target.value)}
+                sx={{ mb: 1.2, '& .MuiInputBase-root': { bgcolor: vx.card2, color: vx.ink,
+                  borderRadius: '10px' }, '& fieldset': { borderColor: vx.line },
+                  '& .MuiSelect-icon': { color: vx.mut } }}>
+                <MenuItem value="">RM — unassigned</MenuItem>
+                {referenceService.getRefSync('RM').map((o) => (
+                  <MenuItem key={o} value={o}>
+                    {referenceService.getRefLabels('RM')?.[o] || o}
+                  </MenuItem>
+                ))}
+                {user.full && !referenceService.getRefSync('RM').includes(user.full) && (
+                  <MenuItem value={user.full}>{user.full}</MenuItem>)}
+              </TextField>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button sx={pillPrimary} disabled={busy} onClick={() => void createLead()}>
+                  Create lead & link
+                </Button>
+                <Button sx={pillGhost} onClick={() => setCreating(false)}>Cancel</Button>
+              </Box>
+            </Box>
+          )}
           <Typography sx={{ fontSize: 12.5, color: vx.mut, mt: 1 }}>
-            Not there? Leave it — the conversation sits in the Queue until someone links or
+            Or leave it — the conversation sits in the Queue until someone links or
             creates the lead. Nothing merges silently.
+          </Typography>
+        </Box>
+      )}
+
+      {/* a lead-only conversation (new company): its lead is the identity; the RM
+          set at creation is editable here for anyone with assignment authority */}
+      {!readOnly && !row.entity_id && row.lead_id && (
+        <Box sx={card}>
+          <Typography sx={microHeading}>New lead — {leadName || 'created'}</Typography>
+          <Typography sx={{ fontSize: 12.5, color: vx.mut }}>
+            Created in the Leads register and linked to this conversation. It appears in
+            the Leads grid now; the RM can be changed there any time.
           </Typography>
         </Box>
       )}
@@ -377,12 +489,58 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
               </MenuItem>
             ))}
           </TextField>
+          {row.lead_id && (user.roles.includes('Management') || user.roles.includes('Admin')) && (
+            <TextField select fullWidth size="small" sx={{ mt: 1,
+              '& .MuiInputBase-root': { bgcolor: vx.card2, color: vx.ink, borderRadius: '10px' },
+              '& fieldset': { borderColor: vx.line }, '& .MuiSelect-icon': { color: vx.mut } }}
+              value={leads.find((l) => l.id === row.lead_id)?.rm ?? ''}
+              onChange={(e) => {
+                void api.patch(`/leads/${row.lead_id}`, { rm: e.target.value || null })
+                  .then(() => setLeads((ls) => ls.map((l) =>
+                    (l.id === row.lead_id ? { ...l, rm: e.target.value } : l))))
+                  .catch((er) => setErr(String(er?.message || er)));
+              }}
+              helperText="RM on this lead — assignment authority only"
+              FormHelperTextProps={{ sx: { color: vx.mut } }}>
+              <MenuItem value="">RM — unassigned</MenuItem>
+              {referenceService.getRefSync('RM').map((o) => (
+                <MenuItem key={o} value={o}>
+                  {referenceService.getRefLabels('RM')?.[o] || o}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+        </Box>
+      )}
+
+      {/* Summary, assembled from the key points — display-only, honest about it */}
+      {report && ((report.common?.key_discussion_points as any)?.value?.length > 0) && (
+        <Box sx={card}>
+          <Typography sx={microHeading}>Summary</Typography>
+          <Typography sx={{ fontSize: 14, lineHeight: 1.6 }}>
+            {((report.common?.key_discussion_points as any).value as string[]).slice(0, 3).join('. ')}.
+          </Typography>
         </Box>
       )}
 
       {report && (
         <RegistryReport registry={registry} report={report} readOnly={readOnly}
           confirmed={confirmed} flashPath={flashPath} onCell={onCell} onConfirm={onConfirm} />
+      )}
+
+      {/* the verbatim transcript — evidence, shown on request, never editable */}
+      {row.raw_transcript && (
+        <Box sx={{ ...card, py: 1.2 }}>
+          <Typography onClick={() => setShowTranscript((v) => !v)}
+            sx={{ ...microHeading, mb: showTranscript ? 1 : 0, cursor: 'pointer' }}>
+            {showTranscript ? 'Hide original transcript ▾' : 'Show original transcript ▸'}
+          </Typography>
+          {showTranscript && (
+            <Typography sx={{ fontSize: 13, color: vx.mut, whiteSpace: 'pre-wrap' }}>
+              {row.raw_transcript}
+            </Typography>
+          )}
+        </Box>
       )}
 
       {!readOnly && (

@@ -121,11 +121,33 @@ function FieldRow({ def, cell, path, readOnly, flash, onCell, onConfirm }: Field
       </Box>
     );
   } else if (control === 'list') {
+    // Bullets, exactly as the blueprint draws them: one row per point, delete on
+    // the row, "+ Add bullet" beneath. What the model heard reads as substance,
+    // not as a text blob.
+    const items: string[] = Array.isArray(value) ? value : [];
     body = (
-      <TextField fullWidth multiline minRows={Math.min(3, Math.max(1, (value || []).length))}
-        size="small" sx={frame} disabled={readOnly}
-        value={listToText(value)} placeholder="One per line"
-        onChange={(e) => set(e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} />
+      <Box>
+        {items.map((it, i) => (
+          <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.8, mb: 0.6 }}>
+            <Box component="span" sx={{ color: vx.grn2, lineHeight: '34px', flex: 'none' }}>•</Box>
+            <TextField fullWidth size="small" multiline sx={{ ...frame, flex: 1 }}
+              disabled={readOnly} value={it}
+              onChange={(e) => set(items.map((x, j) => (j === i ? e.target.value : x)))} />
+            {!readOnly && (
+              <Box component="span" onClick={(e) => { e.stopPropagation();
+                set(items.filter((_, j) => j !== i)); }}
+                sx={{ color: vx.mut, cursor: 'pointer', lineHeight: '34px', px: 0.4,
+                  '&:hover': { color: vx.ink } }}>✕</Box>
+            )}
+          </Box>
+        ))}
+        {!items.length && readOnly && (
+          <Typography sx={{ fontSize: 13, color: vx.mut }}>—</Typography>)}
+        {!readOnly && (
+          <Chip label="+ Add bullet" sx={chip(false, true)}
+            onClick={() => set([...items, ''])} />
+        )}
+      </Box>
     );
   } else if (control === 'number') {
     body = (
