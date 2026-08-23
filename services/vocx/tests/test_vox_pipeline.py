@@ -73,6 +73,7 @@ def _valid_model_json():
             "subsector": cell(None, "n/a"), "attendees_counterparty": cell([], "n/a"),
             "key_discussion_points": cell(["40 MW discussion"]),
             "meeting_summary": cell(None, "n/a"),
+            "follow_up_time": cell(None, "n/a"),
             "action_items": cell([], "n/a"), "next_steps": cell("Share DPR"),
             "follow_up_date": cell(None, "n/a"),
             "opportunity_assessment": cell("Real ask.", "n/a"),
@@ -544,3 +545,27 @@ def test_calendar_event_carries_the_promised_reminder():
     # without the arg, calendar defaults stay untouched
     w.create_event("Plain", "2026-08-28")
     assert "reminders" not in fake._e.body
+
+
+def test_unspoken_meeting_date_defaults_to_the_capture_date():
+    """Field finding: a note recorded now is about a meeting that just happened.
+    A null meeting_date backfills from the capture timestamp at MEDIUM
+    confidence — visible in the needs-strip, never invisible to date filters."""
+    def dateless_model(model, system, user):
+        obj = json.loads(_valid_model_json())
+        obj["common"]["meeting_date"] = {"value": None, "confidence": "n/a"}
+        return json.dumps(obj)
+
+    reg = FakeRegister(created_at="2026-08-24T09:12:00+05:30")
+    row = PipelineRunner(reg, good_transcribe, dateless_model).process("c1")
+    assert row["status"] == "ready"
+    cell = row["structured_report"]["common"]["meeting_date"]
+    assert cell == {"value": "2026-08-24", "confidence": "medium"}
+
+
+def test_date_rules_reach_the_prompt_context():
+    from app.vocx.pipeline.glossary import build_known_names_block
+    block = build_known_names_block([])
+    assert "Resolve RELATIVE dates" in block
+    assert "follow_up_time" in block
+    assert "Capture timestamp's date" in block

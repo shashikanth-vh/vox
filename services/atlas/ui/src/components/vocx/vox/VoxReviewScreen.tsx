@@ -381,6 +381,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         rm: user.full,
         title: ((common.next_steps as any)?.value as string) || `Follow-up — ${entityName || leadName || 'VOX'}`,
         date: when,
+        time: ((common.follow_up_time as any)?.value as string) || '',
         description: ((common.meeting_summary as any)?.value as string) || '',
       });
       if (r.data?.ok) {
@@ -404,8 +405,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     if (!when) return;
     const title = `Follow-up — ${entityName || leadName || 'VOX conversation'}`;
     const d = when.replace(/-/g, '');
+    const hm = (((common.follow_up_time as any)?.value as string) || '').match(/^(\d{1,2}):(\d{2})$/);
+    const dtstart = hm
+      ? `DTSTART:${d}T${hm[1].padStart(2, '0')}${hm[2]}00`
+      : `DTSTART;VALUE=DATE:${d}`;
     const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EVAM//VOX//EN', 'BEGIN:VEVENT',
-      `UID:vox-${conversationId}@evam`, `DTSTART;VALUE=DATE:${d}`,
+      `UID:vox-${conversationId}@evam`, dtstart,
       `SUMMARY:${title}`, `DESCRIPTION:${((common.next_steps as any)?.value || '').replace(/\n/g, ' ')}`,
       // the card promises "Reminder · 1 day before" — the .ics keeps that promise too
       'BEGIN:VALARM', 'TRIGGER:-P1D', 'ACTION:DISPLAY', `DESCRIPTION:${title}`, 'END:VALARM',
@@ -658,7 +663,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             <div className="followup-card">
               <div className="fu-eyebrow">Follow-up detected</div>
               <div className="fu-title">{(common.next_steps as any)?.value || 'Follow-up'}</div>
-              <div className="fu-row"><span className="k">When</span><span className="v">{followUp}</span></div>
+              <div className="fu-row"><span className="k">When</span><span className="v">
+                {followUp}{(common.follow_up_time as any)?.value ? ` · ${(common.follow_up_time as any).value}` : ''}
+              </span></div>
               <div className="fu-row"><span className="k">With</span><span className="v">{(((common.attendees_counterparty as any)?.value || [])[0]) || '—'}</span></div>
               <div className="fu-row"><span className="k">Reminder</span><span className="v">1 day before</span></div>
               {fuMsg && <div style={{ fontSize: 12, color: 'var(--accent)', margin: '8px 0 2px' }}>{fuMsg}</div>}

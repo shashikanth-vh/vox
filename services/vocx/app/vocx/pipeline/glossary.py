@@ -83,6 +83,13 @@ def build_known_names_block(company_names: Iterable[str] | None = None) -> str:
         "treat it as crore/lakh only when the speaker said crore or lakh.\n"
         "- When an asset sale mentions components in any order or run-on form "
         "('bundle, land PPA connectivity'), still extract each component "
-        "individually into offer_components."
+        "individually into offer_components.\n"
+        "- Resolve RELATIVE dates against the Capture timestamp: 'tomorrow', "
+        "'next Monday', 'day after' become concrete ISO dates (confidence "
+        "medium). A spoken time ('11am', 'around 4') fills follow_up_time as "
+        "24-hour HH:MM.\n"
+        "- meeting_date: a post-meeting note is normally recorded the same day "
+        "as the meeting — when the transcript does not state the meeting date, "
+        "use the Capture timestamp's date with confidence medium, not null."
     )
     return "\n\n".join(lines)

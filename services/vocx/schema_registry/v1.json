@@ -124,6 +124,13 @@
    "notes": "Feeds the confirm-then-create calendar draft."
   },
   {
+   "key": "follow_up_time",
+   "label": "Follow-up time",
+   "type": "string",
+   "control": "text",
+   "notes": "Time of the follow-up in 24-hour HH:MM, only when a time was actually spoken ('11am' -> '11:00'). Null when only a date was mentioned."
+  },
+  {
    "key": "opportunity_assessment",
    "label": "Opportunity assessment",
    "type": "string",

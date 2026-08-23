@@ -100,12 +100,15 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
         if ok:
             obj["entity_candidates"] = flat
 
-    # meeting_summary was added to the registry after v1 shipped; an older model
-    # snapshot (or a cached stub) that omits it still satisfies the contract as
-    # an explicit null — additive fields default, they never fail old outputs.
+    # meeting_summary and follow_up_time were added to the registry after v1
+    # shipped; an older model snapshot (or a cached stub) that omits them still
+    # satisfies the contract as explicit nulls — additive fields default, they
+    # never fail old outputs.
     common0 = obj.get("common")
-    if isinstance(common0, dict) and "meeting_summary" not in common0:
-        common0["meeting_summary"] = {"value": None, "confidence": "n/a"}
+    if isinstance(common0, dict):
+        for added in ("meeting_summary", "follow_up_time"):
+            if added not in common0:
+                common0[added] = {"value": None, "confidence": "n/a"}
 
     details = obj.get("subsector_details")
     common = obj.get("common")
@@ -189,6 +192,16 @@ def structure_transcript(
         except (ContractError, StructuringError) as second:
             detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
             raise StructuringError(f"contract violation after repair round: {detail2}") from second
+
+    # A post-meeting note is recorded when the meeting just happened: if the
+    # model still left meeting_date null (nothing spoken, older prompt), the
+    # capture date fills it at medium confidence — flagged for a one-tap
+    # confirm, never silently invisible to date filters.
+    md = (report.get("common") or {}).get("meeting_date") or {}
+    if md.get("value") in (None, "") and capture_ts:
+        cap_date = str(capture_ts)[:10]
+        if len(cap_date) == 10 and cap_date[4] == "-":
+            report["common"]["meeting_date"] = {"value": cap_date, "confidence": "medium"}
 
     # Server-side data-quality nudges merge into the model's own flags (deduplicated,
     # order preserved) — flags never block, they steer the review.
