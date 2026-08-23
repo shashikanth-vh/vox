@@ -59,6 +59,15 @@ def _migrate() -> None:
 
 
 @pytest_asyncio.fixture
+async def db_session():
+    """A raw session on the same engine the client set up — for tests that must
+    talk PAST the API to prove a database-level control (triggers, RLS)."""
+    sm = get_sessionmaker()
+    async with sm() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
 async def client() -> AsyncIterator[AsyncClient]:
     # Fresh engine on this test's event loop.
     clear_tenant_cache()
@@ -85,7 +94,8 @@ async def client() -> AsyncIterator[AsyncClient]:
                 "interactions, external_intelligence, monitoring_reporting, counterparties, "
                 "people, documents, document_checklist, line_assignments, "
                 "change_requests, audit_log, idempotency_keys, "
-                "calendar_events, notifications, notification_deliveries "
+                "calendar_events, notifications, notification_deliveries, "
+                "vox_conversations, vox_consent_records, vox_conversation_edits "
                 "RESTART IDENTITY CASCADE"
             ))
             await session.commit()

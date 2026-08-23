@@ -69,7 +69,8 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
 # same shape: the engine reads several documents and writes a long answer synchronously.
 # The long window is scoped to these prefixes on purpose: a hung register call must never
 # get minutes to hang.
-_SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/template_fill",
+_SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/vox/capture",
+               "/vocx/v1/template_fill",
                "/orchestrator/v1/cam/",
                # The all-firms sweep: four hundred terms fanned out across three news
                # sources. Minutes, legitimately — and cutting it short throws away a

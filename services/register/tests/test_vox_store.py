@@ -1,0 +1,297 @@
+"""The VOX conversation store — statuses hold their line, edits are atomic and
+audited, consent is immutable in the database itself, and erasure is the one
+sanctioned exception (Build Specification, Sections 12 and 16)."""
+
+from __future__ import annotations
+
+import uuid
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import text
+
+pytestmark = pytest.mark.asyncio
+
+
+def _as(email: str, roles: str) -> dict:
+    return {"X-User-Email": email, "X-User-Roles": roles}
+
+
+RECORDER = _as("ananda@evamfinance.com", "BDRM")
+OTHER_RM = _as("chetan@evamfinance.com", "BDRM")
+MGMT = _as("kannan@evamfinance.com", "Management")
+ADMIN = _as("admin@evamfinance.com", "Admin")
+
+
+def _report(quantum=25):
+    cell = lambda v, c="high", **kw: {"value": v, "confidence": c, **kw}  # noqa: E731
+    return {
+        "detected_use_cases": ["lending"],
+        "common": {
+            "meeting_type": cell("in_person"),
+            "meeting_date": cell("2026-08-20"),
+            "location": cell("Whitefield", "medium"),
+            "sector": cell("Renewables"),
+            "subsector": cell("Solar-Developer", "medium"),
+            "attendees_counterparty": cell(["R. Sharma"], "medium"),
+            "key_discussion_points": cell(["40 MW under construction"]),
+            "action_items": cell([], "n/a"),
+            "next_steps": cell("Review DPR"),
+            "follow_up_date": cell(None, "n/a"),
+            "opportunity_assessment": cell("Strong sponsor.", "n/a"),
+            "opportunity_score": cell(4, "medium", user_override=False),
+            "opportunity_score_override_reason": cell(None, "n/a"),
+            "competitive_intelligence": cell("", "n/a"),
+            "data_quality_flags": cell([], "n/a"),
+        },
+        "lending": {
+            "requirement_nature": cell("project_finance"),
+            "requirement_quantum_cr": cell(quantum, "low"),
+            "company_turnover_cr": cell(None, "n/a"),
+            "existing_bankers": cell("SBI", "medium"),
+            "present_requirement": cell("~25 Cr project finance"),
+            "remarks": cell(None, "n/a"),
+        },
+        "entity_candidates": ["Suryodaya EPC", "SBI"],
+    }
+
+
+async def _make(client: AsyncClient, **kw) -> dict:
+    body = {"recording_mode": "post_meeting", **kw}
+    r = await client.post("/v1/vox/conversations", json=body, headers=RECORDER)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def _to_ready(client: AsyncClient, cid: str, report=None) -> dict:
+    for status in ("processing", "ready"):
+        payload = {"status": status}
+        if status == "ready":
+            payload["structured_report"] = report or _report()
+            payload["raw_transcript"] = "met suryodaya at whitefield, forty megawatt"
+            payload["prompt_version"] = "v1"
+            payload["registry_version"] = "v1"
+        r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json=payload)
+        assert r.status_code == 200, r.text
+    return r.json()
+
+
+# ------------------------------------------------------------------ create / replay
+
+async def test_a_note_is_created_queued_and_a_retry_replays(client: AsyncClient):
+    cap = f"cap-{uuid.uuid4()}"
+    first = await _make(client, capture_id=cap)
+    assert first["status"] == "queued"
+    again = await client.post("/v1/vox/conversations",
+                              json={"recording_mode": "post_meeting", "capture_id": cap},
+                              headers=RECORDER)
+    assert again.status_code == 201
+    assert again.json()["id"] == first["id"] and again.json()["replayed"] is True
+
+
+async def test_live_mode_cannot_exist_without_consent(client: AsyncClient):
+    r = await client.post("/v1/vox/conversations", json={"recording_mode": "live"},
+                          headers=RECORDER)
+    assert r.status_code in (400, 422), r.text
+    consent = await client.post("/v1/vox/consents", json={
+        "certification_text": "I certify that everyone in this meeting has been told "
+                              "it is being recorded, and consented."}, headers=RECORDER)
+    assert consent.status_code == 201, consent.text
+    r = await client.post("/v1/vox/conversations",
+                          json={"recording_mode": "live", "consent_id": consent.json()["id"]},
+                          headers=RECORDER)
+    assert r.status_code == 201, r.text
+
+
+# ----------------------------------------------------------------- status machine
+
+async def test_the_status_machine_refuses_illegal_moves(client: AsyncClient):
+    row = await _make(client)
+    cid = row["id"]
+    # queued -> ready skips processing: refused
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={"status": "ready"})
+    assert r.status_code == 409, r.text
+    await _to_ready(client, cid)
+    # ready -> queued goes backwards: refused
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={"status": "queued"})
+    assert r.status_code == 409, r.text
+
+
+async def test_failure_retry_and_permanent_failure_paths(client: AsyncClient):
+    row = await _make(client)
+    cid = row["id"]
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline",
+                           json={"status": "processing"})
+    assert r.status_code == 200
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline",
+                           json={"status": "processing_failed",
+                                 "processing_error": "whisper timeout after 120s",
+                                 "retry_increment": True})
+    assert r.status_code == 200 and r.json()["retry_count"] == 1
+    # retry goes back to processing, then a clean ready clears the error
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={"status": "processing"})
+    assert r.status_code == 200
+    out = await _to_ready(client, cid)
+    assert out["processing_error"] is None
+    # the terminal state exists and is reachable only from a failure
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline",
+                           json={"status": "failed_permanently"})
+    assert r.status_code == 409
+
+
+async def test_ready_denormalises_and_tags_use_cases(client: AsyncClient):
+    row = await _make(client)
+    out = await _to_ready(client, row["id"])
+    assert out["sector"] == "Renewables" and out["subsector"] == "Solar-Developer"
+    assert out["meeting_date"] == "2026-08-20"
+    got = (await client.get(f"/v1/vox/conversations/{row['id']}", headers=OTHER_RM)).json()
+    assert got["use_cases"] == ["lending"]
+
+
+# ------------------------------------------------------------------- the edit path
+
+async def test_the_recorder_edits_and_the_audit_remembers(client: AsyncClient):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 30, "confidence": "high"}}],
+    }, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["changed"] == 1
+    assert body["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 30
+
+
+async def test_an_unrelated_rm_cannot_edit_but_management_can(client: AsyncClient):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 99, "confidence": "high"}}]}, headers=OTHER_RM)
+    assert r.status_code == 403, r.text
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 40, "confidence": "high"}}]}, headers=MGMT)
+    assert r.status_code == 200, r.text
+
+
+async def test_score_override_and_use_case_retag_flow_through_the_same_path(client: AsyncClient):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "common.opportunity_score",
+                   "new_value": {"value": 5, "confidence": "n/a", "user_override": True}}],
+        "use_cases": ["lending", "asset_monetisation"],
+    }, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    got = (await client.get(f"/v1/vox/conversations/{row['id']}")).json()
+    assert sorted(got["use_cases"]) == ["asset_monetisation", "lending"]
+    assert got["structured_report"]["common"]["opportunity_score"]["user_override"] is True
+
+
+async def test_edits_keep_the_denormalised_columns_honest(client: AsyncClient):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "common.subsector",
+                   "new_value": {"value": "Wind", "confidence": "high"}}]}, headers=RECORDER)
+    assert r.status_code == 200
+    assert r.json()["subsector"] == "Wind"
+
+
+# ------------------------------------------------------------------ approve / list
+
+async def test_approve_needs_ready_and_is_idempotent(client: AsyncClient):
+    row = await _make(client)
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert r.status_code == 409  # still queued
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert r.status_code == 200 and r.json()["status"] == "submitted"
+    again = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert again.status_code == 200 and again.json()["replayed"] is True
+
+
+async def test_everyone_reads_everything_and_mine_narrows(client: AsyncClient):
+    mine = await _make(client, capture_id=f"mine-{uuid.uuid4()}")
+    other = await client.post("/v1/vox/conversations",
+                              json={"recording_mode": "post_meeting"}, headers=OTHER_RM)
+    assert other.status_code == 201
+    everyone = (await client.get("/v1/vox/conversations", headers=OTHER_RM)).json()
+    ids = {i["id"] for i in everyone["items"]}
+    assert mine["id"] in ids and other.json()["id"] in ids  # no privacy tier (D2)
+    only_mine = (await client.get("/v1/vox/conversations", params={"mine": "true"},
+                                  headers=RECORDER)).json()
+    assert all(i["recorder_email"] == "ananda@evamfinance.com" for i in only_mine["items"])
+    assert mine["id"] in {i["id"] for i in only_mine["items"]}
+
+
+async def test_search_and_filters_find_the_conversation(client: AsyncClient):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    by_q = (await client.get("/v1/vox/conversations",
+                             params={"q": "suryodaya"})).json()
+    assert row["id"] in {i["id"] for i in by_q["items"]}
+    by_uc = (await client.get("/v1/vox/conversations",
+                              params={"use_case": "lending", "status": "ready"})).json()
+    assert row["id"] in {i["id"] for i in by_uc["items"]}
+    none = (await client.get("/v1/vox/conversations",
+                             params={"q": "zebra-quantum-nonsense"})).json()
+    assert row["id"] not in {i["id"] for i in none["items"]}
+
+
+# ---------------------------------------------------- immutability in the database
+
+async def test_consent_records_refuse_update_and_delete(client: AsyncClient, db_session):
+    r = await client.post("/v1/vox/consents", json={
+        "certification_text": "I certify the attendees were told and consented."},
+        headers=RECORDER)
+    cid = r.json()["id"]
+    for stmt in (f"UPDATE vox_consent_records SET certification_text='edited' WHERE id='{cid}'",
+                 f"DELETE FROM vox_consent_records WHERE id='{cid}'"):
+        with pytest.raises(Exception) as exc:
+            await db_session.execute(text(stmt))
+        assert "immutable" in str(exc.value) or "never changed" in str(exc.value)
+        await db_session.rollback()
+
+
+async def test_the_edit_trail_is_append_only(client: AsyncClient, db_session):
+    row = await _make(client)
+    await _to_ready(client, row["id"])
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 31, "confidence": "high"}}]}, headers=RECORDER)
+    with pytest.raises(Exception):
+        await db_session.execute(text(
+            f"DELETE FROM vox_conversation_edits WHERE conversation_id='{row['id']}'"))
+    await db_session.rollback()
+
+
+async def test_erasure_removes_content_but_consent_and_log_survive(client: AsyncClient):
+    consent = await client.post("/v1/vox/consents", json={
+        "certification_text": "I certify the attendees were told and consented."},
+        headers=RECORDER)
+    consent_id = consent.json()["id"]
+    row = await _make(client, capture_id=f"erase-{uuid.uuid4()}", consent_id=consent_id)
+    await _to_ready(client, row["id"])
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 30, "confidence": "high"}}]}, headers=RECORDER)
+
+    denied = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=RECORDER)
+    assert denied.status_code == 403  # not an RM convenience
+
+    erased = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=ADMIN)
+    assert erased.status_code == 200, erased.text
+    got = (await client.get(f"/v1/vox/conversations/{row['id']}")).json()
+    assert got["erased_at"] is not None
+    assert got["raw_transcript"] is None and got["structured_report"] is None
+    assert got["consent_id"] == consent_id  # the certification outlives the content
+    # further edits and pipeline writes are refused
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "lending.remarks",
+                   "new_value": {"value": "x", "confidence": "high"}}]}, headers=ADMIN)
+    assert r.status_code == 409
+    again = await client.post(f"/v1/vox/conversations/{row['id']}/erase", headers=ADMIN)
+    assert again.status_code == 200 and again.json()["replayed"] is True

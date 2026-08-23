@@ -43,6 +43,14 @@ _RAW: list[tuple[str, str, str]] = [
     # backend still enforces its own final authorization (defence in depth). --------------
     # VocX — field touchpoint capture is an interaction write.
     ("POST",   r"^/vocx/v1/touchpoints$", "log_interaction"),
+    # VOX conversations (the spec build) — recording, consenting, editing and approving
+    # a conversation are all interaction writes; the register still enforces
+    # recorder-or-authority on each row (defence in depth). Erasure is the
+    # irreversible one, so it rides the delete gate (Admin).
+    ("POST",   r"^/v1/vox/(conversations|consents)$", "log_interaction"),
+    ("POST",   r"^/v1/vox/conversations/[^/]+/(edits|approve)$", "log_interaction"),
+    ("POST",   r"^/v1/vox/conversations/[^/]+/erase$", "delete_row"),
+    ("POST",   r"^/vocx/v1/vox/process$", "log_interaction"),
     # PULSE — news radar: triggering a scan / filing items is the intel-scan capability.
     ("POST",   r"^/pulse/v1/scan$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/items$", "run_news_scan"),

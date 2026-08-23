@@ -32,8 +32,15 @@ from app.models.trackers import (
     SyndicationTracker,
 )
 from app.models.users import ChangeRequest, LineAssignment
+from app.models.vox import (
+    VoxConsentRecord,
+    VoxConversation,
+    VoxConversationEdit,
+    VoxConversationUseCase,
+)
 
 __all__ = [
+    "VoxConsentRecord", "VoxConversation", "VoxConversationEdit", "VoxConversationUseCase",
     "Base",
     "AuditLog",
     "Tenant",
