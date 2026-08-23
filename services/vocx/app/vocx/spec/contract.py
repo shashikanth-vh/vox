@@ -178,7 +178,8 @@ def validate_report(obj: Any, registry_version: str | None = None) -> dict:
         if len(detected) != len(set(detected)):
             errors.append("detected_use_cases: duplicates")
 
-    known_top = {"detected_use_cases", "common", "entity_candidates"} | allowed_ucs
+    known_top = {"detected_use_cases", "common", "entity_candidates",
+                 "subsector_details"} | allowed_ucs
     for extra in set(obj) - known_top:
         errors.append(f"{extra}: unknown top-level key")
 
@@ -202,6 +203,30 @@ def validate_report(obj: Any, registry_version: str | None = None) -> dict:
         elif present and not has_fields and obj[uc] not in ({}, None):
             if not isinstance(obj[uc], dict) or obj[uc]:
                 errors.append(f"{uc}: v1 carries the common field set only — block must be empty")
+
+    # The per-subsector canonical data points (9.8) live under "subsector_details" —
+    # only when a subsector is chosen, only that subsector's registered keys, and the
+    # renderer shows them under Additional details with no code change per subsector.
+    details = obj.get("subsector_details")
+    if details not in (None, {}):
+        subsector = (((obj.get("common") or {}).get("subsector")) or {}).get("value") \
+            if isinstance(obj.get("common"), dict) else None
+        if not isinstance(details, dict):
+            errors.append("subsector_details: must be an object")
+        elif subsector is None:
+            errors.append("subsector_details: present without a chosen subsector")
+        else:
+            canon = {f["key"]: f for f in registry["subsector_canonicals"].get(subsector, [])}
+            for key, cell in details.items():
+                if key not in canon:
+                    errors.append(f"subsector_details.{key}: not a canonical data point "
+                                  f"of {subsector!r}")
+                    continue
+                if not isinstance(cell, dict) or "value" not in cell or "confidence" not in cell:
+                    errors.append(f"subsector_details.{key}: every field is {{value, confidence}}")
+                elif cell["confidence"] not in _CONFIDENCES:
+                    errors.append(f"subsector_details.{key}: confidence "
+                                  f"{cell['confidence']!r} not in {_CONFIDENCES}")
 
     cands = obj.get("entity_candidates")
     if cands is None:

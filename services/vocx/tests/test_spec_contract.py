@@ -241,3 +241,28 @@ def test_registry_bumps_never_mutate_old_rows():
     from app.vocx.spec import RegistryError
     with pytest.raises(RegistryError):
         load_registry("v99")
+
+
+# ------------------------------------------------- per-subsector canonicals (9.8)
+
+def test_subsector_details_validate_against_the_chosen_subsector():
+    r = _valid_report()
+    r["subsector_details"] = {
+        "operating_uc_capacity_mw": _cell("40 MW", "high"),
+        "portfolio_stage": _cell("Under construction", "medium"),
+    }
+    validate_report(r)
+
+
+def test_a_canonical_from_another_subsector_is_refused():
+    r = _valid_report()
+    r["subsector_details"] = {"chemistry": _cell("LFP")}   # BESS-OEM's, not Solar-Developer's
+    _expect_error(r, "not a canonical data point of 'Solar-Developer'")
+
+
+def test_details_without_a_subsector_are_refused():
+    r = _valid_report()
+    r["common"]["sector"] = _cell(None, "n/a")
+    r["common"]["subsector"] = _cell(None, "n/a")
+    r["subsector_details"] = {"operating_uc_capacity_mw": _cell("40 MW")}
+    _expect_error(r, "present without a chosen subsector")

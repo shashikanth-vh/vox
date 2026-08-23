@@ -221,6 +221,11 @@ def build_vocx_router(settings: Any) -> APIRouter:
         ("/v1/auth/start", ["GET"], "Begin per-RM Google OAuth (browser)"),
         ("/v1/auth/callback", ["GET"], "OAuth redirect target (exempted at the gateway)"),
         ("/v1/calendar/test", ["GET"], "Prove which Google calendar VocX writes to"),
+        # The VOX spec build (conversation intelligence): the registry the renderer is
+        # driven by, the one-POST capture door, and the processing kick/retry.
+        ("/v1/spec", ["GET"], "The field registry + versions (registry-driven renderer)"),
+        ("/v1/vox/capture", ["POST"], "Audio in → conversation created → pipeline kicked"),
+        ("/v1/vox/process", ["POST"], "Kick or retry processing for a conversation"),
     ]
 
     def _make_handler(route_path: str):

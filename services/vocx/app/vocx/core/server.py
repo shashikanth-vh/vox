@@ -87,6 +87,11 @@ class VocxApp:
         self.log = _logger(self.config)
         self._transcriber = transcriber          # injected in tests; else built lazily
         self.writer_factory = writer_factory      # (rm, store, config) -> writer; None -> MockWriter
+        # The VOX pipeline (spec build): a runner per process, in-flight ids tracked so a
+        # double-tap spawns one worker, not two. Built lazily; injectable for tests.
+        self._vox_runner = None
+        self._vox_inflight: set[str] = set()
+        self._vox_lock = __import__("threading").Lock()
 
     def transcriber(self):
         if self._transcriber is None:
@@ -316,6 +321,10 @@ class VocxApp:
             return 200, "application/json", _j({"types": self.store.interaction_types})
         if method == "GET" and path == "/v1/capabilities":
             return 200, "application/json", _j(self._capabilities())
+        if method == "POST" and path == "/v1/vox/process":
+            return self._vox_process(body)
+        if method == "POST" and path == "/v1/vox/capture":
+            return self._vox_capture(query, body)
         if method == "GET" and path == "/v1/spec":
             # The registry-driven contract (Phase 0): the review renderer draws its
             # blocks from THIS, so adding a field needs zero renderer changes.
@@ -418,6 +427,145 @@ class VocxApp:
         new_company = not matches or matches[0]["score"] < resolver.match_min
         return 200, "application/json", _j({
             "ok": True, "q": q, "matches": matches, "new_company": new_company})
+
+    # --------------------------------------------------------- the VOX pipeline
+
+    def vox_runner(self):
+        """The spec-build pipeline runner, wired to the real register, the local
+        transcriber and Anthropic — built once, injectable for tests via
+        ``self._vox_runner``."""
+        if self._vox_runner is None:
+            import os
+
+            from ..pipeline import PipelineRunner
+            from ..pipeline.register_client import RegisterClient
+
+            register = RegisterClient(
+                base_url=os.environ.get("VOCX_REGISTER_BASE_URL", "http://register:8000"),
+                api_key=os.environ.get("VOCX_REGISTER_API_KEY", "dev-local-key"),
+                tenant=os.environ.get("VOCX_REGISTER_TENANT", "EVAM"),
+            )
+
+            def transcribe(audio_ref: str) -> dict:
+                # A local-archive ref IS a file path — hand it over as one (so test
+                # fixtures' .txt sidecars work too). Anything else (S3 keys) goes
+                # through the store's playback, which yields ("bytes"|"url", data).
+                if os.path.isfile(audio_ref):
+                    audio: Any = audio_ref
+                else:
+                    store = self.audio_store()
+                    playback = store.playback(audio_ref) if store else None
+                    if playback is None:
+                        raise RuntimeError(f"audio {audio_ref!r} is not in the store")
+                    audio = playback[1] if isinstance(playback, tuple) else playback
+                result = self.transcriber().transcribe(audio, prompt=self.stt_prompt())
+                if isinstance(result, str):
+                    return {"text": result, "segments": [{"text": result}], "language": None}
+                segments = result.get("segments") or [{"text": result.get("text", "")}]
+                return {"text": result.get("text", ""), "segments": segments,
+                        "language": result.get("language")}
+
+            def ask_model(model: str, system: str, user: str) -> str:
+                # Eval/dev fixture: a canned contract object instead of a live model.
+                # Set ONLY in test harnesses — never in a deployed environment.
+                stub = os.environ.get("VOCX_MODEL_STUB_FILE")
+                if stub:
+                    with open(stub, encoding="utf-8") as fh:
+                        return fh.read()
+                import anthropic  # lazy: offline paths never import the SDK
+                client = anthropic.Anthropic(
+                    api_key=os.environ[os.environ.get("VOCX_ANTHROPIC_KEY_ENV",
+                                                      "ANTHROPIC_API_KEY")])
+                msg = client.messages.create(
+                    model=model, max_tokens=8000, system=system,
+                    messages=[{"role": "user", "content": user}])
+                return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+
+            self._vox_runner = PipelineRunner(register, transcribe, ask_model,
+                                              alert=lambda m: self.log.error("ADMIN ALERT: %s", m))
+        return self._vox_runner
+
+    def _vox_capture(self, query, body: bytes):
+        """The new-flow capture door, one POST from the panel: store the audio
+        locally, create (or REPLAY, by capture_id) the register conversation row,
+        and kick the pipeline. The client can vanish the moment this returns —
+        everything after is server-side."""
+        cap_id = _one(query, "capture_id") or ""
+        mode = _one(query, "mode") or "post_meeting"
+        if mode not in ("post_meeting", "live"):
+            return 400, "application/json", _j({"ok": False, "error": "mode must be post_meeting|live"})
+        if not body:
+            return 400, "application/json", _j({"ok": False, "error": "no audio payload"})
+        rm = _one(query, "rm") or "unknown"
+        astore = self.audio_store()
+        if astore is None:
+            # Dev/base posture without a configured store: a local archive under the
+            # configured directory. PRISM's subclass supplies the MinIO-backed store.
+            from ..speech.audio_store import LocalAudioStore
+            directory = ((self.config.get("audio") or {}).get("dir")
+                         or os.path.join(os.path.expanduser("~"), ".vocx", "audio"))
+            astore = self._local_audio = getattr(self, "_local_audio", None) or \
+                LocalAudioStore(directory)
+        ref = astore.save(bytes(body), _one(query, "ts") or "", rm,
+                          _one(query, "content_type") or "")
+        if not ref:
+            return 500, "application/json", _j({"ok": False, "error": "audio could not be stored"})
+        try:
+            row = self.vox_runner().register.create(
+                recording_mode=mode,
+                recorder_email=_one(query, "email") or None,
+                recorder_name=rm if rm != "unknown" else None,
+                capture_id=cap_id or None,
+                audio_ref=ref,
+                duration_seconds=int(_one(query, "duration") or 0) or None,
+                latitude=float(_one(query, "lat")) if _one(query, "lat") else None,
+                longitude=float(_one(query, "lng")) if _one(query, "lng") else None,
+                consent_id=_one(query, "consent_id") or None,
+            )
+        except Exception as e:  # noqa: BLE001 — the audio is SAFE; say so honestly
+            self.log.exception("VOX capture: register create failed")
+            return 502, "application/json", _j({
+                "ok": False, "stored_audio": ref,
+                "error": f"the register did not accept the conversation: {e}"})
+        cid = row.get("id")
+        if row.get("replayed") and row.get("status") in ("ready", "submitted"):
+            return 200, "application/json", _j({"ok": True, "conversation_id": cid,
+                                                "replayed": True, "status": row.get("status")})
+        code, ctype, payload = self._vox_process(_j({"conversation_id": cid}))
+        out = json.loads(payload)
+        return 202, "application/json", _j({"ok": True, "conversation_id": cid,
+                                            "status": row.get("status"),
+                                            "processing": out.get("ok", False)})
+
+    def _vox_process(self, body: bytes):
+        """Kick (or resume) processing for a conversation and return AT ONCE —
+        the pipeline continues server-side; the panel polls the register row.
+        Idempotent: a ready row is untouched, an in-flight id spawns nothing."""
+        try:
+            payload = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, "application/json", _j({"ok": False, "error": "invalid JSON"})
+        cid = str(payload.get("conversation_id") or "").strip()
+        if not cid:
+            return 400, "application/json", _j({"ok": False, "error": "conversation_id required"})
+        with self._vox_lock:
+            if cid in self._vox_inflight:
+                return 202, "application/json", _j({"ok": True, "conversation_id": cid,
+                                                    "already_running": True})
+            self._vox_inflight.add(cid)
+
+        def _work():
+            try:
+                self.vox_runner().process(cid)
+            except Exception:  # noqa: BLE001 — the runner logs; the set must clear
+                self.log.exception("VOX pipeline run for %s crashed", cid)
+            finally:
+                with self._vox_lock:
+                    self._vox_inflight.discard(cid)
+
+        import threading
+        threading.Thread(target=_work, daemon=True, name=f"vox-run-{cid[:8]}").start()
+        return 202, "application/json", _j({"ok": True, "conversation_id": cid})
 
     def _capabilities(self) -> dict[str, Any]:
         """What this server can do right now, so the app can adapt the UI
