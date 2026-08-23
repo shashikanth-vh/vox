@@ -345,3 +345,19 @@ def test_the_capture_door_stores_audio_creates_the_row_and_kicks_processing(tmp_
     # no audio -> honest 400, nothing created
     code, _, body = app.handle("POST", "/v1/vox/capture", {"mode": ["post_meeting"]}, b"")
     assert code == 400
+
+
+def test_the_nested_subsector_details_shape_is_unwrapped_not_failed():
+    """Field finding (stage, first live run): the real model keyed the canonical data
+    points under the subsector's own name. Isomorphic shape -> unwrap, ready."""
+    def nesting_model(model, system, user):
+        obj = json.loads(_valid_model_json())
+        obj["common"]["subsector"] = {"value": "Solar-Developer", "confidence": "medium"}
+        obj["subsector_details"] = {"Solar-Developer": {
+            "operating_uc_capacity_mw": {"value": "40 MW", "confidence": "high"}}}
+        return json.dumps(obj)
+
+    row = PipelineRunner(FakeRegister(), good_transcribe, nesting_model).process("c1")
+    assert row["status"] == "ready"
+    assert row["structured_report"]["subsector_details"] == {
+        "operating_uc_capacity_mw": {"value": "40 MW", "confidence": "high"}}

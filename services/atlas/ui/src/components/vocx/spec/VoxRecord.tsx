@@ -11,6 +11,7 @@
 import { Alert, Box, Button, Chip, Typography } from '@mui/material';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
+import { useVocx } from '../VocxProvider';
 import { getSession } from '../../../auth/session';
 import { voxService } from '../../../services/voxService';
 import { banner, chip, pill, pillGhost, vx } from '../vocxStyles';
@@ -23,6 +24,7 @@ export default function VoxRecord({ onCaptured }: {
   onCaptured: (conversationId: string) => void;
 }) {
   const { user } = useAuth();
+  const { setRecording } = useVocx();
   const [phase, setPhase] = useState<Phase>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [segments, setSegments] = useState<number[]>([]); // seconds per closed segment
@@ -33,6 +35,11 @@ export default function VoxRecord({ onCaptured }: {
   const segStartRef = useRef(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gpsRef = useRef<{ lat?: number; lng?: number }>({});
+  // Refs, not closures: the interval and the auto-finish must read LIVE state — a
+  // stale closure once let a take sail straight past the 3:00 cap in the field.
+  const elapsedRef = useRef(0);
+  const finishingRef = useRef(false);
+  const finishRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => () => { if (tickRef.current) clearInterval(tickRef.current); }, []);
 
@@ -52,11 +59,11 @@ export default function VoxRecord({ onCaptured }: {
       segStartRef.current = 0;
       setSegments([]);
       setElapsed(0);
+      elapsedRef.current = 0;
+      finishingRef.current = false;
+      setRecording(true);   // the panel now refuses to close until the take is safe
       setPhase('recording');
-      tickRef.current = setInterval(() => setElapsed((s) => {
-        if (s + 1 >= CAP_SECONDS) void finish();
-        return s + 1;
-      }), 1000);
+      startTick();
     } catch {
       setErr('The microphone is not available. Allow mic access and try again.');
       setPhase('error');
@@ -67,25 +74,33 @@ export default function VoxRecord({ onCaptured }: {
     if (recRef.current?.state !== 'recording') return;
     recRef.current.pause();
     if (tickRef.current) clearInterval(tickRef.current);
-    setSegments((seg) => [...seg, elapsed - segStartRef.current]);
+    setSegments((seg) => [...seg, elapsedRef.current - segStartRef.current]);
     setPhase('paused');
   };
 
   const resume = () => {
     if (recRef.current?.state !== 'paused') return;
     recRef.current.resume();
-    segStartRef.current = elapsed;
+    segStartRef.current = elapsedRef.current;
     setPhase('recording');
-    tickRef.current = setInterval(() => setElapsed((s) => {
-      if (s + 1 >= CAP_SECONDS) void finish();
-      return s + 1;
-    }), 1000);
+    startTick();
+  };
+
+  const startTick = () => {
+    if (tickRef.current) clearInterval(tickRef.current);
+    tickRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+      if (elapsedRef.current >= CAP_SECONDS) void finishRef.current();
+    }, 1000);
   };
 
   const discard = () => {
     if (!window.confirm('Discard this note? Nothing has been saved.')) return;
     stopStream();
-    setPhase('idle'); setElapsed(0); setSegments([]);
+    chunksRef.current = [];
+    setRecording(false);
+    setPhase('idle'); setElapsed(0); elapsedRef.current = 0; setSegments([]);
   };
 
   const stopStream = () => {
@@ -97,7 +112,8 @@ export default function VoxRecord({ onCaptured }: {
 
   const finish = async () => {
     const rec = recRef.current;
-    if (!rec || phase === 'uploading') return;
+    if (!rec || finishingRef.current) return;
+    finishingRef.current = true;
     setPhase('uploading');
     const stopped = new Promise<void>((resolve) => { rec.onstop = () => resolve(); });
     stopStream();
@@ -109,15 +125,18 @@ export default function VoxRecord({ onCaptured }: {
         mode: 'post_meeting',
         rm: user.full,
         email: getSession()?.email || '',
-        durationSeconds: elapsed,
+        durationSeconds: elapsedRef.current,
         ...gpsRef.current,
       });
+      setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);
     } catch (e: any) {
       // The take is still in memory — Send again REUSES the same capture id, so a
-      // retry replays rather than duplicates.
+      // retry replays rather than duplicates. `recording` stays up: this tab is the
+      // only copy, so the panel keeps refusing to close until it is sent or discarded.
       chunksRef.current = [blob] as any;
+      finishingRef.current = false;
       setErr(String(e?.message || e));
       setPhase('error');
     }
@@ -131,12 +150,16 @@ export default function VoxRecord({ onCaptured }: {
         : new Blob(chunksRef.current, { type: 'audio/webm' });
       const out = await voxService.capture(blob, {
         captureId: captureIdRef.current, mode: 'post_meeting',
-        rm: user.full, email: getSession()?.email || '', durationSeconds: elapsed, ...gpsRef.current,
+        rm: user.full, email: getSession()?.email || '',
+        durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
+      setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);
     } catch (e: any) { setErr(String(e?.message || e)); setPhase('error'); }
   };
+
+  finishRef.current = finish;
 
   const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const recording = phase === 'recording';
@@ -175,7 +198,10 @@ export default function VoxRecord({ onCaptured }: {
           </Box>
           <Typography sx={{ color: vx.grn2, fontWeight: 600 }}>Record</Typography>
           {phase === 'error' && chunksRef.current.length > 0 && (
-            <Button sx={{ ...pill, mt: 1.5 }} onClick={retryUpload}>Send the take again</Button>
+            <Box sx={{ mt: 1.5, display: 'flex', gap: 1, justifyContent: 'center' }}>
+              <Button sx={pill} onClick={retryUpload}>Send the take again</Button>
+              <Button sx={pillGhost} onClick={discard}>Discard…</Button>
+            </Box>
           )}
         </Box>
       ) : phase === 'uploading' ? (

@@ -47,8 +47,28 @@ def build_prompt(registry_version: str | None = None) -> str:
           "entity_candidates. Absent means absent. When you chose a subsector, also "
           "fill top-level \"subsector_details\" with THAT subsector's canonical data "
           "points from the registry (subsector_canonicals), same {value, confidence} "
-          "shape; omit the block when subsector is null."
+          "shape; omit the block when subsector is null. Its keys are the canonical "
+          "field KEYS themselves, never the subsector name — e.g. "
+          "{\"subsector_details\": {\"operating_uc_capacity_mw\": "
+          "{\"value\": \"40 MW\", \"confidence\": \"high\"}}}."
     )
+
+
+def _normalize(obj: dict) -> dict:
+    """Deterministic shape aliases — NOT best-effort repair. The one observed in the
+    field: the model nests the canonical data points under the subsector's own name
+    ({"subsector_details": {"Solar-Developer": {...cells...}}}) instead of keying them
+    flat. The two shapes are isomorphic, so unwrap before validation; anything
+    genuinely broken still fails the contract."""
+    details = obj.get("subsector_details")
+    common = obj.get("common")
+    if isinstance(details, dict) and isinstance(common, dict):
+        subsector = ((common.get("subsector") or {}).get("value")
+                     if isinstance(common.get("subsector"), dict) else None)
+        if subsector and set(details.keys()) == {subsector} \
+                and isinstance(details[subsector], dict):
+            obj["subsector_details"] = details[subsector]
+    return obj
 
 
 def _parse_strict(raw: str) -> dict:
@@ -86,7 +106,7 @@ def structure_transcript(
 
     raw = ask_model(model, system, user)
     try:
-        report = validate_report(_parse_strict(raw), registry_version)
+        report = validate_report(_normalize(_parse_strict(raw)), registry_version)
     except (ContractError, StructuringError) as first:
         # One self-repair round: the model sees its own violations, verbatim.
         detail = "; ".join(first.errors) if isinstance(first, ContractError) else str(first)
@@ -94,7 +114,7 @@ def structure_transcript(
                   f"Return the corrected single JSON object only.")
         raw = ask_model(model, system, repair)
         try:
-            report = validate_report(_parse_strict(raw), registry_version)
+            report = validate_report(_normalize(_parse_strict(raw)), registry_version)
         except (ContractError, StructuringError) as second:
             detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
             raise StructuringError(f"contract violation after repair round: {detail2}") from second
