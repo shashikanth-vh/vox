@@ -6,8 +6,11 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import { useDraggable } from './useDraggable';
-import RecordTab from './RecordTab';
 import ReportsTab from './ReportsTab';
+import VoxRecord from './spec/VoxRecord';
+import VoxReview from './spec/VoxReview';
+import { VoxMemoryTab, VoxQueueTab } from './spec/VoxMemory';
+import { voxService } from '../../services/voxService';
 import { useVocx } from './VocxProvider';
 import { vx } from './vocxStyles';
 
@@ -36,6 +39,20 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
     () => typeof window !== 'undefined' && window.innerWidth <= MOBILE_MAX);
   /** Bumped to make the reports list refetch after a capture is filed. */
   const [reportsEpoch, setReportsEpoch] = useState(0);
+  /** The spec-build review: when set, the body shows this conversation instead of
+   *  the tabs — capture, Memory rows and Queue rows all land here. */
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [queueCount, setQueueCount] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const poll = () => void voxService
+      .list({ status: 'processing_failed,failed_permanently', limit: 1 })
+      .then((r) => { if (alive) setQueueCount(r.total); }).catch(() => {});
+    poll();
+    const t = setInterval(poll, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [open, reviewId]);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const { recording } = useVocx();
 
@@ -184,6 +201,9 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
             }}
           >
             <Tab label="Record" id="vocx-tab-record" aria-controls="vocx-panel-record" />
+            <Tab label="Memory" id="vocx-tab-memory" aria-controls="vocx-panel-memory" />
+            <Tab label={queueCount ? `Queue · ${queueCount}` : 'Queue'}
+              id="vocx-tab-queue" aria-controls="vocx-panel-queue" />
             <Tab label="Reports" id="vocx-tab-reports" aria-controls="vocx-panel-reports" />
           </Tabs>
 
@@ -197,13 +217,36 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
                      // Full-screen mobile: the Paper's own edges bound the body, so flex
                      // does the sizing; the fixed cap is the desktop panel's.
                      maxHeight: mobile ? 'none' : PANEL_H - 88 }}>
+            {/* The spec-build review takes the whole body when open — the tabs wait. */}
+            {reviewId && (
+              <Box sx={{ p: 1.5 }}>
+                <Typography onClick={() => setReviewId(null)}
+                  sx={{ color: vx.mut, fontSize: 13.5, cursor: 'pointer', mb: 1,
+                    '&:hover': { color: vx.ink } }}>‹ Back</Typography>
+                <VoxReview conversationId={reviewId}
+                  onClose={() => setReviewId(null)}
+                  onFiled={() => setReportsEpoch((n) => n + 1)} />
+              </Box>
+            )}
             <Box role="tabpanel" id="vocx-panel-record" aria-labelledby="vocx-tab-record"
-                 hidden={tab !== 0} sx={{ display: tab === 0 ? 'block' : 'none' }}>
-              <RecordTab onFiled={() => { setReportsEpoch((n) => n + 1); setTab(1); }} />
+                 hidden={tab !== 0 || !!reviewId}
+                 sx={{ display: tab === 0 && !reviewId ? 'block' : 'none', p: 1.5 }}>
+              <VoxRecord onCaptured={(id) => setReviewId(id)} />
+            </Box>
+            <Box role="tabpanel" id="vocx-panel-memory" aria-labelledby="vocx-tab-memory"
+                 hidden={tab !== 1 || !!reviewId}
+                 sx={{ display: tab === 1 && !reviewId ? 'block' : 'none', p: 1.5 }}>
+              {tab === 1 && !reviewId && <VoxMemoryTab onOpen={(id) => setReviewId(id)} />}
+            </Box>
+            <Box role="tabpanel" id="vocx-panel-queue" aria-labelledby="vocx-tab-queue"
+                 hidden={tab !== 2 || !!reviewId}
+                 sx={{ display: tab === 2 && !reviewId ? 'block' : 'none', p: 1.5 }}>
+              {tab === 2 && !reviewId && <VoxQueueTab onOpen={(id) => setReviewId(id)} />}
             </Box>
             <Box role="tabpanel" id="vocx-panel-reports" aria-labelledby="vocx-tab-reports"
-                 hidden={tab !== 1} sx={{ display: tab === 1 ? 'block' : 'none' }}>
-              <ReportsTab epoch={reportsEpoch} active={tab === 1} />
+                 hidden={tab !== 3 || !!reviewId}
+                 sx={{ display: tab === 3 && !reviewId ? 'block' : 'none' }}>
+              <ReportsTab epoch={reportsEpoch} active={tab === 3} />
             </Box>
           </Box>
       </Box>
