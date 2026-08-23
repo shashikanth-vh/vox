@@ -465,7 +465,7 @@ class VocxApp:
                 return {"text": result.get("text", ""), "segments": segments,
                         "language": result.get("language")}
 
-            def ask_model(model: str, system: str, user: str) -> str:
+            def ask_model(model: str, system: str, user: str, schema: dict | None = None) -> str:
                 # Eval/dev fixture: a canned contract object instead of a live model.
                 # Set ONLY in test harnesses — never in a deployed environment.
                 stub = os.environ.get("VOCX_MODEL_STUB_FILE")
@@ -478,14 +478,33 @@ class VocxApp:
                                                       "ANTHROPIC_API_KEY")])
                 kwargs: dict = dict(model=model, max_tokens=8000, system=system,
                                     messages=[{"role": "user", "content": user}])
-                try:
-                    # deterministic extraction: shape drift between runs is noise
-                    # the contract then has to fight — temperature 0 removes it
-                    msg = client.messages.create(temperature=0.0, **kwargs)
-                except TypeError:
-                    # an SDK line without the keyword (anthropic 1.0 dropped it):
-                    # determinism is preferred, never required
-                    msg = client.messages.create(**kwargs)
+
+                def _create(**extra):
+                    try:
+                        # deterministic extraction: temperature 0 removes sampling
+                        # drift; an SDK line without the keyword still works
+                        return client.messages.create(temperature=0.0, **kwargs, **extra)
+                    except TypeError:
+                        return client.messages.create(**kwargs, **extra)
+
+                if schema is not None:
+                    # The outer wall (same pattern as the legacy extraction path):
+                    # a FORCED tool call — the API validates the model's answer
+                    # against the contract schema before we ever see it. Any
+                    # SDK/feature failure degrades to the text path below.
+                    try:
+                        msg = _create(
+                            tools=[{"name": "file_report",
+                                    "description": "File the structured conversation report.",
+                                    "input_schema": schema}],
+                            tool_choice={"type": "tool", "name": "file_report"})
+                        for blk in msg.content:
+                            if getattr(blk, "type", "") == "tool_use" and isinstance(
+                                    getattr(blk, "input", None), dict):
+                                return json.dumps(blk.input)
+                    except Exception:  # noqa: BLE001 — degrade, never fail the take here
+                        self.log.warning("VOX structured tool call unavailable; text fallback")
+                msg = _create()
                 return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
 
             self._vox_runner = PipelineRunner(register, transcribe, ask_model,

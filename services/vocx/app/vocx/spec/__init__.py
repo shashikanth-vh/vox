@@ -12,7 +12,8 @@ from .registry import (
     load_prompt,
     load_registry,
 )
-from .contract import ContractError, compute_data_quality_flags, validate_report
+from .contract import (ContractError, build_tool_schema,
+                       compute_data_quality_flags, validate_report)
 
 __all__ = [
     "RegistryError",
@@ -22,5 +23,6 @@ __all__ = [
     "latest_registry_version",
     "latest_prompt_version",
     "validate_report",
+    "build_tool_schema",
     "compute_data_quality_flags",
 ]

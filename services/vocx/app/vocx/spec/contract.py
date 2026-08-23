@@ -238,7 +238,8 @@ def validate_report(obj: Any, registry_version: str | None = None) -> dict:
     if cands is None:
         errors.append("entity_candidates: required (may be an empty list)")
     elif not isinstance(cands, list) or any(not isinstance(c, str) for c in cands):
-        errors.append("entity_candidates: a list of names exactly as heard")
+        errors.append("entity_candidates: a flat JSON array of name strings, "
+                      "e.g. [\"Suryodaya EPC\", \"SBI\"]")
 
     if errors:
         raise ContractError(errors)
@@ -264,3 +265,70 @@ def compute_data_quality_flags(obj: dict, registry_version: str | None = None) -
                 if cell.get("value") is None:
                     flags.append(f"{fdef['label']} not mentioned")
     return flags
+
+
+def build_tool_schema(registry_version: str | None = None) -> dict:
+    """A JSON Schema mirror of the contract, for a FORCED tool call — the same
+    pattern the legacy extraction path has run in production: the API validates the
+    model's output against this before we ever see it, so structural drift (cells,
+    arrays, enums) cannot reach the validator at all. validate_report stays the
+    final authority; this schema is the outer wall."""
+    registry = load_registry(registry_version)
+
+    def value_schema(fdef: dict) -> dict:
+        ftype = fdef.get("type")
+        if ftype == "enum" and fdef.get("options"):
+            return {"enum": [o["value"] for o in fdef["options"]] + ["not_specified", None]}
+        if ftype == "number":
+            return {"type": ["number", "null"]}
+        if ftype == "int":
+            sch: dict = {"type": ["integer", "null"]}
+            if fdef.get("min") is not None:
+                sch["minimum"] = fdef["min"]
+            if fdef.get("max") is not None:
+                sch["maximum"] = fdef["max"]
+            return sch
+        if ftype == "list":
+            if fdef.get("item_shape"):
+                return {"type": ["array", "null"], "items": {
+                    "type": "object",
+                    "properties": {"action": {"type": "string"},
+                                   "owner": {"type": ["string", "null"]},
+                                   "deadline": {"type": ["string", "null"]}},
+                    "required": ["action"]}}
+            return {"type": ["array", "null"], "items": {"type": "string"}}
+        return {"type": ["string", "null"]}
+
+    def cell(fdef: dict) -> dict:
+        props: dict = {"value": value_schema(fdef),
+                       "confidence": {"enum": ["high", "medium", "low", "n/a"]}}
+        if fdef["key"] == "opportunity_score":
+            props["user_override"] = {"type": "boolean"}
+        return {"type": "object", "properties": props,
+                "required": ["value", "confidence"], "additionalProperties": False}
+
+    def block(defs: list[dict]) -> dict:
+        return {"type": "object",
+                "properties": {f["key"]: cell(f) for f in defs},
+                "required": [f["key"] for f in defs],
+                "additionalProperties": False}
+
+    generic_cell = {"type": "object",
+                    "properties": {"value": {},
+                                   "confidence": {"enum": ["high", "medium", "low", "n/a"]}},
+                    "required": ["value", "confidence"], "additionalProperties": False}
+
+    properties: dict = {
+        "detected_use_cases": {"type": "array", "minItems": 1,
+                               "items": {"enum": registry["use_cases"]}},
+        "common": block(registry["common"]),
+        "subsector_details": {"type": "object", "additionalProperties": generic_cell},
+        "entity_candidates": {"type": "array", "items": {"type": "string"}},
+    }
+    for uc in registry["use_cases"]:
+        fields = registry["blocks"][uc]["fields"]
+        properties[uc] = block(fields) if fields else {"type": "object",
+                                                       "additionalProperties": False}
+    return {"type": "object", "properties": properties,
+            "required": ["detected_use_cases", "common", "entity_candidates"],
+            "additionalProperties": False}

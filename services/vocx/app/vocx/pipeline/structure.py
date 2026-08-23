@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from ..spec import (
     ContractError,
+    build_tool_schema,
     compute_data_quality_flags,
     latest_prompt_version,
     latest_registry_version,
@@ -75,6 +76,30 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
                 if uc not in present and obj.get(uc) == {}:
                     del obj[uc]
 
+    # entity_candidates as objects instead of plain names: take the one string
+    # each object unambiguously carries ("name" key, or a single string value).
+    cands = obj.get("entity_candidates")
+    if isinstance(cands, list) and any(isinstance(c, dict) for c in cands):
+        flat: list = []
+        ok = True
+        for c in cands:
+            if isinstance(c, str):
+                flat.append(c)
+            elif isinstance(c, dict):
+                name = c.get("name") if isinstance(c.get("name"), str) else None
+                if name is None:
+                    strings = [v for v in c.values() if isinstance(v, str)]
+                    name = strings[0] if len(strings) == 1 else None
+                if name is None:
+                    ok = False
+                    break
+                flat.append(name)
+            else:
+                ok = False
+                break
+        if ok:
+            obj["entity_candidates"] = flat
+
     details = obj.get("subsector_details")
     common = obj.get("common")
     if isinstance(details, dict) and isinstance(common, dict):
@@ -119,7 +144,23 @@ def structure_transcript(
     system = build_prompt(registry_version)
     user = (f"Capture timestamp: {capture_ts or 'unknown'}\n\nTRANSCRIPT:\n{transcript}")
 
-    raw = ask_model(model, system, user)
+    # The forced-tool-call schema: callables that accept it get the API's own
+    # server-side validation (the outer wall); plain callables run text-only.
+    import inspect
+    schema = build_tool_schema(registry_version)
+    params = None
+    try:
+        params = inspect.signature(ask_model).parameters
+    except (TypeError, ValueError):
+        params = None
+    takes_schema = bool(params) and ("schema" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()))
+
+    def _ask(u: str) -> str:
+        return ask_model(model, system, u, schema=schema) if takes_schema \
+            else ask_model(model, system, u)
+
+    raw = _ask(user)
     try:
         report = validate_report(_normalize(_parse_strict(raw), registry_version), registry_version)
     except (ContractError, StructuringError) as first:
@@ -127,7 +168,7 @@ def structure_transcript(
         detail = "; ".join(first.errors) if isinstance(first, ContractError) else str(first)
         repair = (f"{user}\n\nYour previous output violated the contract:\n{detail}\n"
                   f"Return the corrected single JSON object only.")
-        raw = ask_model(model, system, repair)
+        raw = _ask(repair)
         try:
             report = validate_report(_normalize(_parse_strict(raw), registry_version), registry_version)
         except (ContractError, StructuringError) as second:

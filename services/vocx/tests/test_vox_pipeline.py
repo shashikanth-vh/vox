@@ -381,3 +381,35 @@ def test_blocks_present_with_no_detected_tags_infer_the_tags():
     row = PipelineRunner(FakeRegister(), good_transcribe, undeclared_model).process("c1")
     assert row["status"] == "ready"
     assert sorted(row["structured_report"]["detected_use_cases"]) == ["lending", "syndication"]
+
+
+def test_object_entity_candidates_are_flattened_to_names():
+    """Field finding five: candidates arrived as objects. Each carries exactly one
+    unambiguous name — flatten; anything ambiguous still fails by name."""
+    def objecty_model(model, system, user):
+        obj = json.loads(_valid_model_json())
+        obj["entity_candidates"] = [{"name": "Suryodaya EPC", "type": "company"}, "SBI"]
+        return json.dumps(obj)
+
+    row = PipelineRunner(FakeRegister(), good_transcribe, objecty_model).process("c1")
+    assert row["status"] == "ready"
+    assert row["structured_report"]["entity_candidates"] == ["Suryodaya EPC", "SBI"]
+
+
+def test_the_forced_tool_schema_reaches_a_schema_aware_model():
+    """A callable that accepts schema= gets the contract schema — the API-side wall."""
+    seen = {}
+
+    def schema_aware(model, system, user, schema=None):
+        seen["schema"] = schema
+        return _valid_model_json()
+
+    row = PipelineRunner(FakeRegister(), good_transcribe, schema_aware).process("c1")
+    assert row["status"] == "ready"
+    sch = seen["schema"]
+    assert sch["required"] == ["detected_use_cases", "common", "entity_candidates"]
+    assert sch["properties"]["entity_candidates"]["items"] == {"type": "string"}
+    assert "lending" in sch["properties"]["detected_use_cases"]["items"]["enum"]
+    lending = sch["properties"]["lending"]
+    assert lending["additionalProperties"] is False
+    assert "requirement_quantum_cr" in lending["required"]
