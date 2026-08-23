@@ -15,6 +15,8 @@ COPY services/vocx/pyproject.toml services/vocx/README.md ./
 # VOCX_STT_BACKEND=faster_whisper (the HF_HOME env below keeps its cache writable).
 RUN pip install .
 COPY services/vocx/app ./app
+COPY services/vocx/schema_registry ./schema_registry
+COPY services/vocx/prompts ./prompts
 RUN pip install .
 
 FROM python:3.12-slim AS runtime
@@ -33,6 +35,10 @@ RUN groupadd -r vocx && useradd -r -g vocx vocx && mkdir -p /app /data/vocx \
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=vocx:vocx services/vocx/app ./app
+# The VOX schema contract lives beside the code: the registry the renderer and the
+# prompt are driven by must ship in the image, or /v1/spec and structuring fail.
+COPY --chown=vocx:vocx services/vocx/schema_registry ./schema_registry
+COPY --chown=vocx:vocx services/vocx/prompts ./prompts
 USER vocx
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
