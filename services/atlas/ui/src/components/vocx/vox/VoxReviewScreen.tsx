@@ -56,6 +56,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [ucSheet, setUcSheet] = useState<'' | 'add' | string>('');
   const [overflow, setOverflow] = useState(false);
+  /** An approved record opens read-only; Edit report unlocks it — every change
+   *  still travels the atomic edit path and lands in the audit trail. */
+  const [editUnlocked, setEditUnlocked] = useState(false);
   const [toast, setToast] = useState('');
   // atlas view state
   const [resolveQ, setResolveQ] = useState('');
@@ -154,7 +157,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   const strip = useMemo(() => (registry && report ? needsYou(registry, report) : [])
     .filter((n) => !confirmed.has(n.fieldPath)), [registry, report, confirmed]);
-  const readOnly = row?.status === 'submitted' || !!row?.erased_at;
+  const approvedRow = row?.status === 'submitted';
+  const readOnly = (approvedRow && !editUnlocked) || !!row?.erased_at;
   const common = (report?.common || {}) as Record<string, VoxCell>;
 
   const setUseCases = (next: string[]) => {
@@ -548,9 +552,15 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             ? <span className="ah-saved"><Ic i="i-check" /> Saved</span>
             : <span className="ah-saved" style={{ color: 'var(--muted)' }}>Saving…</span>}
         </div>
-        <div className={`status-pill ${readOnly ? 'approved' : 'ready'}`}>
-          {row.erased_at ? 'Erased' : readOnly ? 'Approved' : 'Ready for review'}
+        <div className={`status-pill ${approvedRow || row.erased_at ? 'approved' : 'ready'}`}>
+          {row.erased_at ? 'Erased' : approvedRow ? (editUnlocked ? 'Approved · editing' : 'Approved') : 'Ready for review'}
         </div>
+        {approvedRow && editUnlocked && (
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9,
+            color: 'var(--warn)', letterSpacing: '0.06em', margin: '2px 0 6px' }}>
+            EDITING AN APPROVED RECORD — EVERY CHANGE IS LOGGED
+          </div>
+        )}
         <div className="review-company" onClick={() => row.entity_id && onDossier(row.entity_id)}>
           {entityName || leadName || row.entity_candidates?.[0] || 'Unlinked conversation'}
           {!readOnly && (
@@ -572,7 +582,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         {err && <div style={{ color: 'var(--danger)', fontSize: 12, margin: '6px 2px 10px' }}>{err}</div>}
         {toast && <div style={{ color: 'var(--warn)', fontSize: 12, margin: '6px 2px 10px' }}>{toast}</div>}
 
-        {!readOnly && strip.length > 0 && (
+        {!readOnly && !approvedRow && strip.length > 0 && (
           <div className="needs-strip">
             <div className="ns-head">
               <div className="ns-count">{strip.length}</div>
@@ -815,7 +825,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         <div style={{ height: 68 }} />
       </div>
 
-      {!readOnly && (
+      {!readOnly && !approvedRow && (
         <div className="review-action-bar">
           <button className="icon-btn" title="Download as PDF"
             onClick={() => say('PDF export arrives with the next round.')}><Ic i="i-download" /></button>
@@ -825,9 +835,24 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <button className="icon-btn" title="More" onClick={() => setOverflow(true)}><Ic i="i-more" /></button>
         </div>
       )}
-      {readOnly && (
+      {readOnly && !row.erased_at && (
+        <div className="review-action-bar">
+          <button className="icon-btn" title="Edit this report"
+            onClick={() => setEditUnlocked(true)}><Ic i="i-edit" /></button>
+          <button className="approve-pill" onClick={onBack}><span>Back to Memory</span></button>
+        </div>
+      )}
+      {readOnly && row.erased_at && (
         <div className="review-action-bar">
           <button className="approve-pill" onClick={onBack}><span>Back to Memory</span></button>
+        </div>
+      )}
+      {approvedRow && editUnlocked && (
+        <div className="review-action-bar">
+          <button className="approve-pill" disabled={busy} onClick={async () => {
+            try { await saveEdits(); setEditUnlocked(false); }
+            catch (e: any) { setErr(String(e?.message || e)); }
+          }}><span>Done editing</span></button>
         </div>
       )}
 
