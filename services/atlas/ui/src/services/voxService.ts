@@ -53,6 +53,9 @@ export interface VoxConversation {
   proposed_lead_company?: string | null;
   proposed_lead_rm?: string | null;
   raw_transcript?: string | null;
+  /** The reviewer's corrected copy — what regeneration structures. The verbatim
+   *  raw_transcript is evidence and never changes. */
+  corrected_transcript?: string | null;
   structured_report?: VoxReport | null;
   erased_at?: string | null;
   created_at?: string;
@@ -137,6 +140,7 @@ export const voxService = {
   snippet?: string | null;
     entity_id?: string; lead_id?: string; deal_id?: string; interaction_id?: string;
     proposed_lead_company?: string; proposed_lead_rm?: string;
+    corrected_transcript?: string;
   }): Promise<VoxConversation & { changed: number }> {
     return api.post(`/vox/conversations/${id}/edits`, payload);
   },

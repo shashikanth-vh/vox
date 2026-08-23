@@ -380,3 +380,58 @@ async def test_recorder_deletes_their_draft_but_not_an_approved_record(client: A
     assert r.status_code == 403
     r = await client.post(f"/v1/vox/conversations/{row2['id']}/erase", headers=ADMIN)
     assert r.status_code == 200 and r.json()["erased_at"]
+
+
+# ------------------------------------------------ corrected transcript / regenerate
+
+async def test_correct_transcript_and_regenerate_preserves_overrides(client: AsyncClient):
+    """The Sarvodaya problem: one mis-heard name propagates everywhere. The fix —
+    correct the transcript (original preserved, audited), regenerate the report,
+    and the reviewer's own confirmed cells survive the rebuild."""
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    # the reviewer overrides a cell, then corrects the transcript
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 30, "confidence": "high", "user_override": True}}],
+        "corrected_transcript": "met SUYODAYA epc in whitefield, forty megawatt",
+    }, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["corrected_transcript"].startswith("met SUYODAYA")
+    assert body["raw_transcript"] == "met suryodaya at whitefield, forty megawatt"  # evidence untouched
+
+    # regenerate: report cleared, status back to processing, stage structuring
+    r = await client.post(f"/v1/vox/conversations/{cid}/regenerate", headers=RECORDER)
+    assert r.status_code == 200, r.text
+    regen = r.json()
+    assert regen["status"] == "processing"
+    assert regen["structured_report"] is None
+    assert regen["corrected_transcript"]          # the worker will structure THIS
+
+    # the worker lands a fresh report — the override must ride back on top
+    fresh = _report(quantum=25)                   # AI re-extracted 25 again
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={
+        "status": "ready", "structured_report": fresh})
+    assert r.status_code == 200, r.text
+    after = r.json()
+    cell = after["structured_report"]["lending"]["requirement_quantum_cr"]
+    assert cell["value"] == 30 and cell["user_override"] is True
+
+    # a second plain pipeline write must NOT re-apply anything (stash consumed)
+    r = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={
+        "structured_report": _report(quantum=40)})
+    assert r.json()["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 40
+
+
+async def test_transcript_correction_refused_after_approval(client: AsyncClient):
+    row = await _make(client)
+    cid = row["id"]
+    await _to_ready(client, cid)
+    await client.post(f"/v1/vox/conversations/{cid}/approve", headers=RECORDER)
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "corrected_transcript": "rewrite attempt"}, headers=RECORDER)
+    assert r.status_code == 409
+    r = await client.post(f"/v1/vox/conversations/{cid}/regenerate", headers=RECORDER)
+    assert r.status_code == 409

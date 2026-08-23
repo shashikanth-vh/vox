@@ -106,6 +106,12 @@ class VoxConversation(RegisterBase):
     # lead row is materialised by approve, never by the tap that proposed it.
     proposed_lead_company: Mapped[str | None] = mapped_column(String(300))
     proposed_lead_rm: Mapped[str | None] = mapped_column(String(120))
+    # The reviewer's corrected copy of the transcript. The verbatim original in
+    # raw_transcript is evidence and never changes; regeneration structures THIS
+    # text when present. preserved_overrides carries user-confirmed cells across
+    # a regeneration so the reviewer's work survives the rebuild.
+    corrected_transcript: Mapped[str | None] = mapped_column(Text)
+    preserved_overrides: Mapped[dict | None] = mapped_column(JSONB)
 
     recording_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     capture_id: Mapped[str | None] = mapped_column(String(120))

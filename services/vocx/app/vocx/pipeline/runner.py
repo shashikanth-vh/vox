@@ -162,9 +162,16 @@ class PipelineRunner:
     def _structure_if_needed(self, cid: str, row: dict) -> dict:
         if row.get("structured_report"):
             return row                                   # resume: keep the valid report
-        segments = row.get("transcript_segments") or []
-        transcript = (transcript_for_structuring(segments) if segments
-                      else (row.get("raw_transcript") or ""))
+        # The reviewer's corrected copy outranks the raw speech-to-text: a
+        # regeneration exists precisely to structure the FIXED text. The verbatim
+        # transcript itself is evidence and is never touched.
+        corrected = (row.get("corrected_transcript") or "").strip()
+        if corrected:
+            transcript = corrected
+        else:
+            segments = row.get("transcript_segments") or []
+            transcript = (transcript_for_structuring(segments) if segments
+                          else (row.get("raw_transcript") or ""))
         if not transcript.strip():
             raise StructuringError("structure: the transcript is empty")
         glossary = None

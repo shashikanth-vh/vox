@@ -488,3 +488,28 @@ def test_phonetic_tier_handles_split_words_and_rejects_strangers():
     assert phonetic_ratio("Chip Balapur", "Chikballapur Solar Park") >= 0.78
     assert phonetic_ratio("Meridian Textiles", "Suryodaya EPC") < 0.78
     assert phonetic_ratio("Tata Power", "Tata Steel") < 0.78
+
+
+def test_structuring_prefers_the_corrected_transcript():
+    """After a reviewer fixes a mis-heard name, regeneration must structure the
+    CORRECTED text — and never re-transcribe or alter the verbatim original."""
+    seen = {}
+
+    def spy_model(model, system, user):
+        seen["user"] = user
+        return _valid_model_json()
+
+    # resume path after /regenerate: processing, transcript stored, report cleared
+    reg = FakeRegister(status="processing",
+                       raw_transcript="met sarvodaya in whitefield",
+                       corrected_transcript="met SURYODAYA EPC in Whitefield",
+                       structured_report=None)
+
+    def must_not_transcribe(audio_ref):
+        raise AssertionError("regeneration must never re-transcribe")
+
+    row = PipelineRunner(reg, must_not_transcribe, spy_model).process("c1")
+    assert row["status"] == "ready"
+    assert "SURYODAYA EPC" in seen["user"]
+    assert "sarvodaya" not in seen["user"]
+    assert reg.row["raw_transcript"] == "met sarvodaya in whitefield"

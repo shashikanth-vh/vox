@@ -72,6 +72,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [lineChoice, setLineChoice] =
     useState<{ entityId: string; name: string; leads: any[]; deals: any[] } | null>(null);
   const [dealRow, setDealRow] = useState<any>(null);
+  // transcript correction: the fix is written here, the original never changes
+  const [fixingTranscript, setFixingTranscript] = useState(false);
+  const [fixDraft, setFixDraft] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(dirty);
@@ -242,6 +245,21 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       });
       setCreating(false);
       closeAtlas();
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
+  /** Save the corrected transcript, then send the conversation back through the
+   *  structuring stage only — no re-transcription, original preserved, the
+   *  reviewer's overridden cells re-applied on the far side. */
+  const correctAndRegenerate = async () => {
+    setBusy(true); setErr('');
+    try {
+      await saveEdits({ corrected_transcript: fixDraft });
+      await api.post(`/vox/conversations/${conversationId}/regenerate`, {});
+      await voxService.process(conversationId);
+      setFixingTranscript(false);
+      await refresh();
+      startPolling();
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
@@ -810,11 +828,50 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         {row.raw_transcript && (
           <div className="card">
             <div className="card-h with-action">Full transcript
-              <span className="h-action" onClick={() => setTranscriptOpen((v) => !v)}>
-                {transcriptOpen ? 'Hide' : 'Show original'}</span>
+              <span style={{ display: 'flex', gap: 14 }}>
+                {!readOnly && !approvedRow && !fixingTranscript && (
+                  <span className="h-action" onClick={() => {
+                    setFixDraft(row.corrected_transcript || row.raw_transcript || '');
+                    setFixingTranscript(true); setTranscriptOpen(false);
+                  }}><Ic i="i-edit" /> Correct</span>
+                )}
+                <span className="h-action" onClick={() => setTranscriptOpen((v) => !v)}>
+                  {transcriptOpen ? 'Hide' : 'Show original'}</span>
+              </span>
             </div>
-            <div className="transcript-sub">Translated inline — word-for-word. Evidence: never editable.</div>
-            {transcriptOpen && <div className="transcript-body">{row.raw_transcript}</div>}
+            <div className="transcript-sub">
+              {row.corrected_transcript
+                ? 'Corrected copy in use — the verbatim original is preserved below.'
+                : 'Translated inline — word-for-word. Evidence: never editable.'}
+            </div>
+            {fixingTranscript ? (
+              <div>
+                <textarea className="input-field" rows={10} value={fixDraft}
+                  style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+                  onChange={(e) => setFixDraft(e.target.value)} />
+                <div style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 2px 12px' }}>
+                  Fix mis-heard names and terms here — a corrected name updates every field,
+                  bullet and snippet when the report regenerates. The word-for-word original
+                  stays on record. Your own confirmed field values survive the rebuild.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-primary" disabled={busy || !fixDraft.trim()}
+                    onClick={() => void correctAndRegenerate()}>Save correction &amp; regenerate</button>
+                  <button className="btn btn-ghost" style={{ width: 'auto' }}
+                    onClick={() => setFixingTranscript(false)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {row.corrected_transcript && (
+                  <div className="transcript-body">{row.corrected_transcript}</div>
+                )}
+                {transcriptOpen && <div className="transcript-body"
+                  style={row.corrected_transcript
+                    ? { opacity: 0.65, borderTop: '1px dashed var(--line-2)', marginTop: 10, paddingTop: 10 }
+                    : undefined}>{row.raw_transcript}</div>}
+              </>
+            )}
           </div>
         )}
 

@@ -49,7 +49,13 @@ _RAW: list[tuple[str, str, str]] = [
     # irreversible one, so it rides the delete gate (Admin).
     ("POST",   r"^/v1/vox/(conversations|consents)$", "log_interaction"),
     ("POST",   r"^/v1/vox/conversations/[^/]+/(edits|approve)$", "log_interaction"),
-    ("POST",   r"^/v1/vox/conversations/[^/]+/erase$", "delete_row"),
+    # Erase is LIFECYCLE-dependent — a recorder deletes their own draft, only Admin
+    # erases an approved record — and the split lives in the register handler, which
+    # sees the row. Classifying it delete_row here 403'd every draft delete at the
+    # gate before the register could rule, so it travels as log_interaction and the
+    # register stays the enforcement point.
+    ("POST",   r"^/v1/vox/conversations/[^/]+/erase$", "log_interaction"),
+    ("POST",   r"^/v1/vox/conversations/[^/]+/regenerate$", "log_interaction"),
     ("POST",   r"^/vocx/v1/vox/process$", "log_interaction"),
     # PULSE — news radar: triggering a scan / filing items is the intel-scan capability.
     ("POST",   r"^/pulse/v1/scan$", "run_news_scan"),

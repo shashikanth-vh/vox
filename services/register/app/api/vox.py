@@ -117,6 +117,7 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         out["raw_transcript"] = c.raw_transcript
         out["transcript_segments"] = c.transcript_segments
         out["structured_report"] = c.structured_report
+        out["corrected_transcript"] = c.corrected_transcript
     return out
 
 
@@ -378,9 +379,20 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         # arriving clean: a fresh success clears the previous attempt's error
         row.processing_error = None
     if payload.structured_report is not None:
-        row.structured_report = payload.structured_report
+        incoming = payload.structured_report
+        # A regeneration re-applies the reviewer's overridden cells on top of the
+        # fresh AI report — their confirmed values outrank a re-extraction.
+        if row.preserved_overrides:
+            incoming = dict(incoming)
+            for path, cell in row.preserved_overrides.items():
+                block_key, _, field_key = path.partition(".")
+                block = dict(incoming.get(block_key) or {})
+                block[field_key] = cell
+                incoming[block_key] = block
+            row.preserved_overrides = None
+        row.structured_report = incoming
         _denormalise(row)
-        detected = payload.structured_report.get("detected_use_cases") or []
+        detected = incoming.get("detected_use_cases") or []
         await ctx.session.execute(delete(VoxConversationUseCase).where(
             VoxConversationUseCase.conversation_id == row.id))
         for uc in dict.fromkeys(u for u in detected if isinstance(u, str)):
@@ -413,6 +425,9 @@ class EditsIn(BaseModel):
     # "Create new lead" intent — recorded here, materialised by approve. '' clears.
     proposed_lead_company: str | None = Field(default=None, max_length=300)
     proposed_lead_rm: str | None = Field(default=None, max_length=120)
+    # The reviewer's corrected transcript copy. The verbatim original is evidence
+    # and never changes; this is what regeneration structures. '' clears.
+    corrected_transcript: str | None = None
 
 
 @router.post("/v1/vox/conversations/{conversation_id}/edits")
@@ -493,10 +508,68 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                 _audit(f"links.{field}", old, new_val)
                 changed += 1
 
+    if payload.corrected_transcript is not None:
+        # A correction is a draft-stage tool: once approved, the record's content
+        # changes through the field-edit path, not by rebuilding its foundation.
+        if row.status == "submitted":
+            raise ConflictError(
+                "An approved record's transcript cannot be corrected; "
+                "edit the report fields instead.")
+        new_txt = payload.corrected_transcript.strip() or None
+        if new_txt != row.corrected_transcript:
+            # The audit keeps both copies in full — the correction is as
+            # accountable as the evidence it annotates.
+            _audit("transcript.corrected", row.corrected_transcript, new_txt)
+            row.corrected_transcript = new_txt
+            changed += 1
+
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)
     return {**_row_dict(row, full=True), "changed": changed}
+
+
+@router.post("/v1/vox/conversations/{conversation_id}/regenerate")
+async def regenerate_conversation(conversation_id: str,
+                                  ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """Rebuild the structured report from the (corrected) transcript.
+
+    A name misheard once propagates into every field and bullet; after the
+    reviewer corrects the transcript, this sends the conversation back through
+    the STRUCTURING stage only — the audio is never re-transcribed, the
+    verbatim transcript never changes. Cells the reviewer explicitly
+    overrode (user_override) are stashed on the row and re-applied when the
+    fresh report lands, so their work survives the rebuild."""
+    row = await _get_row(ctx, conversation_id)
+    if not _may_edit(ctx, row):
+        raise ForbiddenError("Only the recorder or Management/Admin may regenerate this record.")
+    if row.erased_at is not None:
+        raise ConflictError("This conversation was erased; there is nothing to regenerate.")
+    if row.status != "ready":
+        raise ConflictError(
+            f"Only a ready conversation can be regenerated (this one is {row.status}).")
+
+    overrides: dict[str, Any] = {}
+    report = row.structured_report or {}
+    for block_key, block in report.items():
+        if not isinstance(block, dict):
+            continue
+        for field_key, cell in block.items():
+            if isinstance(cell, dict) and cell.get("user_override"):
+                overrides[f"{block_key}.{field_key}"] = cell
+    row.preserved_overrides = overrides or None
+    row.structured_report = None
+    row.status = "processing"
+    row.processing_stage = "structuring"
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(tenant_id=ctx.tenant_id, actor=ctx.actor, action="vox.regenerate",
+                             resource_type="vox_conversations", resource_id=str(row.id),
+                             request_id=request_id_ctx.get(),
+                             changes={"corrected": bool(row.corrected_transcript),
+                                      "overrides_preserved": len(overrides)}))
+    await ctx.session.flush()
+    await ctx.session.refresh(row)
+    return _row_dict(row, full=True)
 
 
 # ------------------------------------------------------------------ approve / erase
