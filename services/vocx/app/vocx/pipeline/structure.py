@@ -110,6 +110,24 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
             if added not in common0:
                 common0[added] = {"value": None, "confidence": "n/a"}
 
+    # Judgement prose fields: the model keeps grading its own judgement ("medium"
+    # on competitive_intelligence) or bulleting it as a list — both isomorphic to
+    # the contract shape. Confidence coerces to the only legal value; a list of
+    # strings joins to the newline-separated prose the UI already stores.
+    if isinstance(common0, dict):
+        for fdef in registry.get("common", []):
+            if not (fdef.get("judgement") or fdef.get("system")):
+                continue
+            cell = common0.get(fdef["key"])
+            if not isinstance(cell, dict):
+                continue
+            v = cell.get("value")
+            if (fdef.get("type") == "string" and isinstance(v, list)
+                    and all(isinstance(x, str) for x in v)):
+                cell["value"] = "\n".join(x for x in v if x.strip()) or None
+            if cell.get("confidence") in ("high", "medium", "low"):
+                cell["confidence"] = "n/a"
+
     details = obj.get("subsector_details")
     common = obj.get("common")
     if isinstance(details, dict) and isinstance(common, dict):

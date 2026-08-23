@@ -591,3 +591,37 @@ def test_auth_tickets_are_single_use_and_expire(tmp_path):
     data[t2]["ts"] -= 301
     _j.dump(data, open(p, "w"))
     assert app._ticket_pop(t2) is None           # expired
+
+
+def test_judgement_confidence_and_bullets_normalize():
+    """Field finding (stage VM): Haiku stamped 'medium' on
+    competitive_intelligence through every repair round — a contract violation
+    that burned all five retries. A judgement field's confidence coerces to the
+    only legal value, and bulleted judgement prose joins to newline text."""
+    def grading_model(model, system, user):
+        obj = json.loads(_valid_model_json())
+        obj["common"]["competitive_intelligence"] = {
+            "value": ["Piramal quoted 11.75%", "another party in the room"],
+            "confidence": "medium"}
+        obj["common"]["opportunity_assessment"] = {
+            "value": "Strong sponsor.", "confidence": "high"}
+        return json.dumps(obj)
+
+    row = PipelineRunner(FakeRegister(), good_transcribe, grading_model).process("c1")
+    assert row["status"] == "ready"
+    ci = row["structured_report"]["common"]["competitive_intelligence"]
+    assert ci["confidence"] == "n/a"
+    assert ci["value"] == "Piramal quoted 11.75%\nanother party in the room"
+    oa = row["structured_report"]["common"]["opportunity_assessment"]
+    assert oa == {"value": "Strong sponsor.", "confidence": "n/a"}
+
+
+def test_tool_schema_pins_judgement_confidence():
+    from app.vocx.spec import build_tool_schema
+    sch = build_tool_schema()
+    common = sch["properties"]["common"]["properties"]
+    assert common["competitive_intelligence"]["properties"]["confidence"] == {"enum": ["n/a"]}
+    assert common["meeting_summary"]["properties"]["confidence"] == {"enum": ["n/a"]}
+    # ordinary fields keep the full ladder
+    assert common["location"]["properties"]["confidence"] == {
+        "enum": ["high", "medium", "low", "n/a"]}

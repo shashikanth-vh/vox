@@ -300,8 +300,14 @@ def build_tool_schema(registry_version: str | None = None) -> dict:
         return {"type": ["string", "null"]}
 
     def cell(fdef: dict) -> dict:
+        # A judgement field's confidence is ALWAYS "n/a" (the model's read is not
+        # a fact with a confidence) — say so in the schema so the model never
+        # invents one; the field failure this closes was Haiku stamping "medium"
+        # on competitive_intelligence through every repair round.
+        judgement = bool(fdef.get("judgement") or fdef.get("system"))
         props: dict = {"value": value_schema(fdef),
-                       "confidence": {"enum": ["high", "medium", "low", "n/a"]}}
+                       "confidence": ({"enum": ["n/a"]} if judgement
+                                      else {"enum": ["high", "medium", "low", "n/a"]})}
         if fdef["key"] == "opportunity_score":
             props["user_override"] = {"type": "boolean"}
         return {"type": "object", "properties": props,
