@@ -93,6 +93,11 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
     // `.some(isRegisterId)` and not `.length`: a stale optimistic row would otherwise
     // count as loaded, and the drawer would go on editing a row the register never had.
     const loaded = (rows: { id: string }[]) => rows.some((r) => isRegisterId(r.id));
+    // The Ownership section reads the deal from this same store — and the Deals grid's
+    // live pages never land in it (only the dashboard's full hydrate does). A company
+    // converted a minute ago has its deal in the register but not in the store, and the
+    // drawer would claim "no Deals row yet" right above a live Lending line.
+    if (!db().deals.some((dd: any) => dd.code === code && isRegisterId(String(dd.apiId || '')))) jobs.push(dealsService.hydrateAll());
     if (!loaded(lendingService.byCode(code))) jobs.push(lendingService.list(page as any));
     if (!loaded(assetMonService.byCode(code))) jobs.push(assetMonService.list(page as any));
     if (!loaded(syndicationService.byCode(code))) jobs.push(syndicationService.hydrate());
