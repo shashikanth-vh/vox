@@ -541,18 +541,20 @@ class VocxApp:
         date = (data.get("date") or "").strip()
         if not date:
             return 400, "application/json", _j({"ok": False, "error": "date required"})
-        needs_auth = {"ok": False, "needs_auth": True,
-                      "auth_url": f"/v1/auth/start?rm={quote(rm)}"}
+        def needs_auth():
+            t = self._ticket_mint(rm)
+            return {"ok": False, "needs_auth": True,
+                    "auth_url": f"/v1/auth/start?ticket={quote(t)}&go=1"}
         if not self.writer_factory:
             return 200, "application/json", _j({"ok": False, "google_off": True,
                 "error": "Google writes are off on this server — use the .ics."})
         try:
             writer = self.writer_factory(rm, self.store, self.config)
         except Exception:  # noqa: BLE001 — no token for this RM yet
-            return 200, "application/json", _j(needs_auth)
+            return 200, "application/json", _j(needs_auth())
         cal = getattr(writer, "cal", None)
         if cal is None:
-            return 200, "application/json", _j(needs_auth)
+            return 200, "application/json", _j(needs_auth())
         try:
             r = cal.create_event(
                 title, date, (data.get("time") or "").strip() or None,
@@ -945,6 +947,54 @@ class VocxApp:
         os.makedirs(d, exist_ok=True)
         return os.path.join(d, "vocx_pkce.json")
 
+    # ---- one-time auth tickets --------------------------------------------
+    # A "Connect Google" tab is a plain browser navigation: it cannot carry the
+    # panel's bearer token, and the gateway (rightly) refuses anonymous
+    # /auth/start so nobody can land a token in someone else's slot. The ticket
+    # squares that circle: the AUTHENTICATED follow_up call mints a short-lived
+    # single-use ticket bound to the verified caller, and /auth/start accepts
+    # the ticket in place of the identity it cannot have.
+    def _ticket_path(self) -> str:
+        d = self.config.get("google", {}).get("tokens_dir", "vocx_tokens")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "vocx_auth_tickets.json")
+
+    def _ticket_mint(self, rm: str) -> str:
+        import secrets
+        import time as _t
+        path = self._ticket_path()
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                data = {}
+        now = _t.time()
+        data = {k: v for k, v in data.items() if now - v.get("ts", 0) < 300}
+        ticket = secrets.token_urlsafe(24)
+        data[ticket] = {"rm": rm, "ts": now}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return ticket
+
+    def _ticket_pop(self, ticket: str) -> str | None:
+        import time as _t
+        path = self._ticket_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+        entry = data.pop(ticket, None)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        if not entry or _t.time() - entry.get("ts", 0) > 300:
+            return None
+        return entry.get("rm") or None
+
     def _pkce_save(self, rm: str, verifier: str | None) -> None:
         import time as _t
         path = self._pkce_path()
@@ -987,7 +1037,14 @@ class VocxApp:
         return 200, "application/json", _j({"ok": True, "rm": rm, "connected": self._token_store().has(rm)})
 
     def _auth_start(self, query):
-        rm = _one(query, "rm")
+        ticket = _one(query, "ticket")
+        if ticket:
+            rm = self._ticket_pop(ticket)
+            if not rm:
+                return 401, "application/json", _j({"ok": False,
+                    "error": "This connect link has expired — tap Add to Calendar again."})
+        else:
+            rm = _one(query, "rm")
         if not rm:
             return 400, "application/json", _j({"ok": False, "error": "rm required"})
         try:

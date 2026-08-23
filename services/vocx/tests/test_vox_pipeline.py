@@ -569,3 +569,25 @@ def test_date_rules_reach_the_prompt_context():
     assert "Resolve RELATIVE dates" in block
     assert "follow_up_time" in block
     assert "Capture timestamp's date" in block
+
+
+def test_auth_tickets_are_single_use_and_expire(tmp_path):
+    """The Connect Google tab is bearer-less: its identity is a single-use
+    ticket minted by the authenticated call. Replay dies, expiry dies."""
+    import time
+    from app.vocx.core.server import VocxApp
+    from app.vocx.core.atlas import AtlasStore
+
+    app = VocxApp(store=AtlasStore({}), config={
+        "google": {"tokens_dir": str(tmp_path)}, "thresholds": {}, "scores": {}})
+    t = app._ticket_mint("ananda")
+    assert app._ticket_pop(t) == "ananda"
+    assert app._ticket_pop(t) is None            # single use
+    t2 = app._ticket_mint("divya")
+    # age it past the 300s window on disk
+    import json as _j
+    p = app._ticket_path()
+    data = _j.load(open(p))
+    data[t2]["ts"] -= 301
+    _j.dump(data, open(p, "w"))
+    assert app._ticket_pop(t2) is None           # expired

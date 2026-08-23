@@ -98,7 +98,11 @@ class Settings(BaseSettings):
     # Safe because completing the exchange needs the PKCE verifier persisted by an
     # AUTHENTICATED /auth/start; an attacker cannot land a token in someone's slot.
     # Comma-separated, exact match only.
-    auth_exempt_paths: str = "/vocx/v1/auth/callback"
+    # /auth/start joins the exemption because a "Connect Google" tab is a
+    # bearer-less top-level navigation: the vocx side refuses it unless it
+    # carries the single-use ticket a preceding AUTHENTICATED call minted, so
+    # the cannot-land-a-token-in-someone-else's-slot property holds.
+    auth_exempt_paths: str = "/vocx/v1/auth/callback,/vocx/v1/auth/start"
 
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0

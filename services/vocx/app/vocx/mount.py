@@ -238,7 +238,17 @@ def build_vocx_router(settings: Any) -> APIRouter:
             for k, v in request.query_params.multi_items():
                 query.setdefault(k, []).append(v)
 
-            if route_path in _OWNED:
+            # One carve-out from the owned-route identity binding: /v1/auth/start
+            # reached with a TICKET. A "Connect Google" tab is a bearer-less
+            # browser navigation, so the identity arrives as the single-use
+            # ticket the AUTHENTICATED follow_up call minted — the server
+            # resolves the RM from the ticket and refuses a bad or replayed one.
+            # Without a ticket the route stays identity-bound exactly as before.
+            ticket_auth = (route_path == "/v1/auth/start"
+                           and bool((query.get("ticket") or [None])[0]))
+            if ticket_auth:
+                query.pop("rm", None)       # the ticket, not the caller, names the RM
+            if route_path in _OWNED and not ticket_auth:
                 # BIND the RM to the verified caller. Previously this came from `?rm=`,
                 # so any signed-in user could list, open, edit, delete and play back
                 # anyone else's captures by changing one parameter. A draft belongs to
