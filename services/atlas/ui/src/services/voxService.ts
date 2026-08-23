@@ -39,6 +39,7 @@ export interface VoxConversation {
   sector?: string | null;
   subsector?: string | null;
   meeting_date?: string | null;
+  language_detected?: string | null;
   use_cases?: string[];
   entity_candidates?: string[] | null;
   raw_transcript?: string | null;
@@ -145,13 +146,30 @@ const JUDGEMENT_OR_SYSTEM = new Set([
   'competitive_intelligence', 'data_quality_flags',
 ]);
 
-export interface NeedsYouItem { fieldPath: string; label: string; confidence: Confidence }
+export interface NeedsYouItem {
+  fieldPath: string;
+  label: string;
+  confidence: Confidence;
+  /** Which block the field belongs to — the strip's right-hand tag. */
+  blockLabel: string;
+  /** The current value, shortened — the row reads "Quantum — ₹25 Cr". */
+  valueShort: string;
+}
+
+function shortValue(v: any): string {
+  if (v === null || v === undefined || v === '') return 'not heard';
+  const s = Array.isArray(v)
+    ? v.map((x) => (typeof x === 'string' ? x : (x?.action ?? ''))).filter(Boolean).join(', ')
+    : String(v);
+  return s.length > 28 ? `${s.slice(0, 27)}…` : s;
+}
 
 /** The needs-you strip: only low/medium-confidence fields, never judgement fields,
  *  never the opportunity score (always optional, per the spec). */
 export function needsYou(registry: VoxRegistry, report: VoxReport): NeedsYouItem[] {
   const out: NeedsYouItem[] = [];
-  const walk = (blockKey: string, defs: any[], cells: Record<string, VoxCell> | undefined) => {
+  const walk = (blockKey: string, blockLabel: string, defs: any[],
+                cells: Record<string, VoxCell> | undefined) => {
     if (!cells) return;
     for (const def of defs) {
       if (JUDGEMENT_OR_SYSTEM.has(def.key) || def.key === 'opportunity_score') continue;
@@ -159,14 +177,15 @@ export function needsYou(registry: VoxRegistry, report: VoxReport): NeedsYouItem
       if (!cell) continue;
       if (cell.confidence === 'low' || cell.confidence === 'medium') {
         out.push({ fieldPath: `${blockKey}.${def.key}`, label: def.label,
-                   confidence: cell.confidence });
+                   confidence: cell.confidence, blockLabel,
+                   valueShort: shortValue(cell.value) });
       }
     }
   };
-  walk('common', registry.common, report.common as any);
+  walk('common', 'Common', registry.common, report.common as any);
   for (const uc of report.detected_use_cases || []) {
     const block = registry.blocks[uc];
-    if (block?.fields?.length) walk(uc, block.fields, (report as any)[uc]);
+    if (block?.fields?.length) walk(uc, block.label || uc, block.fields, (report as any)[uc]);
   }
   return out;
 }

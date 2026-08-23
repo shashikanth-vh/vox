@@ -29,9 +29,11 @@ const HIDDEN_IN_MAIN = new Set(['sector', 'subsector', 'attendees_counterparty',
 export function ConfidenceDot({ conf }: { conf?: string }) {
   const sx: any = { display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
     ml: 0.8, verticalAlign: '1px' };
+  // the blueprint's key: high green (pre-accepted), medium amber (confirm),
+  // low RED (must edit), soft signal grey
   if (conf === 'high') sx.bgcolor = vx.grn;
   else if (conf === 'medium') sx.bgcolor = vx.amber;
-  else if (conf === 'low') { sx.border = `2px solid ${vx.amber}`; sx.width = 7; sx.height = 7; }
+  else if (conf === 'low') sx.bgcolor = '#E15B64';
   else { sx.border = `1.5px dashed ${vx.mut}`; sx.width = 7; sx.height = 7; }
   return <Box component="span" sx={sx} title={`confidence: ${conf || 'n/a'}`} />;
 }

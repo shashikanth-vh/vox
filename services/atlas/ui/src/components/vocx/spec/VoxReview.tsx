@@ -65,6 +65,8 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
   const [cands, setCands] = useState<Candidate[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [entityName, setEntityName] = useState('');
+  /** The pencil next to the title reopens the company link even when already linked. */
+  const [relinking, setRelinking] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -163,12 +165,17 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
         entityId = found?.items?.[0]?.id;
       }
       if (!entityId) throw new Error('That candidate has no register id yet — create it as a lead first.');
-      await saveEdits({ entity_id: entityId });
-      setResolveQ(''); setCands([]);
+      const changingCompany = !!row?.entity_id && row.entity_id !== entityId;
+      await saveEdits({ entity_id: entityId, ...(changingCompany ? { lead_id: '' } : {}) });
+      setResolveQ(''); setCands([]); setRelinking(false);
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
   const approve = async () => {
+    if (strip.length > 0 && !window.confirm(
+      `${strip.length} flagged field${strip.length > 1 ? 's are' : ' is'} still unreviewed — approve anyway?`)) {
+      return;
+    }
     setBusy(true); setErr('');
     try {
       await saveEdits();
@@ -250,11 +257,35 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
     <Box>
       {err && <Alert severity="warning" onClose={() => setErr('')} sx={{ mb: 1 }}>{err}</Alert>}
 
-      {/* identity: the company is the document's identity */}
-      <Typography sx={{ fontSize: 20, fontWeight: 700, mb: 0.5 }}>
-        {entityName || (row.entity_candidates?.[0] ?? 'Unlinked conversation')}
-        {readOnly && <Chip size="small" label={row.erased_at ? 'ERASED' : 'FILED'}
-          sx={{ ml: 1, bgcolor: '#14322A', color: vx.grn2, fontWeight: 700 }} />}
+      {/* identity, per the blueprint: status pill above, a calmer title with the
+          link pencil beside it, then the sector/meta line */}
+      <Box sx={{ mb: 0.4 }}>
+        <Box component="span" sx={{ display: 'inline-block', px: 1.2, py: 0.3,
+          borderRadius: '999px', fontSize: 10.5, letterSpacing: '.12em', fontWeight: 700,
+          border: `1px solid ${readOnly ? '#1D4A35' : '#4A3D1D'}`,
+          color: readOnly ? vx.grn2 : vx.amberInk }}>
+          {row.erased_at ? 'ERASED' : readOnly ? 'FILED' : 'READY FOR REVIEW'}
+        </Box>
+      </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mb: 0.3 }}>
+        <Typography sx={{ fontSize: 20, fontWeight: 700, minWidth: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {entityName || (row.entity_candidates?.[0] ?? 'Unlinked conversation')}
+        </Typography>
+        {!readOnly && (
+          <Box component="span" role="button" aria-label="Link the company"
+            onClick={() => setRelinking((v) => !v)}
+            sx={{ cursor: 'pointer', color: relinking ? vx.grn : vx.mut, fontSize: 15,
+              lineHeight: 1, '&:hover': { color: vx.grn2 } }}
+            title={row.entity_id ? 'Change the linked company' : 'Link the company'}>✎</Box>
+        )}
+      </Box>
+      <Typography sx={{ fontSize: 12.5, color: vx.mut, mb: 1 }}>
+        {[row.sector, row.subsector,
+          (report?.common?.location as any)?.value].filter(Boolean).join(' · ') || 'No sector determined'}
+        {'  ·  '}
+        {row.duration_seconds ? `${Math.floor((row.duration_seconds || 0) / 60)}:${String((row.duration_seconds || 0) % 60).padStart(2, '0')}` : ''}
+        {row.language_detected ? ` · ${row.language_detected.toUpperCase()}` : ''}
       </Typography>
       <Box sx={{ mb: 1.2 }}>
         {allUseCases.map((uc) => (
@@ -264,28 +295,47 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
         ))}
       </Box>
 
-      {/* the needs-you strip — only the flagged fields, each row jumps to its field */}
+      {/* the needs-you strip, blueprint layout: count badge, the VALUE in each row,
+          a severity dot, the block tag. Optional, never a gate — approving with
+          unreviewed fields asks once and proceeds. */}
       {!readOnly && strip.length > 0 && (
         <Box sx={{ ...card, borderColor: '#4A3D1D', bgcolor: '#241F10' }}>
-          <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: vx.amberInk, mb: 0.7 }}>
-            ⚠ {strip.length} field{strip.length > 1 ? 's' : ''} need you — tap to jump
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, mb: 0.5 }}>
+            <Box sx={{ width: 26, height: 26, borderRadius: '50%', bgcolor: vx.amber,
+              color: '#1A1503', fontWeight: 800, fontSize: 13.5, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{strip.length}</Box>
+            <Box>
+              <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: vx.amberInk, lineHeight: 1.2 }}>
+                {strip.length === 1 ? 'field' : 'fields'} to confirm
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: vx.mut }}>
+                Low and medium confidence · tap to fix · optional
+              </Typography>
+            </Box>
+          </Box>
           {strip.map((n) => (
             <Box key={n.fieldPath} onClick={() => {
               setFlashPath(n.fieldPath);
               document.getElementById(`vox-${n.fieldPath}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }}
-              sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, cursor: 'pointer',
+              sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.6, cursor: 'pointer',
                 borderTop: '1px solid rgba(74,61,29,.5)', fontSize: 13.5 }}>
-              <span>{n.label}</span>
-              <span style={{ color: vx.amberInk }}>{n.confidence}</span>
+              <Box component="span" sx={{ width: 8, height: 8, borderRadius: '50%', flex: 'none',
+                bgcolor: n.confidence === 'low' ? '#E15B64' : vx.amber }} />
+              <Box sx={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap' }}>
+                {n.label} — {n.valueShort}
+              </Box>
+              <Box component="span" sx={{ fontSize: 10, letterSpacing: '.1em',
+                textTransform: 'uppercase', color: vx.mut, flex: 'none' }}>{n.blockLabel}</Box>
+              <Box component="span" sx={{ color: vx.mut, flex: 'none' }}>›</Box>
             </Box>
           ))}
         </Box>
       )}
 
-      {/* company resolve — never merge silently */}
-      {!readOnly && !row.entity_id && (
+      {/* company resolve — never merge silently; the title's pencil reopens it */}
+      {!readOnly && (!row.entity_id || relinking) && (
         <Box sx={card}>
           <Typography sx={microHeading}>Link the company</Typography>
           {(row.entity_candidates || []).length > 0 && (
@@ -337,9 +387,12 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
 
       {!readOnly && (
         <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
-          <Button sx={{ ...pillPrimary, flex: 1 }} disabled={busy || strip.length > 0}
-            onClick={approve}>
-            {strip.length ? `Approve · ${strip.length} unchecked` : 'Approve'}
+          <Button disabled={busy} onClick={approve}
+            sx={strip.length
+              ? { ...pill, flex: 1, borderColor: '#4A3D1D', color: vx.amberInk,
+                  bgcolor: '#241F10', '&:hover': { bgcolor: '#2C2614', borderColor: vx.amber } }
+              : { ...pillPrimary, flex: 1 }}>
+            {strip.length ? `Approve · ${strip.length} unreviewed` : 'Approve'}
           </Button>
           <Button sx={pillGhost} disabled={busy} onClick={async () => {
             try { await saveEdits(); onClose(); } catch (e: any) { setErr(String(e?.message || e)); }
