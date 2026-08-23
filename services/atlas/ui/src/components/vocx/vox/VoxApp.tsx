@@ -148,7 +148,9 @@ function MemoryScreen({ go, openConversation, openDossier }: {
   const [q, setQ] = useState('');
   const names = useNames(items);
   useEffect(() => {
-    void voxService.list({ limit: 6 }).then((r) => setItems(r.items)).catch(() => {});
+    // your desk, not the firm's: Recent shows YOUR recordings; the full shared
+    // memory (approved, everyone) lives one tap away in All conversations
+    void voxService.list({ mine: true, limit: 6 }).then((r) => setItems(r.items)).catch(() => {});
   }, []);
   const now = new Date();
   const greet = now.getHours() < 12 ? 'Morning' : now.getHours() < 17 ? 'Afternoon' : 'Evening';
@@ -203,16 +205,22 @@ function AllScreen({ go, openConversation, openDossier }: {
 }) {
   const [items, setItems] = useState<VoxConversation[]>([]);
   const [uc, setUc] = useState('');
-  const [mine, setMine] = useState(false);
+  // Mine is the default desk; Everyone is the firm's shared memory and shows
+  // the APPROVED record — colleagues' drafts stay out of the feed unless the
+  // reader explicitly widens to in-progress (default, not a wall).
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [inflight, setInflight] = useState(false);
   const [q, setQ] = useState(() => sessionStorage.getItem('vox.q') || '');
   const names = useNames(items);
   useEffect(() => {
     const t = setTimeout(() => {
       void voxService.list({ q: q.trim() || undefined, use_case: uc || undefined,
-        mine, limit: 60 }).then((r) => setItems(r.items)).catch(() => {});
+        mine: scope === 'mine',
+        status: scope === 'all' && !inflight ? 'submitted' : undefined,
+        limit: 60 }).then((r) => setItems(r.items)).catch(() => {});
     }, q ? 300 : 0);
     return () => clearTimeout(t);
-  }, [q, uc, mine]);
+  }, [q, uc, scope, inflight]);
   const groups = useMemo(() => {
     const by: { head: string; rows: VoxConversation[] }[] = [];
     for (const c of items) {
@@ -237,14 +245,20 @@ function AllScreen({ go, openConversation, openDossier }: {
           onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="filter-row">
-        <div className={`filter-pill${!uc && !mine ? ' active' : ''}`}
-          onClick={() => { setUc(''); setMine(false); }}>All use cases</div>
+        <div className={`filter-pill${scope === 'mine' ? ' active' : ''}`}
+          onClick={() => setScope('mine')}>Mine</div>
+        <div className={`filter-pill${scope === 'all' ? ' active' : ''}`}
+          onClick={() => setScope('all')}>Everyone</div>
+        {scope === 'all' && (
+          <div className={`filter-pill${inflight ? ' active' : ''}`}
+            onClick={() => setInflight((v) => !v)}
+            title="Everyone shows approved records; widen to see in-progress items too">
+            + in-progress</div>
+        )}
         {UCS.map((u) => (
           <div key={u} className={`filter-pill${uc === u ? ' active' : ''}`}
             onClick={() => setUc(uc === u ? '' : u)}>{UC_SHORT[u]}</div>
         ))}
-        <div className={`filter-pill${mine ? ' active' : ''}`}
-          onClick={() => setMine((m) => !m)}>Mine</div>
       </div>
       {groups.map((g) => (
         <div key={g.head}>
@@ -330,7 +344,8 @@ function DossierScreen({ entityId, go, openConversation }: {
     void api.get<any>(`/entities/${entityId}`).then(setEntity).catch(() => {});
   }, [entityId]);
   useEffect(() => {
-    void voxService.list({ entity_id: entityId, use_case: uc || undefined, limit: 100 })
+    void voxService.list({ entity_id: entityId, use_case: uc || undefined,
+      status: 'submitted', limit: 100 })
       .then((r) => setItems(r.items)).catch(() => {});
   }, [entityId, uc]);
   const team = new Set(items.map((c) => c.recorder_email)).size;

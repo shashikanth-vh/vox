@@ -1,340 +1,1272 @@
 {
-  "registry_version": "v1",
-  "description": "VOX field registry — the single source every other component derives from: the AI prompt, the schema contract validator, and the review renderer. Change something here and you change it everywhere (Build Specification, Section 9). Machine names are the JSON keys; labels are the UI copy.",
-  "use_cases": [
-    "lending",
-    "syndication",
-    "asset_monetisation",
-    "credit_diligence",
-    "investor_relations",
-    "banking_relations",
-    "operations"
-  ],
-  "confidence_levels": ["high", "medium", "low", "n/a"],
-  "cross_cutting_rules": [
-    "a conversation may carry multiple use cases",
-    "sector/subsector are available on all use cases, always nullable, never forced",
-    "null numeric values raise a data-quality flag but never block submit",
-    "judgement fields are always review-recommended regardless of confidence",
-    "labels are human-readable; enums render as dropdowns"
-  ],
-  "common": [
-    { "key": "meeting_type", "label": "Meeting type", "type": "enum", "control": "dropdown",
-      "options": [
-        { "value": "in_person", "label": "In person" },
-        { "value": "call", "label": "Call" },
-        { "value": "video", "label": "Video" },
-        { "value": "other", "label": "Other" }
-      ] },
-    { "key": "meeting_date", "label": "Meeting date", "type": "date", "control": "date",
-      "notes": "Null if not stated." },
-    { "key": "location", "label": "Location", "type": "string", "control": "text",
-      "notes": "City/site/place as spoken. Distinct from the auto-captured GPS." },
-    { "key": "sector", "label": "Sector", "type": "enum", "control": "dropdown",
-      "options_from": "taxonomy.sectors", "notes": "Always nullable; never forced." },
-    { "key": "subsector", "label": "Subsector", "type": "enum", "control": "dropdown",
-      "options_from": "taxonomy.subsectors_of_selected_sector",
-      "notes": "Offered only under its parent sector; drives the per-subsector canonical fields." },
-    { "key": "attendees_counterparty", "label": "Attendees (their side)", "type": "list", "control": "list",
-      "notes": "Names/roles on the other side, as heard." },
-    { "key": "key_discussion_points", "label": "Key discussion points", "type": "list", "control": "list" },
-    { "key": "action_items", "label": "Action items", "type": "list", "control": "action_items",
-      "item_shape": { "action": "string", "owner": "string|null", "deadline": "date|null" } },
-    { "key": "next_steps", "label": "Next steps", "type": "string", "control": "text" },
-    { "key": "follow_up_date", "label": "Follow-up date", "type": "date", "control": "date",
-      "notes": "Feeds the confirm-then-create calendar draft." },
-    { "key": "opportunity_assessment", "label": "Opportunity assessment", "type": "string", "control": "textarea",
-      "judgement": true, "notes": "Your read. Always review-recommended; confidence n/a." },
-    { "key": "opportunity_score", "label": "Opportunity score", "type": "int", "control": "score",
-      "min": 1, "max": 5,
-      "notes": "AI suggests with confidence; the recorder may override at review. Null is valid. On override, confidence becomes n/a and user_override flips true. Never a required needs-you item." },
-    { "key": "opportunity_score_override_reason", "label": "Reason for change (optional)", "type": "string",
-      "control": "textarea", "judgement": true,
-      "notes": "Optional free-text reason when the score is changed. Stored for audit only; never compulsory, never blocks submit." },
-    { "key": "competitive_intelligence", "label": "Competitive intelligence", "type": "string", "control": "textarea",
-      "judgement": true, "notes": "Rival quotes/positions. Always review-recommended; confidence n/a." },
-    { "key": "data_quality_flags", "label": "Data quality flags", "type": "list", "control": "list",
-      "system": true, "notes": "What was missing or vague. Confidence n/a." }
-  ],
-  "blocks": {
-    "lending": {
-      "label": "Lending",
-      "ui_note": "Lending uses the term Quantum for the amount required; 'ticket size' is deliberately not used.",
-      "fields": [
-        { "key": "requirement_nature", "label": "Requirement nature", "type": "enum", "control": "dropdown",
-          "options": [
-            { "value": "project_finance", "label": "Project finance" },
-            { "value": "term_loan", "label": "Term loan" },
-            { "value": "working_capital", "label": "Working capital" },
-            { "value": "ncd", "label": "NCD" },
-            { "value": "structured_mezzanine", "label": "Structured / mezzanine" },
-            { "value": "refinance", "label": "Refinance" },
-            { "value": "bridge", "label": "Bridge" },
-            { "value": "other", "label": "Other" }
-          ] },
-        { "key": "requirement_quantum_cr", "label": "Quantum (₹ Cr)", "type": "number", "control": "number",
-          "notes": "Null flags, never blocks." },
-        { "key": "company_turnover_cr", "label": "Turnover (₹ Cr)", "type": "number", "control": "number" },
-        { "key": "existing_bankers", "label": "Existing bankers", "type": "string", "control": "text",
-          "notes": "Who is already lending, and at what, if stated." },
-        { "key": "present_requirement", "label": "Present requirement", "type": "string", "control": "textarea",
-          "notes": "What they asked for, in words." },
-        { "key": "remarks", "label": "Remarks", "type": "string", "control": "textarea" }
-      ]
+ "registry_version": "v1",
+ "description": "VOX field registry — the single source every other component derives from: the AI prompt, the schema contract validator, and the review renderer. Change something here and you change it everywhere (Build Specification, Section 9). Machine names are the JSON keys; labels are the UI copy.",
+ "use_cases": [
+  "lending",
+  "syndication",
+  "asset_monetisation",
+  "credit_diligence",
+  "investor_relations",
+  "banking_relations",
+  "operations"
+ ],
+ "confidence_levels": [
+  "high",
+  "medium",
+  "low",
+  "n/a"
+ ],
+ "cross_cutting_rules": [
+  "a conversation may carry multiple use cases",
+  "sector/subsector are available on all use cases, always nullable, never forced",
+  "null numeric values raise a data-quality flag but never block submit",
+  "judgement fields are always review-recommended regardless of confidence",
+  "labels are human-readable; enums render as dropdowns"
+ ],
+ "common": [
+  {
+   "key": "meeting_type",
+   "label": "Meeting type",
+   "type": "enum",
+   "control": "dropdown",
+   "options": [
+    {
+     "value": "in_person",
+     "label": "In person"
     },
-    "syndication": {
-      "label": "Syndication",
-      "ui_note": "Syndication uses Deal size. The counterparty bank/institution is captured through entity linkage, not a field.",
-      "fields": [
-        { "key": "facility_nature", "label": "Facility nature", "type": "enum", "control": "dropdown",
-          "options": [
-            { "value": "term_loan_syndication", "label": "Term loan syndication" },
-            { "value": "ncd_placement", "label": "NCD placement" },
-            { "value": "co_lending", "label": "Co-lending" },
-            { "value": "ecb", "label": "ECB" },
-            { "value": "structured_mezzanine", "label": "Structured / mezzanine" },
-            { "value": "securitisation_pool", "label": "Securitisation / pool" },
-            { "value": "other", "label": "Other" }
-          ] },
-        { "key": "deal_size_cr", "label": "Deal size (₹ Cr)", "type": "number", "control": "number" },
-        { "key": "existing_lenders", "label": "Existing lenders", "type": "string", "control": "text",
-          "notes": "Already in the deal/portfolio." },
-        { "key": "probable_lenders", "label": "Probable lenders", "type": "string", "control": "text",
-          "notes": "Appetite being explored." },
-        { "key": "remarks", "label": "Remarks", "type": "string", "control": "textarea" }
-      ]
+    {
+     "value": "call",
+     "label": "Call"
     },
-    "asset_monetisation": {
-      "label": "Asset monetisation",
-      "ui_note": "Branches on party_role — the first determination is always which side of the table the counterparty sits on. 'Both' renders the owner block and the buyer block together, in that order. All fields beyond party_role are optional.",
-      "fields": [
-        { "key": "party_role", "label": "Party role", "type": "enum", "control": "dropdown", "applies_to": "always",
-          "options": [
-            { "value": "owner", "label": "Asset owner (selling)" },
-            { "value": "buyer", "label": "Asset buyer (acquiring)" },
-            { "value": "both", "label": "Both" }
-          ], "notes": "First question, always." },
-        { "key": "deal_size", "label": "Deal size", "type": "string", "control": "text", "applies_to": "always",
-          "notes": "Free text (₹ / EV, indicative) — owner-decided as free text, not a parsed number." },
-        { "key": "offer_components", "label": "Offer components", "type": "list", "control": "chips",
-          "applies_to": "owner", "closed_set": ["entire_project", "land", "ppa", "connectivity", "modules", "epc_contract"],
-          "allow_free_text": true,
-          "notes": "Closed set plus free-text additions stored as extra strings in the same array." },
-        { "key": "asset_status", "label": "Asset status", "type": "enum", "control": "dropdown", "applies_to": "owner",
-          "options": [
-            { "value": "operational", "label": "Operational" },
-            { "value": "shovel_ready", "label": "Shovel-ready" },
-            { "value": "under_construction", "label": "Under construction" },
-            { "value": "other", "label": "Other" }
-          ] },
-        { "key": "offer_notes", "label": "Offer notes", "type": "string", "control": "textarea", "applies_to": "owner" },
-        { "key": "target_project_size", "label": "Target project size", "type": "string", "control": "text",
-          "applies_to": "buyer", "notes": "e.g. \"20–50 MW operational\"." },
-        { "key": "valuation_approach", "label": "Valuation approach", "type": "string", "control": "text",
-          "applies_to": "buyer", "notes": "e.g. DCF at 11% equity IRR / EV per MW." },
-        { "key": "buyer_criteria", "label": "Buyer criteria", "type": "list", "control": "list", "applies_to": "buyer",
-          "notes": "Each a criterion as spoken. Flat strings in v1; structured objects are a later registry version, not a v1 gap." },
-        { "key": "remarks", "label": "Remarks", "type": "string", "control": "textarea", "applies_to": "always" }
-      ]
+    {
+     "value": "video",
+     "label": "Video"
     },
-    "credit_diligence": { "label": "Credit diligence", "fields": [],
-      "ui_note": "v1 ships the common field set only; dedicated fields follow after real volume shows what recurs." },
-    "investor_relations": { "label": "Investor relations", "fields": [],
-      "ui_note": "v1 ships the common field set only." },
-    "banking_relations": { "label": "Banking relations", "fields": [],
-      "ui_note": "v1 ships the common field set only." },
-    "operations": { "label": "Operations", "fields": [],
-      "ui_note": "v1 ships the common field set only." }
+    {
+     "value": "other",
+     "label": "Other"
+    }
+   ]
   },
-  "taxonomy": {
-    "Renewables": ["Solar-OEM", "Solar-EPC", "Solar-Developer", "Solar-C&I", "Wind", "Biogas", "Biofuels", "Green Hydrogen"],
-    "BESS": ["BESS-OEM", "BESS-EPC", "BESS-Developer", "BESS-C&I"],
-    "EV Mobility": ["CPO", "Fleet", "EV Components", "Battery-as-a-service operators"],
-    "Industrial Decarbonisation": ["Energy Efficiency", "Waste-to-energy projects", "Industrial cooling and refrigeration", "Material recovery and recycling", "Process electrification"],
-    "Water Treatment & Waste Management": ["STP / ETP / ZLD systems", "Waste collection", "Water recycling and reuse systems", "Desalination", "Stormwater and flood protection", "Decentralised drinking water systems"],
-    "Climate Resilience": ["Post-harvest infrastructure (cold chain, warehousing, processing, packaging)", "On-farm productivity (precision inputs, mechanisation)", "Agri-fintech and warehouse receipts", "Climate intelligence (sensors, IoT, hazard modelling, early-warning, analytics)", "Disaster-response equipment"]
+  {
+   "key": "meeting_date",
+   "label": "Meeting date",
+   "type": "date",
+   "control": "date",
+   "notes": "Null if not stated."
   },
-  "subsector_canonicals": {
-    "Solar-OEM": [
-      { "key": "annual_manufacturing_capacity", "label": "Annual manufacturing capacity (MW/GW)", "conf": "hi", "control": "text" },
-      { "key": "product_line", "label": "Product line", "conf": "md", "control": "dropdown",
-        "options": ["Modules", "Cells", "Both cells & modules", "Inverters / BoS"] },
-      { "key": "order_book_utilisation", "label": "Order book / capacity utilisation", "conf": "md", "control": "text" }
-    ],
-    "Solar-EPC": [
-      { "key": "order_book", "label": "Order book (MW / ₹ Cr)", "conf": "hi", "control": "text" },
-      { "key": "projects_executed_mw", "label": "Projects executed to date (MW)", "conf": "md", "control": "text" },
-      { "key": "typical_client_type", "label": "Typical client type", "conf": "md", "control": "dropdown",
-        "options": ["Utility / IPP", "C&I", "Government / PSU", "Mixed"] }
-    ],
-    "Solar-Developer": [
-      { "key": "operating_uc_capacity_mw", "label": "Operating / under-construction capacity (MW)", "conf": "hi", "control": "text" },
-      { "key": "portfolio_stage", "label": "Portfolio stage", "conf": "md", "control": "dropdown",
-        "options": ["Fully operational", "Under construction", "Mixed portfolio", "Pipeline / DPR"] },
-      { "key": "offtake_ppa", "label": "Offtake / PPA arrangement", "conf": "md", "control": "text" }
-    ],
-    "Solar-C&I": [
-      { "key": "contracted_capacity_mw", "label": "Contracted capacity (MW)", "conf": "hi", "control": "text" },
-      { "key": "offtake_model", "label": "Offtake model", "conf": "md", "control": "dropdown",
-        "options": ["OPEX / RESCO", "CAPEX", "Open access", "Group captive"] },
-      { "key": "anchor_offtaker_credit", "label": "Anchor offtaker credit profile", "conf": "md", "control": "text" }
-    ],
-    "Wind": [
-      { "key": "operating_planned_capacity_mw", "label": "Operating / planned capacity (MW)", "conf": "hi", "control": "text" },
-      { "key": "resource_p90_plf", "label": "Resource / P90 (PLF %)", "conf": "md", "control": "text" },
-      { "key": "offtake_ppa", "label": "Offtake / PPA arrangement", "conf": "md", "control": "text" }
-    ],
-    "Biogas": [
-      { "key": "operational_capacity", "label": "Operational capacity (TPD feedstock / MT CBG)", "conf": "hi", "control": "text" },
-      { "key": "future_capacity", "label": "Future capacity planned", "conf": "md", "control": "text" },
-      { "key": "offtaker_arrangement", "label": "Off-taker arrangement (OMC / industrial)", "conf": "md", "control": "text" }
-    ],
-    "Biofuels": [
-      { "key": "production_capacity", "label": "Production capacity (KLPD / MTPA)", "conf": "hi", "control": "text" },
-      { "key": "feedstock_security", "label": "Feedstock security", "conf": "md", "control": "text" },
-      { "key": "offtake", "label": "Offtake (OMC blending / export)", "conf": "md", "control": "text" }
-    ],
-    "Green Hydrogen": [
-      { "key": "electrolyser_capacity", "label": "Electrolyser capacity (MW) / H2 output (TPA)", "conf": "hi", "control": "text" },
-      { "key": "re_source_firmness", "label": "RE source & firmness", "conf": "md", "control": "text" },
-      { "key": "offtake_commitment", "label": "Offtake commitment (industrial / export)", "conf": "md", "control": "text" }
-    ],
-    "BESS-OEM": [
-      { "key": "cell_pack_capacity_gwh", "label": "Cell / pack capacity (GWh)", "conf": "hi", "control": "text" },
-      { "key": "chemistry", "label": "Chemistry", "conf": "md", "control": "dropdown",
-        "options": ["LFP", "NMC", "Sodium-ion", "Other"] },
-      { "key": "localisation_pli", "label": "Localisation / PLI status", "conf": "md", "control": "text" }
-    ],
-    "BESS-EPC": [
-      { "key": "order_book", "label": "Order book (MWh / ₹ Cr)", "conf": "hi", "control": "text" },
-      { "key": "projects_executed_mwh", "label": "Projects executed (MWh)", "conf": "md", "control": "text" },
-      { "key": "typical_application", "label": "Typical application", "conf": "md", "control": "dropdown",
-        "options": ["Grid-scale", "C&I", "RE co-location", "Ancillary"] }
-    ],
-    "BESS-Developer": [
-      { "key": "energy_power", "label": "Energy / power (MWh / MW)", "conf": "hi", "control": "text" },
-      { "key": "application", "label": "Application", "conf": "md", "control": "dropdown",
-        "options": ["Standalone", "Co-located with RE", "Ancillary / grid", "C&I"] },
-      { "key": "revenue_model", "label": "Revenue model (tolling / merchant / capacity)", "conf": "md", "control": "text" }
-    ],
-    "BESS-C&I": [
-      { "key": "installed_contracted_mwh", "label": "Installed / contracted (MWh)", "conf": "hi", "control": "text" },
-      { "key": "use_case", "label": "Use case", "conf": "md", "control": "dropdown",
-        "options": ["Peak shaving", "Backup / reliability", "Arbitrage", "Solar firming"] },
-      { "key": "anchor_offtaker_credit", "label": "Anchor offtaker credit profile", "conf": "md", "control": "text" }
-    ],
-    "CPO": [
-      { "key": "chargers_installed", "label": "Chargers installed (nos.)", "conf": "hi", "control": "text" },
-      { "key": "chargers_planned", "label": "Chargers planned (next 12-18m)", "conf": "md", "control": "text" },
-      { "key": "utilisation_economics", "label": "Average utilisation (%) / unit economics", "conf": "md", "control": "text" }
-    ],
-    "Fleet": [
-      { "key": "vehicles_deployed", "label": "Vehicles deployed (nos.)", "conf": "hi", "control": "text" },
-      { "key": "vehicle_type", "label": "Vehicle type / segment", "conf": "md", "control": "dropdown",
-        "options": ["2W", "3W", "4W", "LCV / e-bus", "Mixed"] },
-      { "key": "offtake_lease_counterparty", "label": "Offtake / lease counterparty", "conf": "md", "control": "text" }
-    ],
-    "EV Components": [
-      { "key": "manufacturing_capacity", "label": "Manufacturing capacity (units / GWh)", "conf": "hi", "control": "text" },
-      { "key": "component", "label": "Component", "conf": "md", "control": "dropdown",
-        "options": ["Motors", "Controllers / power electronics", "Battery packs", "Chargers", "Other"] },
-      { "key": "oem_customers_order_book", "label": "Key OEM customers / order book", "conf": "md", "control": "text" }
-    ],
-    "Battery-as-a-service operators": [
-      { "key": "packs_stations_deployed", "label": "Packs / swap stations deployed (nos.)", "conf": "hi", "control": "text" },
-      { "key": "swaps_per_day_utilisation", "label": "Swaps per day / asset utilisation", "conf": "md", "control": "text" },
-      { "key": "fleet_tie_ups", "label": "Fleet tie-ups / offtake", "conf": "md", "control": "text" }
-    ],
-    "Energy Efficiency": [
-      { "key": "contracted_savings", "label": "Contracted savings (MWh / ₹ Cr)", "conf": "hi", "control": "text" },
-      { "key": "delivery_model", "label": "Delivery model", "conf": "md", "control": "dropdown",
-        "options": ["ESCO / shared savings", "CAPEX", "BOOT", "Deemed savings"] },
-      { "key": "host_industry_offtaker", "label": "Host industry / offtaker", "conf": "md", "control": "text" }
-    ],
-    "Waste-to-energy projects": [
-      { "key": "processing_capacity_tpd", "label": "Processing capacity (TPD)", "conf": "hi", "control": "text" },
-      { "key": "power_gas_output", "label": "Power / gas output (MW / MT)", "conf": "md", "control": "text" },
-      { "key": "feedstock_tie_up", "label": "Feedstock tie-up (ULB / industrial)", "conf": "md", "control": "text" }
-    ],
-    "Industrial cooling and refrigeration": [
-      { "key": "installed_capacity", "label": "Installed capacity (TR / MT cold storage)", "conf": "hi", "control": "text" },
-      { "key": "efficiency_gain", "label": "Efficiency gain / energy saving", "conf": "md", "control": "text" },
-      { "key": "anchor_host_offtaker", "label": "Anchor host / offtaker", "conf": "md", "control": "text" }
-    ],
-    "Material recovery and recycling": [
-      { "key": "processing_capacity", "label": "Processing capacity (TPD / TPA)", "conf": "hi", "control": "text" },
-      { "key": "material_stream", "label": "Material stream", "conf": "md", "control": "dropdown",
-        "options": ["Plastics", "E-waste", "Metals", "Battery / Li", "Mixed MSW"] },
-      { "key": "feedstock_security_offtake", "label": "Feedstock security & offtake", "conf": "md", "control": "text" }
-    ],
-    "Process electrification": [
-      { "key": "load_electrified", "label": "Load electrified (MW) / throughput", "conf": "hi", "control": "text" },
-      { "key": "emissions_abated", "label": "Emissions abated (indicative)", "conf": "md", "control": "text" },
-      { "key": "host_industry_offtaker", "label": "Host industry / offtaker", "conf": "md", "control": "text" }
-    ],
-    "STP / ETP / ZLD systems": [
-      { "key": "capacity_mld", "label": "Capacity (MLD)", "conf": "hi", "control": "text" },
-      { "key": "contract_type", "label": "Contract type", "conf": "md", "control": "dropdown",
-        "options": ["Concession / BOT", "HAM", "O&M", "EPC", "Annuity"] },
-      { "key": "counterparty", "label": "Counterparty (ULB / industrial)", "conf": "md", "control": "text" }
-    ],
-    "Waste collection": [
-      { "key": "tonnage_handled_tpd", "label": "Tonnage handled (TPD)", "conf": "hi", "control": "text" },
-      { "key": "contract_type", "label": "Contract type", "conf": "md", "control": "dropdown",
-        "options": ["Municipal concession", "Industrial", "Annuity", "Tipping fee"] },
-      { "key": "coverage_population", "label": "Coverage / population served", "conf": "md", "control": "text" }
-    ],
-    "Water recycling and reuse systems": [
-      { "key": "capacity_mld", "label": "Capacity (MLD)", "conf": "hi", "control": "text" },
-      { "key": "reuse_offtake", "label": "Reuse offtake (industrial / municipal)", "conf": "md", "control": "text" },
-      { "key": "contract_type", "label": "Contract type", "conf": "md", "control": "dropdown",
-        "options": ["Concession / BOT", "HAM", "O&M", "EPC"] }
-    ],
-    "Desalination": [
-      { "key": "capacity_mld", "label": "Capacity (MLD)", "conf": "hi", "control": "text" },
-      { "key": "technology", "label": "Technology", "conf": "md", "control": "dropdown",
-        "options": ["SWRO", "BWRO", "Thermal / MED", "Hybrid"] },
-      { "key": "offtake_concession_counterparty", "label": "Offtake / concession counterparty", "conf": "md", "control": "text" }
-    ],
-    "Stormwater and flood protection": [
-      { "key": "scope", "label": "Scope (km / catchment area)", "conf": "hi", "control": "text" },
-      { "key": "contract_type", "label": "Contract type", "conf": "md", "control": "dropdown",
-        "options": ["EPC", "HAM", "Concession", "O&M"] },
-      { "key": "govt_counterparty_funding", "label": "Government counterparty / funding source", "conf": "md", "control": "text" }
-    ],
-    "Decentralised drinking water systems": [
-      { "key": "units_capacity_kld", "label": "Units deployed / capacity (KLD)", "conf": "hi", "control": "text" },
-      { "key": "population_served", "label": "Population served", "conf": "md", "control": "text" },
-      { "key": "revenue_model", "label": "Revenue model (tariff / govt / CSR)", "conf": "md", "control": "text" }
-    ],
-    "Post-harvest infrastructure (cold chain, warehousing, processing, packaging)": [
-      { "key": "capacity_mt", "label": "Capacity (MT storage / throughput)", "conf": "hi", "control": "text" },
-      { "key": "asset_type", "label": "Asset type", "conf": "md", "control": "dropdown",
-        "options": ["Cold storage", "Dry warehousing", "Processing", "Packaging", "Integrated"] },
-      { "key": "anchor_aggregation_partner", "label": "Anchor / aggregation partner", "conf": "md", "control": "text" }
-    ],
-    "On-farm productivity (precision inputs, mechanisation)": [
-      { "key": "acres_farmers_served", "label": "Acres / farmers served", "conf": "hi", "control": "text" },
-      { "key": "offering", "label": "Offering", "conf": "md", "control": "dropdown",
-        "options": ["Precision inputs", "Mechanisation / rental", "Advisory", "Bundled"] },
-      { "key": "revenue_model", "label": "Revenue model", "conf": "md", "control": "text" }
-    ],
-    "Agri-fintech and warehouse receipts": [
-      { "key": "aum_disbursed_cr", "label": "AUM / disbursed (₹ Cr)", "conf": "hi", "control": "text" },
-      { "key": "product", "label": "Product", "conf": "md", "control": "dropdown",
-        "options": ["Warehouse receipt finance", "Input finance", "Invoice / trade", "Insurance-linked"] },
-      { "key": "portfolio_quality", "label": "Portfolio quality / collateral coverage", "conf": "md", "control": "text" }
-    ],
-    "Climate intelligence (sensors, IoT, hazard modelling, early-warning, analytics)": [
-      { "key": "deployments_data_coverage", "label": "Deployments / data coverage", "conf": "hi", "control": "text" },
-      { "key": "revenue_model", "label": "Revenue model", "conf": "md", "control": "dropdown",
-        "options": ["SaaS / subscription", "Per-deployment", "Govt contract", "Data licensing"] },
-      { "key": "anchor_clients", "label": "Anchor clients", "conf": "md", "control": "text" }
-    ],
-    "Disaster-response equipment": [
-      { "key": "units_deployed_order_book", "label": "Units deployed / order book", "conf": "hi", "control": "text" },
-      { "key": "equipment_type", "label": "Equipment type", "conf": "md", "control": "text" },
-      { "key": "primary_buyer", "label": "Primary buyer (govt / NDRF / industrial)", "conf": "md", "control": "text" }
-    ]
+  {
+   "key": "location",
+   "label": "Location",
+   "type": "string",
+   "control": "text",
+   "notes": "City/site/place as spoken. Distinct from the auto-captured GPS."
+  },
+  {
+   "key": "sector",
+   "label": "Sector",
+   "type": "enum",
+   "control": "dropdown",
+   "options_from": "taxonomy.sectors",
+   "notes": "Always nullable; never forced."
+  },
+  {
+   "key": "subsector",
+   "label": "Subsector",
+   "type": "enum",
+   "control": "dropdown",
+   "options_from": "taxonomy.subsectors_of_selected_sector",
+   "notes": "Offered only under its parent sector; drives the per-subsector canonical fields."
+  },
+  {
+   "key": "attendees_counterparty",
+   "label": "Attendees (their side)",
+   "type": "list",
+   "control": "list",
+   "notes": "Names/roles on the other side, as heard."
+  },
+  {
+   "key": "key_discussion_points",
+   "label": "Key discussion points",
+   "type": "list",
+   "control": "list"
+  },
+  {
+   "key": "meeting_summary",
+   "label": "Summary",
+   "type": "string",
+   "control": "textarea",
+   "judgement": true,
+   "notes": "A 2-4 sentence narrative of the meeting: who met whom (names and roles), where, and each distinct thread discussed with its headline numbers — written like a colleague's crisp debrief, e.g. 'Kannan met R. Sharma (MD, Suryodaya EPC) in Whitefield. Three threads: a ₹25 Cr project-finance requirement...'. Confidence n/a."
+  },
+  {
+   "key": "action_items",
+   "label": "Action items",
+   "type": "list",
+   "control": "action_items",
+   "item_shape": {
+    "action": "string",
+    "owner": "string|null",
+    "deadline": "date|null"
+   }
+  },
+  {
+   "key": "next_steps",
+   "label": "Next steps",
+   "type": "string",
+   "control": "text"
+  },
+  {
+   "key": "follow_up_date",
+   "label": "Follow-up date",
+   "type": "date",
+   "control": "date",
+   "notes": "Feeds the confirm-then-create calendar draft."
+  },
+  {
+   "key": "opportunity_assessment",
+   "label": "Opportunity assessment",
+   "type": "string",
+   "control": "textarea",
+   "judgement": true,
+   "notes": "Your read. Always review-recommended; confidence n/a."
+  },
+  {
+   "key": "opportunity_score",
+   "label": "Opportunity score",
+   "type": "int",
+   "control": "score",
+   "min": 1,
+   "max": 5,
+   "notes": "AI suggests with confidence; the recorder may override at review. Null is valid. On override, confidence becomes n/a and user_override flips true. Never a required needs-you item."
+  },
+  {
+   "key": "opportunity_score_override_reason",
+   "label": "Reason for change (optional)",
+   "type": "string",
+   "control": "textarea",
+   "judgement": true,
+   "notes": "Optional free-text reason when the score is changed. Stored for audit only; never compulsory, never blocks submit."
+  },
+  {
+   "key": "competitive_intelligence",
+   "label": "Competitive intelligence",
+   "type": "string",
+   "control": "textarea",
+   "judgement": true,
+   "notes": "Rival quotes/positions. Always review-recommended; confidence n/a."
+  },
+  {
+   "key": "data_quality_flags",
+   "label": "Data quality flags",
+   "type": "list",
+   "control": "list",
+   "system": true,
+   "notes": "What was missing or vague. Confidence n/a."
   }
+ ],
+ "blocks": {
+  "lending": {
+   "label": "Lending",
+   "ui_note": "Lending uses the term Quantum for the amount required; 'ticket size' is deliberately not used.",
+   "fields": [
+    {
+     "key": "requirement_nature",
+     "label": "Requirement nature",
+     "type": "enum",
+     "control": "dropdown",
+     "options": [
+      {
+       "value": "project_finance",
+       "label": "Project finance"
+      },
+      {
+       "value": "term_loan",
+       "label": "Term loan"
+      },
+      {
+       "value": "working_capital",
+       "label": "Working capital"
+      },
+      {
+       "value": "ncd",
+       "label": "NCD"
+      },
+      {
+       "value": "structured_mezzanine",
+       "label": "Structured / mezzanine"
+      },
+      {
+       "value": "refinance",
+       "label": "Refinance"
+      },
+      {
+       "value": "bridge",
+       "label": "Bridge"
+      },
+      {
+       "value": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "key": "requirement_quantum_cr",
+     "label": "Quantum (₹ Cr)",
+     "type": "number",
+     "control": "number",
+     "notes": "Null flags, never blocks."
+    },
+    {
+     "key": "company_turnover_cr",
+     "label": "Turnover (₹ Cr)",
+     "type": "number",
+     "control": "number"
+    },
+    {
+     "key": "existing_bankers",
+     "label": "Existing bankers",
+     "type": "string",
+     "control": "text",
+     "notes": "Who is already lending, and at what, if stated."
+    },
+    {
+     "key": "present_requirement",
+     "label": "Present requirement",
+     "type": "string",
+     "control": "textarea",
+     "notes": "What they asked for, in words."
+    },
+    {
+     "key": "remarks",
+     "label": "Remarks",
+     "type": "string",
+     "control": "textarea"
+    }
+   ]
+  },
+  "syndication": {
+   "label": "Syndication",
+   "ui_note": "Syndication uses Deal size. The counterparty bank/institution is captured through entity linkage, not a field.",
+   "fields": [
+    {
+     "key": "facility_nature",
+     "label": "Facility nature",
+     "type": "enum",
+     "control": "dropdown",
+     "options": [
+      {
+       "value": "term_loan_syndication",
+       "label": "Term loan syndication"
+      },
+      {
+       "value": "ncd_placement",
+       "label": "NCD placement"
+      },
+      {
+       "value": "co_lending",
+       "label": "Co-lending"
+      },
+      {
+       "value": "ecb",
+       "label": "ECB"
+      },
+      {
+       "value": "structured_mezzanine",
+       "label": "Structured / mezzanine"
+      },
+      {
+       "value": "securitisation_pool",
+       "label": "Securitisation / pool"
+      },
+      {
+       "value": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "key": "deal_size_cr",
+     "label": "Deal size (₹ Cr)",
+     "type": "number",
+     "control": "number"
+    },
+    {
+     "key": "existing_lenders",
+     "label": "Existing lenders",
+     "type": "string",
+     "control": "text",
+     "notes": "Already in the deal/portfolio."
+    },
+    {
+     "key": "probable_lenders",
+     "label": "Probable lenders",
+     "type": "string",
+     "control": "text",
+     "notes": "Appetite being explored."
+    },
+    {
+     "key": "remarks",
+     "label": "Remarks",
+     "type": "string",
+     "control": "textarea"
+    }
+   ]
+  },
+  "asset_monetisation": {
+   "label": "Asset monetisation",
+   "ui_note": "Branches on party_role — the first determination is always which side of the table the counterparty sits on. 'Both' renders the owner block and the buyer block together, in that order. All fields beyond party_role are optional.",
+   "fields": [
+    {
+     "key": "party_role",
+     "label": "Party role",
+     "type": "enum",
+     "control": "dropdown",
+     "applies_to": "always",
+     "options": [
+      {
+       "value": "owner",
+       "label": "Asset owner (selling)"
+      },
+      {
+       "value": "buyer",
+       "label": "Asset buyer (acquiring)"
+      },
+      {
+       "value": "both",
+       "label": "Both"
+      }
+     ],
+     "notes": "First question, always."
+    },
+    {
+     "key": "deal_size",
+     "label": "Deal size",
+     "type": "string",
+     "control": "text",
+     "applies_to": "always",
+     "notes": "Free text (₹ / EV, indicative) — owner-decided as free text, not a parsed number."
+    },
+    {
+     "key": "offer_components",
+     "label": "Offer components",
+     "type": "list",
+     "control": "chips",
+     "applies_to": "owner",
+     "closed_set": [
+      "entire_project",
+      "land",
+      "ppa",
+      "connectivity",
+      "modules",
+      "epc_contract"
+     ],
+     "allow_free_text": true,
+     "notes": "Closed set plus free-text additions stored as extra strings in the same array."
+    },
+    {
+     "key": "asset_status",
+     "label": "Asset status",
+     "type": "enum",
+     "control": "dropdown",
+     "applies_to": "owner",
+     "options": [
+      {
+       "value": "operational",
+       "label": "Operational"
+      },
+      {
+       "value": "shovel_ready",
+       "label": "Shovel-ready"
+      },
+      {
+       "value": "under_construction",
+       "label": "Under construction"
+      },
+      {
+       "value": "other",
+       "label": "Other"
+      }
+     ]
+    },
+    {
+     "key": "offer_notes",
+     "label": "Offer notes",
+     "type": "string",
+     "control": "textarea",
+     "applies_to": "owner"
+    },
+    {
+     "key": "target_project_size",
+     "label": "Target project size",
+     "type": "string",
+     "control": "text",
+     "applies_to": "buyer",
+     "notes": "e.g. \"20–50 MW operational\"."
+    },
+    {
+     "key": "valuation_approach",
+     "label": "Valuation approach",
+     "type": "string",
+     "control": "text",
+     "applies_to": "buyer",
+     "notes": "e.g. DCF at 11% equity IRR / EV per MW."
+    },
+    {
+     "key": "buyer_criteria",
+     "label": "Buyer criteria",
+     "type": "list",
+     "control": "list",
+     "applies_to": "buyer",
+     "notes": "Each a criterion as spoken. Flat strings in v1; structured objects are a later registry version, not a v1 gap."
+    },
+    {
+     "key": "remarks",
+     "label": "Remarks",
+     "type": "string",
+     "control": "textarea",
+     "applies_to": "always"
+    }
+   ]
+  },
+  "credit_diligence": {
+   "label": "Credit diligence",
+   "fields": [],
+   "ui_note": "v1 ships the common field set only; dedicated fields follow after real volume shows what recurs."
+  },
+  "investor_relations": {
+   "label": "Investor relations",
+   "fields": [],
+   "ui_note": "v1 ships the common field set only."
+  },
+  "banking_relations": {
+   "label": "Banking relations",
+   "fields": [],
+   "ui_note": "v1 ships the common field set only."
+  },
+  "operations": {
+   "label": "Operations",
+   "fields": [],
+   "ui_note": "v1 ships the common field set only."
+  }
+ },
+ "taxonomy": {
+  "Renewables": [
+   "Solar-OEM",
+   "Solar-EPC",
+   "Solar-Developer",
+   "Solar-C&I",
+   "Wind",
+   "Biogas",
+   "Biofuels",
+   "Green Hydrogen"
+  ],
+  "BESS": [
+   "BESS-OEM",
+   "BESS-EPC",
+   "BESS-Developer",
+   "BESS-C&I"
+  ],
+  "EV Mobility": [
+   "CPO",
+   "Fleet",
+   "EV Components",
+   "Battery-as-a-service operators"
+  ],
+  "Industrial Decarbonisation": [
+   "Energy Efficiency",
+   "Waste-to-energy projects",
+   "Industrial cooling and refrigeration",
+   "Material recovery and recycling",
+   "Process electrification"
+  ],
+  "Water Treatment & Waste Management": [
+   "STP / ETP / ZLD systems",
+   "Waste collection",
+   "Water recycling and reuse systems",
+   "Desalination",
+   "Stormwater and flood protection",
+   "Decentralised drinking water systems"
+  ],
+  "Climate Resilience": [
+   "Post-harvest infrastructure (cold chain, warehousing, processing, packaging)",
+   "On-farm productivity (precision inputs, mechanisation)",
+   "Agri-fintech and warehouse receipts",
+   "Climate intelligence (sensors, IoT, hazard modelling, early-warning, analytics)",
+   "Disaster-response equipment"
+  ]
+ },
+ "subsector_canonicals": {
+  "Solar-OEM": [
+   {
+    "key": "annual_manufacturing_capacity",
+    "label": "Annual manufacturing capacity (MW/GW)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "product_line",
+    "label": "Product line",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Modules",
+     "Cells",
+     "Both cells & modules",
+     "Inverters / BoS"
+    ]
+   },
+   {
+    "key": "order_book_utilisation",
+    "label": "Order book / capacity utilisation",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Solar-EPC": [
+   {
+    "key": "order_book",
+    "label": "Order book (MW / ₹ Cr)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "projects_executed_mw",
+    "label": "Projects executed to date (MW)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "typical_client_type",
+    "label": "Typical client type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Utility / IPP",
+     "C&I",
+     "Government / PSU",
+     "Mixed"
+    ]
+   }
+  ],
+  "Solar-Developer": [
+   {
+    "key": "operating_uc_capacity_mw",
+    "label": "Operating / under-construction capacity (MW)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "portfolio_stage",
+    "label": "Portfolio stage",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Fully operational",
+     "Under construction",
+     "Mixed portfolio",
+     "Pipeline / DPR"
+    ]
+   },
+   {
+    "key": "offtake_ppa",
+    "label": "Offtake / PPA arrangement",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Solar-C&I": [
+   {
+    "key": "contracted_capacity_mw",
+    "label": "Contracted capacity (MW)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "offtake_model",
+    "label": "Offtake model",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "OPEX / RESCO",
+     "CAPEX",
+     "Open access",
+     "Group captive"
+    ]
+   },
+   {
+    "key": "anchor_offtaker_credit",
+    "label": "Anchor offtaker credit profile",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Wind": [
+   {
+    "key": "operating_planned_capacity_mw",
+    "label": "Operating / planned capacity (MW)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "resource_p90_plf",
+    "label": "Resource / P90 (PLF %)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "offtake_ppa",
+    "label": "Offtake / PPA arrangement",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Biogas": [
+   {
+    "key": "operational_capacity",
+    "label": "Operational capacity (TPD feedstock / MT CBG)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "future_capacity",
+    "label": "Future capacity planned",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "offtaker_arrangement",
+    "label": "Off-taker arrangement (OMC / industrial)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Biofuels": [
+   {
+    "key": "production_capacity",
+    "label": "Production capacity (KLPD / MTPA)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "feedstock_security",
+    "label": "Feedstock security",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "offtake",
+    "label": "Offtake (OMC blending / export)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Green Hydrogen": [
+   {
+    "key": "electrolyser_capacity",
+    "label": "Electrolyser capacity (MW) / H2 output (TPA)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "re_source_firmness",
+    "label": "RE source & firmness",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "offtake_commitment",
+    "label": "Offtake commitment (industrial / export)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "BESS-OEM": [
+   {
+    "key": "cell_pack_capacity_gwh",
+    "label": "Cell / pack capacity (GWh)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "chemistry",
+    "label": "Chemistry",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "LFP",
+     "NMC",
+     "Sodium-ion",
+     "Other"
+    ]
+   },
+   {
+    "key": "localisation_pli",
+    "label": "Localisation / PLI status",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "BESS-EPC": [
+   {
+    "key": "order_book",
+    "label": "Order book (MWh / ₹ Cr)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "projects_executed_mwh",
+    "label": "Projects executed (MWh)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "typical_application",
+    "label": "Typical application",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Grid-scale",
+     "C&I",
+     "RE co-location",
+     "Ancillary"
+    ]
+   }
+  ],
+  "BESS-Developer": [
+   {
+    "key": "energy_power",
+    "label": "Energy / power (MWh / MW)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "application",
+    "label": "Application",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Standalone",
+     "Co-located with RE",
+     "Ancillary / grid",
+     "C&I"
+    ]
+   },
+   {
+    "key": "revenue_model",
+    "label": "Revenue model (tolling / merchant / capacity)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "BESS-C&I": [
+   {
+    "key": "installed_contracted_mwh",
+    "label": "Installed / contracted (MWh)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "use_case",
+    "label": "Use case",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Peak shaving",
+     "Backup / reliability",
+     "Arbitrage",
+     "Solar firming"
+    ]
+   },
+   {
+    "key": "anchor_offtaker_credit",
+    "label": "Anchor offtaker credit profile",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "CPO": [
+   {
+    "key": "chargers_installed",
+    "label": "Chargers installed (nos.)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "chargers_planned",
+    "label": "Chargers planned (next 12-18m)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "utilisation_economics",
+    "label": "Average utilisation (%) / unit economics",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Fleet": [
+   {
+    "key": "vehicles_deployed",
+    "label": "Vehicles deployed (nos.)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "vehicle_type",
+    "label": "Vehicle type / segment",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "2W",
+     "3W",
+     "4W",
+     "LCV / e-bus",
+     "Mixed"
+    ]
+   },
+   {
+    "key": "offtake_lease_counterparty",
+    "label": "Offtake / lease counterparty",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "EV Components": [
+   {
+    "key": "manufacturing_capacity",
+    "label": "Manufacturing capacity (units / GWh)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "component",
+    "label": "Component",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Motors",
+     "Controllers / power electronics",
+     "Battery packs",
+     "Chargers",
+     "Other"
+    ]
+   },
+   {
+    "key": "oem_customers_order_book",
+    "label": "Key OEM customers / order book",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Battery-as-a-service operators": [
+   {
+    "key": "packs_stations_deployed",
+    "label": "Packs / swap stations deployed (nos.)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "swaps_per_day_utilisation",
+    "label": "Swaps per day / asset utilisation",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "fleet_tie_ups",
+    "label": "Fleet tie-ups / offtake",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Energy Efficiency": [
+   {
+    "key": "contracted_savings",
+    "label": "Contracted savings (MWh / ₹ Cr)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "delivery_model",
+    "label": "Delivery model",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "ESCO / shared savings",
+     "CAPEX",
+     "BOOT",
+     "Deemed savings"
+    ]
+   },
+   {
+    "key": "host_industry_offtaker",
+    "label": "Host industry / offtaker",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Waste-to-energy projects": [
+   {
+    "key": "processing_capacity_tpd",
+    "label": "Processing capacity (TPD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "power_gas_output",
+    "label": "Power / gas output (MW / MT)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "feedstock_tie_up",
+    "label": "Feedstock tie-up (ULB / industrial)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Industrial cooling and refrigeration": [
+   {
+    "key": "installed_capacity",
+    "label": "Installed capacity (TR / MT cold storage)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "efficiency_gain",
+    "label": "Efficiency gain / energy saving",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "anchor_host_offtaker",
+    "label": "Anchor host / offtaker",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Material recovery and recycling": [
+   {
+    "key": "processing_capacity",
+    "label": "Processing capacity (TPD / TPA)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "material_stream",
+    "label": "Material stream",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Plastics",
+     "E-waste",
+     "Metals",
+     "Battery / Li",
+     "Mixed MSW"
+    ]
+   },
+   {
+    "key": "feedstock_security_offtake",
+    "label": "Feedstock security & offtake",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Process electrification": [
+   {
+    "key": "load_electrified",
+    "label": "Load electrified (MW) / throughput",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "emissions_abated",
+    "label": "Emissions abated (indicative)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "host_industry_offtaker",
+    "label": "Host industry / offtaker",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "STP / ETP / ZLD systems": [
+   {
+    "key": "capacity_mld",
+    "label": "Capacity (MLD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "contract_type",
+    "label": "Contract type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Concession / BOT",
+     "HAM",
+     "O&M",
+     "EPC",
+     "Annuity"
+    ]
+   },
+   {
+    "key": "counterparty",
+    "label": "Counterparty (ULB / industrial)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Waste collection": [
+   {
+    "key": "tonnage_handled_tpd",
+    "label": "Tonnage handled (TPD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "contract_type",
+    "label": "Contract type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Municipal concession",
+     "Industrial",
+     "Annuity",
+     "Tipping fee"
+    ]
+   },
+   {
+    "key": "coverage_population",
+    "label": "Coverage / population served",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Water recycling and reuse systems": [
+   {
+    "key": "capacity_mld",
+    "label": "Capacity (MLD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "reuse_offtake",
+    "label": "Reuse offtake (industrial / municipal)",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "contract_type",
+    "label": "Contract type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Concession / BOT",
+     "HAM",
+     "O&M",
+     "EPC"
+    ]
+   }
+  ],
+  "Desalination": [
+   {
+    "key": "capacity_mld",
+    "label": "Capacity (MLD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "technology",
+    "label": "Technology",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "SWRO",
+     "BWRO",
+     "Thermal / MED",
+     "Hybrid"
+    ]
+   },
+   {
+    "key": "offtake_concession_counterparty",
+    "label": "Offtake / concession counterparty",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Stormwater and flood protection": [
+   {
+    "key": "scope",
+    "label": "Scope (km / catchment area)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "contract_type",
+    "label": "Contract type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "EPC",
+     "HAM",
+     "Concession",
+     "O&M"
+    ]
+   },
+   {
+    "key": "govt_counterparty_funding",
+    "label": "Government counterparty / funding source",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Decentralised drinking water systems": [
+   {
+    "key": "units_capacity_kld",
+    "label": "Units deployed / capacity (KLD)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "population_served",
+    "label": "Population served",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "revenue_model",
+    "label": "Revenue model (tariff / govt / CSR)",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Post-harvest infrastructure (cold chain, warehousing, processing, packaging)": [
+   {
+    "key": "capacity_mt",
+    "label": "Capacity (MT storage / throughput)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "asset_type",
+    "label": "Asset type",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Cold storage",
+     "Dry warehousing",
+     "Processing",
+     "Packaging",
+     "Integrated"
+    ]
+   },
+   {
+    "key": "anchor_aggregation_partner",
+    "label": "Anchor / aggregation partner",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "On-farm productivity (precision inputs, mechanisation)": [
+   {
+    "key": "acres_farmers_served",
+    "label": "Acres / farmers served",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "offering",
+    "label": "Offering",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Precision inputs",
+     "Mechanisation / rental",
+     "Advisory",
+     "Bundled"
+    ]
+   },
+   {
+    "key": "revenue_model",
+    "label": "Revenue model",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Agri-fintech and warehouse receipts": [
+   {
+    "key": "aum_disbursed_cr",
+    "label": "AUM / disbursed (₹ Cr)",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "product",
+    "label": "Product",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "Warehouse receipt finance",
+     "Input finance",
+     "Invoice / trade",
+     "Insurance-linked"
+    ]
+   },
+   {
+    "key": "portfolio_quality",
+    "label": "Portfolio quality / collateral coverage",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Climate intelligence (sensors, IoT, hazard modelling, early-warning, analytics)": [
+   {
+    "key": "deployments_data_coverage",
+    "label": "Deployments / data coverage",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "revenue_model",
+    "label": "Revenue model",
+    "conf": "md",
+    "control": "dropdown",
+    "options": [
+     "SaaS / subscription",
+     "Per-deployment",
+     "Govt contract",
+     "Data licensing"
+    ]
+   },
+   {
+    "key": "anchor_clients",
+    "label": "Anchor clients",
+    "conf": "md",
+    "control": "text"
+   }
+  ],
+  "Disaster-response equipment": [
+   {
+    "key": "units_deployed_order_book",
+    "label": "Units deployed / order book",
+    "conf": "hi",
+    "control": "text"
+   },
+   {
+    "key": "equipment_type",
+    "label": "Equipment type",
+    "conf": "md",
+    "control": "text"
+   },
+   {
+    "key": "primary_buyer",
+    "label": "Primary buyer (govt / NDRF / industrial)",
+    "conf": "md",
+    "control": "text"
+   }
+  ]
+ }
 }

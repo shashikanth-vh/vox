@@ -83,6 +83,7 @@ def _valid_report():
             "subsector": _cell("Solar-Developer", "medium"),
             "attendees_counterparty": _cell(["R. Sharma (MD)"], "medium"),
             "key_discussion_points": _cell(["40 MW under construction"], "high"),
+            "meeting_summary": _cell(None, "n/a"),
             "action_items": _cell([{"action": "Share DPR", "owner": "R. Sharma", "deadline": None}], "medium"),
             "next_steps": _cell("Review DPR together", "high"),
             "follow_up_date": _cell(None, "n/a"),

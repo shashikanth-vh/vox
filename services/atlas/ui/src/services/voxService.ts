@@ -29,6 +29,7 @@ export interface VoxConversation {
   entity_id?: string | null;
   lead_id?: string | null;
   deal_id?: string | null;
+  interaction_id?: string | null;
   recording_mode: 'post_meeting' | 'live';
   status: 'queued' | 'uploading' | 'processing' | 'ready' | 'submitted'
         | 'processing_failed' | 'failed_permanently';

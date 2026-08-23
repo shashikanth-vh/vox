@@ -100,6 +100,13 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
         if ok:
             obj["entity_candidates"] = flat
 
+    # meeting_summary was added to the registry after v1 shipped; an older model
+    # snapshot (or a cached stub) that omits it still satisfies the contract as
+    # an explicit null — additive fields default, they never fail old outputs.
+    common0 = obj.get("common")
+    if isinstance(common0, dict) and "meeting_summary" not in common0:
+        common0["meeting_summary"] = {"value": None, "confidence": "n/a"}
+
     details = obj.get("subsector_details")
     common = obj.get("common")
     if isinstance(details, dict) and isinstance(common, dict):

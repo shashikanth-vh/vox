@@ -72,6 +72,7 @@ def _valid_model_json():
             "location": cell("Whitefield", "medium"), "sector": cell("Renewables"),
             "subsector": cell(None, "n/a"), "attendees_counterparty": cell([], "n/a"),
             "key_discussion_points": cell(["40 MW discussion"]),
+            "meeting_summary": cell(None, "n/a"),
             "action_items": cell([], "n/a"), "next_steps": cell("Share DPR"),
             "follow_up_date": cell(None, "n/a"),
             "opportunity_assessment": cell("Real ask.", "n/a"),

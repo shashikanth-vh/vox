@@ -75,6 +75,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   // transcript correction: the fix is written here, the original never changes
   const [fixingTranscript, setFixingTranscript] = useState(false);
   const [fixDraft, setFixDraft] = useState('');
+  /** Approve tapped with nothing linked: the link screen opens first, and a
+   *  successful pin resumes the approval automatically. */
+  const [linkThenApprove, setLinkThenApprove] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(dirty);
@@ -147,12 +150,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const saveEdits = useCallback(async (extra: Record<string, any> = {}) => {
     const pending = dirtyRef.current;
     const edits = Object.entries(pending).map(([field_path, new_value]) => ({ field_path, new_value }));
-    if (!edits.length && !Object.keys(extra).length) return;
+    if (!edits.length && !Object.keys(extra).length) return null;
     const updated = await voxService.edits(conversationId, { edits, ...extra });
     setDirty({});
     setRow(updated);
     setReport(updated.structured_report as VoxReport);
     onSaved(true);
+    return updated;
   }, [conversationId, onSaved]);
 
   // debounced autosave — the header's "Saved" tick is a real statement
@@ -192,8 +196,24 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const pinTo = async (pins: Record<string, string>) => {
     setBusy(true); setErr('');
     try {
-      await saveEdits({ proposed_lead_company: '', proposed_lead_rm: '', ...pins });
+      const updated = await saveEdits({ proposed_lead_company: '', proposed_lead_rm: '', ...pins });
+      if (!updated) return;
+      // Heal the chain: a standalone lead pinned under a chosen company gets the
+      // company stamped onto the LEAD row too, so its interactions roll up to
+      // the company timeline from now on — for everything, not just VOX.
+      if (pins.lead_id && pins.entity_id) {
+        try {
+          const l = await api.get<any>(`/leads/${pins.lead_id}`);
+          if (!l.entity_id) await api.patch(`/leads/${pins.lead_id}`, { entity_id: pins.entity_id });
+        } catch { /* best-effort data heal */ }
+      }
+      // A pin added to an approved record that never filed its interaction
+      // files it now — post-approval linking completes the record.
+      if (updated.status === 'submitted' && !updated.interaction_id) {
+        await fileTouchpoint(updated);
+      }
       closeAtlas();
+      if (linkThenApprove) { setLinkThenApprove(false); void approve({ unlinked: true }); }
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
@@ -202,9 +222,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     try {
       // A lead candidate links straight to that lead.
       if (c.kind === 'lead' && c.code) {
-        await saveEdits({ lead_id: c.code, deal_id: '', entity_id: '',
-                          proposed_lead_company: '', proposed_lead_rm: '' });
-        closeAtlas(); return;
+        await pinTo({ lead_id: c.code, deal_id: '', entity_id: '' });
+        return;
       }
       let entityId = c.entity_id;
       if (!entityId && c.code) {
@@ -246,6 +265,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       });
       setCreating(false);
       closeAtlas();
+      if (linkThenApprove) { setLinkThenApprove(false); void approve({ unlinked: true }); }
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
@@ -282,7 +302,54 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
-  const approve = async () => {
+  /** File the timeline interaction against the MOST SPECIFIC line pinned on
+   *  the row — a deal beats a lead beats the company timeline. Used at approve
+   *  time, and again when a pin is added to an already-approved record that
+   *  never got its interaction. Idempotent by capture_id. */
+  const fileTouchpoint = useCallback(async (r: VoxConversation) => {
+    const subject = r.deal_id
+      ? { subject_type: 'Deal', subject_id: r.deal_id }
+      : r.lead_id
+        ? { subject_type: 'Lead', subject_id: r.lead_id }
+        : r.entity_id
+          ? { subject_type: 'Entity', subject_id: r.entity_id } : null;
+    if (!subject) return;
+    try {
+      // approve/edits responses can be COMPACT rows (no structured_report) —
+      // the in-memory report is the same document, so it backs them up here;
+      // reading only from the response silently filed lane-less interactions.
+      const srep = (r.structured_report ?? report) as VoxReport | null;
+      const c = (srep?.common || {}) as Record<string, any>;
+      const kdp = (c.key_discussion_points?.value as string[]) || [];
+      // the lanes the reviewer selected ride on the interaction, so every
+      // timeline row says which business it belongs to
+      const lanes = (srep?.detected_use_cases || r.use_cases || []) as string[];
+      const tp = await vocxClient.post('/v1/touchpoints', {
+        ...subject, interaction_type: 'VOX conversation',
+        summary: ((c.meeting_summary?.value as string) || kdp[0] || 'VOX conversation').slice(0, 300),
+        key_intel: (kdp.length || lanes.length)
+          ? { ...(kdp.length ? { points: kdp } : {}),
+              ...(lanes.length ? { use_cases: lanes } : {}) }
+          : undefined,
+        transcript: r.raw_transcript || row?.raw_transcript || undefined,
+        performed_by: user.full, capture_id: `vox-conv:${conversationId}`,
+      });
+      const iid = tp.data?.interaction_id || tp.data?.id;
+      if (iid) await voxService.edits(conversationId, { interaction_id: String(iid) });
+    } catch { /* the conversation row is the durable record */ }
+  }, [conversationId, user.full, report, row]);
+
+  const approve = async (opts: { unlinked?: boolean } = {}) => {
+    // Record-and-tap-approve with nothing linked used to file NOWHERE while the
+    // success screen claimed a timeline. Now the link screen opens first, with
+    // an explicit memory-only escape — never a silently unfiled record.
+    if (!opts.unlinked && row
+        && !row.entity_id && !row.lead_id && !row.deal_id && !row.proposed_lead_company) {
+      setResolveQ(row.entity_candidates?.[0] || '');
+      setLinkThenApprove(true);
+      setSub('atlas');
+      return;
+    }
     if (strip.length > 0 && !window.confirm(
       `${strip.length} flagged field${strip.length > 1 ? 's are' : ' is'} still unreviewed — approve anyway?`)) return;
     setBusy(true); setErr('');
@@ -292,34 +359,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       // register-side during approve, so lead_id can be born right here.
       const approvedRow = await voxService.approve(conversationId);
       setRow(approvedRow);
-      // The touchpoint files against the MOST SPECIFIC line the user pinned:
-      // a deal beats a lead beats the company timeline.
-      const subject = approvedRow.deal_id
-        ? { subject_type: 'Deal', subject_id: approvedRow.deal_id }
-        : approvedRow.lead_id
-          ? { subject_type: 'Lead', subject_id: approvedRow.lead_id }
-          : approvedRow.entity_id
-            ? { subject_type: 'Entity', subject_id: approvedRow.entity_id } : null;
-      if (subject) {
-        try {
-          const kdp = ((common.key_discussion_points as any)?.value as string[]) || [];
-          // the lanes the reviewer selected ride on the interaction, so every
-          // timeline row says which business it belongs to
-          const lanes = (report?.detected_use_cases || approvedRow.use_cases || []) as string[];
-          const tp = await vocxClient.post('/v1/touchpoints', {
-            ...subject, interaction_type: 'VOX conversation',
-            summary: kdp[0] || 'VOX conversation',
-            key_intel: (kdp.length || lanes.length)
-              ? { ...(kdp.length ? { points: kdp } : {}),
-                  ...(lanes.length ? { use_cases: lanes } : {}) }
-              : undefined,
-            transcript: row?.raw_transcript || undefined,
-            performed_by: user.full, capture_id: `vox-conv:${conversationId}`,
-          });
-          const iid = tp.data?.interaction_id || tp.data?.id;
-          if (iid) await voxService.edits(conversationId, { interaction_id: String(iid) });
-        } catch { /* the conversation row is the durable record */ }
-      }
+      await fileTouchpoint(approvedRow);
+      setLinkThenApprove(false);
       setSub('submitted');
       onFiled();
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
@@ -419,7 +460,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     const rmLabels = referenceService.getRefLabels('RM') || {};
     return (
       <div className="app-body no-tabs" style={{ padding: '12px 20px 20px' }}>
-        <button className="review-back" onClick={() => setSub('auto')}>‹ Back to report</button>
+        <button className="review-back" onClick={() => { setLinkThenApprove(false); setSub('auto'); }}>‹ Back to report</button>
         <div className="atlas-header">
           <div className="eyebrow">Register · Entity resolution</div>
           <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 6 }}>Which one?</div>
@@ -427,6 +468,15 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             Search the register, pick the right company — VOX never merges silently.
           </div>
         </div>
+        {linkThenApprove && (
+          <div className="atlas-cand" style={{ borderColor: 'var(--warn)', marginBottom: 12 }}>
+            <span className="as-heard">Approval is waiting on this</span>
+            Pick where this conversation files — it approves right after. Or approve it
+            to the firm's memory only:
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} disabled={busy}
+              onClick={() => void approve({ unlinked: true })}>Approve without linking</button>
+          </div>
+        )}
         {(row.entity_candidates || []).length > 0 && (
           <div className="atlas-cand"><span className="as-heard">As heard in the recording</span>
             {(row.entity_candidates || []).map((c) => `"${c}"`).join(' · ')}</div>
@@ -557,7 +607,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <div className="success-mark"><Ic i="i-check" /></div>
           <div className="success-h">Approved.<br />The firm knows.</div>
           <div className="success-sub">
-            Linked to {entityName || leadName || 'the register'} · on the company timeline · searchable by anyone at Evam
+            {(row.entity_id || row.lead_id || row.deal_id)
+              ? <>Linked to {entityName || leadName || 'the register'} · on the timeline · searchable by anyone at Evam</>
+              : <>In the firm's memory · searchable by anyone at Evam · not on any timeline yet — link a company any time</>}
           </div>
           {followUp && (
             <div className="followup-card">
@@ -702,7 +754,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   const HIDDEN = new Set(['sector', 'subsector', 'attendees_counterparty', 'opportunity_assessment',
     'opportunity_score', 'opportunity_score_override_reason', 'competitive_intelligence',
-    'data_quality_flags', 'key_discussion_points']);
+    'data_quality_flags', 'key_discussion_points', 'meeting_summary']);
 
   const jump = (path: string) => {
     document.getElementById(`vox-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -773,10 +825,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           </div>
         )}
 
-        {kdp.length > 0 && (
+        {(((common.meeting_summary as any)?.value) || kdp.length > 0) && (
           <div className="card">
             <div className="card-h">Summary</div>
-            <div className="summary-body">{kdp.slice(0, 3).join('. ')}.</div>
+            <div className="summary-body">
+              {((common.meeting_summary as any)?.value) || `${kdp.slice(0, 3).join('. ')}.`}
+            </div>
           </div>
         )}
 
