@@ -495,6 +495,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               try { await voxService.process(conversationId); await refresh(); startPolling(); } finally { setBusy(false); }
             }}><Ic i="i-refresh" /> Retry now</button>
             <button className="btn btn-ghost" onClick={onQueue}>Leave it — go to Queue</button>
+            {/* a take the recorder gives up on is deletable right here — the
+                review's overflow menu never renders while processing fails */}
+            <button className="btn btn-ghost" style={{ color: 'var(--danger)' }}
+              onClick={() => void deleteDraft()}>Discard recording</button>
           </div>
         </div>
       </div>

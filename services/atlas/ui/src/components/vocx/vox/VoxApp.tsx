@@ -340,11 +340,17 @@ function QueueScreen({ go, openConversation }: {
 }) {
   const [items, setItems] = useState<VoxConversation[]>([]);
   const names = useNames(items);
-  useEffect(() => {
+  const refresh = () => {
     void voxService.list({ status: 'ready,processing_failed,failed_permanently', limit: 100 })
       .then((r) => setItems(r.items.filter((c) => c.status !== 'ready' || (!c.entity_id && !c.lead_id))))
       .catch(() => {});
-  }, []);
+  };
+  useEffect(refresh, []);
+  const discard = async (c: VoxConversation) => {
+    if (!window.confirm('Discard this recording? The audio, transcript and draft report '
+      + 'are removed for everyone. This cannot be undone.')) return;
+    try { await voxService.erase(c.id); refresh(); } catch { /* row may be gone already */ }
+  };
   return (
     <div className="app-body">
       <div className="home-greet">
@@ -369,8 +375,16 @@ function QueueScreen({ go, openConversation }: {
                 ? `${(c.processing_error || 'Processing failed.').slice(0, 90)} Audio and transcript are safe.`
                 : 'No link yet. Pick the right company, or create a new lead and attach this conversation.'}
             </div>
-            <div className="qi-action" style={failed ? { color: 'var(--danger)' } : undefined}>
-              {failed ? <><Ic i="i-refresh" /> Retry &amp; open</> : <><Ic i="i-plus" /> Link or create lead</>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="qi-action" style={failed ? { color: 'var(--danger)' } : undefined}>
+                {failed ? <><Ic i="i-refresh" /> Retry &amp; open</> : <><Ic i="i-plus" /> Link or create lead</>}
+              </div>
+              {/* a stuck take the recorder gives up on must be deletable HERE —
+                  the review's overflow menu is unreachable while it fails */}
+              <div className="qi-action" style={{ color: 'var(--muted)' }}
+                onClick={(e) => { e.stopPropagation(); void discard(c); }}>
+                <Ic i="i-trash" /> Discard
+              </div>
             </div>
           </div>
         );
