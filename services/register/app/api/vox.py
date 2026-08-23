@@ -103,6 +103,10 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
+    # the feed's one-line story, cheap enough for every listing row
+    report = c.structured_report or {}
+    kdp = (((report.get("common") or {}).get("key_discussion_points") or {}).get("value") or [])
+    out["snippet"] = ". ".join(x for x in kdp[:2] if isinstance(x, str))
     if full:
         out["raw_transcript"] = c.raw_transcript
         out["transcript_segments"] = c.transcript_segments

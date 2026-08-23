@@ -40,7 +40,10 @@ export interface VoxConversation {
   subsector?: string | null;
   meeting_date?: string | null;
   language_detected?: string | null;
+  prompt_version?: string | null;
+  registry_version?: string | null;
   use_cases?: string[];
+  snippet?: string | null;
   entity_candidates?: string[] | null;
   raw_transcript?: string | null;
   structured_report?: VoxReport | null;
@@ -124,6 +127,7 @@ export const voxService = {
   edits(id: string, payload: {
     edits?: { field_path: string; new_value: VoxCell }[];
     use_cases?: string[];
+  snippet?: string | null;
     entity_id?: string; lead_id?: string; deal_id?: string; interaction_id?: string;
   }): Promise<VoxConversation & { changed: number }> {
     return api.post(`/vox/conversations/${id}/edits`, payload);

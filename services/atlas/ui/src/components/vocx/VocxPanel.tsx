@@ -6,11 +6,7 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import { useDraggable } from './useDraggable';
-import ReportsTab from './ReportsTab';
-import VoxRecord from './spec/VoxRecord';
-import VoxReview from './spec/VoxReview';
-import { VoxMemoryTab, VoxQueueTab } from './spec/VoxMemory';
-import { voxService } from '../../services/voxService';
+import VoxApp from './vox/VoxApp';
 import { useVocx } from './VocxProvider';
 import { vx } from './vocxStyles';
 
@@ -33,26 +29,9 @@ const PANEL_H = 680;
 const MOBILE_MAX = 760;
 
 export default function VocxPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState(0);
   const [rolled, setRolled] = useState(false);
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth <= MOBILE_MAX);
-  /** Bumped to make the reports list refetch after a capture is filed. */
-  const [reportsEpoch, setReportsEpoch] = useState(0);
-  /** The spec-build review: when set, the body shows this conversation instead of
-   *  the tabs — capture, Memory rows and Queue rows all land here. */
-  const [reviewId, setReviewId] = useState<string | null>(null);
-  const [queueCount, setQueueCount] = useState(0);
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    const poll = () => void voxService
-      .list({ status: 'processing_failed,failed_permanently', limit: 1 })
-      .then((r) => { if (alive) setQueueCount(r.total); }).catch(() => {});
-    poll();
-    const t = setInterval(poll, 60_000);
-    return () => { alive = false; clearInterval(t); };
-  }, [open, reviewId]);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const { recording } = useVocx();
 
@@ -179,76 +158,12 @@ export default function VocxPanel({ open, onClose }: { open: boolean; onClose: (
         </Tooltip>
       </Box>
 
-      {/* The body is HIDDEN, never unmounted. Rolling up or switching tabs used to
-          destroy whichever tab was mounted — and with it a recorder holding an
-          in-progress take. Nothing the user does to the panel's chrome may cost them a
-          recording, so both tabs stay alive and only their visibility changes. */}
+      {/* The body is the VOX blueprint app itself — screens, bottom tabs and all.
+          Hidden (not unmounted) while rolled up, so a live recorder survives. */}
       <Box sx={{ display: rolled ? 'none' : 'flex', flexDirection: 'column',
-                 flex: 1, minHeight: 0, minWidth: 0 }}>
-          <Tabs
-            value={tab}
-            onChange={(_, v) => setTab(v)}
-            variant="fullWidth"
-            sx={{
-              minHeight: 46, flexShrink: 0,
-              borderBottom: `1px solid ${vx.line}`,
-              '& .MuiTab-root': {
-                minHeight: 46, fontSize: 15, textTransform: 'none', fontWeight: 600,
-                color: vx.mut,
-              },
-              '& .Mui-selected': { color: `${vx.grn2} !important` },
-              '& .MuiTabs-indicator': { backgroundColor: vx.grn, height: 3 },
-            }}
-          >
-            <Tab label="Record" id="vocx-tab-record" aria-controls="vocx-panel-record" />
-            <Tab label="Memory" id="vocx-tab-memory" aria-controls="vocx-panel-memory" />
-            <Tab label={queueCount ? `Queue · ${queueCount}` : 'Queue'}
-              id="vocx-tab-queue" aria-controls="vocx-panel-queue" />
-            <Tab label="Reports" id="vocx-tab-reports" aria-controls="vocx-panel-reports" />
-          </Tabs>
-
-          {/* overflowX HIDDEN, deliberately. With only overflowY set, CSS promotes the
-              other axis to `auto`, so a card a few pixels too wide let the whole body
-              scroll sideways — content slid out past the panel's clipped edge with no
-              scrollbar to say so, which is exactly what a report looked like. Anything
-              wide now wraps or truncates inside the panel instead. */}
-          <Box sx={{ flex: 1, minHeight: 0, minWidth: 0,
-                     overflowY: 'auto', overflowX: 'hidden',
-                     // Full-screen mobile: the Paper's own edges bound the body, so flex
-                     // does the sizing; the fixed cap is the desktop panel's.
-                     maxHeight: mobile ? 'none' : PANEL_H - 88 }}>
-            {/* The spec-build review takes the whole body when open — the tabs wait. */}
-            {reviewId && (
-              <Box sx={{ p: 1.5 }}>
-                <Typography onClick={() => setReviewId(null)}
-                  sx={{ color: vx.mut, fontSize: 13.5, cursor: 'pointer', mb: 1,
-                    '&:hover': { color: vx.ink } }}>‹ Back</Typography>
-                <VoxReview conversationId={reviewId}
-                  onClose={() => setReviewId(null)}
-                  onFiled={() => setReportsEpoch((n) => n + 1)} />
-              </Box>
-            )}
-            <Box role="tabpanel" id="vocx-panel-record" aria-labelledby="vocx-tab-record"
-                 hidden={tab !== 0 || !!reviewId}
-                 sx={{ display: tab === 0 && !reviewId ? 'block' : 'none', p: 1.5 }}>
-              <VoxRecord onCaptured={(id) => setReviewId(id)} />
-            </Box>
-            <Box role="tabpanel" id="vocx-panel-memory" aria-labelledby="vocx-tab-memory"
-                 hidden={tab !== 1 || !!reviewId}
-                 sx={{ display: tab === 1 && !reviewId ? 'block' : 'none', p: 1.5 }}>
-              {tab === 1 && !reviewId && <VoxMemoryTab onOpen={(id) => setReviewId(id)} />}
-            </Box>
-            <Box role="tabpanel" id="vocx-panel-queue" aria-labelledby="vocx-tab-queue"
-                 hidden={tab !== 2 || !!reviewId}
-                 sx={{ display: tab === 2 && !reviewId ? 'block' : 'none', p: 1.5 }}>
-              {tab === 2 && !reviewId && <VoxQueueTab onOpen={(id) => setReviewId(id)} />}
-            </Box>
-            <Box role="tabpanel" id="vocx-panel-reports" aria-labelledby="vocx-tab-reports"
-                 hidden={tab !== 3 || !!reviewId}
-                 sx={{ display: tab === 3 && !reviewId ? 'block' : 'none' }}>
-              <ReportsTab epoch={reportsEpoch} active={tab === 3} />
-            </Box>
-          </Box>
+                 flex: 1, minHeight: 0, minWidth: 0,
+                 maxHeight: mobile ? 'none' : PANEL_H - 48 }}>
+        <VoxApp />
       </Box>
     </Paper>
   );

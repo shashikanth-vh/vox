@@ -1,0 +1,363 @@
+/* The VOX blueprint's own stylesheet (mockup v3.3), scoped under .vox-app so it
+   cannot leak into ATLAS. Selectors are the mock's verbatim; only the phone-frame
+   and annotation chrome were dropped. Fonts fall back to the system stacks. */
+
+.vox-app {
+  --page-bg:#050810; --bg:#0A0F16; --bg-2:#0F161E; --bg-3:#151D27; --bg-4:#1C2530;
+  --line:#1F2833; --line-2:#2A3540; --text:#F1F5F9; --text-2:#CBD4DE; --muted:#9AA8B4; --muted-2:#7A8896;
+  --accent:#2ED4A6; --accent-hi:#4EE0BA; --accent-soft:rgba(46,212,166,0.12); --accent-line:rgba(46,212,166,0.3);
+  --warn:#F5B549; --warn-soft:rgba(245,181,73,0.12); --danger:#F16B5F; --danger-soft:rgba(241,107,95,0.12); --paper:#FCFCF9;
+  background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
+  display:flex; flex-direction:column; height:100%; min-height:0; position:relative; overflow:hidden;
+}
+
+.vox-app svg.ic {width:1em; height:1em; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round; display:block;}
+.vox-app header.topbar {padding:22px 40px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; background:var(--page-bg); position:sticky; top:0; z-index:10;}
+.vox-app .topbar-meta {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:0.08em;}
+.vox-app .topbar-meta strong {color:var(--text-2); font-weight:500;}
+.vox-app main {display:grid; grid-template-columns:260px 1fr 340px; gap:32px; padding:36px 40px 60px; max-width:1400px; margin:0 auto; align-items:start;}
+.vox-app .screen {width:100%; height:100%; background:var(--bg); border-radius:34px; overflow:hidden; position:relative; display:none; flex-direction:column;}
+.vox-app .screen.active {display:flex;}
+.vox-app .app-header {display:flex; align-items:center; justify-content:space-between; padding:12px 20px 18px; flex-shrink:0; border-bottom:1px solid var(--line);}
+.vox-app .app-header .lhs {display:flex; align-items:center; gap:10px;}
+.vox-app .ah-logo {width:32px; height:32px; background:var(--accent); border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; color:#001912; font-size:18px; letter-spacing:-0.03em;}
+.vox-app .ah-brand {display:flex; flex-direction:column;}
+.vox-app .ah-brand .name {font-weight:800; font-size:16px; letter-spacing:-0.02em;}
+.vox-app .ah-brand .tag {font-family:'JetBrains Mono',monospace; font-size:8px; letter-spacing:0.16em; color:var(--muted); text-transform:uppercase; margin-top:1px;}
+.vox-app .ah-actions {display:flex; gap:16px; color:var(--text-2); font-size:17px;}
+.vox-app .ah-actions .act {cursor:pointer; display:flex; align-items:center;}
+.vox-app .ah-actions .act:hover {color:var(--accent);}
+.vox-app .ah-saved {display:flex; align-items:center; gap:5px; font-size:11px; color:var(--accent); font-weight:500;}
+.vox-app .app-body {flex:1; overflow-y:auto; padding:16px 16px 100px; scrollbar-width:thin;}
+.vox-app .app-body::-webkit-scrollbar {width:3px;}
+.vox-app .app-body::-webkit-scrollbar-thumb {background:var(--line-2); border-radius:2px;}
+.vox-app .app-body.no-tabs {padding-bottom:24px;}
+.vox-app .card {background:var(--bg-2); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:14px;}
+.vox-app .card-h {font-size:17px; font-weight:700; letter-spacing:-0.02em; margin-bottom:14px;}
+.vox-app .card-h.with-action {display:flex; justify-content:space-between; align-items:center;}
+.vox-app .card-h .h-action {font-size:13px; color:var(--muted); cursor:pointer; font-weight:500; display:flex; align-items:center; gap:5px;}
+.vox-app .card-h .h-action:hover {color:var(--accent);}
+.vox-app .eyebrow {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;}
+.vox-app .btn {display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:14px 20px; border-radius:12px; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; border:none; cursor:pointer; width:100%; transition:transform 0.08s, background 0.1s, border-color 0.1s; letter-spacing:-0.005em;}
+.vox-app .btn:active {transform:scale(0.98);}
+.vox-app .btn-primary {background:var(--accent); color:#001912;}
+.vox-app .btn-primary:hover {background:var(--accent-hi);}
+.vox-app .btn-ghost {background:transparent; color:var(--text); border:1px solid var(--line-2);}
+.vox-app .btn-ghost:hover {background:var(--bg-3); border-color:var(--accent);}
+.vox-app .btn-danger {background:var(--danger); color:white;}
+.vox-app .btn-google {background:var(--bg-3); color:var(--text); border:1px solid var(--line-2);}
+.vox-app .btn-google:hover {border-color:var(--accent);}
+.vox-app .btn-sm {padding:9px 14px; font-size:12px; border-radius:8px; width:auto;}
+.vox-app /* LOGIN */
+  .login-hero {flex:1; display:flex; flex-direction:column; justify-content:space-between; padding:40px 8px 20px;}
+.vox-app .login-brand-block {display:flex; align-items:center; gap:14px;}
+.vox-app .login-brand-block .lg-logo {width:56px; height:56px; background:var(--accent); border-radius:14px; display:flex; align-items:center; justify-content:center; font-weight:800; color:#001912; font-size:28px; letter-spacing:-0.03em;}
+.vox-app .login-brand-block .lg-name {font-size:36px; font-weight:800; letter-spacing:-0.03em;}
+.vox-app .login-brand-block .lg-tag {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.2em; color:var(--muted); text-transform:uppercase; margin-top:3px;}
+.vox-app .login-pitch {font-size:26px; line-height:1.25; font-weight:500; letter-spacing:-0.02em; margin:50px 0;}
+.vox-app .login-pitch em {font-style:normal; color:var(--accent);}
+.vox-app .login-constraint {font-size:12px; color:var(--text-2); text-align:center; margin-bottom:14px; display:flex; align-items:center; justify-content:center; gap:6px;}
+.vox-app .login-constraint .ic {color:var(--accent); font-size:14px;}
+.vox-app .login-actions {display:flex; flex-direction:column; gap:10px;}
+.vox-app /* MEMORY (home) */
+  .home-greet {padding:4px 4px 16px;}
+.vox-app .home-greet .small {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:4px;}
+.vox-app .home-greet .big {font-size:24px; font-weight:700; letter-spacing:-0.02em;}
+.vox-app .quick-record {background:var(--bg-3); border:1px solid var(--accent-line); border-radius:16px; padding:18px; margin-bottom:20px; cursor:pointer; transition:transform 0.1s, border-color 0.15s; display:flex; align-items:center; gap:16px;}
+.vox-app .quick-record:hover {transform:translateY(-1px); border-color:var(--accent);}
+.vox-app .qr-mic {width:50px; height:50px; background:var(--accent); border-radius:50%; display:flex; align-items:center; justify-content:center; color:#001912; font-size:22px; flex-shrink:0;}
+.vox-app .qr-body {flex:1;}
+.vox-app .qr-label {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:4px;}
+.vox-app .qr-title {font-size:17px; font-weight:700; letter-spacing:-0.01em; margin-bottom:2px;}
+.vox-app .qr-sub {font-size:11px; color:var(--muted);}
+.vox-app .memory-search {display:flex; align-items:center; gap:10px; background:var(--bg-2); border:1px solid var(--line); padding:11px 14px; border-radius:12px; margin-bottom:20px; cursor:text;}
+.vox-app .memory-search .ic {color:var(--muted); font-size:16px;}
+.vox-app .memory-search input {background:none; border:none; outline:none; font-size:14px; font-family:'Inter',sans-serif; color:var(--text); flex:1; letter-spacing:-0.005em;}
+.vox-app .section-h {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); display:flex; justify-content:space-between; align-items:baseline; margin:16px 4px 10px;}
+.vox-app .section-h a {color:var(--accent); text-decoration:none; font-weight:500; cursor:pointer; text-transform:none; letter-spacing:-0.005em; font-family:'Inter',sans-serif; font-size:11px;}
+.vox-app .conv-card {background:var(--bg-2); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:8px; cursor:pointer; transition:border-color 0.12s;}
+.vox-app .conv-card:hover {border-color:var(--accent);}
+.vox-app .cc-top {display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;}
+.vox-app .cc-co {font-weight:700; font-size:14px; letter-spacing:-0.01em;}
+.vox-app .cc-time {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted);}
+.vox-app .cc-snip {font-size:12px; color:var(--text-2); line-height:1.4; margin-bottom:10px;}
+.vox-app .chips {display:flex; flex-wrap:wrap; gap:4px;}
+.vox-app .chip {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.06em; text-transform:uppercase; padding:3px 8px; border-radius:4px; background:var(--bg-3); color:var(--muted); border:1px solid var(--line-2);}
+.vox-app .chip-warn {background:var(--warn-soft); color:var(--warn); border-color:rgba(245,181,73,0.3);}
+.vox-app .chip-ok {background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line);}
+.vox-app /* bottom nav */
+  .bottom-nav {display:flex; justify-content:space-around; padding:12px 20px 24px; border-top:1px solid var(--line); background:var(--bg); flex-shrink:0;}
+.vox-app .bn-item {display:flex; flex-direction:column; align-items:center; gap:4px; font-size:10px; color:var(--muted); cursor:pointer; padding:4px 12px; font-weight:500; position:relative;}
+.vox-app .bn-item.active {color:var(--accent);}
+.vox-app .bn-ico {font-size:20px; display:flex; align-items:center; justify-content:center; width:22px; height:22px;}
+.vox-app .bn-badge {position:absolute; top:0; right:6px; background:var(--warn); color:#2A1F00; font-size:8px; font-weight:700; border-radius:8px; padding:1px 5px; font-family:'JetBrains Mono',monospace;}
+.vox-app /* QUEUE */
+  .queue-item {background:var(--bg-2); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.12s;}
+.vox-app .queue-item:hover {border-color:var(--warn);}
+.vox-app .qi-top {display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+.vox-app .qi-heard {font-weight:600; font-size:14px; letter-spacing:-0.01em;}
+.vox-app .qi-reason {font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--warn); letter-spacing:0.08em; text-transform:uppercase;}
+.vox-app .qi-snip {font-size:12px; color:var(--text-2); line-height:1.4;}
+.vox-app .qi-action {margin-top:10px; font-size:12px; color:var(--accent); font-weight:600; display:flex; align-items:center; gap:5px;}
+.vox-app /* RECORD */
+  .rec-head {display:flex; justify-content:space-between; align-items:center; padding:0 0 20px;}
+.vox-app .rec-close {background:var(--bg-3); border:1px solid var(--line-2); color:var(--text-2); cursor:pointer; width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:50%; font-size:15px;}
+.vox-app .rec-close:hover {color:var(--accent);}
+.vox-app .mode-tabs {display:flex; background:var(--bg-2); border:1px solid var(--line); border-radius:12px; padding:4px; gap:3px; margin-bottom:30px;}
+.vox-app .mode-tab {flex:1; padding:10px 12px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; color:var(--muted); letter-spacing:-0.005em; transition:all 0.15s;}
+.vox-app .mode-tab.active {background:var(--bg-4); color:var(--accent); box-shadow:0 0 0 1px var(--accent-line);}
+.vox-app .mode-tabs.locked {opacity:0.45; pointer-events:none;}
+.vox-app .rec-stage {display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px 0 20px; flex:1;}
+.vox-app .rec-state-label {font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:18px; height:16px;}
+.vox-app .rec-state-label.idle {color:var(--muted);}
+.vox-app .rec-state-label.live {color:var(--danger);}
+.vox-app .rec-state-label.paused {color:var(--warn);}
+.vox-app .rec-timer {font-size:52px; font-weight:600; letter-spacing:-0.03em; margin-bottom:6px; font-variant-numeric:tabular-nums;}
+.vox-app .rec-timer.idle {color:var(--muted-2);}
+.vox-app .rec-timer-cap {font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:32px; letter-spacing:0.08em;}
+.vox-app .waveform {display:flex; align-items:center; justify-content:center; gap:3px; height:70px; margin-bottom:26px; width:100%; padding:0 20px;}
+.vox-app .wave-bar {width:4px; background:var(--accent); border-radius:2px;}
+.vox-app .waveform.live .wave-bar {animation:pulse 1.4s ease-in-out infinite;}
+.vox-app .waveform.idle .wave-bar {background:var(--line-2); height:6px !important;}
+.vox-app .waveform.paused .wave-bar {background:var(--warn); opacity:0.5;}
+@keyframes pulse { 0%,100% { height:8px; opacity:0.5; } 50% { height:var(--h,40px); opacity:1; } }
+.vox-app .rec-segments {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); margin-bottom:8px; letter-spacing:0.04em; height:14px;}
+.vox-app .rec-meta {display:flex; gap:16px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); margin-bottom:28px; letter-spacing:0.04em;}
+.vox-app .rec-meta .dot-live {color:var(--danger);}
+.vox-app .rec-controls-idle {display:flex; align-items:center; justify-content:center; padding-bottom:20px;}
+.vox-app .rec-btn-record {display:flex; flex-direction:column; align-items:center; gap:12px; background:none; border:none; cursor:pointer;}
+.vox-app .rec-btn-record .circle {width:88px; height:88px; border-radius:50%; background:var(--danger); box-shadow:0 0 0 6px rgba(241,107,95,0.15); display:flex; align-items:center; justify-content:center;}
+.vox-app .rec-btn-record .circle .dot {width:30px; height:30px; border-radius:50%; background:white;}
+.vox-app .rec-btn-record .lbl {font-size:13px; font-weight:600; color:var(--text-2); letter-spacing:-0.005em;}
+.vox-app .rec-controls-live {display:none; flex-direction:column; gap:16px; padding-bottom:20px; align-items:center; width:100%;}
+.vox-app .rec-controls-live.show {display:flex;}
+.vox-app .rec-controls-idle.hide {display:none;}
+.vox-app .rec-live-row {display:flex; align-items:center; justify-content:center; gap:40px;}
+.vox-app .rec-ctrl-lg {width:80px; height:80px; border-radius:50%; border:1px solid var(--line-2); background:var(--bg-3); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; font-size:26px; color:var(--text); cursor:pointer;}
+.vox-app .rec-ctrl-lg:hover {border-color:var(--accent); color:var(--accent);}
+.vox-app .rec-ctrl-lg .mini-lbl {font-size:8px; font-family:'JetBrains Mono',monospace; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted);}
+.vox-app .rec-finish-btn {width:100%; max-width:300px; padding:16px; border-radius:14px; background:var(--accent); color:#001912; font-size:15px; font-weight:700; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; letter-spacing:-0.01em;}
+.vox-app .rec-finish-btn:hover {background:var(--accent-hi);}
+.vox-app .rec-finish-note {font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.06em; text-align:center;}
+.vox-app /* CONSENT */
+  .consent-header {display:flex; align-items:center; gap:12px; margin-bottom:20px; padding:20px 4px 0;}
+.vox-app .consent-badge {width:46px; height:46px; border-radius:12px; background:var(--warn-soft); color:var(--warn); display:flex; align-items:center; justify-content:center; font-size:22px; border:1px solid rgba(245,181,73,0.3);}
+.vox-app .consent-title-block .title {font-size:18px; font-weight:700; letter-spacing:-0.02em;}
+.vox-app .consent-title-block .sub {font-size:11px; color:var(--muted); margin-top:2px; font-family:'JetBrains Mono',monospace; letter-spacing:0.04em;}
+.vox-app .consent-note {background:var(--warn-soft); border:1px solid rgba(245,181,73,0.25); border-left:3px solid var(--warn); padding:14px; border-radius:10px; margin-bottom:20px; font-size:13px; line-height:1.55; color:var(--text);}
+.vox-app .consent-check {display:flex; gap:12px; padding:16px; background:var(--bg-2); border:2px solid var(--line); border-radius:12px; margin-bottom:10px; cursor:pointer; transition:border-color 0.15s, background 0.15s;}
+.vox-app .consent-check.checked {border-color:var(--accent); background:var(--accent-soft);}
+.vox-app .check-box {width:22px; height:22px; border-radius:6px; border:2px solid var(--line-2); display:flex; align-items:center; justify-content:center; flex-shrink:0; background:var(--bg-3); margin-top:1px;}
+.vox-app .consent-check.checked .check-box {background:var(--accent); border-color:var(--accent);}
+.vox-app .consent-check.checked .check-box::before {content:'✓'; font-weight:700; font-size:14px; color:#001912;}
+.vox-app .check-text {font-size:12px; line-height:1.45;}
+.vox-app .consent-hint {font-size:11px; color:var(--muted); text-align:center; margin-bottom:20px;}
+.vox-app .consent-audit {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); padding:14px; background:var(--bg-3); border-radius:8px; line-height:1.7; margin-bottom:20px; border:1px solid var(--line);}
+.vox-app .consent-audit .label {color:var(--text-2); font-weight:500;}
+.vox-app /* PROCESSING */
+  .proc-stage {display:flex; flex-direction:column; justify-content:center; padding:40px 0 20px; min-height:100%;}
+.vox-app .proc-title {font-size:24px; font-weight:700; letter-spacing:-0.02em; margin-bottom:8px; text-align:center;}
+.vox-app .proc-sub {font-size:12px; color:var(--muted); text-align:center; margin-bottom:40px; font-family:'JetBrains Mono',monospace; letter-spacing:0.04em;}
+.vox-app .proc-steps {display:flex; flex-direction:column; gap:6px; padding:0 4px; margin-bottom:30px;}
+.vox-app .proc-step {display:flex; align-items:center; gap:14px; padding:14px; border-radius:12px; background:var(--bg-2); border:1px solid var(--line); opacity:0.5;}
+.vox-app .proc-step.done {opacity:1; border-color:var(--accent-line);}
+.vox-app .proc-step.active {opacity:1; border-color:var(--accent); background:var(--accent-soft);}
+.vox-app .proc-step.failed {opacity:1; border-color:var(--danger); background:var(--danger-soft);}
+.vox-app .proc-icon {width:32px; height:32px; border-radius:50%; background:var(--bg-3); color:var(--muted); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; flex-shrink:0;}
+.vox-app .proc-step.done .proc-icon {background:var(--accent); color:#001912;}
+.vox-app .proc-step.failed .proc-icon {background:var(--danger); color:white;}
+.vox-app .proc-spinner {width:16px; height:16px; border:2px solid rgba(46,212,166,0.25); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite;}
+.vox-app .proc-pending {width:8px; height:8px; border-radius:50%; background:var(--line-2); display:block;}
+@keyframes spin { to { transform:rotate(360deg); } }
+.vox-app .proc-txt .name {font-size:13px; font-weight:600; letter-spacing:-0.005em;}
+.vox-app .proc-txt .meta {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); margin-top:2px; letter-spacing:0.03em;}
+.vox-app .proc-fail-note {background:var(--danger-soft); border:1px solid rgba(241,107,95,0.3); border-radius:10px; padding:14px; font-size:12px; color:var(--text-2); line-height:1.5; margin-bottom:16px;}
+.vox-app .proc-fail-note strong {color:var(--text);}
+.vox-app /* REVIEW */
+  .review-back {display:flex; align-items:center; gap:8px; color:var(--text-2); font-size:13px; background:none; border:none; cursor:pointer; padding:4px 0; margin-bottom:14px; font-weight:500;}
+.vox-app .review-back:hover {color:var(--accent);}
+.vox-app .status-pill {display:inline-flex; align-items:center; gap:6px; padding:5px 14px; border-radius:20px; border:1px solid var(--muted-2); color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; font-weight:500; margin-bottom:12px;}
+.vox-app .status-pill.ready {color:var(--warn); border-color:rgba(245,181,73,0.4);}
+.vox-app .status-pill.approved {color:var(--accent); border-color:var(--accent);}
+.vox-app .review-company {font-size:23px; font-weight:700; letter-spacing:-0.02em; line-height:1.1; margin-bottom:6px;}
+.vox-app .review-meta {color:var(--text-2); font-size:13px; line-height:1.5; margin-bottom:4px;}
+.vox-app .review-meta-2 {display:flex; flex-wrap:wrap; gap:10px; align-items:center; color:var(--muted); font-size:11px; font-family:'JetBrains Mono',monospace; letter-spacing:0.03em; margin-bottom:18px;}
+.vox-app .review-meta-2 .drive-link {color:var(--accent); cursor:pointer; display:flex; align-items:center; gap:4px; font-family:'Inter',sans-serif; letter-spacing:-0.005em; font-size:12px; font-weight:500;}
+.vox-app .review-meta-2 .dot {color:var(--muted-2);}
+.vox-app /* needs-you strip */
+  .needs-strip {background:var(--warn-soft); border:1px solid rgba(245,181,73,0.3); border-radius:14px; padding:16px; margin-bottom:14px;}
+.vox-app .needs-strip.clear {background:var(--accent-soft); border-color:var(--accent-line);}
+.vox-app .ns-head {display:flex; align-items:center; gap:10px; margin-bottom:12px;}
+.vox-app .ns-count {width:30px; height:30px; border-radius:50%; background:var(--warn); color:#2A1F00; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0;}
+.vox-app .needs-strip.clear .ns-count {background:var(--accent); color:#001912;}
+.vox-app .ns-title {font-size:14px; font-weight:700; letter-spacing:-0.01em;}
+.vox-app .ns-sub {font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
+.vox-app .ns-item {display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid rgba(245,181,73,0.2); cursor:pointer;}
+.vox-app .ns-item:hover .ns-field {color:var(--accent);}
+.vox-app .ns-dot {width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+.vox-app .ns-dot.md {background:var(--warn);}
+.vox-app .ns-dot.lo {background:var(--danger);}
+.vox-app .ns-field {flex:1; font-size:13px; font-weight:500; letter-spacing:-0.005em;}
+.vox-app .ns-where {font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.06em; text-transform:uppercase;}
+.vox-app .ns-jump {color:var(--muted); font-size:14px;}
+.vox-app .audio-card {padding:16px;}
+.vox-app .card-eyebrow {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; color:var(--muted); text-transform:uppercase; margin-bottom:10px;}
+.vox-app .audio-player {display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--paper); border-radius:32px; color:#12222E;}
+.vox-app .audio-play {width:32px; height:32px; background:none; border:none; cursor:pointer; color:#12222E; display:flex; align-items:center; justify-content:center; font-size:18px; padding:0;}
+.vox-app .audio-time {font-family:'JetBrains Mono',monospace; font-size:12px; color:#12222E; min-width:68px;}
+.vox-app .audio-track {flex:1; height:4px; background:#D1D5DB; border-radius:2px; position:relative;}
+.vox-app .audio-track::before {content:''; position:absolute; left:0; top:0; bottom:0; width:8%; background:#12222E; border-radius:2px;}
+.vox-app .audio-track::after {content:''; position:absolute; left:8%; top:50%; transform:translate(-50%,-50%); width:12px; height:12px; background:#12222E; border-radius:50%;}
+.vox-app .audio-vol {font-size:16px; color:#12222E; display:flex;}
+.vox-app .summary-body {font-size:13.5px; line-height:1.6; color:var(--text-2);}
+.vox-app .uc-chips {display:flex; flex-wrap:wrap; gap:6px;}
+.vox-app .uc-chip {padding:6px 10px; border-radius:8px; background:var(--bg-3); border:1px solid var(--line-2); color:var(--text-2); font-size:11px; font-weight:600; letter-spacing:-0.005em; display:flex; align-items:center; gap:6px;}
+.vox-app .uc-chip .x {cursor:pointer; color:var(--muted); font-size:14px; line-height:1;}
+.vox-app .uc-chip .x:hover {color:var(--danger);}
+.vox-app .uc-chip.add {background:transparent; color:var(--muted); border:1px dashed var(--line-2); cursor:pointer;}
+.vox-app .uc-chip.add:hover {border-color:var(--accent); color:var(--accent);}
+.vox-app .intel-list {display:flex; flex-direction:column; gap:10px;}
+.vox-app .intel-row {display:flex; gap:10px; align-items:flex-start;}
+.vox-app .intel-dot {width:8px; height:8px; border-radius:50%; background:var(--accent); flex-shrink:0; margin-top:15px;}
+.vox-app .intel-dot.grey {background:var(--muted-2);}
+.vox-app .intel-text {flex:1 1 auto; min-width:0; width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; resize:none; line-height:1.5; overflow:hidden; white-space:pre-wrap; word-break:break-word; display:block; max-height:160px;}
+.vox-app .intel-text:focus {border-color:var(--accent);}
+.vox-app .intel-x {width:30px; height:30px; background:var(--bg-3); border:1px solid var(--line-2); border-radius:8px; color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; margin-top:7px;}
+.vox-app .intel-x:hover {color:var(--danger); border-color:var(--danger);}
+.vox-app .btn-add {align-self:flex-start; padding:8px 14px; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; color:var(--text-2); font-size:12px; cursor:pointer; margin-top:12px; font-weight:500;}
+.vox-app .btn-add:hover {border-color:var(--accent); color:var(--accent);}
+.vox-app .divider-h {height:1px; background:var(--line); margin:20px 0 16px; position:relative;}
+.vox-app .divider-h span {position:absolute; top:-6px; left:0; background:var(--bg-2); padding-right:10px; font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase;}
+.vox-app .uc-field-group {margin-bottom:22px;}
+.vox-app .uc-field-group:last-child {margin-bottom:0;}
+.vox-app .uc-group-h {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between;}
+.vox-app .form-row {margin-bottom:14px;}
+.vox-app .form-row .fr-label {font-size:12px; color:var(--text-2); margin-bottom:6px; display:flex; align-items:center; gap:6px; font-weight:500;}
+.vox-app .conf-dot {width:6px; height:6px; border-radius:50%; display:inline-block; flex-shrink:0;}
+.vox-app .conf-dot.hi {background:var(--accent);}
+.vox-app .conf-dot.md {background:var(--warn);}
+.vox-app .conf-dot.lo {background:var(--danger);}
+.vox-app .input-field {width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; letter-spacing:-0.005em; white-space:pre-wrap; word-break:break-word;}
+.vox-app .input-field:focus {border-color:var(--accent);}
+.vox-app .input-field.needs {border-color:rgba(245,181,73,0.5); background:var(--warn-soft);}
+.vox-app .select-field {width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; letter-spacing:-0.005em; appearance:none; background-image:url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%239AA8B4' d='M1 1l5 5 5-5'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; cursor:pointer;}
+.vox-app .select-field:focus {border-color:var(--accent);}
+.vox-app textarea.input-field {resize:none; line-height:1.5; min-height:44px; overflow:hidden; display:block; max-height:160px;}
+.vox-app .multi-select {display:flex; flex-wrap:wrap; gap:6px;}
+.vox-app .ms-opt {padding:8px 12px; border-radius:8px; background:var(--bg-3); border:1px solid var(--line-2); color:var(--text-2); font-size:12px; cursor:pointer; user-select:none;}
+.vox-app .ms-opt.on {background:var(--accent-soft); border-color:var(--accent); color:var(--accent);}
+.vox-app .ms-opt.on::before {content:'✓ ';}
+.vox-app .row-2 {display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.vox-app .canon-empty {font-size:12px; color:var(--muted); padding:10px 0;}
+.vox-app .canon-add {display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--accent); cursor:pointer; font-weight:500; margin-top:4px;}
+.vox-app .transcript-sub {font-size:12px; color:var(--muted); margin-bottom:14px; font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
+.vox-app .transcript-body {font-size:13px; line-height:1.65; color:var(--text-2); position:relative;}
+.vox-app .transcript-body.clamped {max-height:120px; overflow:hidden;}
+.vox-app .transcript-body.clamped::after {content:''; position:absolute; left:0; right:0; bottom:0; height:50px; background:linear-gradient(to bottom, transparent, var(--bg-2));}
+.vox-app .transcript-expand {margin-top:12px; font-size:12px; color:var(--accent); cursor:pointer; font-weight:600; display:flex; align-items:center; gap:5px;}
+.vox-app .fg-item {margin-bottom:14px;}
+.vox-app .fg-item .fg-label {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; display:flex; align-items:center; gap:6px;}
+.vox-app .sector-canonical-box {background:var(--bg-3); border:1px solid var(--line); border-radius:12px; padding:14px; margin-top:4px;}
+.vox-app .scb-h {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-2); margin-bottom:4px;}
+.vox-app .scb-sub {font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.04em; margin-bottom:14px;}
+.vox-app .score-row {display:flex; gap:8px; margin-top:6px;}
+.vox-app .score-cell {width:46px; height:46px; border-radius:10px; background:var(--bg-3); border:1px solid var(--line-2); color:var(--muted); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; cursor:pointer; transition:all 0.15s;}
+.vox-app .score-cell.filled {background:var(--accent); color:#001912; border-color:var(--accent);}
+.vox-app .score-cell.selected {box-shadow:0 0 0 2px rgba(46,212,166,0.3);}
+.vox-app .attendee-row {display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px;}
+.vox-app .attendee-row:last-child {border-bottom:none;}
+.vox-app .att-init {width:32px; height:32px; border-radius:50%; background:var(--bg-4); border:1px solid var(--line-2); color:var(--text-2); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;}
+.vox-app .att-body {flex:1;}
+.vox-app .att-body .att-name {font-weight:600; letter-spacing:-0.005em;}
+.vox-app .att-body .att-role {font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
+.vox-app .company-field {margin-bottom:12px;}
+.vox-app .company-field .cf-label {display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+.vox-app .cf-label .lab {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted);}
+.vox-app .cf-label .edit {font-size:11px; color:var(--accent); cursor:pointer; font-weight:500; display:flex; align-items:center; gap:4px;}
+.vox-app .company-input-row {display:flex; align-items:center; gap:8px;}
+.vox-app .company-input {flex:1; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:12px 14px; color:var(--text); font-size:15px; font-weight:600; font-family:'Inter',sans-serif; outline:none; letter-spacing:-0.01em;}
+.vox-app .company-input:focus {border-color:var(--accent);}
+.vox-app .atlas-badge {display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:10px; font-size:11px; font-weight:600; letter-spacing:-0.005em; white-space:nowrap;}
+.vox-app .atlas-badge.found {background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent-line);}
+.vox-app .atlas-badge.new {background:var(--warn-soft); color:var(--warn); border:1px solid rgba(245,181,73,0.3);}
+.vox-app .atlas-detail {margin-top:10px; padding:12px 14px; background:var(--bg-3); border:1px solid var(--line); border-radius:10px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); line-height:1.7; letter-spacing:0.02em;}
+.vox-app .atlas-detail .k {color:var(--text-2);}
+.vox-app .atlas-toggle-hint {font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.06em; margin-top:10px; cursor:pointer;}
+.vox-app .atlas-toggle-hint:hover {color:var(--accent);}
+.vox-app .audit-strip {padding:12px 14px; background:var(--bg-2); border-radius:10px; border:1px dashed var(--line-2); font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.7; letter-spacing:0.02em;}
+.vox-app .audit-strip .k {color:var(--text-2);}
+.vox-app .review-action-bar {position:absolute; bottom:14px; left:12px; right:12px; background:var(--bg-2); border:1px solid var(--line); border-radius:14px; padding:10px; display:flex; align-items:center; gap:8px; z-index:6; box-shadow:0 -8px 24px -12px rgba(0,0,0,0.6);}
+.vox-app .approve-pill {flex:1; padding:13px; background:var(--accent); border:none; border-radius:10px; color:#001912; font-size:14px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; letter-spacing:-0.005em;}
+.vox-app .approve-pill.gated {background:transparent; border:1px solid var(--warn); color:var(--warn);}
+.vox-app .approve-pill:hover {filter:brightness(1.05);}
+.vox-app .icon-btn {width:44px; height:44px; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; color:var(--text-2); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px;}
+.vox-app .icon-btn:hover {border-color:var(--accent); color:var(--accent);}
+.vox-app .icon-btn.danger:hover {border-color:var(--danger); color:var(--danger);}
+.vox-app .screen[data-screen="review"] .app-body {padding-bottom:84px;}
+.vox-app /* ATLAS */
+  .atlas-header {padding:20px 4px;}
+.vox-app .atlas-cand {padding:14px 16px; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; margin-bottom:20px; font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:-0.005em;}
+.vox-app .atlas-cand .as-heard {font-size:10px; color:var(--muted); letter-spacing:0.1em; text-transform:uppercase; display:block; margin-bottom:6px;}
+.vox-app .atlas-opt {display:flex; justify-content:space-between; align-items:center; padding:16px 14px; border:1px solid var(--line); background:var(--bg-2); border-radius:12px; margin-bottom:8px; cursor:pointer; transition:all 0.12s;}
+.vox-app .atlas-opt:hover {border-color:var(--accent);}
+.vox-app .atlas-opt.selected {border-color:var(--accent); background:var(--accent-soft);}
+.vox-app .atlas-opt .ao-name {font-size:14px; font-weight:700; letter-spacing:-0.01em;}
+.vox-app .atlas-opt .ao-meta {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); margin-top:3px; letter-spacing:0.02em;}
+.vox-app .atlas-opt .ao-score {font-size:11px; color:var(--accent); font-weight:600; text-align:right;}
+.vox-app .atlas-opt .ao-score.possible {color:var(--muted);}
+.vox-app .atlas-create {display:flex; align-items:center; justify-content:center; gap:8px; padding:16px; border:1px dashed var(--line-2); border-radius:12px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; margin-top:6px; width:100%;}
+.vox-app .atlas-create:hover {border-color:var(--accent); color:var(--text);}
+.vox-app .atlas-create strong {color:var(--accent); font-weight:600;}
+.vox-app /* SUBMITTED */
+  .success-stage {padding:50px 4px 20px; display:flex; flex-direction:column;}
+.vox-app .success-mark {width:56px; height:56px; border-radius:50%; background:var(--accent); color:#001912; display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:800; margin-bottom:20px;}
+.vox-app .success-h {font-size:28px; font-weight:800; letter-spacing:-0.03em; line-height:1.15; margin-bottom:8px;}
+.vox-app .success-sub {font-size:13px; color:var(--text-2); margin-bottom:30px; line-height:1.5;}
+.vox-app .followup-card {border:1px solid var(--line); background:var(--bg-2); border-radius:14px; padding:18px;}
+.vox-app .fu-eyebrow {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:10px;}
+.vox-app .fu-title {font-size:17px; font-weight:700; letter-spacing:-0.01em; margin-bottom:12px; line-height:1.25;}
+.vox-app .fu-row {display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:12px;}
+.vox-app .fu-row:last-of-type {border-bottom:none;}
+.vox-app .fu-row .k {color:var(--muted); font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
+.vox-app .fu-row .v {font-weight:500; letter-spacing:-0.005em;}
+.vox-app .fu-actions {display:flex; gap:8px; margin-top:14px;}
+.vox-app /* SEARCH inside memory */
+  .co-head {padding:18px; background:var(--bg-3); border:1px solid var(--line); border-radius:14px; margin-bottom:8px;}
+.vox-app .co-head .co-name {font-size:22px; font-weight:800; letter-spacing:-0.02em; margin-bottom:4px;}
+.vox-app .co-head .co-meta {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted);}
+.vox-app .co-stats {display:flex; padding:12px 16px; background:var(--bg-2); border:1px solid var(--line); border-radius:12px; margin:8px 0 20px; gap:10px;}
+.vox-app .co-stat {flex:1; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); letter-spacing:0.06em; text-transform:uppercase;}
+.vox-app .co-stat .n {display:block; font-family:'Inter',sans-serif; font-size:20px; color:var(--accent); letter-spacing:-0.02em; font-weight:700; margin-bottom:2px;}
+.vox-app .filter-row {display:flex; gap:6px; margin-bottom:20px; flex-wrap:wrap;}
+.vox-app .filter-pill {padding:6px 12px; border-radius:20px; background:var(--bg-2); border:1px solid var(--line); font-size:11px; color:var(--text-2); cursor:pointer; font-weight:500;}
+.vox-app .filter-pill.active {background:var(--bg-4); color:var(--accent); border-color:var(--accent);}
+.vox-app .month-head {font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin:16px 0 8px; padding-left:2px;}
+.vox-app .tl-item {display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--line);}
+.vox-app .tl-date {font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); min-width:52px; text-align:right; padding-top:4px; letter-spacing:0.03em;}
+.vox-app .tl-body {flex:1;}
+.vox-app .tl-who {font-size:11px; color:var(--muted); margin-bottom:4px; font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
+.vox-app .tl-who strong {color:var(--text-2); font-weight:600;}
+.vox-app .tl-note {font-size:13px; color:var(--text-2); line-height:1.45; margin-bottom:8px;}
+.vox-app /* bottom sheets (in-app, .vox-app replaces native confirm) */
+  .sheet-scrim {position:absolute; inset:0; background:rgba(0,0,0,0.5); z-index:20; display:none; align-items:flex-end; border-radius:34px; overflow:hidden;}
+.vox-app .sheet-scrim.show {display:flex;}
+.vox-app .sheet {width:100%; background:var(--bg-2); border-top:1px solid var(--line); border-radius:20px 20px 34px 34px; padding:10px 18px 28px; animation:sheetUp 0.2s ease;}
+@keyframes sheetUp { from { transform:translateY(30px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+.vox-app .sheet-handle {width:36px; height:4px; background:var(--line-2); border-radius:2px; margin:6px auto 16px;}
+.vox-app .sheet-title {font-size:17px; font-weight:700; letter-spacing:-0.01em; margin-bottom:8px;}
+.vox-app .sheet-body {font-size:13px; color:var(--text-2); line-height:1.5; margin-bottom:18px;}
+.vox-app .sheet-row {display:flex; align-items:center; gap:12px; padding:14px 8px; font-size:14px; font-weight:500; color:var(--text); cursor:pointer; border-radius:10px;}
+.vox-app .sheet-row:hover {background:var(--bg-3);}
+.vox-app .sheet-row.danger {color:var(--danger);}
+.vox-app .sheet-row .ic {font-size:17px;}
+
+/* hosted-in-panel adjustments */
+.vox-app .screen { display:none; }
+.vox-app .screen.active { display:flex; flex-direction:column; flex:1; min-height:0; }
+.vox-app .app-body { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:16px 18px 18px; }
+.vox-app .bottom-nav { flex-shrink:0; }
+.vox-app input, .vox-app textarea, .vox-app select, .vox-app button { font-family:inherit; }
+.vox-app textarea.intel-text, .vox-app textarea.input-field { resize:vertical; }.vox-app svg.ic { width:1em; height:1em; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round; display:block; }
+.vox-app a { color:var(--accent); cursor:pointer; text-decoration:none; }
+.vox-app .conf-dot.na { background:transparent; border:1px dashed var(--muted-2); }
+.vox-app .intel-text[disabled], .vox-app .input-field[disabled], .vox-app .select-field[disabled] { opacity:0.85; color:var(--text); }
