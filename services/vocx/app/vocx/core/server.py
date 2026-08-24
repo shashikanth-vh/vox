@@ -106,6 +106,15 @@ class VocxApp:
         # is a remote service.
         workers = int(os.environ.get("VOCX_PIPELINE_WORKERS", "3") or 3)
         self._vox_workers = __import__("threading").BoundedSemaphore(max(1, workers))
+        # THE PRIORITY LANE. A 90-minute live take occupies a worker for the
+        # better part of an hour; two at once must never starve the five-minute
+        # post-meeting notes that are the desk's daily bread. Long takes pass
+        # through this second, smaller gate first — at most workers-1 of them
+        # run concurrently, so one worker slot is always reachable only by the
+        # fast lane. Invisible to users: nothing is deferred, long takes start
+        # immediately when capacity is free.
+        self._vox_slow_workers = __import__("threading").BoundedSemaphore(max(1, workers - 1))
+        self._vox_long_take_s = int(os.environ.get("VOCX_LONG_TAKE_SECONDS", "1500") or 1500)
         self._segments = None  # lazy SegmentStore (streamed in-progress takes)
 
     def segment_store(self):
@@ -853,9 +862,21 @@ class VocxApp:
 
         def _work():
             try:
-                # The 202 has already been returned; waiting here is the queue.
-                with self._vox_workers:
-                    self.vox_runner().process(cid)
+                # The 202 has already been returned; waiting here IS the queue.
+                # Classify before taking a slot: long takes queue on the slow
+                # gate too, so notes always find a worker.
+                slow = False
+                try:
+                    row = self.vox_runner().register.get(cid)
+                    slow = (row.get("duration_seconds") or 0) >= self._vox_long_take_s
+                except Exception:  # noqa: BLE001 — classification is best-effort
+                    pass
+                if slow:
+                    with self._vox_slow_workers, self._vox_workers:
+                        self.vox_runner().process(cid)
+                else:
+                    with self._vox_workers:
+                        self.vox_runner().process(cid)
             except Exception:  # noqa: BLE001 — the runner logs; the set must clear
                 self.log.exception("VOX pipeline run for %s crashed", cid)
             finally:

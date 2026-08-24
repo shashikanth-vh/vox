@@ -808,3 +808,59 @@ def test_glossary_rules_cover_venue_taxonomy_and_multi_ask():
     assert "Solar-Developer" in block and "subsector_details" in block
     assert "SEVERAL asks" in block
     assert "Never sum the amounts" in block
+
+
+def test_long_takes_leave_one_worker_for_the_notes(monkeypatch):
+    """The priority lane: with N workers, at most N-1 LONG takes run at once —
+    the reserved slot means a five-minute note never waits behind two
+    90-minute live meetings."""
+    import threading
+    import time as _t
+
+    monkeypatch.setenv("VOCX_PIPELINE_WORKERS", "2")
+    monkeypatch.setenv("VOCX_LONG_TAKE_SECONDS", "1500")
+    from app.vocx.core.server import VocxApp
+    app = VocxApp.__new__(VocxApp)
+    import logging
+    app.log = logging.getLogger("test")
+    app._vox_lock = threading.Lock()
+    app._vox_inflight = set()
+    workers = 2
+    app._vox_workers = threading.BoundedSemaphore(workers)
+    app._vox_slow_workers = threading.BoundedSemaphore(workers - 1)
+    app._vox_long_take_s = 1500
+
+    running, order = [], []
+    gate = threading.Event()
+
+    class _Runner:
+        class register:  # noqa: N801 — duck-typed client
+            @staticmethod
+            def get(cid):
+                return {"duration_seconds": 5400 if cid.startswith("long") else 300}
+
+        def process(self, cid):
+            running.append(cid)
+            order.append(("start", cid))
+            gate.wait(timeout=10)
+            running.remove(cid)
+
+    runner = _Runner()
+    app.vox_runner = lambda: runner
+
+    for cid in ("long-a", "long-b", "note-1"):
+        app._vox_process(json.dumps({"conversation_id": cid}).encode())
+    deadline = _t.time() + 5
+    while _t.time() < deadline:
+        if "note-1" in running:
+            break
+        _t.sleep(0.05)
+    # ONE long take runs, the note runs beside it; the second long take waits
+    assert "note-1" in running, f"note starved: running={running}"
+    assert sum(1 for c in running if c.startswith("long")) == 1
+    gate.set()
+    deadline = _t.time() + 5
+    while running and _t.time() < deadline:
+        _t.sleep(0.05)
+    assert not running
+    assert [c for k, c in order if k == "start"].count("long-b") == 1

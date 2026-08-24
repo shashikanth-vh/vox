@@ -299,6 +299,12 @@ services:
       VOCX_OAUTH_REDIRECT_URI: "${VOCX_REDIRECT_URI:-https://localhost:8443/vocx/v1/auth/callback}"
       # Transcription is delegated to the dedicated STT service (backend "api"); the
       # in-process faster_whisper backend remains an opt-in fallback (vocx [stt] extra).
+      # Pipeline concurrency: how many transcription+structuring jobs run at
+      # once (size to the box; 3 suits the 8-vCPU host running the whole stack).
+      # Takes at/over VOCX_LONG_TAKE_SECONDS ride the low-priority lane — at
+      # most workers-1 of them concurrently, so short notes never starve.
+      VOCX_PIPELINE_WORKERS: "${VOCX_PIPELINE_WORKERS:-3}"
+      VOCX_LONG_TAKE_SECONDS: "${VOCX_LONG_TAKE_SECONDS:-1500}"
       VOCX_STT_BACKEND: "${VOCX_STT_BACKEND:-api}"
       VOCX_STT_API_URL: "http://stt:8000/v1/audio/transcriptions"
       VOCX_STT_API_KEY: "${STT_API_KEY:-compose-stt-key}"
