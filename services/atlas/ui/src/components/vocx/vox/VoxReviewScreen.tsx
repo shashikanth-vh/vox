@@ -443,16 +443,6 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
-  // The approved record's transcript editor: fixes the READING COPY (audited,
-  // synced onto the filed interaction) — no regeneration of an approved report.
-  const saveTranscriptOnly = async () => {
-    setBusy(true); setErr('');
-    try {
-      await saveEdits({ corrected_transcript: fixDraft });
-      setFixingTranscript(false);
-    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
-  };
-
   const deleteDraft = async () => {
     if (!window.confirm('Delete this conversation? The recording, transcript and report '
       + 'are removed for everyone. This cannot be undone.')) return;
@@ -1156,9 +1146,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   <span className="h-action" onClick={() => {
                     setFixDraft(row.corrected_transcript || row.raw_transcript || '');
                     setFixingTranscript(true); setTranscriptOpen(false);
-                  }}>{approvedRow
-                    ? <><Ic i="i-edit" /> Edit transcript</>
-                    : <><Ic i="i-refresh" /> Re-analyze</>}</span>
+                  }}><Ic i="i-refresh" /> Re-analyze</span>
                 )}
                 <span className="h-action" onClick={() => setTranscriptOpen((v) => !v)}>
                   {transcriptOpen ? 'Hide' : 'Show original'}</span>
@@ -1183,10 +1171,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   onChange={(e) => setFixDraft(e.target.value)} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 2px 12px' }}>
                   {approvedRow
-                    ? 'Approved record: your correction updates the reading copy here and on '
-                      + 'the filed timeline entry. Report fields are edited directly above — '
-                      + 'an approved report is not re-analyzed. The word-for-word original '
-                      + 'stays on record.'
+                    ? 'Fix mis-heard names and terms here — the report rebuilds from your '
+                      + 'corrected text and the record STAYS approved; the filed timeline '
+                      + 'entry updates with it. Your own confirmed field values survive the '
+                      + 'rebuild, and the word-for-word original stays on record.'
                     : 'Fix mis-heard names and terms here — a corrected name updates every '
                       + 'field, bullet and snippet when the report regenerates. The '
                       + 'word-for-word original stays on record. Your own confirmed field '
@@ -1194,8 +1182,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-primary" disabled={busy || !fixDraft.trim()}
-                    onClick={() => void (approvedRow ? saveTranscriptOnly() : correctAndRegenerate())}>
-                    {approvedRow ? 'Save transcript' : 'Save & re-analyze'}</button>
+                    onClick={() => void correctAndRegenerate()}>Save &amp; re-analyze</button>
                   <button className="btn btn-ghost" style={{ width: 'auto' }}
                     onClick={() => setFixingTranscript(false)}>Cancel</button>
                 </div>

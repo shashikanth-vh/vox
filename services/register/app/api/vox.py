@@ -175,6 +175,39 @@ def _denormalise(row: VoxConversation) -> None:
         row.meeting_date = row.meeting_date
 
 
+async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:
+    """Mirror an APPROVED conversation's current report onto its filed timeline
+    entry. The public interaction surface is append-only by design; this service
+    owns both tables and keeps them telling the same story — the conversation's
+    audit rows record who changed what."""
+    if row.status != "submitted" or not row.interaction_id:
+        return
+    from app.models import Interaction
+    itx = (await ctx.session.execute(
+        select(Interaction).where(Interaction.id == row.interaction_id,
+                                  Interaction.tenant_id == ctx.tenant_id)
+    )).scalar_one_or_none()
+    if itx is None:
+        return
+    report = row.structured_report or {}
+    common = report.get("common") or {}
+
+    def _cv(key: str) -> Any:
+        cell = common.get(key)
+        return cell.get("value") if isinstance(cell, dict) else None
+
+    kdp = [x for x in (_cv("key_discussion_points") or []) if isinstance(x, str)]
+    lanes = [u for u in (report.get("detected_use_cases") or []) if isinstance(u, str)]
+    itx.summary = (str(_cv("meeting_summary") or (kdp[0] if kdp else "")
+                       or "VOX conversation"))[:300]
+    if kdp or lanes:
+        itx.key_intel = {**({"points": kdp} if kdp else {}),
+                         **({"use_cases": lanes} if lanes else {})}
+    if itx.transcript:
+        itx.transcript = row.corrected_transcript or row.raw_transcript
+    itx.updated_by = ctx.actor
+
+
 # ----------------------------------------------------------------------- consents
 
 class ConsentIn(BaseModel):
@@ -425,6 +458,13 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         for uc in dict.fromkeys(u for u in detected if isinstance(u, str)):
             if uc in _USE_CASES:
                 ctx.session.add(VoxConversationUseCase(conversation_id=row.id, use_case=uc))
+    if row.status == "ready" and row.resume_status == "submitted":
+        # A re-analyzed APPROVED record lands home: the approval stands, the
+        # rebuilt report replaces the old one, and the filed timeline entry is
+        # brought back in step — all in this same transaction.
+        row.status = "submitted"
+        row.resume_status = None
+        await _sync_linked_interaction(ctx, row)
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)
@@ -555,33 +595,9 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     # or lanes change, its linked interaction's summary/key_intel are re-derived
     # here, inside the same transaction — the conversation's audit rows above
     # already record who changed what.
-    if (changed and row.status == "submitted" and row.interaction_id
-            and (payload.edits or payload.use_cases is not None
-                 or payload.corrected_transcript is not None)):
-        from app.models import Interaction
-        itx = (await ctx.session.execute(
-            select(Interaction).where(Interaction.id == row.interaction_id,
-                                      Interaction.tenant_id == ctx.tenant_id)
-        )).scalar_one_or_none()
-        if itx is not None:
-            report = row.structured_report or {}
-            common = report.get("common") or {}
-
-            def _cv(key: str) -> Any:
-                cell = common.get(key)
-                return cell.get("value") if isinstance(cell, dict) else None
-
-            kdp = [x for x in (_cv("key_discussion_points") or []) if isinstance(x, str)]
-            lanes = [u for u in (report.get("detected_use_cases") or [])
-                     if isinstance(u, str)]
-            itx.summary = (str(_cv("meeting_summary") or (kdp[0] if kdp else "")
-                               or "VOX conversation"))[:300]
-            if kdp or lanes:
-                itx.key_intel = {**({"points": kdp} if kdp else {}),
-                                 **({"use_cases": lanes} if lanes else {})}
-            if itx.transcript:
-                itx.transcript = row.corrected_transcript or row.raw_transcript
-            itx.updated_by = ctx.actor
+    if changed and (payload.edits or payload.use_cases is not None
+                    or payload.corrected_transcript is not None):
+        await _sync_linked_interaction(ctx, row)
 
     row.updated_by = ctx.actor
     await ctx.session.flush()
@@ -605,9 +621,15 @@ async def regenerate_conversation(conversation_id: str,
         raise ForbiddenError("Only the recorder or Management/Admin may regenerate this record.")
     if row.erased_at is not None:
         raise ConflictError("This conversation was erased; there is nothing to regenerate.")
-    if row.status != "ready":
+    if row.status not in ("ready", "submitted"):
         raise ConflictError(
-            f"Only a ready conversation can be regenerated (this one is {row.status}).")
+            f"Only a ready or approved conversation can be regenerated "
+            f"(this one is {row.status}).")
+    # An APPROVED record passes through the pipeline and RETURNS approved: the
+    # pipeline write reads resume_status when the fresh report lands and puts
+    # the row back, re-syncing the filed timeline entry.
+    if row.status == "submitted":
+        row.resume_status = "submitted"
 
     overrides: dict[str, Any] = {}
     report = row.structured_report or {}

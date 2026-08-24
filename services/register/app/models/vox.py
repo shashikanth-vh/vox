@@ -112,6 +112,9 @@ class VoxConversation(RegisterBase):
     # a regeneration so the reviewer's work survives the rebuild.
     corrected_transcript: Mapped[str | None] = mapped_column(Text)
     preserved_overrides: Mapped[dict | None] = mapped_column(JSONB)
+    # Where a re-analyzed row RETURNS when the fresh report lands ("submitted"
+    # for an approved record passing through the pipeline again; NULL otherwise).
+    resume_status: Mapped[str | None] = mapped_column(String(32))
 
     recording_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     capture_id: Mapped[str | None] = mapped_column(String(120))

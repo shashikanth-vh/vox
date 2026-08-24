@@ -425,19 +425,54 @@ async def test_correct_transcript_and_regenerate_preserves_overrides(client: Asy
     assert r.json()["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 40
 
 
-async def test_transcript_correction_after_approval_edits_reading_copy_only(client: AsyncClient):
-    """Post-approval the reading copy stays fixable (audited), but regeneration —
-    rebuilding an approved record's report — remains closed."""
+async def test_reanalysis_of_an_approved_record_returns_it_approved(client: AsyncClient):
+    """An approved record whose transcript the desk corrects rebuilds its report
+    and COMES BACK approved — with the filed timeline entry re-synced and the
+    reviewer's overridden cells surviving the rebuild."""
+    ent = await client.post("/v1/entities", json={
+        "code": "VOXRSM1", "legal_name": "Resume Co", "entity_type": "Company"},
+        headers=MGMT)
+    eid = ent.json()["id"]
+    itx = await client.post("/v1/interactions", json={
+        "subject_type": "Entity", "subject_id": eid,
+        "interaction_type": "VOX conversation", "summary": "old summary",
+        "transcript": "old transcript", "performed_by": "Ananda H"}, headers=MGMT)
+    iid = itx.json()["id"]
+
     row = await _make(client)
     cid = row["id"]
     await _to_ready(client, cid)
+    await client.post(f"/v1/vox/conversations/{cid}/edits",
+                      json={"entity_id": eid, "interaction_id": iid}, headers=RECORDER)
     await client.post(f"/v1/vox/conversations/{cid}/approve", headers=RECORDER)
+
+    # the reviewer confirms a cell post-approval — it must survive the rebuild
     r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
-        "corrected_transcript": "met SURYODAYA EPC at Whitefield"}, headers=RECORDER)
+        "edits": [{"field_path": "lending.requirement_quantum_cr",
+                   "new_value": {"value": 50, "confidence": "high", "user_override": True}}],
+        "corrected_transcript": "met SURYODAYA EPC: 50 crore, 90 megawatt"},
+        headers=RECORDER)
     assert r.status_code == 200, r.text
-    assert r.json()["corrected_transcript"] == "met SURYODAYA EPC at Whitefield"
+
     r = await client.post(f"/v1/vox/conversations/{cid}/regenerate", headers=RECORDER)
-    assert r.status_code == 409
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "processing"
+
+    # the pipeline lands the fresh report — the row RETURNS approved
+    fresh = _report(quantum=99)
+    fresh["common"]["meeting_summary"] = {
+        "value": "REBUILT: Suryodaya 50 Cr / 90 MW", "confidence": "n/a"}
+    done = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={
+        "status": "ready", "structured_report": fresh})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    assert body["status"] == "submitted"
+    # the override outranked the re-extraction
+    assert body["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 50
+    # and the timeline entry tells the new story
+    synced = (await client.get(f"/v1/interactions/{iid}", headers=MGMT)).json()
+    assert synced["summary"] == "REBUILT: Suryodaya 50 Cr / 90 MW"
+    assert synced["transcript"] == "met SURYODAYA EPC: 50 crore, 90 megawatt"
 
 
 async def test_list_filters_by_lead_for_the_lead_only_dossier(client: AsyncClient):
