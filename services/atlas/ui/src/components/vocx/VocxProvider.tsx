@@ -47,10 +47,26 @@ export function VocxProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let alive = true;
     if (!vocxService.enabled()) { setPending(0); return; }
-    void vocxService.reports(currentRm()).then((r) => {
-      if (!alive || !r.ok) return;
-      setPending(r.data.filter((x) => String(x.status || '').toLowerCase() !== 'committed').length);
-    });
+    void (async () => {
+      let count = 0;
+      // The VOX conversation store is the live product: the badge counts YOUR
+      // conversations awaiting action — ready to review, or failed and needing
+      // a retry/discard. (The badge silently died when the rework superseded
+      // the legacy drafts store it used to count.)
+      try {
+        const { voxService } = await import('../../services/voxService');
+        const r = await voxService.list({
+          mine: true, status: 'ready,processing_failed,failed_permanently', limit: 1 });
+        count += r.total || 0;
+      } catch { /* fail-quiet on the toolbar */ }
+      try {
+        const r = await vocxService.reports(currentRm());
+        if (r.ok) {
+          count += r.data.filter((x) => String(x.status || '').toLowerCase() !== 'committed').length;
+        }
+      } catch { /* legacy store optional */ }
+      if (alive) setPending(count);
+    })();
     return () => { alive = false; };
   }, [open, epoch]);
 

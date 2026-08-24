@@ -70,7 +70,7 @@ export function VocxNavButton() {
   return (
     <Tooltip title={recording
       ? 'VocX is recording — stop or minimise from the panel'
-      : (pending ? `VocX — ${pending} awaiting approval` : 'VocX field intell')}>
+      : (pending ? `VocX — ${pending} awaiting your review` : 'VocX field intell')}>
       <Box
         component="button"
         type="button"
@@ -78,7 +78,7 @@ export function VocxNavButton() {
         aria-label={recording
           ? 'VocX field intell — recording in progress'
           : (pending
-            ? `VocX field intell — ${pending} capture(s) awaiting approval`
+            ? `VocX field intell — ${pending} conversation(s) awaiting your review`
             : 'VocX field intell')}
         aria-expanded={open}
         sx={{
