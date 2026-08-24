@@ -174,6 +174,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   // debounced autosave — the header's "Saved" tick is a real statement
   const onCell = (path: string, cell: VoxCell) => {
+    // A hand-touched cell is the REVIEWER'S value: stamped user_override so a
+    // later Re-analyze re-applies it on top of the fresh extraction instead of
+    // silently discarding the human's correction. (Previously only the score
+    // carried the stamp — every other hand-fix was lost to regeneration.)
+    cell = { ...cell, user_override: true };
     setDirty((d) => ({ ...d, [path]: cell }));
     setConfirmed((c) => new Set(c).add(path));
     setReport((r) => {
