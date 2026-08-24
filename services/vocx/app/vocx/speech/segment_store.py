@@ -40,6 +40,7 @@ from typing import Any
 _ID_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,99}$")
 MAX_SEGMENTS = 200
 MAX_CAPTURE_BYTES = 64 * 1024 * 1024        # matches the capture door's wall
+MAX_UNFINISHED_PER_USER = 20                # abandoned-take hoarding wall
 STALE_AFTER_S = 7 * 24 * 3600               # abandoned takes are prunable after a week
 
 _locks: dict[str, threading.Lock] = {}
@@ -103,11 +104,17 @@ class SegmentStore:
             m = self.manifest(capture_id) or {}
             return {"bytes_total": m.get("bytes_total", 0)}
         with _lock_for(capture_id):
-            m = self.manifest(capture_id) or {
-                "capture_id": capture_id, "rm": rm, "mime": mime, "mode": mode,
-                "consent_id": consent_id, "created_at": time.time(),
-                "segments": {}, "bytes_total": 0, "finalized": False,
-            }
+            m = self.manifest(capture_id)
+            if m is None:
+                # a NEW take: refuse hoarding — finish or discard something first
+                if rm and len(self.unfinished_for(rm)) >= MAX_UNFINISHED_PER_USER:
+                    raise SegmentStoreError(
+                        "too many unfinished recordings — finish or discard one first")
+                m = {
+                    "capture_id": capture_id, "rm": rm, "mime": mime, "mode": mode,
+                    "consent_id": consent_id, "created_at": time.time(),
+                    "segments": {}, "bytes_total": 0, "finalized": False,
+                }
             if m.get("finalized"):
                 raise SegmentStoreError("this take is already finished")
             if m["bytes_total"] + len(chunk) > MAX_CAPTURE_BYTES:

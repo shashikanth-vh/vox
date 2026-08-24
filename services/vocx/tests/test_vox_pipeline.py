@@ -770,3 +770,29 @@ def test_multi_segment_transcripts_merge_in_order(tmp_path):
     assert got["text"] == "text-of-seg000.webm\ntext-of-seg001.webm"
     assert [s["text"] for s in got["segments"]] == ["seg000.webm", "seg001.webm"]
     assert got["language"] == "en"
+
+
+def test_streamed_takes_belong_to_their_recorder(tmp_path, monkeypatch):
+    """The capture id alone is not a key: another signed-in user presenting a
+    stolen id is refused on append, playback, finish and discard alike."""
+    from app.vocx.core.atlas import AtlasStore
+    from app.vocx.core.server import VocxApp
+    monkeypatch.setenv("VOCX_SEGMENTS_DIR", str(tmp_path))
+    app = VocxApp(store=AtlasStore({}), config={"thresholds": {}, "scores": {}})
+
+    def call(method, path, q, body=b""):
+        return app.handle(method, path, {k: [v] for k, v in q.items()}, body)
+
+    assert call("POST", "/v1/vox/stream",
+                {"capture_id": "cap-own-1", "seg": "0", "rm": "Divya"}, b"abc")[0] == 200
+    for method, path in [("POST", "/v1/vox/stream"),
+                         ("GET", "/v1/vox/stream/audio"),
+                         ("POST", "/v1/vox/stream/finish"),
+                         ("POST", "/v1/vox/stream/discard")]:
+        code, _, out = call(method, path,
+                            {"capture_id": "cap-own-1", "seg": "0", "rm": "Chetan"}, b"x")
+        assert code == 403, (path, out)
+        assert b"another user" in out
+    # the owner still passes everywhere
+    assert call("GET", "/v1/vox/stream/audio",
+                {"capture_id": "cap-own-1", "seg": "0", "rm": "Divya"})[0] == 200

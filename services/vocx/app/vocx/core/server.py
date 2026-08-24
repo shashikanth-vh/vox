@@ -614,6 +614,18 @@ class VocxApp:
 
     # ---- streamed capture: the server-side copy of a take in progress -------
 
+    def _stream_owner_check(self, query, capture_id: str):
+        """A streamed take belongs to its RECORDER. The mount binds ?rm= to the
+        verified identity, so a mismatch here is someone else's capture id —
+        refused, even though the ids are unguessable UUIDs (defence in depth)."""
+        rm = (_one(query, "rm") or "").strip().lower()
+        m = self.segment_store().manifest(capture_id) if capture_id else None
+        owner = ((m or {}).get("rm") or "").strip().lower()
+        if m and owner and rm and owner != rm:
+            return 403, "application/json", _j({"ok": False,
+                "error": "this recording belongs to another user"})
+        return None
+
     def _vox_stream_append(self, query, body: bytes):
         """Append a chunk batch to an in-flight take. Called every few seconds
         while the mic is open — a failure here must never disturb recording, so
@@ -621,6 +633,9 @@ class VocxApp:
         from ..speech.segment_store import SegmentStoreError
         if len(body) > 4 * 1024 * 1024:
             return 413, "application/json", _j({"ok": False, "error": "batch too large"})
+        denied = self._stream_owner_check(query, _one(query, "capture_id") or "")
+        if denied:
+            return denied
         try:
             got = self.segment_store().append(
                 _one(query, "capture_id") or "",
@@ -652,6 +667,9 @@ class VocxApp:
         """Playback of one stored segment, for the resume card's player."""
         from ..speech.audio_store import sniff_audio_type
         from ..speech.segment_store import SegmentStoreError
+        denied = self._stream_owner_check(query, _one(query, "capture_id") or "")
+        if denied:
+            return denied
         try:
             paths = self.segment_store().segment_paths(_one(query, "capture_id") or "")
             idx = int(_one(query, "seg") or 0)
@@ -675,6 +693,9 @@ class VocxApp:
         mode = _one(query, "mode") or "post_meeting"
         if mode not in ("post_meeting", "live"):
             return 400, "application/json", _j({"ok": False, "error": "mode must be post_meeting|live"})
+        denied = self._stream_owner_check(query, cap_id)
+        if denied:
+            return denied
         try:
             self.segment_store().finalize(cap_id)
         except SegmentStoreError as e:
@@ -684,6 +705,9 @@ class VocxApp:
 
     def _vox_stream_discard(self, query):
         from ..speech.segment_store import SegmentStoreError
+        denied = self._stream_owner_check(query, _one(query, "capture_id") or "")
+        if denied:
+            return denied
         try:
             self.segment_store().discard(_one(query, "capture_id") or "")
         except SegmentStoreError as e:
