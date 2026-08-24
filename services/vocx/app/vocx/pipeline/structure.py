@@ -164,6 +164,7 @@ def structure_transcript(
     capture_ts: str | None = None,
     registry_version: str | None = None,
     known_names: str | None = None,
+    recorder: str | None = None,
 ) -> dict[str, Any]:
     """Run the structuring stage. ``ask_model(model, system, user)`` is injected so
     the pipeline is testable without a network and swappable without a rewrite.
@@ -177,7 +178,10 @@ def structure_transcript(
     model = MODEL_LIVE if mode == "live" else MODEL_NOTE
     system = build_prompt(registry_version)
     context = f"{known_names}\n\n" if known_names else ""
-    user = (f"Capture timestamp: {capture_ts or 'unknown'}\n\n"
+    # The narrator has a name: summaries should read "Ananda H met R. Sharma",
+    # not "the BDM met" — the transcript's "I"/"the BDM"/"the RM" is this person.
+    by = f"Recorded by: {recorder}\n" if recorder else ""
+    user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
             f"{context}TRANSCRIPT:\n{transcript}")
 
     # The forced-tool-call schema: callables that accept it get the API's own

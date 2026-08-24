@@ -108,6 +108,10 @@ def build_known_names_block(company_names: Iterable[str] | None = None) -> str:
         "syndication mandate discussed together mean BOTH use cases are "
         "detected, each with its own amount in its own block ('100 Cr loan for "
         "the Tamil Nadu project' -> lending; '5,000 Cr debt syndication' -> "
-        "syndication). Never sum the amounts and never swap them between blocks."
+        "syndication). Never sum the amounts and never swap them between blocks.\n"
+        "- The narrator is the person named under 'Recorded by'. When the "
+        "transcript says 'I', 'me', 'the BDM', 'the RM' or similar, that is "
+        "this person — use their actual NAME in meeting_summary and "
+        "key_discussion_points ('Ananda H met R. Sharma', never 'the BDM met')."
     )
     return "\n\n".join(lines)

@@ -189,6 +189,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [leads, setLeads] = useState<any[]>([]);
   const [showMore, setShowMore] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  // The blueprint's transcript pattern: a clamped preview with a fade, and an
+  // explicit "Show all" that expands to the FULL text (the page scrolls) —
+  // no inner scrollbar for anyone to miss.
+  const [transcriptFull, setTranscriptFull] = useState(false);
   const [ucSheet, setUcSheet] = useState<'' | 'add' | string>('');
   const [overflow, setOverflow] = useState(false);
   /** An approved record opens read-only; Edit report unlocks it — every change
@@ -1201,16 +1205,25 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             ) : (
               <>
                 {row.corrected_transcript && (
-                  <div className="transcript-body"
-                    style={{ maxHeight: 'min(300px,42vh)', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                  <div className={`transcript-body${transcriptFull ? '' : ' clamped'}`}
+                    style={transcriptFull
+                      ? { whiteSpace: 'pre-wrap', maxHeight: 'none', overflow: 'visible' }
+                      : { whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'hidden' }}>
                     {row.corrected_transcript}</div>
                 )}
-                {transcriptOpen && <div className="transcript-body"
-                  style={{ maxHeight: 'min(300px,42vh)', overflowY: 'auto', whiteSpace: 'pre-wrap',
+                {transcriptOpen && <div className={`transcript-body${transcriptFull ? '' : ' clamped'}`}
+                  style={{ ...(transcriptFull
+                    ? { whiteSpace: 'pre-wrap', maxHeight: 'none', overflow: 'visible' }
+                    : { whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'hidden' }),
                     ...(row.corrected_transcript
                       ? { opacity: 0.65, borderTop: '1px dashed var(--line-2)',
                           marginTop: 10, paddingTop: 10 }
                       : {}) }}>{row.raw_transcript}</div>}
+                {(row.corrected_transcript || transcriptOpen) && (
+                  <div className="transcript-expand"
+                    onClick={() => setTranscriptFull((v) => !v)}>
+                    {transcriptFull ? 'Show less ⌃' : 'Show all ⌄'}</div>
+                )}
               </>
             )}
           </div>

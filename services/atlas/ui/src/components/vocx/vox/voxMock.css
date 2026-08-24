@@ -375,3 +375,9 @@
    button uses, no longer hidden behind it. */
 .vox-app .rec-discard-link {margin-top:14px; background:none; border:none; cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:var(--danger); opacity:0.85; font-family:'Inter',sans-serif;}
 .vox-app .rec-discard-link:hover {opacity:1;}
+
+/* Phones read at arm's length: the summary and transcript step up a size. */
+@media (max-width: 640px) {
+  .vox-app .summary-body {font-size:15px; line-height:1.65;}
+  .vox-app .transcript-body {font-size:14.5px; line-height:1.7;}
+}
