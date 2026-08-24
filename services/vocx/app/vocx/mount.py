@@ -181,6 +181,7 @@ def build_vocx_router(settings: Any) -> APIRouter:
         "/v1/reports/save", "/v1/reports/delete",
         "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test", "/v1/vox/follow_up",
         "/v1/vox/stream", "/v1/vox/stream/unfinished", "/v1/vox/stream/audio",
+        "/v1/vox/audio", "/v1/vox/audio/meta",
         "/v1/vox/stream/finish", "/v1/vox/stream/discard",
         "/v1/suggest", "/v1/template_fill",
     }
@@ -232,6 +233,8 @@ def build_vocx_router(settings: Any) -> APIRouter:
         ("/v1/vox/stream", ["POST"], "Append a chunk batch to an in-flight recording"),
         ("/v1/vox/stream/unfinished", ["GET"], "The caller's streamed takes awaiting finish"),
         ("/v1/vox/stream/audio", ["GET"], "Play back one stored segment"),
+        ("/v1/vox/audio", ["GET"], "Play back a conversation's recording (review)"),
+        ("/v1/vox/audio/meta", ["GET"], "Segment count for a conversation's recording"),
         ("/v1/vox/stream/finish", ["POST"], "Finish a streamed take → conversation + pipeline"),
         ("/v1/vox/stream/discard", ["POST"], "Discard a streamed take"),
     ]

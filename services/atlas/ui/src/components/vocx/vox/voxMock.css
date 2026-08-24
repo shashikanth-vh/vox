@@ -251,7 +251,7 @@
 .vox-app .canon-empty {font-size:12px; color:var(--muted); padding:10px 0;}
 .vox-app .canon-add {display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--accent); cursor:pointer; font-weight:500; margin-top:4px;}
 .vox-app .transcript-sub {font-size:12px; color:var(--muted); margin-bottom:14px; font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
-.vox-app .transcript-body {font-size:13px; line-height:1.65; color:var(--text-2); position:relative;}
+.vox-app .transcript-body {font-size:13px; line-height:1.65; color:var(--text-2); position:relative; max-height:320px; overflow-y:auto; scrollbar-width:thin; padding-right:6px;}
 .vox-app .transcript-body.clamped {max-height:120px; overflow:hidden;}
 .vox-app .transcript-body.clamped::after {content:''; position:absolute; left:0; right:0; bottom:0; height:50px; background:linear-gradient(to bottom, transparent, var(--bg-2));}
 .vox-app .transcript-expand {margin-top:12px; font-size:12px; color:var(--accent); cursor:pointer; font-weight:600; display:flex; align-items:center; gap:5px;}

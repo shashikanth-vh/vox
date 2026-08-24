@@ -358,6 +358,10 @@ class VocxApp:
             return self._vox_stream_unfinished(query)
         if method == "GET" and path == "/v1/vox/stream/audio":
             return self._vox_stream_audio(query)
+        if method == "GET" and path == "/v1/vox/audio/meta":
+            return self._vox_review_audio(query, meta_only=True)
+        if method == "GET" and path == "/v1/vox/audio":
+            return self._vox_review_audio(query)
         if method == "POST" and path == "/v1/vox/stream/finish":
             return self._vox_stream_finish(query)
         if method == "POST" and path == "/v1/vox/stream/discard":
@@ -682,6 +686,61 @@ class VocxApp:
                 data = fh.read()
         except OSError:
             return 404, "application/json", _j({"ok": False, "error": "segment unreadable"})
+        return 200, sniff_audio_type(data), data
+
+    def _vox_review_audio(self, query, meta_only: bool = False):
+        """Playback of a CONVERSATION's recording for the review screen. Read
+        rights mirror the conversation itself — every signed-in user in the
+        tenant reads every conversation, so every one may listen; the recorder-
+        only wall applies to takes still being made, not to filed records.
+        Erased or audio-swept conversations answer 404, honestly."""
+        cid = (_one(query, "conversation_id") or "").strip()
+        if not cid:
+            return 400, "application/json", _j({"ok": False, "error": "conversation_id required"})
+        try:
+            row = self.vox_runner().register.get(cid)
+        except Exception:  # noqa: BLE001 — register down or unknown id
+            return 404, "application/json", _j({"ok": False, "error": "conversation not found"})
+        if row.get("erased_at") or row.get("audio_deleted_at"):
+            return 404, "application/json", _j({"ok": False, "error": "the audio is no longer stored"})
+        ref = row.get("audio_ref") or ""
+        if not ref:
+            return 404, "application/json", _j({"ok": False, "error": "no audio on this conversation"})
+        from ..speech.audio_store import sniff_audio_type
+        if ref.startswith("vox-seg:"):
+            paths = self.segment_store().segment_paths(ref[len("vox-seg:"):])
+            if meta_only:
+                return 200, "application/json", _j({"ok": True, "segments": len(paths)})
+            try:
+                idx = int(_one(query, "seg") or 0)
+            except ValueError:
+                idx = 0
+            if not (0 <= idx < len(paths)):
+                return 404, "application/json", _j({"ok": False, "error": "no such segment"})
+            try:
+                with open(paths[idx], "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                return 404, "application/json", _j({"ok": False, "error": "segment unreadable"})
+            return 200, sniff_audio_type(data), data
+        if meta_only:
+            return 200, "application/json", _j({"ok": True, "segments": 1})
+        data = None
+        if os.path.isfile(ref):
+            try:
+                with open(ref, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                data = None
+        if data is None:
+            astore = self.audio_store() or getattr(self, "_local_audio", None)
+            got = astore.playback(ref) if astore else None
+            if got is None:
+                return 404, "application/json", _j({"ok": False, "error": "audio not found"})
+            kind, payload = got
+            if kind == "url":
+                return 200, "application/json", _j({"ok": True, "url": payload})
+            data = payload
         return 200, sniff_audio_type(data), data
 
     def _vox_stream_finish(self, query):

@@ -58,6 +58,8 @@ export interface VoxConversation {
    *  raw_transcript is evidence and never changes. */
   corrected_transcript?: string | null;
   structured_report?: VoxReport | null;
+  audio_ref?: string | null;
+  audio_deleted_at?: string | null;
   erased_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -162,6 +164,21 @@ export const voxService = {
 
   streamDiscard(captureId: string): Promise<any> {
     return vocxClient.post('/v1/vox/stream/discard', null, { params: { capture_id: captureId } });
+  },
+
+  /** How many playable pieces a conversation's recording has (1 for a
+   *  one-shot upload, N for a streamed take's segments). */
+  async reviewAudioMeta(conversationId: string): Promise<number> {
+    try {
+      const r = await vocxClient.get('/v1/vox/audio/meta', {
+        params: { conversation_id: conversationId } });
+      return r.data?.ok ? (r.data.segments || 0) : 0;
+    } catch { return 0; }
+  },
+
+  /** Playback URL for a conversation's recording — the review's player. */
+  reviewAudioUrl(conversationId: string, seg = 0): string {
+    return `${vocxClient.defaults.baseURL}/v1/vox/audio?conversation_id=${encodeURIComponent(conversationId)}&seg=${seg}`;
   },
 
   /** URL of one stored segment for the resume card's player. */

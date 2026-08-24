@@ -92,6 +92,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   // transcript correction: the fix is written here, the original never changes
   const [fixingTranscript, setFixingTranscript] = useState(false);
   const [fixDraft, setFixDraft] = useState('');
+  /** Playable pieces of the recording (0 = none stored / swept / erased). */
+  const [audioSegs, setAudioSegs] = useState(0);
   /** Approve tapped with nothing linked: the link screen opens first, and a
    *  successful pin resumes the approval automatically. */
   const [linkThenApprove, setLinkThenApprove] = useState(false);
@@ -148,6 +150,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     if (!row?.deal_id) { setDealRow(null); return; }
     void api.get<any>(`/deals/${row.deal_id}`).then(setDealRow).catch(() => {});
   }, [row?.deal_id]);
+  useEffect(() => {
+    if (!row?.audio_ref || row.audio_deleted_at || row.erased_at) { setAudioSegs(0); return; }
+    void voxService.reviewAudioMeta(conversationId).then(setAudioSegs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row?.audio_ref, row?.audio_deleted_at, row?.erased_at]);
 
   // atlas typeahead
   useEffect(() => {
@@ -1015,6 +1022,15 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 ? 'Corrected copy in use — the verbatim original is preserved below.'
                 : 'Translated inline — word-for-word. Evidence: never editable.'}
             </div>
+            {audioSegs > 0 && (
+              <div style={{ margin: '4px 0 10px' }}>
+                {Array.from({ length: audioSegs }, (_, i) => (
+                  <audio key={i} controls preload="none"
+                    style={{ width: '100%', height: 34, marginBottom: 6 }}
+                    src={voxService.reviewAudioUrl(conversationId, i)} />
+                ))}
+              </div>
+            )}
             {fixingTranscript ? (
               <div>
                 <textarea className="input-field" rows={10} value={fixDraft}
