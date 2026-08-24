@@ -585,3 +585,15 @@ async def test_post_approve_edits_resync_the_filed_interaction(client: AsyncClie
     assert r.status_code == 200, r.text
     unchanged = (await client.get(f"/v1/interactions/{iid}", headers=MGMT)).json()
     assert unchanged["summary"] == "REVISED: 45 MW, quotes compared"
+
+
+async def test_malformed_ids_are_the_callers_error_not_a_500(client: AsyncClient):
+    """Found by the 90-minute live E2E: a non-UUID consent_id from a corrupted
+    manifest crashed conversation creation with an unhandled 500."""
+    r = await client.post("/v1/vox/conversations", json={
+        "recording_mode": "live", "consent_id": "not-a-uuid"}, headers=RECORDER)
+    assert r.status_code == 422, r.text
+    row = await _make(client)
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"lead_id": "garbage-id"}, headers=RECORDER)
+    assert r.status_code == 422, r.text

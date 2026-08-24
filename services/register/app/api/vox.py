@@ -175,6 +175,17 @@ def _denormalise(row: VoxConversation) -> None:
         row.meeting_date = row.meeting_date
 
 
+def _uuid_or_422(value: str | None, name: str) -> uuid.UUID | None:
+    """Foreign ids arrive from clients and manifests; a malformed one is the
+    CALLER'S error (422), never an unhandled 500."""
+    if not value:
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise ValidationAppError(f"{name} is not a valid id.") from exc
+
+
 async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:
     """Mirror an APPROVED conversation's current report onto its filed timeline
     entry. The public interaction surface is append-only by design; this service
@@ -286,9 +297,9 @@ async def create_conversation(payload: ConversationIn,
         duration_seconds=payload.duration_seconds,
         latitude=payload.latitude,
         longitude=payload.longitude,
-        consent_id=uuid.UUID(payload.consent_id) if payload.consent_id else None,
-        entity_id=uuid.UUID(payload.entity_id) if payload.entity_id else None,
-        lead_id=uuid.UUID(payload.lead_id) if payload.lead_id else None,
+        consent_id=_uuid_or_422(payload.consent_id, "consent_id"),
+        entity_id=_uuid_or_422(payload.entity_id, "entity_id"),
+        lead_id=_uuid_or_422(payload.lead_id, "lead_id"),
         status="queued",
         created_by=ctx.actor,
     )
@@ -557,7 +568,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     for link in ("entity_id", "lead_id", "deal_id", "interaction_id"):
         raw = getattr(payload, link)
         if raw is not None:
-            new_id = uuid.UUID(raw) if raw else None
+            new_id = _uuid_or_422(raw, link)
             old = getattr(row, link)
             if old != new_id:
                 setattr(row, link, new_id)
