@@ -597,3 +597,30 @@ async def test_malformed_ids_are_the_callers_error_not_a_500(client: AsyncClient
     r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
                           json={"lead_id": "garbage-id"}, headers=RECORDER)
     assert r.status_code == 422, r.text
+
+
+async def test_maker_never_checks_their_own_stage_request(client: AsyncClient):
+    """Maker-checker on the request flow: the requester — approver role or not —
+    is refused on their own request; a different authority decides it."""
+    ent = await client.post("/v1/entities", json={
+        "code": "MKRCHK1", "legal_name": "Maker Checker Co", "entity_type": "Company"},
+        headers=MGMT)
+    assert ent.status_code == 201, ent.text
+    lend = await client.post("/v1/lending", json={
+        "entity_id": ent.json()["id"], "stage": "Diligence"}, headers=MGMT)
+    assert lend.status_code == 201, lend.text
+    # Management MAY raise a request (their choice to route through a second pair
+    # of eyes even though they hold direct edit rights)
+    req = await client.post("/v1/requests", json={
+        "subject_type": "Lending", "subject_id": lend.json()["id"],
+        "field": "stage", "to_value": "Note Circulated"}, headers=MGMT)
+    assert req.status_code == 201, req.text
+    rid = req.json()["id"]
+    # ...but the SAME person never decides their own request
+    r = await client.post(f"/v1/requests/{rid}/approve", json={}, headers=MGMT)
+    assert r.status_code == 403, r.text
+    assert "different approver" in r.text
+    # a DIFFERENT authority approves it fine
+    r = await client.post(f"/v1/requests/{rid}/approve", json={},
+                          headers=_as("admin@evamfinance.com", "Admin"))
+    assert r.status_code == 200, r.text

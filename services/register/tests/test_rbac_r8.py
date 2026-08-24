@@ -86,8 +86,11 @@ async def test_approval_path_enforces_allowed_transitions(client: AsyncClient):
         "to_value": "On Hold"}, headers=BD_HEAD)
     assert cr.status_code == 201, cr.text
     # Approving it must be refused by the transition policy (not silently applied).
+    # A DIFFERENT authority decides — the maker-checker rule refuses the requester
+    # before the transition policy would even be consulted.
     decided = await client.post(f"/v1/requests/{cr.json()['id']}/approve", json={},
-                                headers=BD_HEAD)
+                                headers={"X-User-Email": "kannan@evamfinance.com",
+                                         "X-User-Roles": "Management"})
     assert decided.status_code == 409, decided.text
     assert "may not move" in decided.text.lower()
 

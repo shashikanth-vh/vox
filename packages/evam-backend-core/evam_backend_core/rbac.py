@@ -131,7 +131,11 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     "upload_remove_documents":        _row("F F F S F S S S S S - -"),
     "snooze_today_item":              _row("F F F S S S S S S S - -"),
     "delete_row":                     _row("F - - - - - - - - - - -"),
-    "request_stage_change":           _row("- - F S S S S S S S - -"),
+    # v-field: Management may RAISE a request too (their edit rights let them act
+    # directly, but routing a change through a second pair of eyes is a choice
+    # the desk asked for) — the maker-checker rule still bars them from deciding
+    # their own.
+    "request_stage_change":           _row("- F F S S S S S S S - -"),
     "approve_stage_change":           _row("A A A - A - A - A - - -"),
     # Governance-evidence attachment, gated BY KIND (see evam_backend_core.evidence). These are the
     # authorities that may file each class of governance evidence — NOT any identified caller. A

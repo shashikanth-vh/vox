@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { hydrateBook } from '../../services/bookHydration';
-import { Alert, Box, Paper, Typography, Button, Collapse } from '@mui/material';
+import { Alert, Box, Paper, Typography, Button, Collapse, Tooltip } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
@@ -99,8 +99,10 @@ export default function TodayPage() {
   // Stage-change requests: approvers see pending items they can decide; requesters see
   // their own submissions awaiting approval.
   const pendReq = stageRequestService.pending();
-  const reqActionable = pendReq.filter((r) => canApproveLine(user.roles, r.line));
-  const reqMine = pendReq.filter((r) => r.by === user.full && !canApproveLine(user.roles, r.line));
+  // Maker-checker: your OWN request is never actionable by you, approver role or
+  // not — it shows with the verbs disabled and the reason spelled out.
+  const reqActionable = pendReq.filter((r) => canApproveLine(user.roles, r.line) && r.by !== user.full);
+  const reqMine = pendReq.filter((r) => r.by === user.full);
   const decide = (id: string, ok: boolean) => { stageRequestService.decide(id, ok, user.full); refresh(); };
   const coName = (code: string) => clientsService.get(code).name || code;
 
@@ -385,7 +387,17 @@ export default function TodayPage() {
           {reqMine.map((r) => (
             <ChLine key={r.id}>
               <Box component="span" sx={{ px: '8px', py: '1px', borderRadius: '99px', fontSize: 10.5, fontWeight: 700, bgcolor: '#EDF1F3', color: tokens.muted, whiteSpace: 'nowrap' }}>{r.line}</Box>
-              {name(coName(r.code), r.code)}{hint(`${r.currentStage || '—'} → ${r.targetStage} · awaiting approval`)}
+              {name(coName(r.code), r.code)}
+              {hint(`${r.currentStage || '—'} → ${r.targetStage} · you raised this — a different approver decides`)}
+              {canApproveLine(user.roles, r.line) && (<>
+                <Box sx={{ flex: 1 }} />
+                <Tooltip title="Maker-checker: you raised this request, so another approver must decide it.">
+                  <span>
+                    <Button size="small" variant="contained" disabled sx={{ minWidth: 0 }}>Approve</Button>
+                    <Button size="small" color="error" disabled sx={{ minWidth: 0, ml: 1 }}>Reject</Button>
+                  </span>
+                </Tooltip>
+              </>)}
             </ChLine>
           ))}
         </Section>

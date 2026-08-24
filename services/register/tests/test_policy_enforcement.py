@@ -360,8 +360,10 @@ async def test_approval_cannot_bypass_funnel_order_deal(client):
         "subject_type": "Deal", "subject_id": did, "field": "stage",
         "to_value": "Closed Won"}, headers=BD_HEAD)
     assert cr.status_code == 201, cr.text
+    # a DIFFERENT authority decides (maker-checker refuses the requester first)
     decided = await client.post(f"/v1/requests/{cr.json()['id']}/approve", json={},
-                                headers=BD_HEAD)
+                                headers={"X-User-Email": "kannan@evamfinance.com",
+                                         "X-User-Roles": "Management"})
     assert decided.status_code == 409, decided.text
     assert "may not move" in decided.text.lower()
     assert (await client.get(f"/v1/deals/{did}")).json()["stage"] == "New Inquiry"

@@ -295,10 +295,16 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
         raise NotFoundError(f"Request '{request_id}' not found.")
     if req.status != "Pending":
         raise ConflictError(f"Request is already {req.status.lower()}.")
+    # MAKER-CHECKER: whoever raised the request never decides it — approver role
+    # or not. The vertical always has more than one authority; a second pair of
+    # eyes is the entire point of the request flow.
+    caller = ctx.user.email if ctx.user is not None else None
+    if caller and (req.requested_by or "").strip().lower() == caller.strip().lower():
+        raise ForbiddenError(
+            "You raised this request — a different approver must decide it.")
     # Approval routing: Admin / Management / the relevant vertical Head.
     if ctx.user is not None:
         if not authz.can_approve(ctx.user, req.subject_type):
-            from app.core.errors import ForbiddenError
 
             raise ForbiddenError(
                 f"Role(s) {sorted(ctx.user.roles)} may not decide requests on a "

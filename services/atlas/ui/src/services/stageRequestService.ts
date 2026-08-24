@@ -69,6 +69,8 @@ export const stageRequestService = {
   decide(id: string, approve: boolean, by: string) {
     const r = bag().find((x) => x.id === id);
     if (!r || r.status !== 'Pending') return;
+    // maker-checker: the requester never decides their own request
+    if ((r.by || '').trim().toLowerCase() === (by || '').trim().toLowerCase()) return;
     r.status = approve ? 'Approved' : 'Rejected';
     r.decidedBy = by; r.decidedAt = today();
     if (approve && r.refId) {
