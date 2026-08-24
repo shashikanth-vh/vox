@@ -29,6 +29,14 @@ const dotCls = (conf?: string) =>
 const mmss = (s?: number | null) => s == null ? ''
   : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+/** Chip labels the way the blueprint prints them: "entire_project" reads
+ *  "Entire project", and the acronyms stay acronyms ("ppa" -> "PPA"). Free-text
+ *  additions pass through as typed. */
+const ACRONYMS = new Set(['ppa', 'epc', 'spv', 'ipp', 'ev', 'bess', 'lc', 'nbfc']);
+const chipLabel = (v: string) => v.split('_').map((w, i) =>
+  ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase()
+    : i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w).join(' ');
+
 interface Candidate { name: string; code?: string; entity_id?: string; kind?: string; meta?: string }
 
 export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDossier, onSaved, onFiled }: {
@@ -749,7 +757,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           {[...closed, ...chosen.filter((c) => !closed.includes(c))].map((c) => (
             <div key={c} className={`ms-opt${chosen.includes(c) ? ' on' : ''}`}
               onClick={() => !readOnly && set(chosen.includes(c)
-                ? chosen.filter((x) => x !== c) : [...chosen, c])}>{c.replace(/_/g, ' ')}</div>
+                ? chosen.filter((x) => x !== c) : [...chosen, c])}>{chipLabel(c)}</div>
           ))}
           {!readOnly && def.allow_free_text && (
             <div className="ms-opt" onClick={() => {
