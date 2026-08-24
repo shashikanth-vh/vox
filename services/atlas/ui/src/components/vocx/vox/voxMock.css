@@ -251,7 +251,7 @@
 .vox-app .canon-empty {font-size:12px; color:var(--muted); padding:10px 0;}
 .vox-app .canon-add {display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--accent); cursor:pointer; font-weight:500; margin-top:4px;}
 .vox-app .transcript-sub {font-size:12px; color:var(--muted); margin-bottom:14px; font-family:'JetBrains Mono',monospace; letter-spacing:0.03em;}
-.vox-app .transcript-body {font-size:13px; line-height:1.65; color:var(--text-2); position:relative; max-height:min(300px,42vh); overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(148,163,184,0.55) transparent; scrollbar-gutter:stable; padding-right:8px; overscroll-behavior:contain;}
+.vox-app .transcript-body {white-space:pre-wrap; font-size:13px; line-height:1.65; color:var(--text-2); position:relative; max-height:min(300px,42vh); overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(148,163,184,0.55) transparent; scrollbar-gutter:stable; padding-right:8px; overscroll-behavior:contain;}
 .vox-app .transcript-body::-webkit-scrollbar {width:6px;}
 .vox-app .transcript-body::-webkit-scrollbar-thumb {background:rgba(148,163,184,0.55); border-radius:3px;}
 .vox-app .transcript-body.clamped {max-height:120px; overflow:hidden;}

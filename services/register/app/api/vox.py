@@ -536,12 +536,11 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                 changed += 1
 
     if payload.corrected_transcript is not None:
-        # A correction is a draft-stage tool: once approved, the record's content
-        # changes through the field-edit path, not by rebuilding its foundation.
-        if row.status == "submitted":
-            raise ConflictError(
-                "An approved record's transcript cannot be corrected; "
-                "edit the report fields instead.")
+        # Draft stage: the correction is what regeneration structures. Approved
+        # stage: regeneration stays closed (the report changes through field
+        # edits), but the READING COPY is still the desk's to fix — a mis-heard
+        # name in an approved record was otherwise wrong forever. Both are
+        # audited; the verbatim original never changes.
         new_txt = payload.corrected_transcript.strip() or None
         if new_txt != row.corrected_transcript:
             # The audit keeps both copies in full — the correction is as
@@ -557,7 +556,8 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     # here, inside the same transaction — the conversation's audit rows above
     # already record who changed what.
     if (changed and row.status == "submitted" and row.interaction_id
-            and (payload.edits or payload.use_cases is not None)):
+            and (payload.edits or payload.use_cases is not None
+                 or payload.corrected_transcript is not None)):
         from app.models import Interaction
         itx = (await ctx.session.execute(
             select(Interaction).where(Interaction.id == row.interaction_id,
@@ -579,6 +579,8 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
             if kdp or lanes:
                 itx.key_intel = {**({"points": kdp} if kdp else {}),
                                  **({"use_cases": lanes} if lanes else {})}
+            if itx.transcript:
+                itx.transcript = row.corrected_transcript or row.raw_transcript
             itx.updated_by = ctx.actor
 
     row.updated_by = ctx.actor

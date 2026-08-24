@@ -443,6 +443,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
+  // The approved record's transcript editor: fixes the READING COPY (audited,
+  // synced onto the filed interaction) — no regeneration of an approved report.
+  const saveTranscriptOnly = async () => {
+    setBusy(true); setErr('');
+    try {
+      await saveEdits({ corrected_transcript: fixDraft });
+      setFixingTranscript(false);
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
   const deleteDraft = async () => {
     if (!window.confirm('Delete this conversation? The recording, transcript and report '
       + 'are removed for everyone. This cannot be undone.')) return;
@@ -1142,11 +1152,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <div className="card">
             <div className="card-h with-action">Full transcript
               <span style={{ display: 'flex', gap: 14 }}>
-                {!readOnly && !approvedRow && !fixingTranscript && (
+                {!readOnly && !fixingTranscript && (
                   <span className="h-action" onClick={() => {
                     setFixDraft(row.corrected_transcript || row.raw_transcript || '');
                     setFixingTranscript(true); setTranscriptOpen(false);
-                  }}><Ic i="i-refresh" /> Re-analyze</span>
+                  }}>{approvedRow
+                    ? <><Ic i="i-edit" /> Edit transcript</>
+                    : <><Ic i="i-refresh" /> Re-analyze</>}</span>
                 )}
                 <span className="h-action" onClick={() => setTranscriptOpen((v) => !v)}>
                   {transcriptOpen ? 'Hide' : 'Show original'}</span>
@@ -1170,13 +1182,20 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   style={{ width: '100%', lineHeight: 1.5 }}
                   onChange={(e) => setFixDraft(e.target.value)} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 2px 12px' }}>
-                  Fix mis-heard names and terms here — a corrected name updates every field,
-                  bullet and snippet when the report regenerates. The word-for-word original
-                  stays on record. Your own confirmed field values survive the rebuild.
+                  {approvedRow
+                    ? 'Approved record: your correction updates the reading copy here and on '
+                      + 'the filed timeline entry. Report fields are edited directly above — '
+                      + 'an approved report is not re-analyzed. The word-for-word original '
+                      + 'stays on record.'
+                    : 'Fix mis-heard names and terms here — a corrected name updates every '
+                      + 'field, bullet and snippet when the report regenerates. The '
+                      + 'word-for-word original stays on record. Your own confirmed field '
+                      + 'values survive the rebuild.'}
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-primary" disabled={busy || !fixDraft.trim()}
-                    onClick={() => void correctAndRegenerate()}>Save &amp; re-analyze</button>
+                    onClick={() => void (approvedRow ? saveTranscriptOnly() : correctAndRegenerate())}>
+                    {approvedRow ? 'Save transcript' : 'Save & re-analyze'}</button>
                   <button className="btn btn-ghost" style={{ width: 'auto' }}
                     onClick={() => setFixingTranscript(false)}>Cancel</button>
                 </div>
@@ -1184,12 +1203,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             ) : (
               <>
                 {row.corrected_transcript && (
-                  <div className="transcript-body">{row.corrected_transcript}</div>
+                  <div className="transcript-body"
+                    style={{ maxHeight: 'min(300px,42vh)', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                    {row.corrected_transcript}</div>
                 )}
                 {transcriptOpen && <div className="transcript-body"
-                  style={row.corrected_transcript
-                    ? { opacity: 0.65, borderTop: '1px dashed var(--line-2)', marginTop: 10, paddingTop: 10 }
-                    : undefined}>{row.raw_transcript}</div>}
+                  style={{ maxHeight: 'min(300px,42vh)', overflowY: 'auto', whiteSpace: 'pre-wrap',
+                    ...(row.corrected_transcript
+                      ? { opacity: 0.65, borderTop: '1px dashed var(--line-2)',
+                          marginTop: 10, paddingTop: 10 }
+                      : {}) }}>{row.raw_transcript}</div>}
               </>
             )}
           </div>

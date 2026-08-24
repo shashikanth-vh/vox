@@ -425,14 +425,17 @@ async def test_correct_transcript_and_regenerate_preserves_overrides(client: Asy
     assert r.json()["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 40
 
 
-async def test_transcript_correction_refused_after_approval(client: AsyncClient):
+async def test_transcript_correction_after_approval_edits_reading_copy_only(client: AsyncClient):
+    """Post-approval the reading copy stays fixable (audited), but regeneration —
+    rebuilding an approved record's report — remains closed."""
     row = await _make(client)
     cid = row["id"]
     await _to_ready(client, cid)
     await client.post(f"/v1/vox/conversations/{cid}/approve", headers=RECORDER)
     r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
-        "corrected_transcript": "rewrite attempt"}, headers=RECORDER)
-    assert r.status_code == 409
+        "corrected_transcript": "met SURYODAYA EPC at Whitefield"}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert r.json()["corrected_transcript"] == "met SURYODAYA EPC at Whitefield"
     r = await client.post(f"/v1/vox/conversations/{cid}/regenerate", headers=RECORDER)
     assert r.status_code == 409
 
