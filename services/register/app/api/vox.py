@@ -550,6 +550,37 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
             row.corrected_transcript = new_txt
             changed += 1
 
+    # A post-approval content edit must not leave the FILED timeline row telling
+    # yesterday's story. The public interaction surface is append-only by design,
+    # but this service owns both tables: when an approved conversation's report
+    # or lanes change, its linked interaction's summary/key_intel are re-derived
+    # here, inside the same transaction — the conversation's audit rows above
+    # already record who changed what.
+    if (changed and row.status == "submitted" and row.interaction_id
+            and (payload.edits or payload.use_cases is not None)):
+        from app.models import Interaction
+        itx = (await ctx.session.execute(
+            select(Interaction).where(Interaction.id == row.interaction_id,
+                                      Interaction.tenant_id == ctx.tenant_id)
+        )).scalar_one_or_none()
+        if itx is not None:
+            report = row.structured_report or {}
+            common = report.get("common") or {}
+
+            def _cv(key: str) -> Any:
+                cell = common.get(key)
+                return cell.get("value") if isinstance(cell, dict) else None
+
+            kdp = [x for x in (_cv("key_discussion_points") or []) if isinstance(x, str)]
+            lanes = [u for u in (report.get("detected_use_cases") or [])
+                     if isinstance(u, str)]
+            itx.summary = (str(_cv("meeting_summary") or (kdp[0] if kdp else "")
+                               or "VOX conversation"))[:300]
+            if kdp or lanes:
+                itx.key_intel = {**({"points": kdp} if kdp else {}),
+                                 **({"use_cases": lanes} if lanes else {})}
+            itx.updated_by = ctx.actor
+
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)

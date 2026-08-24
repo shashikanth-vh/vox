@@ -495,3 +495,55 @@ async def test_parallel_duplicate_captures_replay_not_500(client: AsyncClient):
     assert all(r.status_code == 201 for r in results), [r.text for r in results]
     ids = {r.json()["id"] for r in results}
     assert len(ids) == 1                   # same conversation for both
+
+
+async def test_post_approve_edits_resync_the_filed_interaction(client: AsyncClient):
+    """The timeline is append-only at its public door, but a post-approval edit of an
+    approved conversation must not leave the FILED interaction telling yesterday's
+    story — the register owns both tables and re-derives summary/key_intel in the
+    same transaction as the audited edit."""
+    ent = await client.post("/v1/entities", json={
+        "code": "VOXSYNC1", "legal_name": "Sync Co", "entity_type": "Company"},
+        headers=MGMT)
+    assert ent.status_code == 201, ent.text
+    eid = ent.json()["id"]
+    itx = await client.post("/v1/interactions", json={
+        "subject_type": "Entity", "subject_id": eid,
+        "interaction_type": "VOX conversation",
+        "summary": "old summary", "key_intel": {"points": ["old point"]},
+        "performed_by": "Ananda H"}, headers=MGMT)
+    assert itx.status_code == 201, itx.text
+    iid = itx.json()["id"]
+
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"entity_id": eid, "interaction_id": iid}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    # a content edit AFTER approval — the summary cell changes
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "common.key_discussion_points",
+                   "new_value": {"value": ["REVISED: 45 MW, quotes compared"],
+                                 "confidence": "high", "user_override": True}}]},
+        headers=MGMT)
+    assert r.status_code == 200, r.text
+
+    got = await client.get(f"/v1/interactions/{iid}", headers=MGMT)
+    assert got.status_code == 200, got.text
+    synced = got.json()
+    assert synced["summary"] == "REVISED: 45 MW, quotes compared"
+    assert synced["key_intel"]["points"] == ["REVISED: 45 MW, quotes compared"]
+    assert synced["key_intel"]["use_cases"] == ["lending"]
+
+    # a LINK-only edit leaves the interaction content untouched
+    lead = await client.post("/v1/leads", json={"entity_id": eid, "company": "Sync Co", "rm": "Ananda H"},
+                             headers=MGMT)
+    assert lead.status_code == 201, lead.text
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"lead_id": lead.json()["id"]}, headers=MGMT)
+    assert r.status_code == 200, r.text
+    unchanged = (await client.get(f"/v1/interactions/{iid}", headers=MGMT)).json()
+    assert unchanged["summary"] == "REVISED: 45 MW, quotes compared"

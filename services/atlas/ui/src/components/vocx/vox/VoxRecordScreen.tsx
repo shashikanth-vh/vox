@@ -55,6 +55,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const waveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gpsRef = useRef<{ lat?: number; lng?: number }>({});
+  const gpsWatchRef = useRef<number | null>(null);
   const elapsedRef = useRef(0);
   const finishingRef = useRef(false);
   const finishRef = useRef<() => Promise<void>>(async () => {});
@@ -150,9 +151,15 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     setErr('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      navigator.geolocation?.getCurrentPosition(
-        (p) => { gpsRef.current = { lat: p.coords.latitude, lng: p.coords.longitude }; },
-        () => {}, { timeout: 4000 });
+      // WATCH for the whole take, not a one-shot: a phone's first GPS fix often
+      // arrives half a minute in, and a 4s window silently lost it. Whenever the
+      // fix lands, the coordinates catch up; the watch dies with the stream.
+      try {
+        if (gpsWatchRef.current != null) navigator.geolocation?.clearWatch(gpsWatchRef.current);
+        gpsWatchRef.current = navigator.geolocation?.watchPosition(
+          (p) => { gpsRef.current = { lat: p.coords.latitude, lng: p.coords.longitude }; },
+          () => {}, { maximumAge: 30_000 }) ?? null;
+      } catch { /* no location service — the take records without coordinates */ }
       let rec: MediaRecorder;
       try {
         // 32 kbps opus is transparent for speech; the browser default (~128k)
@@ -222,6 +229,10 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   };
 
   const stopStream = () => {
+    if (gpsWatchRef.current != null) {
+      try { navigator.geolocation?.clearWatch(gpsWatchRef.current); } catch { /* gone */ }
+      gpsWatchRef.current = null;
+    }
     if (tickRef.current) clearInterval(tickRef.current);
     stopWave();
     const rec = recRef.current;
@@ -509,6 +520,9 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             </div>
             <button className="rec-finish-btn" onClick={() => void finish()}>
               <Ic i="i-check" /> Finish &amp; process
+            </button>
+            <button className="rec-discard-link" onClick={() => setDiscardOpen(true)}>
+              <Ic i="i-trash" /> Discard recording
             </button>
             <div className="rec-finish-note">Pause and resume as many times as you need. Finish when the conversation is done.</div>
           </div>

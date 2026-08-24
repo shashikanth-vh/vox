@@ -106,6 +106,11 @@ function buildPrintHtml(row: VoxConversation, report: VoxReport | null,
     ['Business lines', lanes.join(' · ')],
     ['Recording', [row.recording_mode === 'live' ? 'Live meeting' : 'Post-meeting note', dur]
       .filter(Boolean).join(' · ')],
+    ['Location', pdfVal(common.location?.value)],
+    ['GPS', (row.latitude != null && row.longitude != null)
+      ? `${Math.abs(row.latitude).toFixed(4)}°${row.latitude >= 0 ? 'N' : 'S'}, `
+        + `${Math.abs(row.longitude).toFixed(4)}°${row.longitude >= 0 ? 'E' : 'W'}`
+      : ''],
     ['Language', row.language_detected ? `${row.language_detected} (report in English)` : ''],
     ['Status', row.status === 'submitted' ? 'Approved' : 'Draft — not yet approved'],
   ];

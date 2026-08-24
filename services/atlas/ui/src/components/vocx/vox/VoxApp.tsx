@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
+import { useVocx } from '../VocxProvider';
 import { api } from '../../../api/http';
 import vocxClient from '../../../api/vocxClient';
 import { voxService } from '../../../services/voxService';
@@ -522,10 +523,14 @@ export default function VoxApp() {
     useState<{ entityId?: string; leadId?: string } | null>(null);
   const [queueCount, setQueueCount] = useState(0);
 
+  const { refreshPending } = useVocx();
   const refreshQueueCount = useCallback(() => {
     void voxService.list({ status: 'processing_failed,failed_permanently', limit: 1 })
       .then((r) => setQueueCount(r.total)).catch(() => {});
-  }, []);
+    // the header mic badge counts the same world — keep it honest in real time
+    // (an approve or discard inside the panel used to wait for the panel to close)
+    refreshPending();
+  }, [refreshPending]);
   useEffect(() => { refreshQueueCount(); }, [screen, refreshQueueCount]);
 
   const go = (s: VoxScreen) => setScreen(s);
