@@ -993,7 +993,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     'data_quality_flags', 'key_discussion_points', 'meeting_summary']);
 
   const jump = (path: string) => {
-    document.getElementById(`vox-${path}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const go = () => document.getElementById(`vox-${path}`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (document.getElementById(`vox-${path}`)) { go(); return; }
+    // sector/subsector and friends live inside the collapsed Additional details
+    // section — open it first, then scroll once the rows exist
+    setShowMore(true);
+    setTimeout(go, 150);
   };
 
   return (
@@ -1109,6 +1115,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               </div>
             ))}
             {!readOnly && <div className="uc-chip add" onClick={() => setUcSheet('add')}>+ Add</div>}
+          </div>
+          <div className="uc-field-group">
+            <div className="uc-group-h">Meeting details</div>
+            {(registry.common as any[]).filter((d) => !HIDDEN.has(d.key))
+              .map((d) => formRow('common', d))}
           </div>
           {detected.map((uc) => {
             const block = registry.blocks[uc];
