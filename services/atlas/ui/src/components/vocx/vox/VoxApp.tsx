@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
 import { api } from '../../../api/http';
+import vocxClient from '../../../api/vocxClient';
 import { voxService } from '../../../services/voxService';
 import type { VoxConversation } from '../../../services/voxService';
 import ReportsTab from '../ReportsTab';
@@ -26,6 +27,35 @@ export type VoxScreen = 'memory' | 'all' | 'record' | 'review' | 'queue'
 export const Ic = ({ i, style }: { i: string; style?: React.CSSProperties }) => (
   <svg className="ic" style={style}><use href={`#${i}`} /></svg>
 );
+
+/** An audio player that can actually authenticate. A native <audio src> fetch
+ *  carries no bearer token, so the gateway (rightly) refused it and the player
+ *  sat at 0:00/0:00 in the field. This fetches the bytes through the
+ *  authenticated client on tap and plays the local blob. */
+export function AuthAudio({ path }: { path: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => () => { if (src) URL.revokeObjectURL(src); }, [src]);
+  if (src) {
+    return <audio controls autoPlay style={{ width: '100%', height: 34, marginBottom: 6 }} src={src} />;
+  }
+  return (
+    <button className="btn btn-ghost btn-sm" disabled={busy}
+      style={{ marginBottom: 6, width: '100%' }}
+      onClick={async () => {
+        setBusy(true); setError('');
+        try {
+          const r = await vocxClient.get(path, { responseType: 'blob', timeout: 120_000 });
+          setSrc(URL.createObjectURL(r.data));
+        } catch {
+          setError(' — could not load the recording');
+        } finally { setBusy(false); }
+      }}>
+      {busy ? 'Loading…' : '▶ Play recording'}{error}
+    </button>
+  );
+}
 
 /* ------------------------------------------------------------------ helpers */
 

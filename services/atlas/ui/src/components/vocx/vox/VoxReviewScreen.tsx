@@ -19,7 +19,7 @@ import { getSession } from '../../../auth/session';
 import { referenceService } from '../../../services/referenceService';
 import { needsYou, voxService } from '../../../services/voxService';
 import type { VoxCell, VoxConversation, VoxRegistry, VoxReport } from '../../../services/voxService';
-import { Ic } from './VoxApp';
+import { AuthAudio, Ic } from './VoxApp';
 
 type SubView = 'auto' | 'atlas' | 'submitted';
 
@@ -1025,9 +1025,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             {audioSegs > 0 && (
               <div style={{ margin: '4px 0 10px' }}>
                 {Array.from({ length: audioSegs }, (_, i) => (
-                  <audio key={i} controls preload="none"
-                    style={{ width: '100%', height: 34, marginBottom: 6 }}
-                    src={voxService.reviewAudioUrl(conversationId, i)} />
+                  <AuthAudio key={i} path={voxService.reviewAudioPath(conversationId, i)} />
                 ))}
               </div>
             )}

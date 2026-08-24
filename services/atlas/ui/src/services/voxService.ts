@@ -176,14 +176,15 @@ export const voxService = {
     } catch { return 0; }
   },
 
-  /** Playback URL for a conversation's recording — the review's player. */
-  reviewAudioUrl(conversationId: string, seg = 0): string {
-    return `${vocxClient.defaults.baseURL}/v1/vox/audio?conversation_id=${encodeURIComponent(conversationId)}&seg=${seg}`;
+  /** Playback PATH for a conversation's recording — fetched through the
+   *  authenticated client (a bare <audio src> cannot carry the bearer). */
+  reviewAudioPath(conversationId: string, seg = 0): string {
+    return `/v1/vox/audio?conversation_id=${encodeURIComponent(conversationId)}&seg=${seg}`;
   },
 
-  /** URL of one stored segment for the resume card's player. */
-  streamAudioUrl(captureId: string, seg: number): string {
-    return `${vocxClient.defaults.baseURL}/v1/vox/stream/audio?capture_id=${encodeURIComponent(captureId)}&seg=${seg}`;
+  /** PATH of one stored segment for the resume card's player. */
+  streamAudioPath(captureId: string, seg: number): string {
+    return `/v1/vox/stream/audio?capture_id=${encodeURIComponent(captureId)}&seg=${seg}`;
   },
 
   /** Kick (or retry) processing — the Queue's "Retry & open". */

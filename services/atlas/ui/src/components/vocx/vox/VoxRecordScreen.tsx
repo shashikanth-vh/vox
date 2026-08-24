@@ -13,7 +13,7 @@ import { useVocx } from '../VocxProvider';
 import { voxService } from '../../../services/voxService';
 import { appendTakeChunk, deleteTake, loadUnsentTake } from '../spec/takeStore';
 import type { StoredTake } from '../spec/takeStore';
-import { Ic } from './VoxApp';
+import { AuthAudio, Ic } from './VoxApp';
 
 const CAP_SECONDS = 180;          // Mode A — a post-meeting note is minutes, not a meeting
 const CAP_LIVE_SECONDS = 5400;    // Mode B — the blueprint's 90-minute live meeting
@@ -441,8 +441,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             device changed. Listen, continue, or finish it now.
           </div>
           {Array.from({ length: t.segments }, (_, i) => (
-            <audio key={i} controls preload="none" style={{ width: '100%', marginBottom: 8, height: 34 }}
-              src={voxService.streamAudioUrl(t.capture_id, i)} />
+            <AuthAudio key={i} path={voxService.streamAudioPath(t.capture_id, i)} />
           ))}
           <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
             onClick={() => void start(t)}>Continue recording</button>
