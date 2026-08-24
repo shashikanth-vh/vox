@@ -602,12 +602,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   /* ------------------------------------------------------ processing / failed */
   if (sub === 'auto' && ['queued', 'uploading', 'processing'].includes(row.status)) {
-    const STAGES = [
-      ['Uploaded', 'Segments assembled & stored'],
-      ['Transcribed', row.language_detected ? `${row.language_detected.toUpperCase()} detected` : 'Speech to verbatim text'],
-      ['Writing the report', 'Detecting use cases & fields'],
-      ['Matching company', 'Register · RM / analyst lookup'],
-      ['Ready for review', 'Confidence-scored draft'],
+    const STAGES: [string, string, string][] = [
+      ['Uploading…', 'Uploaded', 'Segments assembled & stored'],
+      ['Transcribing…', 'Transcribed',
+        row.language_detected ? `${row.language_detected.toUpperCase()} detected` : 'Speech to verbatim text'],
+      ['Writing the report…', 'Report written', 'Detecting use cases & fields'],
+      ['Matching company…', 'Company matched', 'Register · RM / analyst lookup'],
+      ['Finalising…', 'Ready for review', 'Confidence-scored draft'],
     ];
     const idx: Record<string, number> = { uploaded: 1, transcribed: 2, structured: 3, matched: 4, ready: 5 };
     const done = idx[row.processing_stage || ''] ?? (row.status === 'processing' ? 1 : 0);
@@ -617,12 +618,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           <div className="proc-title">Making sense of it</div>
           <div className="proc-sub">You can close this · it continues on the server</div>
           <div className="proc-steps">
-            {STAGES.map(([name, meta], i) => (
-              <div key={name} className={`proc-step${i < done ? ' done' : i === done ? ' active' : ''}`}>
+            {STAGES.map(([active, past, meta], i) => (
+              <div key={past} className={`proc-step${i < done ? ' done' : i === done ? ' active' : ''}`}>
                 <div className="proc-icon">
                   {i < done ? <Ic i="i-check" /> : i === done ? <div className="proc-spinner" /> : <span className="proc-pending" />}
                 </div>
-                <div className="proc-txt"><div className="name">{name}</div><div className="meta">{meta}</div></div>
+                <div className="proc-txt">
+                  <div className="name">{i < done ? past : i === done ? active : past}</div>
+                  <div className="meta">{meta}</div></div>
               </div>
             ))}
           </div>
