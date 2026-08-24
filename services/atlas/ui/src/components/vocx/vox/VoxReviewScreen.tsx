@@ -48,6 +48,119 @@ const chipLabel = (v: string) => v.split('_').map((w, i) =>
 
 interface Candidate { name: string; code?: string; entity_id?: string; kind?: string; meta?: string }
 
+// ------------------------------------------------------------------ PDF export
+// The browser's own print engine is the PDF renderer: every font, script and
+// currency sign it can display it can also print, with zero bundled libraries.
+// We compose a clean A4 document in a hidden iframe and open the print dialog
+// with "Save as PDF" one tap away — on the desktop and on a phone alike.
+
+const esc = (v: any) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const pdfVal = (v: any): string => {
+  if (v === null || v === undefined || v === '') return '';
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => (typeof x === 'string' ? x : (x?.action ?? x?.label ?? '')))
+      .map((x) => String(x).trim()).filter(Boolean);
+    return parts.join('; ');
+  }
+  if (typeof v === 'object') return Object.entries(v)
+    .map(([k, x]) => `${chipLabel(k)}: ${x}`).join('; ');
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
+};
+
+function pdfRows(defs: any[], cells: Record<string, any> | undefined,
+                 skip: Set<string>): string {
+  if (!cells) return '';
+  let out = '';
+  for (const def of defs || []) {
+    if (skip.has(def.key)) continue;
+    const cell = cells[def.key];
+    const val = pdfVal(cell?.value);
+    if (!val) continue;
+    const conf = cell?.user_override ? 'confirmed'
+      : (cell?.confidence === 'low' || cell?.confidence === 'medium') ? cell.confidence : '';
+    out += `<tr><td class="k">${esc(def.label || chipLabel(def.key))}</td>`
+      + `<td>${esc(val)}${conf ? ` <span class="conf">${conf}</span>` : ''}</td></tr>`;
+  }
+  return out;
+}
+
+function buildPrintHtml(row: VoxConversation, report: VoxReport | null,
+                        registry: VoxRegistry, names: { entityName?: string; leadName?: string }): string {
+  const srep = (report ?? row.structured_report ?? null) as VoxReport | null;
+  const common = (srep?.common || {}) as Record<string, any>;
+  const subject = names.entityName || names.leadName || row.proposed_lead_company
+    || (row.entity_candidates || [])[0] || 'Unlinked conversation';
+  const lanes = ((srep?.detected_use_cases || row.use_cases || []) as string[]).map(chipLabel);
+  const dur = row.duration_seconds
+    ? `${Math.floor(row.duration_seconds / 60)}m ${Math.round(row.duration_seconds % 60)}s` : '';
+  const summary = pdfVal(common.meeting_summary?.value);
+  const kdp = ((common.key_discussion_points?.value as string[]) || []).filter(Boolean);
+  const skip = new Set(['meeting_summary', 'key_discussion_points']);
+  const meta: [string, string][] = [
+    ['Subject', subject],
+    ['Meeting date', pdfVal(common.meeting_date?.value) || row.meeting_date || ''],
+    ['Recorded by', row.recorder_name || row.recorder_email || ''],
+    ['Business lines', lanes.join(' · ')],
+    ['Recording', [row.recording_mode === 'live' ? 'Live meeting' : 'Post-meeting note', dur]
+      .filter(Boolean).join(' · ')],
+    ['Language', row.language_detected ? `${row.language_detected} (report in English)` : ''],
+    ['Status', row.status === 'submitted' ? 'Approved' : 'Draft — not yet approved'],
+  ];
+  let blocks = '';
+  const commonRows = pdfRows(registry.common as any[], common, skip);
+  if (commonRows) blocks += `<h2>Details</h2><table>${commonRows}</table>`;
+  for (const uc of (srep?.detected_use_cases || [])) {
+    const block = (registry.blocks || {})[uc];
+    const rows = block?.fields?.length ? pdfRows(block.fields, (srep as any)?.[uc], new Set()) : '';
+    if (rows) blocks += `<h2>${esc(block.label || chipLabel(uc))}</h2><table>${rows}</table>`;
+  }
+  const transcript = row.corrected_transcript || row.raw_transcript || '';
+  const dateStr = new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>${esc(`VOX report — ${subject}`)}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font: 11pt/1.5 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+         color: #14181f; margin: 0; }
+  .brand { font-size: 9pt; letter-spacing: 0.18em; color: #64748b; text-transform: uppercase; }
+  h1 { font-size: 17pt; margin: 4px 0 2px; }
+  .sub { color: #64748b; font-size: 9.5pt; margin-bottom: 14px; }
+  h2 { font-size: 11.5pt; margin: 18px 0 6px; padding-bottom: 3px;
+       border-bottom: 1px solid #d7dde5; break-after: avoid; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 3.5px 0; vertical-align: top; border-bottom: 1px solid #eef1f5; }
+  td.k { width: 34%; color: #475569; padding-right: 12px; }
+  .conf { font-size: 8pt; color: #b45309; border: 1px solid #f2d9a7; border-radius: 3px;
+          padding: 0 4px; margin-left: 6px; white-space: nowrap; }
+  ul { margin: 4px 0; padding-left: 18px; }
+  li { margin: 3px 0; }
+  .transcript { white-space: pre-wrap; font-size: 9.5pt; line-height: 1.6; color: #33404f; }
+  .note { font-size: 8.5pt; color: #94a3b8; margin: 2px 0 8px; }
+  .foot { margin-top: 22px; padding-top: 8px; border-top: 1px solid #d7dde5;
+          font-size: 8.5pt; color: #94a3b8; }
+  tr, li { break-inside: avoid; }
+</style></head><body>
+<div class="brand">PRISM · VOX field intelligence</div>
+<h1>${esc(subject)}</h1>
+<div class="sub">Conversation report · generated ${esc(dateStr)}</div>
+<table>${meta.filter(([, v]) => v).map(([k, v]) =>
+    `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>
+${summary ? `<h2>Meeting summary</h2><p>${esc(summary)}</p>` : ''}
+${kdp.length ? `<h2>Key discussion points</h2><ul>${kdp.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+${blocks}
+${transcript ? `<h2>Full transcript</h2>
+<div class="note">${row.corrected_transcript
+      ? 'Reviewer-corrected copy. The verbatim original remains on record in PRISM.'
+      : 'Word-for-word, translated to English. Evidence: never edited.'}</div>
+<div class="transcript">${esc(transcript)}</div>` : ''}
+<div class="foot">Confidential — Evam Finance internal. Conversation ${esc(row.id)} · PRISM VOX</div>
+</body></html>`;
+}
+
 export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDossier, onSaved, onFiled }: {
   conversationId: string;
   onBack: () => void;
@@ -340,6 +453,23 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
    *  the row — a deal beats a lead beats the company timeline. Used at approve
    *  time, and again when a pin is added to an already-approved record that
    *  never got its interaction. Idempotent by capture_id. */
+  const downloadPdf = useCallback(() => {
+    if (!row || !registry) return;
+    const html = buildPrintHtml(row, report, registry, { entityName, leadName });
+    const frame = document.createElement('iframe');
+    frame.setAttribute('style', 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;');
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    if (!doc) { frame.remove(); return; }
+    doc.open(); doc.write(html); doc.close();
+    const win = frame.contentWindow;
+    if (win) win.onafterprint = () => setTimeout(() => frame.remove(), 300);
+    // give the iframe a beat to lay out, then hand over to the print dialog —
+    // "Save as PDF" is the download, rendered by the browser itself
+    setTimeout(() => { try { win?.focus(); win?.print(); } catch { frame.remove(); } }, 250);
+    setTimeout(() => frame.remove(), 120_000);   // belt-and-braces cleanup
+  }, [row, report, registry, entityName, leadName]);
+
   const fileTouchpoint = useCallback(async (r: VoxConversation) => {
     const subject = r.deal_id
       ? { subject_type: 'Deal', subject_id: r.deal_id }
@@ -1031,8 +1161,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             )}
             {fixingTranscript ? (
               <div>
-                <textarea className="input-field" rows={10} value={fixDraft}
-                  style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+                <textarea className="input-field transcript-edit" value={fixDraft}
+                  style={{ width: '100%', lineHeight: 1.5 }}
                   onChange={(e) => setFixDraft(e.target.value)} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 2px 12px' }}>
                   Fix mis-heard names and terms here — a corrected name updates every field,
@@ -1233,7 +1363,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       {!readOnly && !approvedRow && (
         <div className="review-action-bar">
           <button className="icon-btn" title="Download as PDF"
-            onClick={() => say('PDF export arrives with the next round.')}><Ic i="i-download" /></button>
+            onClick={downloadPdf}><Ic i="i-download" /></button>
           <button className={`approve-pill${strip.length ? ' gated' : ''}`} disabled={busy} onClick={() => void approve()}>
             <span>{strip.length ? `Approve · ${strip.length} unreviewed` : 'Approve'}</span>
           </button>
@@ -1242,6 +1372,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       )}
       {readOnly && !row.erased_at && (
         <div className="review-action-bar">
+          <button className="icon-btn" title="Download as PDF"
+            onClick={downloadPdf}><Ic i="i-download" /></button>
           <button className="icon-btn" title="Edit this report"
             onClick={() => setEditUnlocked(true)}><Ic i="i-edit" /></button>
           <button className="approve-pill" onClick={onBack}><span>Back to Memory</span></button>
@@ -1265,7 +1397,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         <div className="sheet-scrim show" onClick={() => setOverflow(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-handle" />
-            <div className="sheet-row" onClick={() => { setOverflow(false); say('PDF export arrives with the next round.'); }}>
+            <div className="sheet-row" onClick={() => { setOverflow(false); downloadPdf(); }}>
               <Ic i="i-download" /> Download as PDF</div>
             <div className="sheet-row" onClick={() => { setOverflow(false); setTranscriptOpen(true); }}>
               <Ic i="i-list" /> Show original transcript</div>
