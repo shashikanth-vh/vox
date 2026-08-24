@@ -230,7 +230,9 @@
 .vox-app .divider-h span {position:absolute; top:-6px; left:0; background:var(--bg-2); padding-right:10px; font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--muted); letter-spacing:0.14em; text-transform:uppercase;}
 .vox-app .uc-field-group {margin-bottom:22px;}
 .vox-app .uc-field-group:last-child {margin-bottom:0;}
-.vox-app .uc-group-h {font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between;}
+.vox-app .uc-group-h {font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; cursor:pointer; user-select:none;}
+.vox-app .uc-group-h .ug-chev {color:var(--accent); font-size:12px; line-height:1;}
+.vox-app .uc-group-h:hover {filter:brightness(1.15);}
 .vox-app .form-row {margin-bottom:14px;}
 .vox-app .form-row .fr-label {font-size:12px; color:var(--text-2); margin-bottom:6px; display:flex; align-items:center; gap:6px; font-weight:500;}
 .vox-app .conf-dot {width:6px; height:6px; border-radius:50%; display:inline-block; flex-shrink:0;}

@@ -203,6 +203,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   // explicit "Show all" that expands to the FULL text (the page scrolls) —
   // no inner scrollbar for anyone to miss.
   const [transcriptFull, setTranscriptFull] = useState(false);
+  // Which field groups are open. Meeting details is metadata and starts FOLDED;
+  // the business blocks are the meat of the review and start open.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const groupOpen = (key: string) => openGroups[key] ?? (key !== 'common');
+  const toggleGroup = (key: string) =>
+    setOpenGroups((g) => ({ ...g, [key]: !groupOpen(key) }));
   const [ucSheet, setUcSheet] = useState<'' | 'add' | string>('');
   const [overflow, setOverflow] = useState(false);
   /** An approved record opens read-only; Edit report unlocks it — every change
@@ -1013,8 +1019,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     const go = () => document.getElementById(`vox-${path}`)
       ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     if (document.getElementById(`vox-${path}`)) { go(); return; }
-    // sector/subsector and friends live inside the collapsed Additional details
-    // section — open it first, then scroll once the rows exist
+    // the target may live behind a fold: the Meeting details group, a collapsed
+    // business block, or the Additional details section — open, then scroll
+    const groupKey = path.split('.')[0];
+    setOpenGroups((g) => ({ ...g, [groupKey]: true }));
     setShowMore(true);
     setTimeout(go, 150);
   };
@@ -1134,9 +1142,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             {!readOnly && <div className="uc-chip add" onClick={() => setUcSheet('add')}>+ Add</div>}
           </div>
           <div className="uc-field-group">
-            <div className="uc-group-h">Meeting details</div>
-            {(registry.common as any[]).filter((d) => !HIDDEN.has(d.key))
-              .map((d) => formRow('common', d))}
+            <div className="uc-group-h" onClick={() => toggleGroup('common')}>
+              <span>Meeting details</span>
+              <span className="ug-chev">{groupOpen('common') ? '⌃' : '⌄'}</span></div>
+            {groupOpen('common') && (registry.common as any[])
+              .filter((d) => !HIDDEN.has(d.key)).map((d) => formRow('common', d))}
           </div>
           {detected.map((uc) => {
             const block = registry.blocks[uc];
@@ -1159,8 +1169,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             });
             return (
               <div key={uc} className="uc-field-group">
-                <div className="uc-group-h">{block.label}</div>
-                {visible.map((d: any) => formRow(uc, d))}
+                <div className="uc-group-h" onClick={() => toggleGroup(uc)}>
+                  <span>{block.label}</span>
+                  <span className="ug-chev">{groupOpen(uc) ? '⌃' : '⌄'}</span></div>
+                {groupOpen(uc) && visible.map((d: any) => formRow(uc, d))}
               </div>
             );
           })}
