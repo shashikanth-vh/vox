@@ -381,3 +381,9 @@
   .vox-app .summary-body {font-size:15px; line-height:1.65;}
   .vox-app .transcript-body {font-size:14.5px; line-height:1.7;}
 }
+
+.vox-app .rec-meta-discard {color:var(--danger); cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-weight:600; opacity:0.9;}
+.vox-app .rec-meta-discard:hover {opacity:1;}
+.vox-app .transcript-body.windowed::-webkit-scrollbar {width:8px;}
+.vox-app .transcript-body.windowed::-webkit-scrollbar-track {background:rgba(148,163,184,0.12); border-radius:4px;}
+.vox-app .transcript-body.windowed::-webkit-scrollbar-thumb {background:rgba(148,163,184,0.8); border-radius:4px;}

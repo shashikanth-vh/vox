@@ -48,6 +48,16 @@ const chipLabel = (v: string) => v.split('_').map((w, i) =>
 
 interface Candidate { name: string; code?: string; entity_id?: string; kind?: string; meta?: string }
 
+// The transcript's two shapes, carried INLINE so no stylesheet delivery can lose
+// them: a clamped preview, and — after "Show all" — a bounded reading window
+// with a visible scrollbar, so a 90-minute transcript never swallows the page.
+const TRANSCRIPT_CLAMP: React.CSSProperties = {
+  whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'hidden' };
+const TRANSCRIPT_WINDOW: React.CSSProperties = {
+  whiteSpace: 'pre-wrap', maxHeight: 'min(60vh, 520px)', overflowY: 'auto',
+  border: '1px solid var(--line-2)', borderRadius: 10, padding: '10px 12px',
+  scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.8) rgba(148,163,184,0.12)' };
+
 // ------------------------------------------------------------------ PDF export
 // The browser's own print engine is the PDF renderer: every font, script and
 // currency sign it can display it can also print, with zero bundled libraries.
@@ -1208,19 +1218,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             ) : (
               <>
                 {row.corrected_transcript && (
-                  <div className={`transcript-body${transcriptFull ? '' : ' clamped'}`}
-                    style={transcriptFull
-                      ? { whiteSpace: 'pre-wrap', maxHeight: 'none', overflow: 'visible' }
-                      : { whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'hidden' }}>
+                  <div className={`transcript-body${transcriptFull ? ' windowed' : ' clamped'}`}
+                    style={transcriptFull ? TRANSCRIPT_WINDOW : TRANSCRIPT_CLAMP}>
                     {row.corrected_transcript}</div>
                 )}
-                {transcriptOpen && <div className={`transcript-body${transcriptFull ? '' : ' clamped'}`}
-                  style={{ ...(transcriptFull
-                    ? { whiteSpace: 'pre-wrap', maxHeight: 'none', overflow: 'visible' }
-                    : { whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'hidden' }),
+                {transcriptOpen && <div className={`transcript-body${transcriptFull ? ' windowed' : ' clamped'}`}
+                  style={{ ...(transcriptFull ? TRANSCRIPT_WINDOW : TRANSCRIPT_CLAMP),
                     ...(row.corrected_transcript
-                      ? { opacity: 0.65, borderTop: '1px dashed var(--line-2)',
-                          marginTop: 10, paddingTop: 10 }
+                      ? { opacity: 0.65, marginTop: 10 }
                       : {}) }}>{row.raw_transcript}</div>}
                 {(row.corrected_transcript || transcriptOpen) && (
                   <div className="transcript-expand"

@@ -498,6 +498,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         <div className="rec-meta" style={{ visibility: live ? 'visible' : 'hidden' }}>
           <span><span className="dot-live">●</span> {phase === 'paused' ? 'Paused' : 'Recording'}</span>
           <span>{gpsRef.current.lat ? `GPS ${gpsRef.current.lat.toFixed(2)}, ${gpsRef.current.lng?.toFixed(2)}` : 'GPS —'}</span>
+          <span className="rec-meta-discard" onClick={() => setDiscardOpen(true)}>
+            <Ic i="i-trash" /> Discard</span>
         </div>
 
         {(phase === 'idle' || phase === 'error') && (
@@ -520,9 +522,6 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             </div>
             <button className="rec-finish-btn" onClick={() => void finish()}>
               <Ic i="i-check" /> Finish &amp; process
-            </button>
-            <button className="rec-discard-link" onClick={() => setDiscardOpen(true)}>
-              <Ic i="i-trash" /> Discard recording
             </button>
             <div className="rec-finish-note">Pause and resume as many times as you need. Finish when the conversation is done.</div>
           </div>
