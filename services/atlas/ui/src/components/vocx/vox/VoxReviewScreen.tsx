@@ -29,6 +29,15 @@ const dotCls = (conf?: string) =>
 const mmss = (s?: number | null) => s == null ? ''
   : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+/** Auto-size a textarea to its content — long remarks were clipped INVISIBLE
+ *  by a fixed max-height with overflow hidden. Passed as an inline ref so it
+ *  re-runs on every render (external value changes included). */
+const grow = (el: HTMLTextAreaElement | null) => {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight + 2}px`;
+};
+
 /** Chip labels the way the blueprint prints them: "entire_project" reads
  *  "Entire project", and the acronyms stay acronyms ("ppa" -> "PPA"). Free-text
  *  additions pass through as typed. */
@@ -801,7 +810,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           {items.map((it, i) => (
             <div key={i} className="intel-row">
               <span className="intel-dot" />
-              <textarea className="intel-text" disabled={readOnly} value={it} rows={1}
+              <textarea className="intel-text" disabled={readOnly} value={it} rows={1} ref={grow}
                 onChange={(e) => set(items.map((x, j) => (j === i ? e.target.value : x)))} />
               {!readOnly && <button className="intel-x" onClick={() => set(items.filter((_, j) => j !== i))}>✕</button>}
             </div>
@@ -819,7 +828,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         value={cell?.value ?? ''} onChange={(e) => set(e.target.value || null)} />;
     }
     if (def.control === 'textarea') {
-      return <textarea className={`input-field${flagged ? ' needs' : ''}`} disabled={readOnly}
+      return <textarea className={`input-field${flagged ? ' needs' : ''}`} disabled={readOnly} ref={grow}
         value={cell?.value ?? ''} onChange={(e) => set(e.target.value || null)} />;
     }
     return <input className={`input-field${flagged ? ' needs' : ''}`} disabled={readOnly}
@@ -928,7 +937,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             {kdp.map((it, i) => (
               <div key={i} className="intel-row">
                 <span className="intel-dot" />
-                <textarea className="intel-text" disabled={readOnly} value={it} rows={2}
+                <textarea className="intel-text" disabled={readOnly} value={it} rows={2} ref={grow}
                   onChange={(e) => setKdp(kdp.map((x, j) => (j === i ? e.target.value : x)))} />
                 {!readOnly && <button className="intel-x" onClick={() => setKdp(kdp.filter((_, j) => j !== i))}>✕</button>}
               </div>
@@ -940,7 +949,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             {nuances.map((it, i) => (
               <div key={i} className="intel-row">
                 <span className="intel-dot grey" />
-                <textarea className="intel-text" disabled={readOnly} value={it} rows={2}
+                <textarea className="intel-text" disabled={readOnly} value={it} rows={2} ref={grow}
                   onChange={(e) => setNuances(nuances.map((x, j) => (j === i ? e.target.value : x)))} />
                 {!readOnly && <button className="intel-x" onClick={() => setNuances(nuances.filter((_, j) => j !== i))}>✕</button>}
               </div>

@@ -220,7 +220,7 @@
 .vox-app .intel-row {display:flex; gap:10px; align-items:flex-start;}
 .vox-app .intel-dot {width:8px; height:8px; border-radius:50%; background:var(--accent); flex-shrink:0; margin-top:15px;}
 .vox-app .intel-dot.grey {background:var(--muted-2);}
-.vox-app .intel-text {flex:1 1 auto; min-width:0; width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; resize:none; line-height:1.5; overflow:hidden; white-space:pre-wrap; word-break:break-word; display:block; max-height:160px;}
+.vox-app .intel-text {flex:1 1 auto; min-width:0; width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; resize:none; line-height:1.5; overflow:hidden; white-space:pre-wrap; word-break:break-word; display:block;}
 .vox-app .intel-text:focus {border-color:var(--accent);}
 .vox-app .intel-x {width:30px; height:30px; background:var(--bg-3); border:1px solid var(--line-2); border-radius:8px; color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; margin-top:7px;}
 .vox-app .intel-x:hover {color:var(--danger); border-color:var(--danger);}
@@ -242,7 +242,7 @@
 .vox-app .input-field.needs {border-color:rgba(245,181,73,0.5); background:var(--warn-soft);}
 .vox-app .select-field {width:100%; background:var(--bg-3); border:1px solid var(--line-2); border-radius:10px; padding:11px 14px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; letter-spacing:-0.005em; appearance:none; background-image:url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%239AA8B4' d='M1 1l5 5 5-5'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; cursor:pointer;}
 .vox-app .select-field:focus {border-color:var(--accent);}
-.vox-app textarea.input-field {resize:none; line-height:1.5; min-height:44px; overflow:hidden; display:block; max-height:160px;}
+.vox-app textarea.input-field {resize:none; line-height:1.5; min-height:44px; overflow:hidden; display:block;}
 .vox-app .multi-select {display:flex; flex-wrap:wrap; gap:6px;}
 .vox-app .ms-opt {padding:8px 12px; border-radius:8px; background:var(--bg-3); border:1px solid var(--line-2); color:var(--text-2); font-size:12px; cursor:pointer; user-select:none;}
 .vox-app .ms-opt.on {background:var(--accent-soft); border-color:var(--accent); color:var(--accent);}
