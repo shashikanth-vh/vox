@@ -796,3 +796,15 @@ def test_streamed_takes_belong_to_their_recorder(tmp_path, monkeypatch):
     # the owner still passes everywhere
     assert call("GET", "/v1/vox/stream/audio",
                 {"capture_id": "cap-own-1", "seg": "0", "rm": "Divya"})[0] == 200
+
+
+def test_glossary_rules_cover_venue_taxonomy_and_multi_ask():
+    """The field round that motivated these: project geographies dumped into the
+    meeting-venue field, and a loan + syndication meeting collapsing into one."""
+    from app.vocx.pipeline.glossary import build_known_names_block
+    block = build_known_names_block([])
+    assert "MEETING VENUE only" in block
+    assert "NEVER fill location" in block
+    assert "Solar-Developer" in block and "subsector_details" in block
+    assert "SEVERAL asks" in block
+    assert "Never sum the amounts" in block
