@@ -115,6 +115,60 @@ export const voxService = {
     }
   },
 
+  // ---- streamed capture: the server holds the take WHILE it records --------
+
+  /** Append a chunk batch of an in-flight recording. Fire-and-forget cadence —
+   *  the caller retries on failure; recording is never disturbed. */
+  async streamAppend(chunk: Blob, opts: {
+    captureId: string; seg: number; mime?: string; mode?: string;
+    consentId?: string; elapsed?: number; rm?: string;
+  }): Promise<{ ok: boolean; bytes_total?: number }> {
+    const r = await vocxClient.post('/v1/vox/stream', await chunk.arrayBuffer(), {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: 30_000,
+      params: {
+        capture_id: opts.captureId, seg: opts.seg, mime: opts.mime || '',
+        mode: opts.mode || '', consent_id: opts.consentId || '',
+        elapsed: opts.elapsed ?? '', rm: opts.rm || '',
+      },
+    });
+    return r.data;
+  },
+
+  /** The caller's streamed takes that never finished — the resume card. */
+  async streamUnfinished(): Promise<{ capture_id: string; elapsed: number;
+    segments: number; mode: string; consent_id: string }[]> {
+    const r = await vocxClient.get('/v1/vox/stream/unfinished');
+    return r.data?.takes || [];
+  },
+
+  /** Finish a streamed take — audio is already server-side, segment by segment. */
+  async streamFinish(opts: {
+    captureId: string; mode?: string; durationSeconds?: number;
+    lat?: number; lng?: number; consentId?: string; email?: string; rm?: string;
+  }): Promise<{ conversation_id: string; replayed?: boolean }> {
+    const r = await vocxClient.post('/v1/vox/stream/finish', null, {
+      timeout: 60_000,
+      params: {
+        capture_id: opts.captureId, mode: opts.mode || 'post_meeting',
+        duration: opts.durationSeconds ?? '', lat: opts.lat ?? '', lng: opts.lng ?? '',
+        consent_id: opts.consentId ?? '', email: opts.email || '', rm: opts.rm || '',
+        ts: new Date().toISOString(),
+      },
+    });
+    if (!r.data?.ok) throw new Error(r.data?.error || 'finish failed');
+    return r.data;
+  },
+
+  streamDiscard(captureId: string): Promise<any> {
+    return vocxClient.post('/v1/vox/stream/discard', null, { params: { capture_id: captureId } });
+  },
+
+  /** URL of one stored segment for the resume card's player. */
+  streamAudioUrl(captureId: string, seg: number): string {
+    return `${vocxClient.defaults.baseURL}/v1/vox/stream/audio?capture_id=${encodeURIComponent(captureId)}&seg=${seg}`;
+  },
+
   /** Kick (or retry) processing — the Queue's "Retry & open". */
   async process(conversationId: string): Promise<void> {
     const r = await vocxClient.post('/v1/vox/process', { conversation_id: conversationId });

@@ -694,3 +694,79 @@ def test_transcribe_budget_scales_with_the_take():
     finally:
         runner_mod._run_with_timeout = orig
     assert seen["transcribe"] == 1800                # the floor holds for notes
+
+
+# ------------------------------------------------------------ streamed capture
+
+def test_segment_store_appends_reads_finalizes_and_caps(tmp_path):
+    from app.vocx.speech.segment_store import SegmentStore, SegmentStoreError
+    st = SegmentStore(str(tmp_path))
+    got = st.append("cap-abc-123", 0, b"hello ", rm="Ananda H", mime="audio/webm",
+                    mode="post_meeting", elapsed=5)
+    assert got["bytes_total"] == 6
+    st.append("cap-abc-123", 0, b"world", elapsed=9)
+    st.append("cap-abc-123", 1, b"segment two", elapsed=20)   # a new browser session
+    m = st.manifest("cap-abc-123")
+    assert m["bytes_total"] == len(b"hello world") + len(b"segment two")
+    assert m["elapsed"] == 20 and m["rm"] == "Ananda H"
+    paths = st.segment_paths("cap-abc-123")
+    assert [open(p, "rb").read() for p in paths] == [b"hello world", b"segment two"]
+    # the caller's resume list finds it; a stranger's does not
+    assert st.unfinished_for("ananda h")[0]["segments"] == 2
+    assert st.unfinished_for("someone else") == []
+    # finalize is idempotent and closes the door to further appends
+    assert st.finalize("cap-abc-123") == paths
+    assert st.finalize("cap-abc-123") == paths
+    import pytest as _pt
+    with _pt.raises(SegmentStoreError):
+        st.append("cap-abc-123", 2, b"late")
+    with _pt.raises(SegmentStoreError):
+        st.append("../evil", 0, b"x")                       # id charset wall
+    st.discard("cap-abc-123")
+    assert st.manifest("cap-abc-123") is None
+
+
+def test_stream_endpoints_append_list_audio_discard(tmp_path, monkeypatch):
+    from app.vocx.core.atlas import AtlasStore
+    from app.vocx.core.server import VocxApp
+    monkeypatch.setenv("VOCX_SEGMENTS_DIR", str(tmp_path))
+    app = VocxApp(store=AtlasStore({}), config={"thresholds": {}, "scores": {}})
+
+    def post(path, q, body=b""):
+        return app.handle("POST", path, {k: [v] for k, v in q.items()}, body)
+    def get(path, q):
+        return app.handle("GET", path, {k: [v] for k, v in q.items()}, b"")
+
+    code, _, out = post("/v1/vox/stream", {"capture_id": "cap-xyz-1", "seg": "0",
+                                           "rm": "Divya", "elapsed": "12"}, b"audio-bytes")
+    assert code == 200 and json.loads(out)["bytes_total"] == 11
+    code, _, out = get("/v1/vox/stream/unfinished", {"rm": "Divya"})
+    takes = json.loads(out)["takes"]
+    assert code == 200 and takes[0]["capture_id"] == "cap-xyz-1"
+    code, ctype, data = get("/v1/vox/stream/audio", {"capture_id": "cap-xyz-1", "seg": "0"})
+    assert code == 200 and data == b"audio-bytes"
+    code, _, out = post("/v1/vox/stream/discard", {"capture_id": "cap-xyz-1"})
+    assert code == 200
+    code, _, out = get("/v1/vox/stream/unfinished", {"rm": "Divya"})
+    assert json.loads(out)["takes"] == []
+    # oversized batch refused with a name, storage untouched
+    code, _, out = post("/v1/vox/stream", {"capture_id": "cap-xyz-2", "seg": "0"},
+                        b"x" * (4 * 1024 * 1024 + 1))
+    assert code == 413
+
+
+def test_multi_segment_transcripts_merge_in_order(tmp_path):
+    from app.vocx.speech.segment_store import SegmentStore, transcribe_segments
+    st = SegmentStore(str(tmp_path))
+    st.append("cap-mrg-1", 0, b"a")
+    st.append("cap-mrg-1", 1, b"b")
+
+    class EchoTranscriber:
+        def transcribe(self, path, prompt=None, **kw):
+            name = path.rsplit("/", 1)[-1]
+            return {"text": f"text-of-{name}", "segments": [{"text": name}], "language": "en"}
+
+    got = transcribe_segments(st.segment_paths("cap-mrg-1"), EchoTranscriber())
+    assert got["text"] == "text-of-seg000.webm\ntext-of-seg001.webm"
+    assert [s["text"] for s in got["segments"]] == ["seg000.webm", "seg001.webm"]
+    assert got["language"] == "en"

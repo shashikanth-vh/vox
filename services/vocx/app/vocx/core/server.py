@@ -106,6 +106,19 @@ class VocxApp:
         # is a remote service.
         workers = int(os.environ.get("VOCX_PIPELINE_WORKERS", "3") or 3)
         self._vox_workers = __import__("threading").BoundedSemaphore(max(1, workers))
+        self._segments = None  # lazy SegmentStore (streamed in-progress takes)
+
+    def segment_store(self):
+        """Where in-flight recordings stream to, chunk batches at a time — the
+        durable cross-device copy of a take that is still being made."""
+        if self._segments is None:
+            from ..speech.segment_store import SegmentStore
+            base = (os.environ.get("VOCX_SEGMENTS_DIR")
+                    or os.path.join(self.config.get("google", {}).get(
+                        "tokens_dir", "vocx_tokens"), "vox_segments"))
+            os.makedirs(base, exist_ok=True)
+            self._segments = SegmentStore(base)
+        return self._segments
 
     def transcriber(self):
         if self._transcriber is None:
@@ -339,6 +352,16 @@ class VocxApp:
             return self._vox_process(body)
         if method == "POST" and path == "/v1/vox/follow_up":
             return self._vox_follow_up(body)
+        if method == "POST" and path == "/v1/vox/stream":
+            return self._vox_stream_append(query, body)
+        if method == "GET" and path == "/v1/vox/stream/unfinished":
+            return self._vox_stream_unfinished(query)
+        if method == "GET" and path == "/v1/vox/stream/audio":
+            return self._vox_stream_audio(query)
+        if method == "POST" and path == "/v1/vox/stream/finish":
+            return self._vox_stream_finish(query)
+        if method == "POST" and path == "/v1/vox/stream/discard":
+            return self._vox_stream_discard(query)
         if method == "POST" and path == "/v1/vox/capture":
             return self._vox_capture(query, body)
         if method == "GET" and path == "/v1/spec":
@@ -468,6 +491,16 @@ class VocxApp:
             )
 
             def transcribe(audio_ref: str) -> dict:
+                # A STREAMED take ("vox-seg:{capture_id}") transcribes segment by
+                # segment, in order, transcripts merged — cross-session segments
+                # are separate streams and are never byte-concatenated.
+                if audio_ref.startswith("vox-seg:"):
+                    from ..speech.segment_store import transcribe_segments
+                    paths = self.segment_store().segment_paths(audio_ref[len("vox-seg:"):])
+                    if not paths:
+                        raise RuntimeError(f"streamed take {audio_ref!r} holds no audio")
+                    return transcribe_segments(paths, self.transcriber(),
+                                               prompt=self.stt_prompt())
                 # A local-archive ref IS a file path — hand it over as one (so test
                 # fixtures' .txt sidecars work too). Anything else (S3 keys) goes
                 # through the store's playback, which yields ("bytes"|"url", data).
@@ -579,6 +612,115 @@ class VocxApp:
         except Exception as e:  # noqa: BLE001 — API refusal is a told truth
             return 200, "application/json", _j({"ok": False, "error": str(e)[:300]})
 
+    # ---- streamed capture: the server-side copy of a take in progress -------
+
+    def _vox_stream_append(self, query, body: bytes):
+        """Append a chunk batch to an in-flight take. Called every few seconds
+        while the mic is open — a failure here must never disturb recording, so
+        every refusal is a NAMED 4xx the panel can retry or ignore."""
+        from ..speech.segment_store import SegmentStoreError
+        if len(body) > 4 * 1024 * 1024:
+            return 413, "application/json", _j({"ok": False, "error": "batch too large"})
+        try:
+            got = self.segment_store().append(
+                _one(query, "capture_id") or "",
+                int(_one(query, "seg") or 0),
+                bytes(body),
+                rm=_one(query, "rm") or "",
+                mime=_one(query, "mime") or "",
+                mode=_one(query, "mode") or "",
+                consent_id=_one(query, "consent_id") or "",
+                elapsed=int(_one(query, "elapsed") or 0),
+            )
+        except SegmentStoreError as e:
+            return 400, "application/json", _j({"ok": False, "error": str(e)})
+        except (OSError, ValueError) as e:
+            self.log.warning("segment append failed: %s", e)
+            return 500, "application/json", _j({"ok": False, "error": "storage hiccup — retry"})
+        return 200, "application/json", _j({"ok": True, **got})
+
+    def _vox_stream_unfinished(self, query):
+        """The caller's takes that streamed but never finished — the resume card."""
+        rm = _one(query, "rm") or ""
+        try:
+            takes = self.segment_store().unfinished_for(rm)
+        except OSError:
+            takes = []
+        return 200, "application/json", _j({"ok": True, "takes": takes})
+
+    def _vox_stream_audio(self, query):
+        """Playback of one stored segment, for the resume card's player."""
+        from ..speech.audio_store import sniff_audio_type
+        from ..speech.segment_store import SegmentStoreError
+        try:
+            paths = self.segment_store().segment_paths(_one(query, "capture_id") or "")
+            idx = int(_one(query, "seg") or 0)
+        except (SegmentStoreError, ValueError):
+            return 400, "application/json", _j({"ok": False, "error": "bad request"})
+        if not (0 <= idx < len(paths)):
+            return 404, "application/json", _j({"ok": False, "error": "no such segment"})
+        try:
+            with open(paths[idx], "rb") as fh:
+                data = fh.read()
+        except OSError:
+            return 404, "application/json", _j({"ok": False, "error": "segment unreadable"})
+        return 200, sniff_audio_type(data), data
+
+    def _vox_stream_finish(self, query):
+        """Finish a STREAMED take: the audio is already here, segment by segment.
+        Mark it final, register the conversation with a segment reference, and
+        kick the pipeline — same tail as the one-shot capture door."""
+        from ..speech.segment_store import SegmentStoreError
+        cap_id = _one(query, "capture_id") or ""
+        mode = _one(query, "mode") or "post_meeting"
+        if mode not in ("post_meeting", "live"):
+            return 400, "application/json", _j({"ok": False, "error": "mode must be post_meeting|live"})
+        try:
+            self.segment_store().finalize(cap_id)
+        except SegmentStoreError as e:
+            return 400, "application/json", _j({"ok": False, "error": str(e)})
+        rm = _one(query, "rm") or "unknown"
+        return self._vox_register_and_kick(query, mode, rm, f"vox-seg:{cap_id}", cap_id)
+
+    def _vox_stream_discard(self, query):
+        from ..speech.segment_store import SegmentStoreError
+        try:
+            self.segment_store().discard(_one(query, "capture_id") or "")
+        except SegmentStoreError as e:
+            return 400, "application/json", _j({"ok": False, "error": str(e)})
+        return 200, "application/json", _j({"ok": True})
+
+    def _vox_register_and_kick(self, query, mode: str, rm: str, ref: str, cap_id: str):
+        """Create (or replay) the register conversation for stored audio and kick
+        the pipeline — shared by the one-shot capture door and the streamed
+        finish. The audio is SAFE before this runs; failures say so."""
+        try:
+            row = self.vox_runner().register.create(
+                recording_mode=mode,
+                recorder_email=_one(query, "email") or None,
+                recorder_name=rm if rm != "unknown" else None,
+                capture_id=cap_id or None,
+                audio_ref=ref,
+                duration_seconds=int(_one(query, "duration") or 0) or None,
+                latitude=float(_one(query, "lat")) if _one(query, "lat") else None,
+                longitude=float(_one(query, "lng")) if _one(query, "lng") else None,
+                consent_id=_one(query, "consent_id") or None,
+            )
+        except Exception as e:  # noqa: BLE001 — the audio is SAFE; say so honestly
+            self.log.exception("VOX capture: register create failed")
+            return 502, "application/json", _j({
+                "ok": False, "stored_audio": ref,
+                "error": f"the register did not accept the conversation: {e}"})
+        cid = row.get("id")
+        if row.get("replayed") and row.get("status") in ("ready", "submitted"):
+            return 200, "application/json", _j({"ok": True, "conversation_id": cid,
+                                                "replayed": True, "status": row.get("status")})
+        code, ctype, payload = self._vox_process(_j({"conversation_id": cid}))
+        out = json.loads(payload)
+        return 202, "application/json", _j({"ok": True, "conversation_id": cid,
+                                            "status": row.get("status"),
+                                            "processing": out.get("ok", False)})
+
     def _vox_capture(self, query, body: bytes):
         """The new-flow capture door, one POST from the panel: store the audio
         locally, create (or REPLAY, by capture_id) the register conversation row,
@@ -607,32 +749,7 @@ class VocxApp:
                           _one(query, "content_type") or "")
         if not ref:
             return 500, "application/json", _j({"ok": False, "error": "audio could not be stored"})
-        try:
-            row = self.vox_runner().register.create(
-                recording_mode=mode,
-                recorder_email=_one(query, "email") or None,
-                recorder_name=rm if rm != "unknown" else None,
-                capture_id=cap_id or None,
-                audio_ref=ref,
-                duration_seconds=int(_one(query, "duration") or 0) or None,
-                latitude=float(_one(query, "lat")) if _one(query, "lat") else None,
-                longitude=float(_one(query, "lng")) if _one(query, "lng") else None,
-                consent_id=_one(query, "consent_id") or None,
-            )
-        except Exception as e:  # noqa: BLE001 — the audio is SAFE; say so honestly
-            self.log.exception("VOX capture: register create failed")
-            return 502, "application/json", _j({
-                "ok": False, "stored_audio": ref,
-                "error": f"the register did not accept the conversation: {e}"})
-        cid = row.get("id")
-        if row.get("replayed") and row.get("status") in ("ready", "submitted"):
-            return 200, "application/json", _j({"ok": True, "conversation_id": cid,
-                                                "replayed": True, "status": row.get("status")})
-        code, ctype, payload = self._vox_process(_j({"conversation_id": cid}))
-        out = json.loads(payload)
-        return 202, "application/json", _j({"ok": True, "conversation_id": cid,
-                                            "status": row.get("status"),
-                                            "processing": out.get("ok", False)})
+        return self._vox_register_and_kick(query, mode, rm, ref, cap_id)
 
     def _vox_process(self, body: bytes):
         """Kick (or resume) processing for a conversation and return AT ONCE —

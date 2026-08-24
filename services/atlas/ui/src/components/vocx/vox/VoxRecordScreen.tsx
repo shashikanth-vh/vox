@@ -59,14 +59,54 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const finishingRef = useRef(false);
   const finishRef = useRef<() => Promise<void>>(async () => {});
   const capRef = useRef(CAP_SECONDS);
+  // ---- streaming: the server holds the take WHILE it records ----------------
+  // Chunks flush every few seconds; a failed flush retries on the next beat and
+  // NEVER disturbs the recording. Cross-session resume starts the next segment.
+  const streamSegRef = useRef(0);
+  const flushedRef = useRef(0);
+  const flushingRef = useRef(false);
+  const streamedOkRef = useRef(false);
+  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [serverTakes, setServerTakes] = useState<{ capture_id: string; elapsed: number;
+    segments: number; mode: string; consent_id: string }[]>([]);
+
+  const flushToServer = async () => {
+    if (flushingRef.current) return;
+    const end = chunksRef.current.length;
+    if (end <= flushedRef.current) return;
+    flushingRef.current = true;
+    try {
+      const batch = new Blob(chunksRef.current.slice(flushedRef.current, end));
+      await voxService.streamAppend(batch, {
+        captureId: captureIdRef.current, seg: streamSegRef.current,
+        mime: recRef.current?.mimeType || 'audio/webm',
+        mode: mode === 'B' ? 'live' : 'post_meeting',
+        consentId: consentIdRef.current || '',
+        elapsed: elapsedRef.current, rm: user.full,
+      });
+      flushedRef.current = end;
+      streamedOkRef.current = true;
+    } catch { /* next beat retries; IndexedDB still holds everything */ }
+    finally { flushingRef.current = false; }
+  };
+  const startFlushing = () => {
+    if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+    flushTimerRef.current = setInterval(() => { void flushToServer(); }, 10_000);
+  };
+  const stopFlushing = () => {
+    if (flushTimerRef.current) { clearInterval(flushTimerRef.current); flushTimerRef.current = null; }
+  };
 
   useEffect(() => () => {
     if (tickRef.current) clearInterval(tickRef.current);
     if (waveRef.current) clearInterval(waveRef.current);
   }, []);
   useEffect(() => {
-    if (phase === 'idle') void loadUnsentTake().then(setRecovered);
+    if (phase !== 'idle') return;
+    void loadUnsentTake().then(setRecovered);
+    voxService.streamUnfinished().then(setServerTakes).catch(() => {});
   }, [phase]);
+  useEffect(() => () => stopFlushing(), []);
   useEffect(() => {
     if (!['recording', 'paused', 'uploading', 'error'].includes(phase)) return;
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
@@ -105,7 +145,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     } finally { setConsentBusy(false); }
   };
 
-  const start = async () => {
+  const start = async (resume?: { capture_id: string; elapsed: number;
+    segments: number; mode: string; consent_id: string }) => {
     setErr('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -134,15 +175,28 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       };
       rec.start(1000);
       recRef.current = rec;
-      captureIdRef.current = `vox-${crypto.randomUUID()}`;
-      capRef.current = mode === 'B' ? CAP_LIVE_SECONDS : CAP_SECONDS;
-      segStartRef.current = 0;
-      elapsedRef.current = 0;
+      if (resume) {
+        // continue the SAME take: next server segment, clock carried forward
+        captureIdRef.current = resume.capture_id;
+        streamSegRef.current = resume.segments;
+        elapsedRef.current = resume.elapsed || 0;
+        if (resume.mode === 'live') { setMode('B'); consentIdRef.current = resume.consent_id || consentIdRef.current; }
+        capRef.current = resume.mode === 'live' ? CAP_LIVE_SECONDS : CAP_SECONDS;
+      } else {
+        captureIdRef.current = `vox-${crypto.randomUUID()}`;
+        streamSegRef.current = 0;
+        elapsedRef.current = 0;
+        capRef.current = mode === 'B' ? CAP_LIVE_SECONDS : CAP_SECONDS;
+      }
+      flushedRef.current = 0;
+      streamedOkRef.current = !!resume;
+      segStartRef.current = elapsedRef.current;
       finishingRef.current = false;
-      setSegments([]); setElapsed(0);
+      setSegments([]); setElapsed(elapsedRef.current);
       setRecording(true);
       setPhase('recording');
       startTick();
+      startFlushing();
     } catch {
       setErr('The microphone is not available. Allow mic access and try again.');
       setPhase('error');
@@ -158,6 +212,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       stopWave();
       setSegments((s) => [...s, elapsedRef.current - segStartRef.current]);
       setPhase('paused');
+      void flushToServer();
     } else if (rec.state === 'paused') {
       rec.resume();
       segStartRef.current = elapsedRef.current;
@@ -179,18 +234,38 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     if (!rec || finishingRef.current) return;
     finishingRef.current = true;
     setPhase('uploading');
+    stopFlushing();
     const stopped = new Promise<void>((resolve) => { rec.onstop = () => resolve(); });
     stopStream();
     await stopped;
     const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
+    const common = {
+      mode: (mode === 'B' ? 'live' : 'post_meeting') as 'live' | 'post_meeting',
+      consentId: consentIdRef.current || undefined,
+      rm: user.full, email: getSession()?.email || '',
+      durationSeconds: elapsedRef.current, ...gpsRef.current,
+    };
+    // Streamed-first: the audio is already on the server chunk by chunk — the
+    // last batch flushes, then finish is a tiny POST. Any failure in this path
+    // falls back to the one-shot upload of the complete local blob; the server
+    // segments are then redundant and are discarded best-effort.
+    try {
+      if (streamedOkRef.current || flushedRef.current > 0) {
+        await flushToServer();
+        if (flushedRef.current >= chunksRef.current.length) {
+          const out = await voxService.streamFinish({
+            captureId: captureIdRef.current, ...common });
+          void deleteTake(captureIdRef.current);
+          setRecording(false);
+          onCaptured(out.conversation_id);
+          return;
+        }
+      }
+    } catch { /* fall through to the one-shot path */ }
     try {
       const out = await voxService.capture(blob, {
-        captureId: captureIdRef.current,
-        mode: mode === 'B' ? 'live' : 'post_meeting',
-        consentId: consentIdRef.current || undefined,
-        rm: user.full, email: getSession()?.email || '',
-        durationSeconds: elapsedRef.current, ...gpsRef.current,
-      });
+        captureId: captureIdRef.current, ...common });
+      void voxService.streamDiscard(captureIdRef.current).catch(() => {});
       void deleteTake(captureIdRef.current);
       setRecording(false);
       onCaptured(out.conversation_id);
@@ -223,6 +298,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
 
   const discardConfirm = () => {
     stopStream();
+    stopFlushing();
+    void voxService.streamDiscard(captureIdRef.current).catch(() => {});
     void deleteTake(captureIdRef.current);
     chunksRef.current = [];
     setRecording(false);
@@ -341,10 +418,50 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
           <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
             onClick={() => void sendRecovered(recovered)}>Send it now</button>
           <button className="btn btn-ghost btn-sm" onClick={() => {
-            void deleteTake(recovered.id); setRecovered(null);
+            void deleteTake(recovered.id);
+            void voxService.streamDiscard(recovered.id).catch(() => {});
+            setRecovered(null);
+            setServerTakes((t) => t.filter((x) => x.capture_id !== recovered.id));
           }}>Discard</button>
         </div>
       )}
+
+      {/* A take streamed to the SERVER — resumable from any device. The local
+          IndexedDB card wins when both refer to the same take (it also holds the
+          last unflushed seconds); this card covers every other scenario. */}
+      {phase === 'idle' && serverTakes.filter((t) => t.capture_id !== recovered?.id)
+        .slice(0, 1).map((t) => (
+        <div key={t.capture_id} className="card"
+          style={{ marginTop: 14, borderColor: 'rgba(46,212,166,0.5)' }}>
+          <div className="card-eyebrow" style={{ color: 'var(--accent)' }}>
+            Recording in progress — saved on the server</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', margin: '6px 0 10px' }}>
+            {mmss(t.elapsed)} across {t.segments} segment{t.segments === 1 ? '' : 's'}
+            {t.mode === 'live' ? ' · live meeting' : ''} — safe even if the browser or
+            device changed. Listen, continue, or finish it now.
+          </div>
+          {Array.from({ length: t.segments }, (_, i) => (
+            <audio key={i} controls preload="none" style={{ width: '100%', marginBottom: 8, height: 34 }}
+              src={voxService.streamAudioUrl(t.capture_id, i)} />
+          ))}
+          <button className="btn btn-primary btn-sm" style={{ marginBottom: 8 }}
+            onClick={() => void start(t)}>Continue recording</button>
+          <button className="btn btn-ghost btn-sm" style={{ marginBottom: 8 }} onClick={() => {
+            setPhase('uploading');
+            voxService.streamFinish({
+              captureId: t.capture_id, mode: t.mode,
+              durationSeconds: t.elapsed, consentId: t.consent_id || undefined,
+              rm: user.full, email: getSession()?.email || '',
+            }).then((out) => { setRecording(false); onCaptured(out.conversation_id); })
+              .catch((e) => { setErr(String(e?.message || e)); setPhase('idle'); });
+          }}>Finish &amp; process now</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => {
+            if (!window.confirm('Discard this recording from the server? This cannot be undone.')) return;
+            void voxService.streamDiscard(t.capture_id).catch(() => {});
+            setServerTakes((x) => x.filter((y) => y.capture_id !== t.capture_id));
+          }}>Discard</button>
+        </div>
+      ))}
 
       <div className="rec-stage">
         <div className={`rec-state-label ${live ? 'live' : 'idle'}`}>{stateLabel}</div>
@@ -375,8 +492,8 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
 
         {(phase === 'idle' || phase === 'error') && (
           <div className="rec-controls-idle" style={{ display: 'flex' }}>
-            <button className="rec-btn-record" onClick={phase === 'error' && chunksRef.current.length
-              ? retryUpload : start} aria-label="Start recording">
+            <button className="rec-btn-record" onClick={() => (phase === 'error' && chunksRef.current.length
+              ? void retryUpload() : void start())} aria-label="Start recording">
               <div className="circle"><div className="dot" /></div>
               <div className="lbl">{phase === 'error' && chunksRef.current.length ? 'Send again' : 'Record'}</div>
             </button>

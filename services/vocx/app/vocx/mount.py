@@ -180,6 +180,8 @@ def build_vocx_router(settings: Any) -> APIRouter:
         "/v1/reports", "/v1/reports/get", "/v1/reports/print", "/v1/reports/pdf",
         "/v1/reports/save", "/v1/reports/delete",
         "/v1/audio", "/v1/auth/status", "/v1/auth/start", "/v1/calendar/test", "/v1/vox/follow_up",
+        "/v1/vox/stream", "/v1/vox/stream/unfinished", "/v1/vox/stream/audio",
+        "/v1/vox/stream/finish", "/v1/vox/stream/discard",
         "/v1/suggest", "/v1/template_fill",
     }
 
@@ -227,6 +229,11 @@ def build_vocx_router(settings: Any) -> APIRouter:
         ("/v1/vox/capture", ["POST"], "Audio in → conversation created → pipeline kicked"),
         ("/v1/vox/process", ["POST"], "Kick or retry processing for a conversation"),
         ("/v1/vox/follow_up", ["POST"], "Create the detected follow-up on the RM\'s Google Calendar"),
+        ("/v1/vox/stream", ["POST"], "Append a chunk batch to an in-flight recording"),
+        ("/v1/vox/stream/unfinished", ["GET"], "The caller's streamed takes awaiting finish"),
+        ("/v1/vox/stream/audio", ["GET"], "Play back one stored segment"),
+        ("/v1/vox/stream/finish", ["POST"], "Finish a streamed take → conversation + pipeline"),
+        ("/v1/vox/stream/discard", ["POST"], "Discard a streamed take"),
     ]
 
     def _make_handler(route_path: str):
