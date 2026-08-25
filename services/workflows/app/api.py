@@ -4046,6 +4046,17 @@ def create_app() -> FastAPI:
                 reason = ("Upload the sanction letter first — 'Enter sanction terms' "
                           "files it and reads the CP conditions out of it; the "
                           "checklist opens from what the letter says.")
+            # Disbursement FOLLOWS the CP approval — its own description says so.
+            # Without an approved checklist (or the minted evidence / a stage that
+            # already required it), the money door stays shut with the reason named.
+            if (spec["key"] == "disburse" and enabled
+                    and latest_checklist_status != "Approved"
+                    and "cp_cs_completion" not in on_file
+                    and stage not in ("Ready for Disbursement", "Disbursed")):
+                enabled = False
+                reason = ("Disbursement follows the CP approval — prepare the CP "
+                          "checklist and get it approved first; its approval mints "
+                          "the evidence the money moves on.")
             # The committee decides ON the CAM: no CAM on the line, nothing to send.
             if spec["key"] == "deal-structuring.start" and enabled and not cam_ready:
                 enabled = False

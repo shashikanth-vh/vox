@@ -39,6 +39,7 @@ export default function DisburseDialog({ action, onClose, onDone }: {
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
   const [unmet, setUnmet] = useState<string[]>([]);
+  const [hasApprovedCp, setHasApprovedCp] = useState(true);
   const [pkg, setPkg] = useState<any | null>(null);
   const [sched, setSched] = useState<any | null>(null);
   // Step 1 (request)
@@ -77,6 +78,7 @@ export default function DisburseDialog({ action, onClose, onDone }: {
       // whose conditions had been reworked, that is a stale list of unmet CPs.
       const approved = latestBy(lists.filter((l) => l.status === 'Approved'),
         'checklist_version');
+      setHasApprovedCp(!!approved);
       setUnmet(((approved?.items || []) as any[])
         .filter((i) => i.condition_type === 'CP' && String(i.status) !== 'Completed')
         .map((i) => `${i.label || i.key} — ${i.status}`));
@@ -93,6 +95,10 @@ export default function DisburseDialog({ action, onClose, onDone }: {
   }, [open, lendingId]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const status: string = pkg?.status || '';
+  // Disbursement follows the CP approval: with no APPROVED checklist on the line
+  // there is no clean bill to print and nothing to send — "zero conditions" is a
+  // missing checklist, never a completed one.
+
   const tranches: any[] = sched?.items || [];
   // Which step is LIVE. A rejected answer reopens the request step.
   const step: 1 | 2 | 3 =
@@ -187,16 +193,25 @@ export default function DisburseDialog({ action, onClose, onDone }: {
               the request — waived and deferred items with their decisions — and
               their collection continues in parallel.
             </Typography>
-            <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.2 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 0.4 }}>
-                {unmet.length
-                  ? `Conditions disclosed in the request (${unmet.length})`
-                  : 'Every CP condition is completed — the request goes clean'}
-              </Typography>
-              {unmet.map((u) => (
-                <Typography key={u} sx={{ fontSize: 12, py: 0.2 }}>• {u}</Typography>
-              ))}
-            </Box>
+            {!hasApprovedCp && (
+              <Alert severity="warning" sx={{ mb: 1.2, py: 0.2, fontSize: 12.4 }}>
+                No approved CP checklist on this line — disbursement follows the CP
+                approval. Prepare the CP checklist and get it approved first; its
+                approval mints the evidence the money moves on.
+              </Alert>
+            )}
+            {hasApprovedCp && (
+              <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 1, p: 1.2, mb: 1.2 }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 0.4 }}>
+                  {unmet.length
+                    ? `Conditions disclosed in the request (${unmet.length})`
+                    : 'Every CP condition is completed — the request goes clean'}
+                </Typography>
+                {unmet.map((u) => (
+                  <Typography key={u} sx={{ fontSize: 12, py: 0.2 }}>• {u}</Typography>
+                ))}
+              </Box>
+            )}
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
               <TextField size="small" type="number" label="Proposed drawdown ₹ Cr" required
                 value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -322,7 +337,7 @@ export default function DisburseDialog({ action, onClose, onDone }: {
         <Button onClick={onClose} variant="outlined" disabled={busy}>Close</Button>
         {step === 1 && (
           <Button onClick={() => void sendRequest()} variant="contained"
-            disabled={busy || loading}
+            disabled={busy || loading || !hasApprovedCp}
             startIcon={<SendIcon sx={{ fontSize: 15 }} />}>
             {busy ? 'Sending…' : 'Send disbursement request'}
           </Button>
