@@ -24,8 +24,9 @@ const SOURCE_BADGE: Record<string, [string, string]> = {
 
 // key_intel arrives in whatever shape its writer used: VocX a dict, its reports a
 // bullet list, older rows a plain string. Flatten every shape to label/text lines.
-// Two dict keys are structural, not intel: `points` is the bullet list itself
-// (each its own line), and `use_cases` is the lane tag set rendered as chips.
+// Three dict keys are structural, not intel: `points` is the bullet list itself
+// (each its own line), `use_cases` is the lane tag set rendered as chips, and
+// `locations` is the per-lane geography map rendered as its own labelled line.
 function intelLines(ki: any): { label?: string; text: string }[] {
   if (!ki) return [];
   if (typeof ki === 'string') return ki.trim() ? [{ text: ki }] : [];
@@ -36,7 +37,7 @@ function intelLines(ki: any): { label?: string; text: string }[] {
   const points: { label?: string; text: string }[] = Array.isArray(ki.points)
     ? ki.points.filter(Boolean).map((p: any) => ({ text: String(p) })) : [];
   const rest = Object.entries(ki)
-    .filter(([k]) => k !== 'points' && k !== 'use_cases')
+    .filter(([k]) => k !== 'points' && k !== 'use_cases' && k !== 'locations')
     .filter(([, v]) => v != null && String(v).trim() !== '')
     .map(([k, v]) => ({ label: k.replace(/_/g, ' '), text: Array.isArray(v) ? (v as any[]).join('; ') : String(v) }));
   return [...points, ...rest];
@@ -48,6 +49,21 @@ function intelLines(ki: any): { label?: string; text: string }[] {
 const LANE_LABEL: Record<string, string> = {
   lending: 'LENDING', syndication: 'SYND', asset_monetisation: 'ASSET MON',
 };
+
+// Per-lane project/asset geographies from a VOX conversation — "Lending —
+// Tamil Nadu · Asset monetisation — Chikkaballapur" on one line.
+const LANE_NAME: Record<string, string> = {
+  lending: 'Lending', syndication: 'Syndication', asset_monetisation: 'Asset monetisation',
+};
+
+function locationLine(ki: any): string {
+  const locs = ki && !Array.isArray(ki) && typeof ki === 'object' ? ki.locations : null;
+  if (!locs || typeof locs !== 'object' || Array.isArray(locs)) return '';
+  return Object.entries(locs)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => `${LANE_NAME[k] || k.replace(/_/g, ' ')} — ${v}`)
+    .join(' · ');
+}
 
 function laneChips(ki: any): string[] {
   const lanes = ki && !Array.isArray(ki) && typeof ki === 'object' ? ki.use_cases : null;
@@ -82,8 +98,9 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
   const [showTranscript, setShowTranscript] = useState(false);
   const intel = intelLines(i.keyIntel);
   const lanes = laneChips(i.keyIntel);
+  const laneLocs = locationLine(i.keyIntel);
   const hasDepth = !!(intel.length || i.fullNotes || i.outcome || i.nextSteps?.length
-    || i.transcript || i.attendees?.length || i.location || i.nextMeetingDate);
+    || i.transcript || i.attendees?.length || i.location || i.nextMeetingDate || laneLocs);
   const badge = i.source ? SOURCE_BADGE[i.source] : undefined;
 
   return (
@@ -116,6 +133,7 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
             // A rich VOX row would otherwise stretch the drawer to several screens; the
             // detail keeps its own window and scrolls inside it.
             maxHeight: 340, overflowY: 'auto' }}>
+          {laneLocs && <Field label="Project locations">📍 {laneLocs}</Field>}
           {i.fullNotes && <Field label="Notes"><span style={{ whiteSpace: 'pre-wrap' }}>{i.fullNotes}</span></Field>}
           {i.outcome && <Field label="Outcome"><span style={{ whiteSpace: 'pre-wrap' }}>{i.outcome}</span></Field>}
           {intel.length > 0 && (

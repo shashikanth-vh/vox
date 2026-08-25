@@ -209,11 +209,27 @@ async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) ->
 
     kdp = [x for x in (_cv("key_discussion_points") or []) if isinstance(x, str)]
     lanes = [u for u in (report.get("detected_use_cases") or []) if isinstance(u, str)]
+
+    def _block_val(block: str, key: str) -> str:
+        cell = (report.get(block) or {}).get(key)
+        val = cell.get("value") if isinstance(cell, dict) else None
+        return str(val).strip() if val is not None else ""
+
+    locs = {k: v for k, v in (
+        ("lending", _block_val("lending", "project_location")),
+        ("syndication", _block_val("syndication", "project_location")),
+        ("asset_monetisation", _block_val("asset_monetisation", "asset_location")),
+    ) if v}
     itx.summary = (str(_cv("meeting_summary") or (kdp[0] if kdp else "")
                        or "VOX conversation"))[:300]
-    if kdp or lanes:
+    if kdp or lanes or locs:
         itx.key_intel = {**({"points": kdp} if kdp else {}),
-                         **({"use_cases": lanes} if lanes else {})}
+                         **({"use_cases": lanes} if lanes else {}),
+                         **({"locations": locs} if locs else {})}
+    venue = str(_cv("location") or "").strip()
+    loc_line = venue or " · ".join(locs.values())
+    if loc_line:
+        itx.location = loc_line[:200]
     if itx.transcript:
         itx.transcript = row.corrected_transcript or row.raw_transcript
     itx.updated_by = ctx.actor

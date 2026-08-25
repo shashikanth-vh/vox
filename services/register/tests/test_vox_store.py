@@ -49,6 +49,7 @@ def _report(quantum=25):
             "requirement_quantum_cr": cell(quantum, "low"),
             "company_turnover_cr": cell(None, "n/a"),
             "existing_bankers": cell("SBI", "medium"),
+            "project_location": cell("Karnataka", "medium"),
             "present_requirement": cell("~25 Cr project finance"),
             "remarks": cell(None, "n/a"),
         },
@@ -575,6 +576,10 @@ async def test_post_approve_edits_resync_the_filed_interaction(client: AsyncClie
     assert synced["summary"] == "REVISED: 45 MW, quotes compared"
     assert synced["key_intel"]["points"] == ["REVISED: 45 MW, quotes compared"]
     assert synced["key_intel"]["use_cases"] == ["lending"]
+    # the per-lane geography map rides along, and the location column fills
+    # from the meeting venue (falling back to the lane locations)
+    assert synced["key_intel"]["locations"] == {"lending": "Karnataka"}
+    assert synced["location"] == "Whitefield"
 
     # a LINK-only edit leaves the interaction content untouched
     lead = await client.post("/v1/leads", json={"entity_id": eid, "company": "Sync Co", "rm": "Ananda H"},

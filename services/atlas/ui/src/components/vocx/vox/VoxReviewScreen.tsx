@@ -513,12 +513,25 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       // the lanes the reviewer selected ride on the interaction, so every
       // timeline row says which business it belongs to
       const lanes = (srep?.detected_use_cases || r.use_cases || []) as string[];
+      // per-lane project/asset geographies ride the interaction so the timeline
+      // says WHERE each business sits — no extra register field, key_intel carries it
+      const locs: Record<string, string> = {};
+      const putLoc = (k: string, cell: any) => {
+        const v = String(cell?.value ?? '').trim();
+        if (v) locs[k] = v;
+      };
+      putLoc('lending', (srep as any)?.lending?.project_location);
+      putLoc('syndication', (srep as any)?.syndication?.project_location);
+      putLoc('asset_monetisation', (srep as any)?.asset_monetisation?.asset_location);
+      const venue = String((c.location as any)?.value ?? '').trim();
       const tp = await vocxClient.post('/v1/touchpoints', {
         ...subject, interaction_type: 'VOX conversation',
         summary: ((c.meeting_summary?.value as string) || kdp[0] || 'VOX conversation').slice(0, 300),
-        key_intel: (kdp.length || lanes.length)
+        location: (venue || Object.values(locs).join(' · ') || undefined)?.slice(0, 200),
+        key_intel: (kdp.length || lanes.length || Object.keys(locs).length)
           ? { ...(kdp.length ? { points: kdp } : {}),
-              ...(lanes.length ? { use_cases: lanes } : {}) }
+              ...(lanes.length ? { use_cases: lanes } : {}),
+              ...(Object.keys(locs).length ? { locations: locs } : {}) }
           : undefined,
         transcript: r.raw_transcript || row?.raw_transcript || undefined,
         performed_by: user.full, capture_id: `vox-conv:${conversationId}`,
