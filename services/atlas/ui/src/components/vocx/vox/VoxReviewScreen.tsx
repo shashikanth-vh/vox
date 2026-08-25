@@ -810,19 +810,6 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               <input placeholder="Search the register…" value={resolveQ} autoFocus
                 onChange={(e) => setResolveQ(e.target.value)} />
             </div>
-            {cands.map((c) => (
-              <div key={`${c.name}-${c.code}`}
-                className={`atlas-opt${selected?.code === c.code ? ' selected' : ''}`}
-                onClick={() => setSelected(c)}>
-                <div>
-                  <div className="ao-name">{c.name}</div>
-                  <div className="ao-meta">{c.meta || c.code}</div>
-                </div>
-                <div className={`ao-score${selected?.code === c.code ? '' : ' possible'}`}>
-                  {selected?.code === c.code ? 'Selected' : 'Possible'}
-                </div>
-              </div>
-            ))}
             {!creating ? (
               <button className="atlas-create" onClick={() => {
                 setCreating(true);
@@ -846,6 +833,19 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   Pin as new lead — created on approve</button>
               </div>
             )}
+            {cands.map((c) => (
+              <div key={`${c.name}-${c.code}`}
+                className={`atlas-opt${selected?.code === c.code ? ' selected' : ''}`}
+                onClick={() => setSelected(c)}>
+                <div>
+                  <div className="ao-name">{c.name}</div>
+                  <div className="ao-meta">{c.meta || c.code}</div>
+                </div>
+                <div className={`ao-score${selected?.code === c.code ? '' : ' possible'}`}>
+                  {selected?.code === c.code ? 'Selected' : 'Possible'}
+                </div>
+              </div>
+            ))}
             <div style={{ padding: '24px 0 8px' }}>
               <button className="btn btn-primary" disabled={!selected || busy}
                 onClick={() => selected && void linkEntity(selected)}>Link selected</button>
