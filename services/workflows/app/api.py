@@ -2103,6 +2103,14 @@ def create_app() -> FastAPI:
     # the waiting; flipping the flag back restores every human gate untouched.
     _POLICY_BY = "auto-approval (policy)"
     _POLICY_NOTE = "Auto-approved by deployment policy (WORKFLOWS_AUTO_APPROVE)."
+    # Fire-and-forget tasks MUST be referenced: asyncio.create_task without a held
+    # reference can be garbage-collected mid-flight — the CPCS auto-approval died
+    # silently exactly this way in the field (no auto_approved, no failure line).
+    _bg_tasks: set = set()
+
+    def _hold(task) -> None:  # noqa: ANN001
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
     def _policy_ctx(tenant: str) -> CallerContext:
         return CallerContext(tenant=tenant, email="auto-approval@policy",
@@ -2581,6 +2589,9 @@ def create_app() -> FastAPI:
                               or (result.get("checklist_id")
                                   if isinstance(result, dict) else None))
                     if not chk_id:
+                        log.warning("auto_approve_failed",
+                                    extra={"workflow": _wfid, "kind": "cpcs",
+                                           "error": "prepare returned no checklist id"})
                         return
                     out = await _approve_cpcs_core(
                         request, str(chk_id), _POLICY_BY, _policy_ctx(_tenant),
@@ -2595,7 +2606,7 @@ def create_app() -> FastAPI:
                                 extra={"workflow": _wfid, "kind": "cpcs",
                                        "error": str(exc)})
 
-            asyncio.create_task(_auto_cpcs())
+            _hold(asyncio.create_task(_auto_cpcs()))
             return ORJSONResponse(status_code=202, content={
                 "workflow_id": handle.id, "status": "prepared — auto-approval (policy) queued",
                 "status_url": f"/v1/workflows/{handle.id}"})
