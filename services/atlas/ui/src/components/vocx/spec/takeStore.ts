@@ -97,26 +97,37 @@ export function saveTake(take: StoredTake): void {
   }).catch(() => {});
 }
 
-/** The oldest unsent take, if any — offered for recovery on mount. Reassembles
- *  v2 chunk rows; passes a v1 inline-chunks record through unchanged. */
-export async function loadUnsentTake(): Promise<StoredTake | null> {
+/** The oldest unsent take BELONGING TO THIS USER, if any — offered for recovery
+ *  on mount. A browser is shared between logins on field laptops: a take is only
+ *  ever offered back to the person who recorded it (the rm stamped at capture),
+ *  and a stray empty meta (an aborted start with no audio) is cleaned up
+ *  silently instead of haunting the next login as a 00:00 recovery card.
+ *  Reassembles v2 chunk rows; passes a v1 inline-chunks record through. */
+export async function loadUnsentTake(rm?: string): Promise<StoredTake | null> {
+  const owns = (takeRm: string | undefined) =>
+    !rm || (takeRm || '').trim().toLowerCase() === rm.trim().toLowerCase();
   try {
-    return await withTx([STORE, CHUNKS], 'readonly', async (tx) => {
-      const metas = (await reqDone(tx.objectStore(STORE).getAll())) as TakeMeta[];
-      if (!metas.length) return null;
-      metas.sort((a, b) => (a.startedAt || '').localeCompare(b.startedAt || ''));
-      const m = metas[0];
+    // One SHORT transaction per read: an IndexedDB transaction auto-commits the
+    // moment the event loop spins past it, so a second await inside one tx dies
+    // with TransactionInactiveError on some engines.
+    const metas = (await withTx([STORE], 'readonly', (tx) =>
+      reqDone(tx.objectStore(STORE).getAll()))) as TakeMeta[];
+    metas.sort((a, b) => (a.startedAt || '').localeCompare(b.startedAt || ''));
+    for (const m of metas) {
       if (Array.isArray(m.chunks) && m.chunks.length) {
+        if (!owns(m.rm)) continue;               // another login's audio — never offered
         return { ...(m as StoredTake) };
       }
-      const rows = (await reqDone(tx.objectStore(CHUNKS).getAll(
-        IDBKeyRange.bound([m.id, 0], [m.id, Infinity])))) as { idx: number; chunk: Blob }[];
+      const rows = (await withTx([CHUNKS], 'readonly', (tx) =>
+        reqDone(tx.objectStore(CHUNKS).getAll(
+          IDBKeyRange.bound([m.id, 0], [m.id, Infinity]))))) as { idx: number; chunk: Blob }[];
+      if (!rows.length) { void deleteTake(m.id); continue; }   // aborted start — clean, move on
+      if (!owns(m.rm)) continue;
       rows.sort((a, b) => a.idx - b.idx);
-      const chunks = rows.map((r) => r.chunk);
-      if (!chunks.length) return null;
       return { id: m.id, startedAt: m.startedAt, elapsed: m.elapsed,
-               mime: m.mime, rm: m.rm, chunks };
-    });
+               mime: m.mime, rm: m.rm, chunks: rows.map((r) => r.chunk) };
+    }
+    return null;
   } catch {
     return null;
   }

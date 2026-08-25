@@ -104,7 +104,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   }, []);
   useEffect(() => {
     if (phase !== 'idle') return;
-    void loadUnsentTake().then(setRecovered);
+    void loadUnsentTake(user.full).then(setRecovered);
     voxService.streamUnfinished().then(setServerTakes).catch(() => {});
   }, [phase]);
   useEffect(() => () => stopFlushing(), []);
