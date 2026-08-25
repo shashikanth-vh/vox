@@ -23,6 +23,14 @@ class Settings(BaseServiceSettings):
     register_tenant: str = "EVAM"     # DEFAULT tenant only — a caller's tenant overrides it
     register_actor: str = "workflows"
 
+    # APPROVAL POLICY. False (default) = every gate needs its human: conversion
+    # decision, credit-committee decision, CP/CS checker. True = the service
+    # drives those SAME doors itself the moment each gate is reached — decisions
+    # are still durably recorded (decided_by "auto-approval (policy)") and every
+    # verification the workflows run stays in force; only the waiting-for-a-person
+    # part is removed. Deployment-level governance: flip it in compose, restart.
+    auto_approve: bool = False
+
     # Signed internal context. When set, the worker RE-MINTS a short-lived signed context
     # from the caller identity carried in the workflow input, so the Register authorizes
     # writes as the HUMAN (with their scope) — not the worker's service key. Must equal the

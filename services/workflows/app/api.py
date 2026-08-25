@@ -16,6 +16,7 @@ Run it:  python -m app.api   (same image as the worker; a second container/deplo
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 
 import orjson
@@ -1638,6 +1639,25 @@ def create_app() -> FastAPI:
                                  **payload.model_dump(exclude=_CLIENT_ONLY_FIELDS)),
                              wf_id, restart_if_closed=True, memo=memo)
         wf_id = handle.id  # may be the #n retry id if a prior attempt had closed
+        if settings.auto_approve:
+            approver = _policy_ctx(caller.tenant)
+            record, perr = await _persist_decision(
+                request, wf_id, "Approved", _POLICY_BY, _POLICY_NOTE, approver,
+                payload.lead_id)
+            if perr is None:
+                decision_ref = str((record or {}).get("id") or "") if record else ""
+                try:
+                    await handle.signal(LeadConversionWorkflow.approve,
+                                        args=[_POLICY_BY, _POLICY_NOTE, "", decision_ref])
+                    log.info("auto_approved", extra={"workflow": wf_id, "kind": "conversion"})
+                    return ORJSONResponse(status_code=202, content={
+                        "workflow_id": wf_id, "status": "auto-approved (policy)",
+                        "status_url": f"/v1/workflows/{wf_id}"})
+                except RPCError:
+                    log.warning("auto_approve_signal_failed", extra={"workflow": wf_id})
+            else:
+                log.warning("auto_approve_persist_failed", extra={"workflow": wf_id})
+            # fall through: the run parks for a human, exactly as with the flag off
         return ORJSONResponse(status_code=202, content={
             "workflow_id": wf_id, "status": "pending approval",
             "approve_url": f"/v1/workflows/{wf_id}/approve",
@@ -2055,6 +2075,19 @@ def create_app() -> FastAPI:
                                   f"Register refused the decision record ({resp.status_code}).")
         return resp.json(), None
 
+    # ---- auto-approval (deployment policy) ---------------------------------
+    # When WORKFLOWS_AUTO_APPROVE is on, the service walks the SAME doors a human
+    # approver would — durably recorded decisions, verified signals, evidence with
+    # provenance — under this named policy identity. Nothing is bypassed except
+    # the waiting; flipping the flag back restores every human gate untouched.
+    _POLICY_BY = "auto-approval (policy)"
+    _POLICY_NOTE = "Auto-approved by deployment policy (WORKFLOWS_AUTO_APPROVE)."
+
+    def _policy_ctx(tenant: str) -> CallerContext:
+        return CallerContext(tenant=tenant, email="auto-approval@policy",
+                             user_id="auto-approval@policy", roles=["Management"],
+                             decision="FULL")
+
     async def _has_approver_role(request: Request, workflow_id: str, who: str,
                                  tenant: str) -> bool:
         """Whether ``who`` holds an approver role for this workflow's vertical (via Access)."""
@@ -2395,7 +2428,7 @@ def create_app() -> FastAPI:
             reference, err = await _mint_credit_note_ref(request, payload.deal_id)
             if err is not None:
                 return err
-        return await _start_business(
+        resp = await _start_business(
             request, x_api_key, payload.requested_by, DealStructuringWorkflow,
             DealStructuringInput, "struct", payload.deal_id,
             {"deal_id": payload.deal_id, "subject_type": "Deal"},
@@ -2404,6 +2437,42 @@ def create_app() -> FastAPI:
             product_type=payload.product_type, rm=payload.rm,
             credit_note_reference=reference,
             decision_timeout_hours=payload.decision_timeout_hours)
+        if settings.auto_approve and getattr(resp, "status_code", 0) == 202:
+            # Record the committee decision (deal + one subject-bound record per
+            # lending line — the SAME shape the human door persists, so every
+            # verification and every evidence citation resolves) and wake the run.
+            try:
+                wf_id = orjson.loads(resp.body).get("workflow_id")
+                approver = _policy_ctx(tenant)
+                client: Client = request.app.state.temporal
+                handle = client.get_workflow_handle(wf_id)
+                desc = await handle.describe()
+                lines = await _lending_lines_for_deal(
+                    request, payload.deal_id, approver, _POLICY_BY)
+                if not isinstance(lines, list):
+                    lines = []
+                record, perr = await _persist_decision(
+                    request, wf_id, "Approved", _POLICY_BY, _POLICY_NOTE, approver, None,
+                    extra={"kind": "committee", "subject_type": "Deal",
+                           "subject_id": payload.deal_id, "run_id": desc.run_id,
+                           "committee_reference": wf_id})
+                if perr is None:
+                    for line in lines:
+                        lid = str(line)
+                        await _persist_decision(
+                            request, f"{wf_id}:lending:{lid}", "Approved", _POLICY_BY,
+                            _POLICY_NOTE, approver, None,
+                            extra={"kind": "committee", "subject_type": "Lending",
+                                   "subject_id": lid, "run_id": desc.run_id,
+                                   "committee_reference": wf_id})
+                    await handle.signal(DealStructuringWorkflow.committee_decision, "")
+                    log.info("auto_approved", extra={"workflow": wf_id, "kind": "committee"})
+                else:
+                    log.warning("auto_approve_persist_failed", extra={"workflow": wf_id})
+            except Exception as exc:  # noqa: BLE001 — degrade to the manual gate
+                log.warning("auto_approve_failed",
+                            extra={"deal": payload.deal_id, "error": str(exc)})
+        return resp
 
     @app.post("/v1/workflows/document-collections", status_code=202, tags=["Workflows"],
               summary="Start a document-collection workflow (awaits document signals)")
@@ -2476,6 +2545,39 @@ def create_app() -> FastAPI:
                 note=note,
                 approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
+        if settings.auto_approve:
+            # The prepare run is short (one activity). Await its checklist id in the
+            # background, then walk the SAME approve door as a checker would — under
+            # the policy identity, which trivially satisfies maker-checker. A restart
+            # in the window degrades to the manual gate; nothing is lost.
+            _tenant = caller.tenant
+            _wfid = handle.id
+
+            async def _auto_cpcs() -> None:
+                try:
+                    result = await asyncio.wait_for(handle.result(), timeout=600)
+                    chk_id = (getattr(result, "checklist_id", None)
+                              or (result.get("checklist_id")
+                                  if isinstance(result, dict) else None))
+                    if not chk_id:
+                        return
+                    out = await _approve_cpcs_core(
+                        request, str(chk_id), _POLICY_BY, _policy_ctx(_tenant),
+                        _POLICY_NOTE)
+                    ok = getattr(out, "status_code", 500) < 300
+                    (log.info if ok else log.warning)(
+                        "auto_approved" if ok else "auto_approve_failed",
+                        extra={"workflow": _wfid, "kind": "cpcs",
+                               "checklist": str(chk_id)})
+                except Exception as exc:  # noqa: BLE001 — degrade to the manual checker
+                    log.warning("auto_approve_failed",
+                                extra={"workflow": _wfid, "kind": "cpcs",
+                                       "error": str(exc)})
+
+            asyncio.create_task(_auto_cpcs())
+            return ORJSONResponse(status_code=202, content={
+                "workflow_id": handle.id, "status": "prepared — auto-approval (policy) queued",
+                "status_url": f"/v1/workflows/{handle.id}"})
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
             "status_url": f"/v1/workflows/{handle.id}"})
@@ -2839,9 +2941,17 @@ def create_app() -> FastAPI:
             return _problem(403, "Forbidden",
                             "Approving a CP/CS checklist requires Credit Head / Management / Admin "
                             "authority.")
+        return await _approve_cpcs_core(request, checklist_id, approved_by, checker,
+                                        payload.note)
+
+    async def _approve_cpcs_core(request: Request, checklist_id: str, approved_by: str,
+                                 checker: CallerContext, note: str | None) -> Any:
+        """The approve act itself — shared by the human endpoint (after its authority
+        gates) and the auto-approval policy path: register approve, cp_cs_completion
+        minted, the stage moved when both halves are clear."""
         approved = await _register_post_as(
             request, f"/v1/internal/cpcs-checklists/{checklist_id}/approve", approved_by,
-            checker, {"note": payload.note} if payload.note else {})
+            checker, {"note": note} if note else {})
         if approved.status_code >= 300:
             return approved
 

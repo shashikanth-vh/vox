@@ -547,6 +547,10 @@ services:
       # The CAM workbench engine. Set WORKFLOWS_ANTHROPIC_API_KEY in deploy/compose/.env
       # (never in this file) — without it the deterministic stub engine runs, which
       # exercises the whole lifecycle but drafts a placeholder instead of a real CAM.
+      # Approval policy: false = every gate needs its human (conversion decision,
+      # credit committee, CP/CS checker); true = those gates auto-approve under the
+      # recorded "auto-approval (policy)" identity, with all verifications intact.
+      WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
       WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
       # Re-mint the caller's signed context so a conversion writes as the human, not the key.
@@ -644,6 +648,10 @@ services:
       # The CAM workbench engine lives HERE (the orchestrator serves /v1/cam/*), not on
       # the worker — the key must reach THIS container or the workbench drafts with the
       # offline stub while `docker compose exec workflows env` swears the key is set.
+      # Approval policy: false = every gate needs its human (conversion decision,
+      # credit committee, CP/CS checker); true = those gates auto-approve under the
+      # recorded "auto-approval (policy)" identity, with all verifications intact.
+      WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
       WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
       # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
