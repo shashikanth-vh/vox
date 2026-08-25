@@ -548,10 +548,13 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                     data = data2
             except Exception:  # noqa: BLE001 — the first answer stands
                 pass
-        cp = [str(x).strip() for x in (data.get("cp_items") or []) if str(x).strip()]
-        cs = [({"label": str(x.get("label") or "").strip(),
-                **({"timeline": str(x.get("timeline")).strip()} if x.get("timeline") else {})}
-               if isinstance(x, dict) else {"label": str(x).strip()})
+        # CLAMPED to the register's own schema limits (covenant name 200, labels
+        # 1000) — a letter whose clause runs long must never wedge the save with a
+        # 422 the user cannot fix from the dialog.
+        cp = [str(x).strip()[:1000] for x in (data.get("cp_items") or []) if str(x).strip()]
+        cs = [({"label": str(x.get("label") or "").strip()[:1000],
+                **({"timeline": str(x.get("timeline")).strip()[:200]} if x.get("timeline") else {})}
+               if isinstance(x, dict) else {"label": str(x).strip()[:1000]})
               for x in (data.get("cs_items") or [])]
         cs = [x for x in cs if x["label"]]
         freq_ok = {"Monthly", "Quarterly", "SemiAnnual", "Annual"}
@@ -560,9 +563,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             if not isinstance(x, dict) or not str(x.get("name") or "").strip():
                 continue
             f = str(x.get("frequency") or "").strip()
-            cov.append({"name": str(x["name"]).strip(),
+            cov.append({"name": str(x["name"]).strip()[:200],
                         "frequency": f if f in freq_ok else "Monthly",
-                        **({"timeline": str(x.get("timeline")).strip()}
+                        **({"timeline": str(x.get("timeline")).strip()[:200]}
                            if x.get("timeline") else {})})
         # The NUMERIC terms — validated field by field, null for anything unstated.
         raw_terms = data.get("terms") if isinstance(data.get("terms"), dict) else {}
