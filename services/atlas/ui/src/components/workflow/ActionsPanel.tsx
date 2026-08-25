@@ -115,6 +115,7 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
         subjectId={subjectId} entityId={entityId}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <SanctionTermsDialog action={open?.screen === 'sanction-terms' ? open : null}
+        stage={String((data as any)?.subject?.stage || '')}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
       <DisburseDialog action={open?.screen === 'disburse' ? open : null}
         onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />

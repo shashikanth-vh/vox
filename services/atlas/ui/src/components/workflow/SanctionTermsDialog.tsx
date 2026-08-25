@@ -33,13 +33,18 @@ const blankCov = (): CovRow => ({
   frequency: 'Monthly', first_due_on: '', breach_severity: 'Amber',
 });
 
-export default function SanctionTermsDialog({ action, onClose, onDone }: {
+export default function SanctionTermsDialog({ action, stage, onClose, onDone }: {
   action: WorkflowAction | null;
+  stage?: string;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
   const open = !!action;
   const lendingId = String(action?.body?.lending_id || '');
+  // Past 'Sanctioned' the letter IS the sanctioned record — the dialog stays open as
+  // the reference (downloads), but replacing or re-deriving from it is closed:
+  // corrections to a decided letter go through an amendment, not a quiet re-upload.
+  const referenceOnly = !!stage && stage !== 'Sanctioned';
 
   const [existing, setExisting] = useState<SanctionTermsOut | null>(null);
   const [loading, setLoading] = useState(false);
@@ -358,7 +363,9 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
           <Typography sx={{ fontSize: 12.5, fontWeight: 600, mb: 0.4 }}>Sanction letter</Typography>
           <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 0.8 }}>
             {letter
-              ? <>On file: <b>{letter.title}</b> — replace it by uploading a newer version.</>
+              ? (referenceOnly
+                ? <>On file: <b>{letter.title}</b> — the sanctioned record; corrections go through an amendment.</>
+                : <>On file: <b>{letter.title}</b> — replace it by uploading a newer version.</>)
               : 'Download the letterhead template, fill it from the committee\'s approval, and file the signed letter here.'}
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -369,10 +376,12 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
                 {letterBusy === 'letter' ? 'Fetching…' : 'Download sanction letter'}
               </Button>
             )}
-            <Button size="small" variant="outlined" disabled={!tmpl || letterBusy === 'template'}
-              onClick={() => void downloadTemplate()} sx={{ textTransform: 'none' }}>
-              {letterBusy === 'template' ? 'Fetching…' : tmpl ? 'Download template' : 'No template on record'}
-            </Button>
+            {!referenceOnly && (
+              <Button size="small" variant="outlined" disabled={!tmpl || letterBusy === 'template'}
+                onClick={() => void downloadTemplate()} sx={{ textTransform: 'none' }}>
+                {letterBusy === 'template' ? 'Fetching…' : tmpl ? 'Download template' : 'No template on record'}
+              </Button>
+            )}
             <Button size="small" variant="outlined" disabled={letterBusy === 'cam'}
               onClick={() => void downloadCam()} sx={{ textTransform: 'none' }}
               title="The latest CAM on this line — the letter is written from it">
@@ -392,12 +401,17 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
                 {letterBusy === 'draft' ? 'Drafting…' : 'Generate letter (draft)'}
               </Button>
             )}
-            <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
-              disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
-              {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace sanction letter…' : 'Upload sanction letter…'}
-              <input hidden type="file" accept=".docx,.pdf"
-                onChange={(e) => { void uploadLetter(e.target.files?.[0] || null); e.target.value = ''; }} />
-            </Button>
+            {/* Reference mode closes REPLACEMENT of a filed letter; the FIRST filing
+                stays open at any stage — an imported line past Sanctioned still needs
+                its letter brought on file (the strip's to-do points here). */}
+            {!(referenceOnly && letter) && (
+              <Button size="small" component="label" variant={letter ? 'outlined' : 'contained'}
+                disabled={letterBusy === 'upload'} sx={{ textTransform: 'none' }}>
+                {letterBusy === 'upload' ? 'Uploading…' : letter ? 'Replace sanction letter…' : 'Upload sanction letter…'}
+                <input hidden type="file" accept=".docx,.pdf"
+                  onChange={(e) => { void uploadLetter(e.target.files?.[0] || null); e.target.value = ''; }} />
+              </Button>
+            )}
             {letter && !existing && (
               <Button size="small" variant="contained" disabled={!!letterBusy}
                 onClick={() => void fillFromLetter(letter, decision?.note || undefined)}
