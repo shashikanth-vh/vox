@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Box, ListItemText, Menu, MenuItem, Stack, Tooltip, Typography } from '@mui/material';
 import type { PipelineStep, WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
@@ -48,9 +48,10 @@ function StepBox({ s, verbs, onPick }: {
       <Tooltip title={s.note || ''} placement="top" arrow>
         <Box onClick={onClick} sx={{
           border: `2px solid ${EDGE[s.state]}`, borderRadius: '7px', px: 0.9, py: 0.1,
-          // uniform boxes: every step the same width, label centred — the strip
-          // reads as one instrument instead of a ragged word row
-          minWidth: 104, textAlign: 'center',
+          // the box fills its SLOT — the stepper row deals equal slots, so every
+          // step reads the same width and the strip never wraps
+          width: '100%', boxSizing: 'border-box', textAlign: 'center',
+          overflow: 'hidden', textOverflow: 'ellipsis',
           fontSize: 11.5, fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap',
           color: pending ? tokens.muted : EDGE[s.state],
           backgroundColor: s.state === 'active' ? '#EAF2F8'
@@ -98,19 +99,23 @@ export default function PipelineStepper({ steps, actions = [], onOpen }: {
   const verbsOf = (s: PipelineStep) => (onOpen ? actions.filter((a) => a.step === s.key) : []);
   const pick = (a: WorkflowAction, ro?: boolean) => onOpen?.(a, ro);
   return (
-    <Stack direction="row" spacing={0.7} alignItems="center" flexWrap="wrap" useFlexGap
-      sx={{ mb: 1 }}>
+    // ONE row, always: equal flex slots for each step (the fork's two boxes stack
+    // inside one slot), arrows fixed between them — the strip reads as a single
+    // instrument at any drawer width instead of wrapping into a ragged second line.
+    <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mb: 1 }}>
       {line.map((s, i) => (
-        <Stack key={s.key} direction="row" spacing={0.7} alignItems="center">
+        <Fragment key={s.key}>
           {i > 0 && <Arrow />}
-          <StepBox s={s} verbs={verbsOf(s)} onPick={pick} />
-        </Stack>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <StepBox s={s} verbs={verbsOf(s)} onPick={pick} />
+          </Box>
+        </Fragment>
       ))}
       {fork.length > 0 && (
         <>
           <Arrow />
           {/* After CP the journey forks: the money and the CS chase run side by side. */}
-          <Stack spacing={0.5}>
+          <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
             {fork.map((s) => <StepBox key={s.key} s={s} verbs={verbsOf(s)} onPick={pick} />)}
           </Stack>
         </>
