@@ -326,13 +326,8 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
     if (phase === 'CS') {
       const namedCs = items.filter((r) => r.label.trim());
       if (!namedCs.length) { setErr('Nothing to save — add or read the CS conditions first.'); return; }
-      const csNoEvidence = namedCs.findIndex(
-        (r) => r.status === 'Completed' && !r.evidence_ref.trim());
-      if (csNoEvidence >= 0) {
-        setErr(`Condition ${csNoEvidence + 1} is marked Completed — name its evidence `
-          + '(the filed document or receipt reference) so the record shows what satisfied it.');
-        return;
-      }
+      // Evidence reference is OPTIONAL — the desk names it when a document exists;
+      // a phone confirmation or a site visit completes a condition too.
       if (!latestId || latestStatus !== 'Approved') {
         setErr('CS progress is recorded on the APPROVED checklist — get the CP checklist approved first.');
         return;
@@ -393,15 +388,8 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
         + '. Mark each Completed, Waived (with a reason) or Deferred as CS.');
       return;
     }
-    // A Completed condition must NAME its evidence — the checker verifies against the
-    // filed document, and "completed, trust me" is not a checkable record.
-    const noEvidence = named.findIndex(
-      (r) => r.status === 'Completed' && !r.evidence_ref.trim());
-    if (noEvidence >= 0) {
-      setErr(`Condition ${noEvidence + 1} is marked Completed — name its evidence `
-        + '(the filed document or receipt reference) so the checker can verify it.');
-      return;
-    }
+    // Evidence reference is OPTIONAL on a Completed condition — name it when a
+    // filed document exists; the checker's approval is the four-eyes control.
     if (!action) return;
     setBusy(true);
     const values: Record<string, any> = {
