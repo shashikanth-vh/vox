@@ -3979,6 +3979,18 @@ def create_app() -> FastAPI:
             else:
                 cam_ready = True
                 cam_on_file = False
+            # The CP checklist is READ FROM the sanction letter — preparing one with no
+            # letter on file is typing from memory. The gate wants the letter DOCUMENT
+            # (the bytes the engine reads), not just the sanction evidence reference.
+            # Fail-open on an unreadable answer: the gate informs, it must not wedge.
+            letter_on_file = True
+            docs, doc_err = await _register_get_as(
+                request, f"/v1/lending/{subject_id}/documents", who, caller)
+            if doc_err is None and isinstance(docs, list):
+                letter_on_file = any(
+                    str(d.get("doc_type") or "") == "sanction_letter"
+                    and str(d.get("status") or "") not in ("Superseded", "Removed")
+                    for d in docs)
 
         actions = []
         for spec in _MAKER_ACTIONS[subject_type]:
@@ -4007,6 +4019,16 @@ def create_app() -> FastAPI:
                           "Conditions subsequent are worked on the Conditions Subsequent "
                           "tab; re-opening the CP half needs a fresh sanction condition, "
                           "not a new version here.")
+            # No letter, no checklist: the CP conditions COME FROM the sanction
+            # letter, so the button waits until one is filed (Enter sanction terms
+            # uploads it and reads the conditions out in the same motion). A line
+            # with a seeded/live checklist already passed this gate once.
+            if (spec["key"] == "cpcs.prepare" and enabled
+                    and not letter_on_file and not latest_checklist_items):
+                enabled = False
+                reason = ("Upload the sanction letter first — 'Enter sanction terms' "
+                          "files it and reads the CP conditions out of it; the "
+                          "checklist opens from what the letter says.")
             # The committee decides ON the CAM: no CAM on the line, nothing to send.
             if spec["key"] == "deal-structuring.start" and enabled and not cam_ready:
                 enabled = False
