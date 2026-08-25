@@ -292,12 +292,18 @@ def test_cp_and_cs_boxes_declare_when_there_is_a_record_to_show():
     assert not empty["cp"].get("viewable") and not empty["cs"].get("viewable")
 
 
-def test_pipeline_trusts_imported_history():
-    """A line the MIS landed at 'Sanctioned' has no on-platform CAM/committee artefacts;
-    the strip reads the milestones off the stage rather than accusing the history."""
+def test_pipeline_greens_only_what_is_on_file():
+    """Green means ON FILE. A line the MIS landed at 'Sanctioned' with no on-platform
+    artefacts shows grey boxes that SAY why — never a green the register cannot back;
+    the artefacts landing is what paints them."""
     s = _strip(stage="Sanctioned")
-    assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["done"] * 3
-    assert "imported history" in s["cam"]["note"]
+    assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["pending"] * 3
+    assert "no CAM is on file" in s["cam"]["note"]
+    assert "not on file" in s["sanction"]["note"]
+    lettered = _strip(stage="Sanctioned",
+                      on_file={"credit_committee_approval", "sanction_letter"})
+    assert lettered["ccr"]["state"] == "done"
+    assert lettered["sanction"]["state"] == "done"
 
 
 def test_every_lending_verb_belongs_to_a_pipeline_box():

@@ -445,12 +445,17 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     past_sanction = stage in _SANCTION_FAMILY
     dead = stage == "Rejected"
 
-    # CAM — the workbench artefact. Green once one exists (or history has moved past it),
-    # blue while the desk is working toward the committee without one.
-    if cam_ready or past_sanction or "credit_committee_approval" in on_file:
-        cam = ("done", "CAM on file" if cam_ready else "Passed — imported history")
+    # CAM — the workbench artefact. GREEN MEANS ON FILE: a stage the history moved
+    # past does not paint the box — the artefact does. A passed stage with nothing
+    # uploaded stays grey with the reason spelled out (imported lines, off-platform
+    # preparation), so green is always a claim the register can back.
+    if cam_ready:
+        cam = ("done", "CAM on file")
     elif stage in ("Data Awaited", "Diligence", "Note Circulated"):
         cam = ("active", "Prepare the CAM in the workbench")
+    elif past_sanction:
+        cam = ("pending", "Stage has passed, but no CAM is on file — imported "
+                          "history or prepared off-platform")
     else:
         cam = ("pending", "Prepared before the committee reads the file")
 
@@ -460,8 +465,11 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
         ccr = ("active", "Committee decision awaited")
     elif run_state == "returned":
         ccr = ("active", "Returned for revision — amend the note and resubmit")
-    elif "credit_committee_approval" in on_file or past_sanction:
+    elif "credit_committee_approval" in on_file:
         ccr = ("done", "Committee approved")
+    elif past_sanction and not dead:
+        ccr = ("pending", "Stage has passed, but no committee decision is on file — "
+                          "imported history or decided off-platform")
     elif dead:
         ccr = ("rejected",
                ("Committee rejected — reopen (stage back to Diligence) to revise "
@@ -474,17 +482,23 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     else:
         ccr = ("pending", "Send to credit committee once the CAM is ready")
 
-    # Sanction — a milestone, not a task: green at/beyond it, grey before.
-    if past_sanction:
-        san = ("done", "Sanctioned — letter on file" if "sanction_letter" in on_file
-               else "Sanctioned")
+    # Sanction — green only with the LETTER on file: the stage alone says the word
+    # was typed; the evidence says it happened.
+    if past_sanction and "sanction_letter" in on_file:
+        san = ("done", "Sanctioned — letter on file")
+    elif past_sanction:
+        san = ("pending", "Sanctioned by stage, but the sanction letter is not on "
+                          "file — upload it (Enter sanction terms files it)")
     else:
         san = ("pending", "Reached through the committee's approval")
 
     # CP — the latest checklist version's verdict rules; progress counts ride the note.
     cp_items = [i for i in checklist_items if str(i.get("condition_type")) == "CP"]
-    if checklist_status == "Approved" or stage in _SANCTION_FAMILY[1:]:
+    if checklist_status == "Approved":
         cp = ("done", "CP checklist approved")
+    elif stage in _SANCTION_FAMILY[1:] and not checklist_status:
+        cp = ("pending", "Stage has passed, but no approved CP checklist is on file — "
+                         "imported history or approved off-platform")
     elif checklist_status == "Rejected":
         cp = ("rejected", "Checker rejected — prepare the next version")
     elif checklist_status == "Completed":
