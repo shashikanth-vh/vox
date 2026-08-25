@@ -405,6 +405,16 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             out["attachable"] = (reason == _SCANNED_PDF and engine.supports_documents)
         return out
 
+    # A filed letter is IMMUTABLE, so its extraction is too: the first read (the
+    # sanction-terms dialog fires one the moment the letter uploads) computes and
+    # CACHES per document; every later read — the CP checklist's "Read CP
+    # conditions", another user, another session — answers in milliseconds from
+    # here. Concurrent reads of the same document share ONE engine call. In-memory
+    # by design: a service restart merely recomputes on the next click.
+    _extract_cache: dict[str, tuple[float, dict]] = {}
+    _extract_inflight: dict[str, Any] = {}
+    _EXTRACT_TTL_S = 24 * 3600
+
     @app.post("/v1/cam/extract-terms", tags=["CAM"],
               summary="Read CP / CS / covenants OUT of a sanction letter (engine-parsed)")
     async def cam_extract_terms(payload: ExtractTermsIn, request: Request) -> Any:
@@ -420,8 +430,28 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return err
         caller, _ = caller_context(request, who)
 
+        import asyncio as _asyncio
+        import time as _time
+        cache_key = str(payload.doc_id)
+        hit = _extract_cache.get(cache_key)
+        if hit and (_time.monotonic() - hit[0]) < _EXTRACT_TTL_S:
+            return {**hit[1], "cached": True}
+        pending = _extract_inflight.get(cache_key)
+        if pending is not None:
+            # someone is already reading this letter — share their answer
+            try:
+                result = await _asyncio.shield(pending)
+                return {**result, "cached": True}
+            except Exception:  # noqa: BLE001 — their failure; run our own read below
+                pass
+        fut: Any = _asyncio.get_event_loop().create_future()
+        _extract_inflight[cache_key] = fut
+
         blob, ctype, fetch_err = await _doc_fetch(request, caller, who, payload.doc_id)
         if fetch_err is not None:
+            _extract_inflight.pop(cache_key, None)
+            if not fut.done():
+                fut.set_exception(RuntimeError(str(fetch_err)))
             return problem(404, "Not found", f"Document {payload.doc_id!r}: {fetch_err}")
         text, reason = extract_text(ctype, blob or b"")
         content: Any
@@ -466,6 +496,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             content = [_pdf_block(blob), {"type": "text", "text": extra + "\n\n" + instruction
                                           if extra else instruction}]
         else:
+            _extract_inflight.pop(cache_key, None)
+            if not fut.done():
+                fut.set_exception(RuntimeError("unreadable letter"))
             return problem(422, "Validation failed",
                            f"The letter could not be read{f' ({reason})' if reason else ''} "
                            "— enter the conditions by hand.")
@@ -476,6 +509,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 "JSON only — no commentary, no code fences.",
                 [{"role": "user", "content": content}])
         except Exception as exc:  # noqa: BLE001 — vendor errors surface as text
+            _extract_inflight.pop(cache_key, None)
+            if not fut.done():
+                fut.set_exception(RuntimeError(str(exc)))
             return problem(502, "Extraction failed", str(exc))
         import json as _json
         import re as _re
@@ -530,12 +566,20 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             terms["repayment_start"] = rs
 
         if not (cp or cs or cov or terms):
+            _extract_inflight.pop(cache_key, None)
+            if not fut.done():
+                fut.set_exception(RuntimeError("extraction yielded nothing"))
             return problem(422, "Extraction failed",
                            "The engine did not return usable lists from this letter — "
                            "enter the conditions by hand (the offline stub engine "
                            "cannot parse documents).")
-        return {"engine": engine.name, "cp_items": cp, "cs_items": cs, "covenants": cov,
-                "terms": terms}
+        result = {"engine": engine.name, "cp_items": cp, "cs_items": cs,
+                  "covenants": cov, "terms": terms}
+        _extract_cache[cache_key] = (_time.monotonic(), result)
+        _extract_inflight.pop(cache_key, None)
+        if not fut.done():
+            fut.set_result(result)
+        return result
 
     @app.post("/v1/cam/{lending_id}/generate", status_code=201, tags=["CAM"],
               summary="Draft a CAM from selected documents + the prompt doc")
