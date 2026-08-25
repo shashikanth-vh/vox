@@ -866,3 +866,44 @@ def test_long_takes_leave_one_worker_for_the_notes(monkeypatch):
         _t.sleep(0.05)
     assert not running
     assert [c for k, c in order if k == "start"].count("long-b") == 1
+
+
+def test_quick_lane_marker_survives_by_ref_and_defaults_safe(tmp_path):
+    """The recorder's quick-transcript choice is a marker keyed by the audio ref
+    on the persistent volume: a retry after a restart still uses the model the
+    user picked, and a missing marker degrades to the accurate default."""
+    import logging
+    from app.vocx.core.server import VocxApp
+    app = VocxApp.__new__(VocxApp)
+    app.log = logging.getLogger("t")
+    app.config = {"google": {"tokens_dir": str(tmp_path)}}
+    ref = "vox-seg:e2e-quick-take-01"
+    assert app._quick_model(ref) is None
+    app._mark_quick(ref)
+    assert app._quick_model(ref) == "small"
+    assert app._quick_model("some/other/ref.webm") is None
+
+
+def test_transcribe_segments_names_the_model_only_when_chosen(tmp_path):
+    """model= reaches the transcriber only when the quick lane chose one — a
+    legacy transcriber without the kwarg keeps working untouched."""
+    from app.vocx.speech.segment_store import transcribe_segments
+    p = tmp_path / "seg000.webm"
+    p.write_bytes(b"x")
+
+    seen = []
+
+    class Modern:
+        def transcribe(self, path, prompt=None, model=None):
+            seen.append(model)
+            return {"text": "t", "segments": [{"text": "t"}], "language": "en"}
+
+    class Legacy:
+        def transcribe(self, path, prompt=None):
+            return {"text": "t", "segments": [{"text": "t"}], "language": "en"}
+
+    transcribe_segments([str(p)], Modern())
+    transcribe_segments([str(p)], Modern(), model="small")
+    assert seen == [None, "small"]
+    out = transcribe_segments([str(p)], Legacy())      # no TypeError
+    assert out["text"] == "t"

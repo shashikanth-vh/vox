@@ -117,6 +117,31 @@ class VocxApp:
         self._vox_long_take_s = int(os.environ.get("VOCX_LONG_TAKE_SECONDS", "1500") or 1500)
         self._segments = None  # lazy SegmentStore (streamed in-progress takes)
 
+    def _quick_path(self, ref: str) -> str:
+        import hashlib
+        base = os.path.join(self.config.get("google", {}).get(
+            "tokens_dir", "vocx_tokens"), "vox_quick")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, hashlib.sha1(ref.encode()).hexdigest())
+
+    def _mark_quick(self, ref: str) -> None:
+        """Remember the recorder chose the quick-transcript lane for this audio —
+        a marker file keyed by the audio ref, so a retry after a restart still
+        transcribes with the model the user picked. Best-effort: losing the
+        marker degrades to the accurate default, never to a failure."""
+        try:
+            with open(self._quick_path(ref), "w", encoding="utf-8") as fh:
+                fh.write("small")
+        except OSError:
+            self.log.warning("quick-lane marker for %s could not be written", ref)
+
+    def _quick_model(self, ref: str) -> str | None:
+        try:
+            with open(self._quick_path(ref), encoding="utf-8") as fh:
+                return fh.read().strip() or "small"
+        except OSError:
+            return None
+
     def segment_store(self):
         """Where in-flight recordings stream to, chunk batches at a time — the
         durable cross-device copy of a take that is still being made."""
@@ -507,13 +532,15 @@ class VocxApp:
                 # A STREAMED take ("vox-seg:{capture_id}") transcribes segment by
                 # segment, in order, transcripts merged — cross-session segments
                 # are separate streams and are never byte-concatenated.
+                quick_model = self._quick_model(audio_ref)
                 if audio_ref.startswith("vox-seg:"):
                     from ..speech.segment_store import transcribe_segments
                     paths = self.segment_store().segment_paths(audio_ref[len("vox-seg:"):])
                     if not paths:
                         raise RuntimeError(f"streamed take {audio_ref!r} holds no audio")
                     return transcribe_segments(paths, self.transcriber(),
-                                               prompt=self.stt_prompt())
+                                               prompt=self.stt_prompt(),
+                                               model=quick_model)
                 # A local-archive ref IS a file path — hand it over as one (so test
                 # fixtures' .txt sidecars work too). Anything else (S3 keys) goes
                 # through the store's playback, which yields ("bytes"|"url", data).
@@ -525,7 +552,10 @@ class VocxApp:
                     if playback is None:
                         raise RuntimeError(f"audio {audio_ref!r} is not in the store")
                     audio = playback[1] if isinstance(playback, tuple) else playback
-                result = self.transcriber().transcribe(audio, prompt=self.stt_prompt())
+                stt_kw: dict = {"prompt": self.stt_prompt()}
+                if quick_model:
+                    stt_kw["model"] = quick_model
+                result = self.transcriber().transcribe(audio, **stt_kw)
                 if isinstance(result, str):
                     return {"text": result, "segments": [{"text": result}], "language": None}
                 segments = result.get("segments") or [{"text": result.get("text", "")}]
@@ -786,6 +816,8 @@ class VocxApp:
         """Create (or replay) the register conversation for stored audio and kick
         the pipeline — shared by the one-shot capture door and the streamed
         finish. The audio is SAFE before this runs; failures say so."""
+        if (_one(query, "quick") or "").strip().lower() in ("1", "true", "yes"):
+            self._mark_quick(ref)
         try:
             row = self.vox_runner().register.create(
                 recording_mode=mode,

@@ -44,6 +44,17 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const [consentBusy, setConsentBusy] = useState(false);
   const consentIdRef = useRef<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  // The quick-transcript lane: unticked (default) = the accurate medium model;
+  // ticked = the small model for a rough draft, faster. A personal convenience,
+  // persisted per browser — never a server-side setting.
+  const [quick, setQuick] = useState<boolean>(() => {
+    try { return localStorage.getItem('vox.quickTranscript') === '1'; } catch { return false; }
+  });
+  const toggleQuick = () => setQuick((v) => {
+    const next = !v;
+    try { localStorage.setItem('vox.quickTranscript', next ? '1' : '0'); } catch { /* private mode */ }
+    return next;
+  });
   const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
   const [bars, setBars] = useState<number[]>(() => Array.from({ length: BARS }, () => 4));
@@ -255,6 +266,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       consentId: consentIdRef.current || undefined,
       rm: user.full, email: getSession()?.email || '',
       durationSeconds: elapsedRef.current, ...gpsRef.current,
+      quick,
     };
     // Streamed-first: the audio is already on the server chunk by chunk — the
     // last batch flushes, then finish is a tiny POST. Any failure in this path
@@ -502,6 +514,12 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             <Ic i="i-trash" /> Discard</span>
         </div>
 
+        {(phase === 'idle' || phase === 'error') && (
+          <label className="rec-quick-row">
+            <input type="checkbox" checked={quick} onChange={toggleQuick} />
+            <span>⚡ Quick transcript — faster, lower accuracy</span>
+          </label>
+        )}
         {(phase === 'idle' || phase === 'error') && (
           <div className="rec-controls-idle" style={{ display: 'flex' }}>
             <button className="rec-btn-record" onClick={() => (phase === 'error' && chunksRef.current.length

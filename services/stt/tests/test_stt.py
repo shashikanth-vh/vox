@@ -143,3 +143,15 @@ async def test_undecodable_audio_is_400_not_500():
         r = await c.post("/v1/audio/transcriptions", files={"file": ("a.webm", b"12345")})
     assert r.status_code == 400
     assert "could not be transcribed" in r.json()["error"]["detail"]
+
+
+def test_engine_knows_its_baked_sizes_and_falls_back():
+    """extra_model_sizes widens the per-request menu; anything not baked routes
+    to the default size rather than failing an OpenAI-compat caller."""
+    from app.config import Settings
+    from app.engine import FasterWhisperEngine
+    s = Settings(model_size="medium", extra_model_sizes="small, large-v3")
+    e = FasterWhisperEngine(s)
+    assert e.known_sizes() == {"medium", "small", "large-v3"}
+    s2 = Settings(model_size="small")
+    assert FasterWhisperEngine(s2).known_sizes() == {"small"}

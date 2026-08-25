@@ -389,3 +389,6 @@
 .vox-app .transcript-body.windowed::-webkit-scrollbar {width:8px;}
 .vox-app .transcript-body.windowed::-webkit-scrollbar-track {background:rgba(148,163,184,0.12); border-radius:4px;}
 .vox-app .transcript-body.windowed::-webkit-scrollbar-thumb {background:rgba(148,163,184,0.8); border-radius:4px;}
+
+.vox-app .rec-quick-row {display:flex; align-items:center; justify-content:center; gap:8px; margin:6px 0 2px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;}
+.vox-app .rec-quick-row input {accent-color:var(--accent); width:15px; height:15px; cursor:pointer;}

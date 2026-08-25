@@ -207,7 +207,8 @@ class SegmentStore:
 
 
 def transcribe_segments(paths: list[str], transcriber: Any,
-                        prompt: str | None = None) -> dict[str, Any]:
+                        prompt: str | None = None,
+                        model: str | None = None) -> dict[str, Any]:
     """Transcribe each segment IN ORDER and merge — text joined, segment lists
     concatenated, the first detected language wins. One bad segment fails the
     whole take loudly (the pipeline's retry machinery owns what happens next);
@@ -216,7 +217,10 @@ def transcribe_segments(paths: list[str], transcriber: Any,
     segments: list[dict[str, Any]] = []
     language = None
     for p in paths:
-        result = transcriber.transcribe(p, prompt=prompt)
+        kw: dict[str, Any] = {"prompt": prompt}
+        if model:
+            kw["model"] = model          # only named when chosen — fakes stay untouched
+        result = transcriber.transcribe(p, **kw)
         if isinstance(result, str):
             result = {"text": result, "segments": [{"text": result}], "language": None}
         texts.append((result.get("text") or "").strip())

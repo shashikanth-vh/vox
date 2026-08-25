@@ -102,7 +102,7 @@ def create_app() -> FastAPI:
     @app.post("/v1/audio/transcriptions", summary="Transcribe one audio clip")
     async def transcribe(request: Request,
                          file: UploadFile = File(...),
-                         model: str = Form(""),          # accepted for OpenAI-compat; ignored
+                         model: str = Form(""),          # selects among BAKED sizes; else default
                          language: str | None = Form(None),
                          task: str = Form("transcribe"),
                          prompt: str | None = Form(None)) -> Any:
@@ -120,9 +120,14 @@ def create_app() -> FastAPI:
             return _problem(400, "invalid_request", "Bad task",
                             "task must be 'transcribe' or 'translate'.")
         try:
+            # A recognised size ("small", "medium", "large-v3") routes to that baked
+            # model — the quick-transcript lane; anything else ("whisper-1", "") is
+            # the default. Unknown names never fail: OpenAI-compat callers send
+            # their own model strings and must keep working.
             result = await run_in_threadpool(_engine(request).transcribe, blob,
                                              language or None, task,
-                                             (prompt or "")[:1500] or None)
+                                             (prompt or "")[:1500] or None,
+                                             (model or "").strip() or None)
         except ModelUnavailable as exc:
             # 503, and SAY WHY. This reaches VocX's capture log; a bare 500 there is
             # indistinguishable from a crash and leaves the operator with nothing to fix.

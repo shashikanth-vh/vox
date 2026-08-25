@@ -90,6 +90,7 @@ export const voxService = {
   async capture(audio: Blob, opts: {
     captureId: string; mode?: 'post_meeting' | 'live'; rm?: string; email?: string;
     durationSeconds?: number; lat?: number; lng?: number; consentId?: string;
+    quick?: boolean;
   }): Promise<{ conversation_id: string; replayed?: boolean; status?: string }> {
     try {
       const r = await vocxClient.post('/v1/vox/capture', await audio.arrayBuffer(), {
@@ -107,6 +108,7 @@ export const voxService = {
           lng: opts.lng ?? '',
           consent_id: opts.consentId ?? '',
           content_type: audio.type || '',
+          quick: opts.quick ? '1' : '',
           ts: new Date().toISOString(),
         },
       });
@@ -148,6 +150,7 @@ export const voxService = {
   async streamFinish(opts: {
     captureId: string; mode?: string; durationSeconds?: number;
     lat?: number; lng?: number; consentId?: string; email?: string; rm?: string;
+    quick?: boolean;
   }): Promise<{ conversation_id: string; replayed?: boolean }> {
     const r = await vocxClient.post('/v1/vox/stream/finish', null, {
       timeout: 60_000,
@@ -155,6 +158,7 @@ export const voxService = {
         capture_id: opts.captureId, mode: opts.mode || 'post_meeting',
         duration: opts.durationSeconds ?? '', lat: opts.lat ?? '', lng: opts.lng ?? '',
         consent_id: opts.consentId ?? '', email: opts.email || '', rm: opts.rm || '',
+        quick: opts.quick ? '1' : '',
         ts: new Date().toISOString(),
       },
     });

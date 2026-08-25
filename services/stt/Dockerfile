@@ -17,17 +17,25 @@ RUN pip install ".[whisper]"
 COPY services/stt/app ./app
 RUN pip install ".[whisper]"
 
-# Bake the model. HF_HOME keeps the hub's side caches inside the same throwaway layer.
+# Bake the models. The default size serves every request that doesn't choose;
+# STT_EXTRA_MODELS (comma/space list) bakes additional sizes selectable per
+# request via the `model` form field — the quick-transcript lane ships "small"
+# alongside the medium default. HF_HOME keeps hub caches in this throwaway layer.
 ARG STT_MODEL_SIZE=small
+ARG STT_EXTRA_MODELS=""
 ENV HF_HOME=/opt/models/hf
 RUN python -c "import os; from faster_whisper.utils import download_model; \
-    download_model(os.environ['STT_MODEL_SIZE'], cache_dir='/opt/models')" \
+    sizes = {os.environ['STT_MODEL_SIZE'], \
+             *os.environ.get('STT_EXTRA_MODELS', '').replace(',', ' ').split()}; \
+    [download_model(s, cache_dir='/opt/models') for s in sorted(sizes) if s]" \
     && rm -rf /opt/models/hf
 
 FROM python:3.12-slim AS runtime
 ARG STT_MODEL_SIZE=small
+ARG STT_EXTRA_MODELS=""
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH" \
-    HF_HUB_OFFLINE=1 STT_MODEL_DIR=/opt/models STT_MODEL_SIZE=${STT_MODEL_SIZE}
+    HF_HUB_OFFLINE=1 STT_MODEL_DIR=/opt/models STT_MODEL_SIZE=${STT_MODEL_SIZE} \
+    STT_EXTRA_MODELS=${STT_EXTRA_MODELS}
 RUN groupadd -r stt && useradd -r -g stt stt && mkdir -p /app && chown stt:stt /app
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=stt:stt /opt/models /opt/models

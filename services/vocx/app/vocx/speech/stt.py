@@ -28,7 +28,8 @@ class Transcriber:
     toward expected vocabulary (client names, finance terms) where supported."""
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None,
+                   model: str | None = None) -> dict[str, Any]:
         """`content_type` is what the RECORDER declared (audio/mp4 from an iPhone,
         audio/webm from Android Chrome). Backends that decode the bytes themselves
         ignore it; the HTTP one uses it to name the upload honestly."""
@@ -55,7 +56,8 @@ class StubTranscriber(Transcriber):
         self.text = text
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None,
+                   model: str | None = None) -> dict[str, Any]:
         if self.text is not None:
             return _result(self.text, language or "en", backend="stub")
         if isinstance(audio, str):
@@ -110,7 +112,8 @@ class FasterWhisperTranscriber(Transcriber):
         return self._model
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None,
+                   model: str | None = None) -> dict[str, Any]:
         # content_type is irrelevant here: PyAV sniffs the container from the bytes.
         with self._lock:
             return self._transcribe_locked(audio, language, prompt)
@@ -197,7 +200,8 @@ class APITranscriber(Transcriber):
         self.attempts = max(1, int(attempts))
 
     def transcribe(self, audio: AudioInput, language: str | None = None,
-                   prompt: str | None = None, content_type: str | None = None) -> dict[str, Any]:
+                   prompt: str | None = None, content_type: str | None = None,
+                   model: str | None = None) -> dict[str, Any]:
         import time
 
         import httpx  # lazy
@@ -221,7 +225,7 @@ class APITranscriber(Transcriber):
             blob = audio
             fname = "audio" + (ext_for(content_type) if content_type else ".wav")
         headers = {"Authorization": f"Bearer {key}"} if key else {}
-        data = {"model": self.model, "task": self.task}
+        data = {"model": model or self.model, "task": self.task}
         if language:
             data["language"] = language
         if prompt:

@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Must match what the Dockerfile baked (ARG STT_MODEL_SIZE) — with HF_HUB_OFFLINE=1
     # a size that is not in model_dir fails fast at startup instead of downloading.
     model_size: str = "small"
+    # Additional sizes ALSO baked into the image (comma/space separated) — selectable
+    # per request via the OpenAI-compat `model` form field ("small" = quick lane).
+    extra_model_sizes: str = ""
     device: str = "cpu"
     compute_type: str = "int8"
     beam_size: int = 5

@@ -251,7 +251,10 @@ services:
       # medium is the production default: the small->medium step is the steep part
       # of the accuracy curve (names, accents, the translate path) at ~2x small's
       # decode time. Override with STT_MODEL_SIZE=large-v3 when a GPU box arrives.
-      args: { STT_MODEL_SIZE: "${STT_MODEL_SIZE:-medium}" }
+      # medium is the default; small ships alongside it as the quick-transcript
+      # lane, selectable per recording from the VOCX recorder.
+      args: { STT_MODEL_SIZE: "${STT_MODEL_SIZE:-medium}",
+              STT_EXTRA_MODELS: "${STT_EXTRA_MODELS:-small}" }
     environment:
       STT_API_KEYS: "${STT_API_KEY:-compose-stt-key}"
       STT_LOG_JSON: "true"
