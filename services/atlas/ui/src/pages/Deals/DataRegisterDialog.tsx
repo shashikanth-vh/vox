@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, LinearProgress, Alert, Chip } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, LinearProgress, Alert, Chip, TextField } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { REQ_DOCS, documentsService } from '../../services/documentsService';
 import type { DocEntry, DocIndex } from '../../services/documentsService';
@@ -23,6 +23,11 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
   const [docs, setDocs] = useState<DocIndex>({});
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  // "+ Add another document": the checklist names the REQUIRED set, but a live
+  // deal always carries papers the list never predicted — name it, upload it,
+  // it lives in the same section with the same verify/remove lifecycle.
+  const [addingSec, setAddingSec] = useState('');
+  const [newDocName, setNewDocName] = useState('');
 
   const reload = useCallback(() => {
     documentsService.load(code, entityId).then(setDocs).catch(() => setDocs({}));
@@ -117,7 +122,13 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
                 <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700, flex: 1 }}>{s.t}</Typography>
                 <Typography sx={{ fontSize: 11, fontWeight: 700, color: reqGot >= reqN ? tokens.ok : tokens.warn }}>{reqGot}/{reqN} required</Typography>
               </Box>
-              {s.d.map((dd) => {
+              {[...s.d,
+                // ad-hoc documents already stored under this section — every key
+                // the fixed checklist does not claim renders as its own row
+                ...Object.entries(sStore)
+                  .filter(([k]) => !s.d.some((dd) => dd.k === k))
+                  .map(([k, e]) => ({ k, n: (e as DocEntry).label || (e as DocEntry).name, req: 0 })),
+              ].map((dd) => {
                 const e = sStore[dd.k];
                 return (
                   <Box key={dd.k} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderBottom: `1px dashed ${tokens.line}`, flexWrap: 'wrap' }}>
@@ -155,6 +166,29 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
                   </Box>
                 );
               })}
+              {!ro && (addingSec === s.k ? (
+                <Box sx={{ display: 'flex', gap: 1, mt: 1.2, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <TextField size="small" autoFocus placeholder="Document name"
+                    value={newDocName} onChange={(ev) => setNewDocName(ev.target.value)}
+                    sx={{ flex: 1, minWidth: 180, '& input': { fontSize: 13, py: 0.75 } }} />
+                  <Button size="small" variant="contained" component="label"
+                    disabled={!newDocName.trim()}>
+                    Choose file &amp; upload
+                    <input type="file" hidden onChange={(ev) => {
+                      const f = ev.target.files?.[0];
+                      const key = 'x_' + Date.now().toString(36);
+                      setAddingSec(''); const nm = newDocName.trim(); setNewDocName('');
+                      void upload(s.k, key, nm, s.t, false, f);
+                    }} />
+                  </Button>
+                  <Button size="small" onClick={() => { setAddingSec(''); setNewDocName(''); }}>Cancel</Button>
+                </Box>
+              ) : (
+                <Button size="small" sx={{ mt: 1, textTransform: 'none', fontSize: 12.5 }}
+                  onClick={() => { setAddingSec(s.k); setNewDocName(''); }}>
+                  + Add another document
+                </Button>
+              ))}
             </Box>
           );
         })}
