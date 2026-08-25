@@ -341,7 +341,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
       setBusy(true);
       try {
         const { api } = await import('../../api/http');
-        await api.post(`/internal/cpcs-checklists/${latestId}/cs-progress`, {
+        const saved = await api.post<any>(`/internal/cpcs-checklists/${latestId}/cs-progress`, {
           items: namedCs.map((r) => ({
             key: (r.key.trim() || r.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 80),
             label: r.label.trim(),
@@ -351,8 +351,30 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
             required: r.required,
           })),
         });
+        // THE LAST CS CLOSING is the milestone: when every condition subsequent on
+        // the saved checklist is settled and the line still sits at Sanctioned, move
+        // it to CP/CS Completed through the SAME gated stage door the manual action
+        // uses — best-effort, so a refusal (gates rule) leaves the manual door open.
+        // From Ready for Disbursement / Disbursed the stage is the money's; it
+        // never steps back — the strip carries the conditions truth there.
+        let doneMsg = 'CS progress saved — the chase reminders now cover only what is still open.';
+        const items: any[] = (saved as any)?.items || [];
+        const openCs = items.filter((i) => String(i.condition_type) === 'CS'
+          && !['Completed', 'Waived'].includes(String(i.status)));
+        if (items.length && !openCs.length) {
+          try {
+            const lid2 = String(action?.body?.lending_id || '');
+            const line = await api.get<any>(`/lending/${lid2}`);
+            if (String(line?.stage) === 'Sanctioned') {
+              await api.patch(`/lending/${lid2}`, { stage: 'CP/CS Completed' });
+              doneMsg = 'All conditions subsequent are satisfied — the line moved to CP/CS Completed.';
+            } else {
+              doneMsg = 'All conditions subsequent are satisfied — the checklist is fully closed.';
+            }
+          } catch { /* stage gates rule; "Move to CP/CS Completed" remains available */ }
+        }
         setBusy(false);
-        onDone('CS progress saved — the chase reminders now cover only what is still open.');
+        onDone(doneMsg);
         onClose();
       } catch (e: any) {
         setBusy(false);
