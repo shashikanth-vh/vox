@@ -192,7 +192,12 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "key": "sanction.terms", "step": "sanction",
             "label": "Enter sanction terms",
             "method": "POST", "url": "/v1/internal/sanction-terms",
-            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
+            "roles": _CREDIT_MAKERS,
+            # Reachable at EVERY post-sanction stage: once the terms exist the dialog
+            # renders as the read-only reference — and it is where "Download sanction
+            # letter" / "Download CAM" live, which the desk needs long after CP.
+            "stages": {"Sanctioned", "Ready for Disbursement", "CP/CS Completed",
+                       "Disbursed"},
             "stage_reason": "Available once the committee has sanctioned this facility.",
             # Amount, rate, tenor, EMI — plus the CP/CS item lists and the covenant
             # register the terms SEED. Lists of structured rows need their own screen.

@@ -61,7 +61,12 @@ export default function DisburseDialog({ action, onClose, onDone }: {
     try {
       const { api } = await import('../../api/http');
       const line = await api.get<any>(`/lending/${lendingId}`);
-      setAmount(String(line.proposed_disbursement_amount ?? line.amount_cr ?? ''));
+      // The SANCTIONED amount read out of the letter (saved with the terms) beats the
+      // row's imported figure — the letter is what the partner actually sanctioned.
+      const { camService } = await import('../../services/camService');
+      const terms = await camService.terms(lendingId).catch(() => null);
+      setAmount(String(line.proposed_disbursement_amount
+        ?? terms?.amount_cr ?? line.amount_cr ?? ''));
       setDate(String(line.proposed_disbursement_date
         || new Date().toISOString().slice(0, 10)));
       setPkg(await api.get<any>(`/lending/${lendingId}/handover-package`)
