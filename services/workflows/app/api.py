@@ -481,7 +481,10 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     elif "credit_committee_rejection" in on_file:
         ccr = ("rejected", "Committee rejected — revise the CAM and re-send")
     else:
-        ccr = ("pending", "Send to credit committee once the CAM is ready")
+        # CAM on file and nothing with the committee: SENDING is the working step
+        ccr = (("active", "The CAM is on file — send it to the credit committee")
+               if cam_ready else
+               ("pending", "Send to credit committee once the CAM is ready"))
 
     # Sanction — green only when the LETTER DOCUMENT is uploaded. The stage says the
     # word was typed; an evidence reference says a decision recorded it (the

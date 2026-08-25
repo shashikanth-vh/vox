@@ -308,7 +308,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       const doc = await camService.uploadDoc(subjectId, file, 'CAM', 'Sanction');
       await camService.finalise(subjectId,
         title.trim() || file.name.replace(/\.[^.]+$/, ''), String(doc.id));
-      onDone(`Completed CAM "${file.name}" is on file — use "Send to credit committee" to raise the review.`);
+      onDone(`Completed CAM "${file.name}" is on file — CCR is the next step: tap the CCR box to send it to the credit committee.`);
       return 'Filed. Raise "Send to credit committee" when ready.';
     });
   };

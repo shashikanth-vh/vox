@@ -502,11 +502,11 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return problem(422, "Validation failed",
                            f"The letter could not be read{f' ({reason})' if reason else ''} "
                            "— enter the conditions by hand.")
+        _SYSTEM = ("You extract structured data from credit documents. You answer with "
+                   "JSON only — no commentary, no code fences.")
         try:
             reply = await engine.generate(
-                request.app.state.http,
-                "You extract structured data from credit documents. You answer with "
-                "JSON only — no commentary, no code fences.",
+                request.app.state.http, _SYSTEM,
                 [{"role": "user", "content": content}])
         except Exception as exc:  # noqa: BLE001 — vendor errors surface as text
             _extract_inflight.pop(cache_key, None)
@@ -516,11 +516,38 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         import json as _json
         import re as _re
 
-        m = _re.search(r"\{.*\}", reply, _re.DOTALL)
-        try:
-            data = _json.loads(m.group(0)) if m else {}
-        except ValueError:
-            data = {}
+        def _parse(raw: str) -> dict:
+            mm = _re.search(r"\{.*\}", raw, _re.DOTALL)
+            try:
+                return _json.loads(mm.group(0)) if mm else {}
+            except ValueError:
+                return {}
+
+        data = _parse(reply)
+        # A sanction letter with ZERO conditions precedent is almost always a
+        # misclassification (everything swept into covenants) — the field hit it
+        # three letters running. One corrective re-ask, only in that case: the
+        # model is shown its own answer and told to re-split by nature.
+        if (not (data.get("cp_items") or [])
+                and (data.get("covenants") or data.get("cs_items"))):
+            try:
+                reply2 = await engine.generate(
+                    request.app.state.http, _SYSTEM,
+                    [{"role": "user", "content": content},
+                     {"role": "assistant", "content": reply},
+                     {"role": "user", "content":
+                      "Your answer has an empty cp_items list, which is almost "
+                      "certainly wrong for a sanction letter. Re-read the letter: "
+                      "every ONE-TIME act required before disbursement is a CP even "
+                      "when it sits under a generic 'Terms and Conditions' heading "
+                      "or reads like documentation/security/fee work. Keep in "
+                      "covenants ONLY genuinely recurring periodic obligations. "
+                      "Answer again with the SAME JSON shape, complete."}])
+                data2 = _parse(reply2)
+                if data2.get("cp_items"):
+                    data = data2
+            except Exception:  # noqa: BLE001 — the first answer stands
+                pass
         cp = [str(x).strip() for x in (data.get("cp_items") or []) if str(x).strip()]
         cs = [({"label": str(x.get("label") or "").strip(),
                 **({"timeline": str(x.get("timeline")).strip()} if x.get("timeline") else {})}
