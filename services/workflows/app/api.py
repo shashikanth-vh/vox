@@ -2585,25 +2585,50 @@ def create_app() -> FastAPI:
             _tenant = caller.tenant
             _wfid = handle.id
 
+            _lending = str(payload.lending_id)
+            _version = int(payload.checklist_version or 1)
+
             async def _auto_cpcs() -> None:
+                # The REGISTER is the source of truth the approval needs — poll it
+                # for the Completed checklist row instead of waiting on the Temporal
+                # handle (whose result-wait proved able to hang without a word in
+                # the field). The worker writes the row within seconds; two minutes
+                # of patience covers a busy queue, and every exit path logs.
                 try:
-                    result = await asyncio.wait_for(handle.result(), timeout=600)
-                    chk_id = (getattr(result, "checklist_id", None)
-                              or (result.get("checklist_id")
-                                  if isinstance(result, dict) else None))
+                    chk_id = ""
+                    for _ in range(60):
+                        await asyncio.sleep(2)
+                        rows, perr = await _register_get_as(
+                            request,
+                            f"/v1/internal/cpcs-checklists?lending_id={_lending}&limit=50",
+                            _POLICY_BY, _policy_ctx(_tenant))
+                        if perr is not None or not isinstance(rows, list):
+                            continue
+                        match = [r for r in rows
+                                 if int(r.get("checklist_version") or 0) == _version
+                                 and r.get("status") == "Completed"]
+                        if match:
+                            chk_id = str(match[0].get("id") or "")
+                            break
                     if not chk_id:
                         log.warning("auto_approve_failed",
                                     extra={"workflow": _wfid, "kind": "cpcs",
-                                           "error": "prepare returned no checklist id"})
+                                           "error": "no Completed checklist appeared "
+                                                    "within the wait window"})
                         return
                     out = await _approve_cpcs_core(
-                        request, str(chk_id), _POLICY_BY, _policy_ctx(_tenant),
+                        request, chk_id, _POLICY_BY, _policy_ctx(_tenant),
                         _POLICY_NOTE)
                     ok = getattr(out, "status_code", 500) < 300
                     (log.info if ok else log.warning)(
                         "auto_approved" if ok else "auto_approve_failed",
                         extra={"workflow": _wfid, "kind": "cpcs",
-                               "checklist": str(chk_id)})
+                               "checklist": chk_id})
+                except asyncio.CancelledError:
+                    log.warning("auto_approve_failed",
+                                extra={"workflow": _wfid, "kind": "cpcs",
+                                       "error": "task cancelled (shutdown?)"})
+                    raise
                 except Exception as exc:  # noqa: BLE001 — degrade to the manual checker
                     log.warning("auto_approve_failed",
                                 extra={"workflow": _wfid, "kind": "cpcs",
