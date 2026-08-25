@@ -166,6 +166,26 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
     return await apply_tranche(ctx, lending_id, payload)
 
 
+async def _cs_all_settled(ctx: RequestContext, lending_id: str) -> bool:
+    """Whether the latest APPROVED CP/CS checklist HAS conditions subsequent and every
+    one of them is settled. No approved checklist, or a checklist with no CS at all →
+    False: there was no CS chase to have finished, so the settlement ends the line at
+    'Disbursed' and 'CP/CS Completed' has nothing to add."""
+    from app.models.cpcs import CpcsChecklist
+    chk = (await ctx.session.execute(
+        select(CpcsChecklist).where(
+            CpcsChecklist.tenant_id == ctx.tenant_id,
+            CpcsChecklist.lending_id == str(lending_id),
+            CpcsChecklist.status == "Approved",
+            CpcsChecklist.deleted_at.is_(None))
+        .order_by(CpcsChecklist.checklist_version.desc()).limit(1))).scalar_one_or_none()
+    if chk is None:
+        return False
+    cs = [i for i in (chk.items or []) if str(i.get("condition_type")) == "CS"]
+    return bool(cs) and all(
+        str(i.get("status") or "Pending") in ("Completed", "Waived") for i in cs)
+
+
 async def _settle_booked(ctx: RequestContext, line: LendingTracker,
                          row: DisbursementTranche, source: str) -> None:
     """The money is REAL — the one settlement block, shared by the machine lane (books
@@ -178,12 +198,22 @@ async def _settle_booked(ctx: RequestContext, line: LendingTracker,
     line.disbursed_amount = already + float(row.amount)
     if line.disbursement_date is None:
         line.disbursement_date = row.disbursed_on or date.today()
-    if line.stage != "Disbursed":
+    if line.stage not in ("Disbursed", "CP/CS Completed"):
         history = list(line.stage_history or [])
         history.append({"from": line.stage, "to": "Disbursed",
                         "source": source,
                         "tranche_ref": row.tranche_ref, "by": ctx.actor})
         line.stage = "Disbursed"
+        # 'CP/CS COMPLETED' NEEDS BOTH HALVES: whichever finishes second triggers it.
+        # When the CS chase settled first (recorded on the checklist, stage held at
+        # 'Ready for Disbursement'), this settlement IS the second half — the line
+        # completes NOW, and BOTH audit events stand: the Disbursed event above and
+        # this closing move, each with its own provenance.
+        if await _cs_all_settled(ctx, str(line.id)):
+            history.append({"from": "Disbursed", "to": "CP/CS Completed",
+                            "source": f"{source}:cs-already-complete",
+                            "tranche_ref": row.tranche_ref, "by": ctx.actor})
+            line.stage = "CP/CS Completed"
         line.stage_history = history
     line.updated_by = ctx.actor
     # The LMS follows the money: the FIRST booked tranche opens the loan account
@@ -225,10 +255,11 @@ async def apply_tranche(ctx: RequestContext, lending_id: str, payload: TrancheIn
         raise ConflictError(
             f"Handover package is {pkg.status if pkg else 'absent'!r}; disbursement "
             "tranches are recorded only after Advaya ACCEPTED the handover.")
-    if line.stage not in ("Ready for Disbursement", "Disbursed"):
+    if line.stage not in ("Ready for Disbursement", "Disbursed", "CP/CS Completed"):
         raise ConflictError(
             f"Lending line is {line.stage!r}; disbursement tranches apply only to a "
-            "line at 'Ready for Disbursement' (first tranche) or 'Disbursed'.")
+            "line at 'Ready for Disbursement' (first tranche), 'Disbursed', or "
+            "'CP/CS Completed' (later tranches after the conditions closed).")
     rows = await _existing(ctx, lending_id)
     prior = next((r for r in rows if r.tranche_ref == payload.tranche_ref), None)
     if prior is not None:

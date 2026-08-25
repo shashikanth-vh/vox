@@ -255,38 +255,41 @@ async def test_import_quarantines_unknown_lifecycle_values_and_audits(client, tm
     assert row[1]["quarantined_count"] >= 1
 
 
-async def test_import_quarantines_incomplete_terminal_by_default(client, tmp_path):
-    """A 'Ready for Disbursement' lending row missing its mandatory amount/date is QUARANTINED by
-    default — the same state the interactive API rejects — and only imported (flagged
-    reconciliation) under an explicit retain_incomplete override."""
+async def test_import_retains_incomplete_disbursed_and_accepts_bare_rfd(client, tmp_path):
+    """Two truths of the simple line, at import time.
+
+    A 'Ready for Disbursement' row missing amount/date imports CLEAN — the stage is now the
+    CP-approval milestone and carries no drawdown mandate (the figures are fixed at the
+    Disburse action). A 'Disbursed' row missing them is a REAL exposure: it is never
+    dropped — imported flagged reconciliation_status=Required even without the
+    retain_incomplete override (zero-omission rule)."""
     from openpyxl import Workbook
 
-    def _wb():
+    def _wb(stage, company):
         wb = Workbook()
         leads = wb.active
         leads.title = "Leads"
         leads.append(["Company Name", "Sector"])
-        leads.append(["IncompleteCo", "Solar - EPC"])
+        leads.append([company, "Solar - EPC"])
         lend = wb.create_sheet("Lending Tracker")
         lend.append(["Company Name", "Stage"])
-        lend.append(["IncompleteCo", "Ready for Disbursement"])   # no Disbursed Amount / Date
-        p = tmp_path / "inc.xlsx"
+        lend.append([company, stage])   # no drawdown columns at all
+        p = tmp_path / f"inc_{stage[:3]}.xlsx"
         wb.save(p)
         return p
 
-    with open(_wb(), "rb") as fh:
+    with open(_wb("Ready for Disbursement", "BareRfdCo"), "rb") as fh:
         r = await client.post("/v1/import/atlas-xlsx",
                               params={"mode": "replace", "reason": "load"},
                               files={"file": ("inc.xlsx", fh.read())})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["report"]["quarantined_count"] >= 1
-    assert body["counts"]["lending_tracker"] == 0
-    # Explicit historical override → imported, flagged reconciliation_status=Required.
-    with open(_wb(), "rb") as fh:
+    assert body["report"]["quarantined_count"] == 0
+    assert body["counts"]["lending_tracker"] == 1
+    # A DISBURSED exposure missing its drawdown record: retained + flagged, by default.
+    with open(_wb("Disbursed", "BareDisbCo"), "rb") as fh:
         r2 = await client.post("/v1/import/atlas-xlsx",
-                               params={"mode": "replace", "reason": "hist",
-                                       "retain_incomplete": "true"},
+                               params={"mode": "replace", "reason": "hist"},
                                files={"file": ("inc.xlsx", fh.read())})
     b2 = r2.json()
     assert b2["report"]["reconciliation_count"] >= 1
@@ -336,8 +339,9 @@ _MGMT = {"X-User-Email": "cro@evamfinance.com", "X-User-Roles": "Management"}
 
 
 async def _import_incomplete_disbursed(client, tmp_path, company="ReconCo"):  # noqa: ANN001
-    """Import a 'Ready for Disbursement' lending row missing its amount/date under the retain
-    override; returns the reconciliation item and the lending subject id."""
+    """Import a 'Disbursed' lending row missing its drawdown amount/date — a real exposure,
+    so it is retained + flagged by default; returns the reconciliation item and the lending
+    subject id."""
     from openpyxl import Workbook
     wb = Workbook()
     leads = wb.active
@@ -346,7 +350,7 @@ async def _import_incomplete_disbursed(client, tmp_path, company="ReconCo"):  # 
     leads.append([company, "Solar - EPC"])
     lend = wb.create_sheet("Lending Tracker")
     lend.append(["Company Name", "Stage"])
-    lend.append([company, "Ready for Disbursement"])
+    lend.append([company, "Disbursed"])
     p = tmp_path / f"{company}.xlsx"
     wb.save(p)
     with open(p, "rb") as fh:

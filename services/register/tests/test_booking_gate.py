@@ -397,3 +397,56 @@ async def test_the_recorder_learns_the_booking_outcome_in_their_inbox(client):
     read = await client.post(f"/v1/notifications/{mine[0]['id']}/read",
                              headers=CREDIT_HEAD)
     assert read.status_code == 200, read.text
+
+
+async def test_cs_finished_first_settlement_closes_the_book_with_both_audit_events(client):
+    """The simple line, CS-first ordering: the CS chase settles while the line still sits
+    at 'Ready for Disbursement' (checklist truth only — no stage move), and the
+    disbursement confirmation is then the SECOND half. The one settlement block writes
+    BOTH audit events — → 'Disbursed', then → 'CP/CS Completed' — and the line ends at
+    the closing milestone. Whichever half finishes second triggers the final stage."""
+    lid = await _accepted_manual_line(client)
+    # A NEW checklist version whose CS half exists AND is fully settled (v1, from the
+    # handover fixture, is CP-only). Maker prepares; a different checker approves.
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": lid, "status": "Completed", "checklist_version": 2,
+              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"},
+                        {"key": "noc", "condition_type": "CS", "status": "Completed"}]},
+        headers=ADMIN)
+    assert chk.status_code == 201, chk.text
+    appr = await client.post(f"/v1/internal/cpcs-checklists/{chk.json()['id']}/approve",
+                             headers=CREDIT_HEAD)
+    assert appr.status_code == 200, appr.text
+    # CS done ≠ stage move: the line HOLDS at Ready for Disbursement until the money.
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
+
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-7777",
+                                  "amount_cr": 2.0, "disbursed_on": "2026-08-05"})
+    assert dis.status_code == 201, dis.text
+    tid = dis.json()["tranche"]["id"]
+    ok = await client.post(f"/v1/lending/{lid}/tranches/{tid}/book",
+                           json={"action": "approve", "note": "UTR verified."},
+                           headers=AUTHORIZER)
+    assert ok.status_code == 200, ok.text
+
+    line = (await client.get(f"/v1/lending/{lid}")).json()
+    assert line["stage"] == "CP/CS Completed", line["stage"]
+    tail = [(h.get("from"), h.get("to")) for h in line["stage_history"][-2:]]
+    assert tail == [("Ready for Disbursement", "Disbursed"),
+                    ("Disbursed", "CP/CS Completed")], tail
+
+
+async def test_no_cs_chase_means_the_book_ends_at_disbursed(client):
+    """A CP-only checklist has no conditions subsequent to finish — the settlement ends
+    the line at 'Disbursed' and nothing invents the closing milestone."""
+    lid = await _accepted_manual_line(client)   # fixture checklist v1 is CP-only
+    dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
+                            json={"event": "disbursed", "reference": "UTR-7778",
+                                  "amount_cr": 2.0})
+    assert dis.status_code == 201, dis.text
+    ok = await client.post(f"/v1/lending/{lid}/tranches/{dis.json()['tranche']['id']}/book",
+                           json={"action": "approve"}, headers=AUTHORIZER)
+    assert ok.status_code == 200, ok.text
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Disbursed"

@@ -236,24 +236,6 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
                      _NOTE],
         },
         {
-            # A FALLBACK only: the CP approval auto-moves the stage itself. This stays
-            # for the rare case where that auto-move failed (register unreachable at the
-            # moment of approval) — the evidence gate still guards it.
-            "key": "lending.cpcs-complete", "step": "cs",
-            "label": "Move to CP/CS Completed",
-            "method": "PATCH", "url": "/v1/lending/{subject_id}",
-            "roles": _CREDIT_MAKERS, "stages": {"Sanctioned"},
-            # No longer automatic: 'CP/CS Completed' means BOTH halves are satisfied, and
-            # the CP approval only settles the CP half. The desk marks this when the CS
-            # chase finishes before the money moves; if it moves first, the terminal is
-            # 'Disbursed' and the line never passes through here.
-            "stage_reason": "Mark this once the conditions subsequent are satisfied too "
-                            "— the CP approval alone does not close both halves.",
-            "evidence": ("cp_cs_completion",),
-            "constant": {"stage": "CP/CS Completed"},
-            "form": [],
-        },
-        {
             # ONE verb for the desk: shows the unmet CPs, stages the line if the CP
             # approval just landed, prepares the request package (unmet CPs in its
             # note), and marks it SENT. Generic over the partner — Advaya today,
@@ -360,7 +342,6 @@ _IDENTITY_FOR: dict[str, tuple[str, ...]] = {
     "disburse": ("requested_by",),
     # A plain stage write: the register attributes it to the verified caller from
     # the forwarded identity, so there is no identity FIELD to fill.
-    "lending.cpcs-complete": (),
     "lending.ready-for-disbursement": (),
     "syndication.start": ("requested_by",),
     "syndication.lender-update": ("by",),
@@ -3049,62 +3030,37 @@ def create_app() -> FastAPI:
                     "is.")
                 return ORJSONResponse(status_code=200, content=row)
             row["cp_cs_completion"] = orjson.loads(ev.body).get("id")
-            # 'CP/CS COMPLETED' MEANS BOTH HALVES ARE DONE — and the CP approval only
-            # settles the CP half. Moving the line here on that approval alone put a
-            # label on the screen that claimed the Conditions Subsequent were satisfied
-            # while the desk was still chasing them, sometimes for months. The CP
-            # approval is what UNBLOCKS disbursement (it minted the evidence the stage
-            # gate reads); it is not the milestone that closes both halves.
-            #
-            # So: move only when nothing is open on either half. Otherwise leave the
-            # stage alone and say which conditions are still being worked — the line
-            # disburses off the evidence, and reaches 'CP/CS Completed' when the CS
-            # chase actually finishes (before disbursement) or never, if the money
-            # moves first and the terminal is 'Disbursed'.
+            # ONE SIMPLE LINE — CP approval → 'Ready for Disbursement', disbursement →
+            # 'Disbursed', and the LAST conditions-subsequent receipt (worked before or
+            # after the money) closes the book at 'CP/CS Completed'. So the approval
+            # stages the facility to 'Ready for Disbursement' unconditionally; the CS
+            # chase owns the closing milestone, never this door.
             open_cs = [i for i in (row.get("items") or [])
                        if str(i.get("condition_type")) == "CS"
                        and str(i.get("status") or "Pending") not in ("Completed", "Waived")]
+            cs_note = ""
             if open_cs:
                 cs_names = ', '.join(str(i.get('label') or i.get('key'))
                                      for i in open_cs[:3])
                 cs_tail = ', …' if len(open_cs) > 3 else ''
-                # CP approved, CS still open: finalise for disbursement NOW — the
-                # evidence just minted is exactly what the 'Ready for Disbursement'
-                # gate reads. Best-effort: a line without a proposed drawdown yet
-                # stays 'Sanctioned' and the Disburse action stages it when the
-                # amount and date are proposed.
-                moved = await _register_patch_as(
-                    request, f"/v1/lending/{lending_id}", approved_by, checker,
-                    {"stage": "Ready for Disbursement"})
-                if isinstance(moved, ORJSONResponse) and moved.status_code == 200:
-                    row["stage"] = "Ready for Disbursement"
-                    row["next"] = (
-                        f"CP approved — the line is at 'Ready for Disbursement'; "
-                        f"disbursement can proceed. {len(open_cs)} condition"
-                        f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
-                        f" ({cs_names}{cs_tail}); 'CP/CS Completed' lands when they "
-                        "are satisfied.")
-                else:
-                    row["next"] = (
-                        f"CP approved — the line can disburse. {len(open_cs)} condition"
-                        f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
-                        f" ({cs_names}{cs_tail}); propose the drawdown in Disburse to "
-                        "finalise for disbursement; 'CP/CS Completed' lands when the "
-                        "conditions subsequent are satisfied.")
-                return ORJSONResponse(status_code=200, content=row)
-            # Best-effort — a failed move leaves the fallback action and says so.
+                cs_note = (f" {len(open_cs)} condition"
+                           f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
+                           f" ({cs_names}{cs_tail}); 'CP/CS Completed' lands when the "
+                           "last one is satisfied.")
+            # Best-effort — a failed move leaves the manual stage door and says so.
             moved = await _register_patch_as(
                 request, f"/v1/lending/{lending_id}", approved_by, checker,
-                {"stage": "CP/CS Completed"})
+                {"stage": "Ready for Disbursement"})
             if isinstance(moved, ORJSONResponse) and moved.status_code == 200:
-                row["stage"] = "CP/CS Completed"
-                row["next"] = ("Both halves are satisfied — the line is at 'CP/CS "
-                               "Completed'. Prepare the disbursement request to Advaya.")
+                row["stage"] = "Ready for Disbursement"
+                row["next"] = ("CP approved — the line is at 'Ready for Disbursement'; "
+                               "disbursement can proceed." + cs_note)
             else:
                 log.warning("cpcs_stage_automove_failed",
                             extra={"checklist": checklist_id, "lending": lending_id})
-                row["next"] = ("Approved and evidenced, but the stage could not be moved "
-                               "automatically — use 'Move to CP/CS Completed'.")
+                row["next"] = ("CP approved and evidenced, but the stage could not be "
+                               "moved automatically — set it to 'Ready for Disbursement' "
+                               "from the stage menu." + cs_note)
         return ORJSONResponse(status_code=200, content=row)
 
 

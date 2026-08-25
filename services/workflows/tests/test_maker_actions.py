@@ -617,7 +617,7 @@ def test_every_action_declares_which_service_answers_it():
 
     # The one that bit: a register route that is NOT under /v1/workflows.
     by_key = {s["key"]: s for acts in _MAKER_ACTIONS.values() for s in acts}
-    for key in ("lending.cpcs-complete",):
+    for key in ("sanction.terms",):
         assert _plane_of(by_key[key], by_key[key]["url"]) == "register", key
 
 
@@ -665,28 +665,17 @@ def test_a_lending_citation_names_the_per_line_decision():
     assert 'str(decision.get("subject_id") or "") == str(subject_id)' in src
 
 
-def test_the_stage_move_is_offered_and_names_what_it_is_waiting_for():
-    """'CP/CS Completed' was reachable only by knowing about a dropdown.
+def test_the_manual_stage_move_is_gone_the_cs_save_owns_the_milestone():
+    """'Move to CP/CS Completed' is no longer an action.
 
-    The register gates that stage on two evidences and nothing else — no field lock, no
-    role lock on the stage itself — so the move is a plain write that simply starts being
-    accepted once both are on file. Nothing said so: the evidence landed, the stage did
-    not move, and the screen was silent about which half was missing. It is an action now,
-    and while it is unavailable it says what it is waiting for, by name.
+    The simple line reaches 'CP/CS Completed' automatically when the LAST conditions-
+    subsequent receipt is saved — from Sanctioned, Ready for Disbursement, or Disbursed
+    alike — so a manual button would only invite the milestone to be stamped while
+    conditions were still open. The stage dropdown (register-gated) remains the
+    break-glass path if the auto-move ever fails.
     """
-    from app.api import _EVIDENCE_LABEL
-
-    spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == "lending.cpcs-complete")
-    assert spec["constant"]["stage"] == "CP/CS Completed"
-    assert spec["stages"] == {"Sanctioned"}          # it moves the line ON from Sanctioned
-    assert tuple(spec["evidence"]) == ("cp_cs_completion",)
-    # The two evidence kinds the register's own policy requires for that stage.
-    from evam_backend_core.policy import EVIDENCE_FOR_STAGE
-    assert set(spec["evidence"]) == set(EVIDENCE_FOR_STAGE["Lending"]["CP/CS Completed"]), (
-        "the action must gate on exactly what the register gates on")
-    # And every kind it can wait for has words a credit manager would use.
-    for kind in spec["evidence"]:
-        assert kind in _EVIDENCE_LABEL and " " in _EVIDENCE_LABEL[kind], kind
+    keys = {s["key"] for acts in _MAKER_ACTIONS.values() for s in acts}
+    assert "lending.cpcs-complete" not in keys
 
 
 def test_an_evidence_gated_action_is_refused_by_name_not_by_silence():

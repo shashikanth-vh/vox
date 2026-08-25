@@ -217,17 +217,18 @@ async def test_mandatory_fields_enforced_on_the_real_lending_route(client):
     no_ev = await client.patch(f"/v1/lending/{lid}", json={"stage": "CP/CS Completed"})
     assert no_ev.status_code == 422 and "evidence" in no_ev.text.lower()
     await _advance(client, "lending", lid, ["CP/CS Completed"])
-    # A facility cannot be marked 'Ready for Disbursement' without the PROPOSED amount + date.
-    blocked = await client.patch(f"/v1/lending/{lid}", json={"stage": "Ready for Disbursement"})
+    # 'Ready for Disbursement' is the CP-approval milestone — it takes the label with NO
+    # proposed drawdown on the row (the figures are fixed by the Disburse action later).
+    ready = await client.patch(f"/v1/lending/{lid}", json={"stage": "Ready for Disbursement"})
+    assert ready.status_code == 200, ready.text
+    # 'Disbursed' still cannot be reached without the PROPOSED amount + date.
+    blocked = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"})
     assert blocked.status_code == 422, blocked.text
     assert "proposed_disbursement_amount" in blocked.text and "required" in blocked.text.lower()
-    ready = await client.patch(
+    ok = await client.patch(
         f"/v1/lending/{lid}",
-        json={"stage": "Ready for Disbursement", "proposed_disbursement_amount": 12.5,
+        json={"stage": "Disbursed", "proposed_disbursement_amount": 12.5,
               "proposed_disbursement_date": "2026-01-15"})
-    assert ready.status_code == 200, ready.text
-    # Handover to Advaya is PRISM's TERMINAL — reachable from 'Ready for Disbursement'.
-    ok = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"})
     assert ok.status_code == 200, ok.text
     assert ok.json()["stage"] == "Disbursed"
     # There is no self-disbursement onward: 'Disbursed' only off-ramps to 'On Hold'
@@ -331,23 +332,26 @@ async def test_creation_applies_mandatory_fields_when_a_stage_is_supplied(client
 # The change-request APPROVAL path runs the same policy as a direct PATCH
 # --------------------------------------------------------------------------- #
 async def test_approval_cannot_bypass_mandatory_fields_lending(client):
-    """A change request approving Lending → Ready for Disbursement must be refused when the
-    disbursement amount/date are not already on the row — the approval path uses the SAME policy
-    authority a direct PATCH does."""
+    """A change request approving Lending → Disbursed must be refused when the proposed
+    drawdown amount/date are not already on the row — the approval path uses the SAME policy
+    authority a direct PATCH does. ('Ready for Disbursement' carries no field mandate any
+    more — it is the CP-approval milestone.)"""
     eid = await _entity(client)
     lid = (await client.post("/v1/lending",
                              json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
-    await _advance(client, "lending", lid, ["Note Circulated", "Sanctioned", "CP/CS Completed"])
+    await _advance(client, "lending", lid,
+                   ["Note Circulated", "Sanctioned", "CP/CS Completed",
+                    "Ready for Disbursement"])
     cr = await client.post("/v1/requests", json={
         "subject_type": "Lending", "subject_id": lid, "field": "stage",
-        "to_value": "Ready for Disbursement"}, headers=BD_HEAD)
+        "to_value": "Disbursed"}, headers=BD_HEAD)
     assert cr.status_code == 201, cr.text
     decided = await client.post(f"/v1/requests/{cr.json()['id']}/approve", json={},
                                 headers=CREDIT_HEAD)
     assert decided.status_code == 409, decided.text
     assert "proposed_disbursement_amount" in decided.text
     # The stage did NOT change — the bypass is closed.
-    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "CP/CS Completed"
+    assert (await client.get(f"/v1/lending/{lid}")).json()["stage"] == "Ready for Disbursement"
 
 
 async def test_approval_cannot_bypass_funnel_order_deal(client):

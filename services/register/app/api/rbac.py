@@ -336,8 +336,7 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
         # the single proposed field change and run transition + mandatory-field + field-lock +
         # row-lock enforcement. A change request carries only one field, so a mandatory field a
         # target stage needs must ALREADY be on the row — e.g. a Lending line cannot be approved
-        # into Ready for Disbursement unless disbursed_amount/date are present, and a Deal cannot be approved
-        # into Sanctioned without product_type/rm.
+        # into Disbursed unless the proposed drawdown amount/date are present.
         from evam_backend_core import policy
 
         from app.core import evidence as ev

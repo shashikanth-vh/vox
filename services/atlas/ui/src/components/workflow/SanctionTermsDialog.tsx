@@ -319,8 +319,11 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         })),
         note: f.note || undefined,
       });
-      onDone(`Sanction terms saved — CP/CS checklist ${out.seeded_checklist_id ? 'seeded' : 'not needed'}, `
-        + `${out.seeded_covenant_ids.length} covenant(s) opened.`);
+      onDone(`Sanction terms saved — ${out.seeded_covenant_ids.length} covenant(s) opened. `
+        + (out.seeded_checklist_id
+          ? 'The CP/CS checklist is seeded from the letter — open the CP box to work it.'
+          : 'Next: tap the CP box to prepare the checklist — it reads the conditions '
+            + 'straight out of the letter.'));
       onClose();
     } catch (e: any) { setErr(e?.message || String(e)); }
     setBusy(false);

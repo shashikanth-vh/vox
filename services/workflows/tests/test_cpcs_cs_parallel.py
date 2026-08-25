@@ -1,12 +1,9 @@
-"""'CP/CS Completed' means BOTH halves are done.
+"""ONE simple line: CP approved → Ready for Disbursement → Disbursed → CP/CS Completed.
 
-The CP approval settles the CP half and mints the evidence that unblocks disbursement.
-It used to also stamp the line 'CP/CS Completed', which claimed the conditions
-subsequent were satisfied while the desk was still chasing them — sometimes for months.
-
-The rule this pins: before disbursement, a line reaches 'CP/CS Completed' only when
-nothing is open on either half; a line whose CS are still live disburses on the evidence
-and its terminal is 'Disbursed'.
+The CP approval mints the evidence and stages the facility to 'Ready for Disbursement'
+unconditionally — whatever the CS half looks like. The CS chase owns the closing
+milestone: the LAST conditions-subsequent receipt (recorded before or after the money
+moves) is what takes the line to 'CP/CS Completed', never the approval door itself.
 """
 
 from __future__ import annotations
@@ -56,9 +53,8 @@ async def _approve(app):
 
 
 async def test_an_open_cs_keeps_the_line_out_of_cp_cs_completed(monkeypatch):
-    """Open CS: the milestone stage stays out of reach, but the CP approval now
-    FINALISES the line for disbursement — it moves to 'Ready for Disbursement'
-    (never 'CP/CS Completed'), and the CS chase carries on in parallel."""
+    """Open CS: the approval stages the line to 'Ready for Disbursement' (never
+    'CP/CS Completed'), and the CS chase carries on in parallel."""
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
     reg = _Register({"id": LID, "stage": "Sanctioned"}, [
         {"key": "cp1", "condition_type": "CP", "status": "Completed"},
@@ -72,11 +68,14 @@ async def test_an_open_cs_keeps_the_line_out_of_cp_cs_completed(monkeypatch):
     assert body["cp_cs_completion"] == "e1", "the evidence still mints — disbursement is unblocked"
     assert reg.patches == [{"stage": "Ready for Disbursement"}], reg.patches
     assert "CP approved" in body["next"] and "NOC from lender" in body["next"]
-    assert "CP/CS Completed" in body["next"]      # the milestone still waits for the CS
+    assert "CP/CS Completed" in body["next"]      # the milestone waits for the last CS
     get_settings.cache_clear()
 
 
-async def test_both_halves_satisfied_moves_the_line(monkeypatch):
+async def test_both_halves_satisfied_still_stages_for_disbursement(monkeypatch):
+    """Even with every CS already settled, the approval door stages to 'Ready for
+    Disbursement' — 'CP/CS Completed' belongs to the CS save / manual door, keeping
+    the path one straight line."""
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
     reg = _Register({"id": LID, "stage": "Sanctioned"}, [
         {"key": "cp1", "condition_type": "CP", "status": "Completed"},
@@ -85,20 +84,24 @@ async def test_both_halves_satisfied_moves_the_line(monkeypatch):
     app.state.http = reg
     r = await _approve(app)
     assert r.status_code == 200, r.text
-    assert reg.patches == [{"stage": "CP/CS Completed"}]
-    assert r.json()["stage"] == "CP/CS Completed"
+    assert reg.patches == [{"stage": "Ready for Disbursement"}]
+    assert r.json()["stage"] == "Ready for Disbursement"
     get_settings.cache_clear()
 
 
 async def test_a_waived_cs_is_not_an_open_one(monkeypatch):
+    """A waived CS never appears in the still-open note — and the stage move is the
+    same 'Ready for Disbursement' as every other approval."""
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
     reg = _Register({"id": LID, "stage": "Sanctioned"}, [
         {"key": "cp1", "condition_type": "CP", "status": "Completed"},
         {"key": "cs-x", "condition_type": "CS", "status": "Waived"},
     ])
     app.state.http = reg
-    assert (await _approve(app)).status_code == 200
-    assert reg.patches == [{"stage": "CP/CS Completed"}]
+    r = await _approve(app)
+    assert r.status_code == 200
+    assert reg.patches == [{"stage": "Ready for Disbursement"}]
+    assert "still open" not in r.json()["next"]
     get_settings.cache_clear()
 
 

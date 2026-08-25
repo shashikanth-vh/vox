@@ -351,12 +351,13 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
             required: r.required,
           })),
         });
-        // THE LAST CS CLOSING is the milestone: when every condition subsequent on
-        // the saved checklist is settled and the line still sits at Sanctioned, move
-        // it to CP/CS Completed through the SAME gated stage door the manual action
-        // uses — best-effort, so a refusal (gates rule) leaves the manual door open.
-        // From Ready for Disbursement / Disbursed the stage is the money's; it
-        // never steps back — the strip carries the conditions truth there.
+        // 'CP/CS COMPLETED' NEEDS BOTH HALVES — disbursement AND the conditions
+        // subsequent — and whichever finishes SECOND triggers it. A CS chase that
+        // settles before the money moves is recorded on the checklist only (the
+        // stage holds at Ready for Disbursement); when disbursement confirms, the
+        // register adds the closing move itself. Here, the last CS receipt landing
+        // on an already-Disbursed line IS the second half — move now, best-effort
+        // (a refusal leaves the register-gated stage dropdown as the break-glass).
         let doneMsg = 'CS progress saved — the chase reminders now cover only what is still open.';
         const items: any[] = (saved as any)?.items || [];
         const openCs = items.filter((i) => String(i.condition_type) === 'CS'
@@ -365,13 +366,14 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
           try {
             const lid2 = String(action?.body?.lending_id || '');
             const line = await api.get<any>(`/lending/${lid2}`);
-            if (String(line?.stage) === 'Sanctioned') {
+            if (String(line?.stage) === 'Disbursed') {
               await api.patch(`/lending/${lid2}`, { stage: 'CP/CS Completed' });
               doneMsg = 'All conditions subsequent are satisfied — the line moved to CP/CS Completed.';
             } else {
-              doneMsg = 'All conditions subsequent are satisfied — the checklist is fully closed.';
+              doneMsg = 'All conditions subsequent are satisfied — recorded on the checklist; '
+                + 'the line completes to CP/CS Completed once disbursement is confirmed.';
             }
-          } catch { /* stage gates rule; "Move to CP/CS Completed" remains available */ }
+          } catch { /* stage gates rule; the stage dropdown is the break-glass path */ }
         }
         setBusy(false);
         onDone(doneMsg);

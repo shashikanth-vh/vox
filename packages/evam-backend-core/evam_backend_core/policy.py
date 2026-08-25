@@ -67,12 +67,13 @@ MANDATORY_FOR_STAGE: dict[str, dict[str, list[str]]] = {
     # (The former Deal→Sanctioned mandate moved with the sanction itself to the Lending line;
     # the structuring workflow still records product_type/rm on the deal as plain data.)
     "Lending": {
-        # A facility cannot be marked ready for disbursement without recording the PROPOSED drawdown
-        # amount and date — these are fixed here and carried into the Advaya handover package. The
-        # ACTUAL disbursed_amount/disbursement_date are reserved for a real disbursement confirmation
-        # (a future Advaya integration), never asserted by PRISM on its own.
-        "Ready for Disbursement": ["proposed_disbursement_amount", "proposed_disbursement_date"],
-        # Still required at handover (already on the row by now).
+        # 'Ready for Disbursement' is the CP-approval milestone — the stage flips the moment
+        # the checklist clears, BEFORE a drawdown is proposed, so the book reads what the desk
+        # means: cleared to disburse. The PROPOSED drawdown amount and date are fixed in the
+        # Disburse action, and the Advaya handover independently refuses to send a package
+        # without them — the money-movement gate lost nothing by leaving this stage label.
+        # The ACTUAL disbursed_amount/disbursement_date are reserved for a real disbursement
+        # confirmation (a future Advaya integration), never asserted by PRISM on its own.
         "Disbursed": ["proposed_disbursement_amount", "proposed_disbursement_date"],
     },
 }

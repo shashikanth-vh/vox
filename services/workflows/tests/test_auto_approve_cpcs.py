@@ -94,7 +94,7 @@ async def test_sending_the_checklist_auto_approves_when_the_flag_is_on(monkeypat
 
     assert any("/v1/internal/cpcs-checklists/c1/approve" in p for p in reg.posts), reg.posts
     assert any("/v1/evidence" in p for p in reg.posts), reg.posts
-    assert reg.patches == [{"stage": "CP/CS Completed"}], reg.patches
+    assert reg.patches == [{"stage": "Ready for Disbursement"}], reg.patches
     get_settings.cache_clear()
 
 

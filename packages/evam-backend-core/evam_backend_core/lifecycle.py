@@ -99,20 +99,20 @@ _CREDIT_PIPELINE: dict[str, set[str]] = {
     "Data Awaited":    {"Diligence", "On Hold", "Rejected"},
     "Diligence":       {"Note Circulated", "Data Awaited", "On Hold", "Rejected"},
     "Note Circulated": {"Sanctioned", "Diligence", "On Hold", "Rejected"},
-    # Post-sanction, the conditions precedent / subsequent and the executed agreement are worked
-    # to completion before the facility is prepared for disbursement. The CP approval alone
-    # UNBLOCKS disbursement: 'Ready for Disbursement' is reachable straight from 'Sanctioned' —
-    # gated by the cp_cs_completion evidence (policy.EVIDENCE_STAGE_GATES) and the proposed
-    # drawdown fields — so the CS chase runs in parallel with the money. 'CP/CS Completed'
-    # remains the milestone that closes BOTH halves.
+    # Post-sanction the path is ONE simple line: CP approval stages the facility to 'Ready
+    # for Disbursement' (gated by the cp_cs_completion evidence — policy.EVIDENCE_STAGE_GATES),
+    # disbursement takes it to 'Disbursed', and the CS chase — worked before or after the
+    # money — closes the book at 'CP/CS Completed' when its last condition settles.
     "Sanctioned":      {"CP/CS Completed", "Ready for Disbursement", "Note Circulated", "On Hold"},
-    "CP/CS Completed": {"Ready for Disbursement", "Sanctioned", "On Hold"},
-    # 'Ready for Disbursement' is the internal finalisation (proposed amount/date fixed); the
-    # move to 'Disbursed' is senior-locked (ROW_LOCKS) and normally made by the maker-checker
-    # handover approval.
+    # 'Disbursed' stays reachable from here so a CS chase that finishes BEFORE the money
+    # moves never blocks the disbursement confirmation.
+    "CP/CS Completed": {"Ready for Disbursement", "Disbursed", "Sanctioned", "On Hold"},
+    # The move to 'Disbursed' is senior-locked (ROW_LOCKS) and normally made by the
+    # maker-checker handover approval.
     "Ready for Disbursement": {"Disbursed", "CP/CS Completed", "On Hold"},
-    # 'Disbursed' is TERMINAL for the current product scope (see rbac header + FOUNDATION_SPEC §11).
-    "Disbursed": {"On Hold"},
+    # After the money moves, the LAST conditions-subsequent receipt closes the book:
+    # 'Disbursed' → 'CP/CS Completed' is the normal ending of the simple path.
+    "Disbursed": {"CP/CS Completed", "On Hold"},
     "On Hold":         {"Data Awaited", "Diligence", "Note Circulated", "Sanctioned",
                         "CP/CS Completed", "Ready for Disbursement", "Disbursed"},
     "Rejected":        {"Data Awaited", "Diligence"},   # refer-back / reopen

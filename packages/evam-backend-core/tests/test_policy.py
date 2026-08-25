@@ -7,20 +7,24 @@ from evam_backend_core import policy
 
 
 def test_mandatory_field_error_blocks_advance_until_required_fields_present():
-    # Lending → Ready for Disbursement requires the proposed amount + date; amount present →
-    # only the date missing. (The former Deal→Sanctioned mandate moved to the Lending line with
+    # Lending → Disbursed requires the proposed amount + date; amount present → only the date
+    # missing. ('Ready for Disbursement' carries NO field mandate any more — it flips on CP
+    # approval, before a drawdown is proposed; the figures are fixed by the Disburse action and
+    # re-verified at handover. The former Deal→Sanctioned mandate moved to the Lending line with
     # the rest of the sanction governance — a deal's stage is the commercial funnel.)
-    err = policy.mandatory_field_error("Lending", "Ready for Disbursement",
+    err = policy.mandatory_field_error("Lending", "Disbursed",
                                        {"proposed_disbursement_amount": 5})
     assert err and "proposed_disbursement_date" in err and "amount" not in (err.split("required")[0])
     # Both present (merged from row + change) → passes.
     assert policy.mandatory_field_error(
-        "Lending", "Ready for Disbursement",
+        "Lending", "Disbursed",
         {"proposed_disbursement_amount": 5, "proposed_disbursement_date": "2026-01-01"}) is None
     # Empty string counts as missing.
     assert policy.mandatory_field_error(
-        "Lending", "Ready for Disbursement",
+        "Lending", "Disbursed",
         {"proposed_disbursement_amount": "", "proposed_disbursement_date": "2026-01-01"}) is not None
+    # The CP-approval milestone itself needs no proposed drawdown to take the label.
+    assert policy.mandatory_field_error("Lending", "Ready for Disbursement", {}) is None
 
 
 def test_mandatory_field_error_is_noop_without_a_rule():
@@ -61,7 +65,7 @@ def test_stage_field_uses_the_registers_real_subject_names():
     assert policy.stage_field_of("AssetMonetisation") == "status"
     assert policy.stage_field_of("Unknown") is None
     # And the seeded rules for those subjects are actually reachable under the real names.
-    assert policy.mandatory_field_error("Lending", "Ready for Disbursement", {}) is not None
+    assert policy.mandatory_field_error("Lending", "Disbursed", {}) is not None
     assert policy.field_lock_error("Syndication", "Sanctioned", ["Syn RM"], ["amount_cr"]) is not None
     assert policy.field_lock_error("Syndication", "Sanctioned", ["Syn Head"], ["amount_cr"]) is None
 
@@ -149,10 +153,12 @@ def test_check_write_is_the_single_authority_across_paths():
     v = policy.check_write("Lending", current={}, changes={"stage": "Disbursed"},
                            roles=["Credit Head"], is_creation=True)
     assert v is not None and v.kind == "validation"
-    # Update into a mandatory stage without the required fields → validation error. 'Ready for
-    # Disbursement' requires the proposed amount/date and is reached from 'CP/CS Completed'.
-    v = policy.check_write("Lending", current={"stage": "CP/CS Completed"},
-                           changes={"stage": "Ready for Disbursement"}, roles=["Credit Head"])
+    # Update into a mandatory stage without the required fields → validation error. 'Disbursed'
+    # requires the proposed amount/date ('Ready for Disbursement' no longer does — it is the
+    # CP-approval milestone; but it still carries the cp_cs_completion evidence gate, checked
+    # separately below and by the register).
+    v = policy.check_write("Lending", current={"stage": "Ready for Disbursement"},
+                           changes={"stage": "Disbursed"}, roles=["Credit Head"])
     assert v is not None and v.kind == "validation" and "proposed_disbursement_amount" in v.message
     # The evidence gate: reaching 'CP/CS Completed' needs CP/CS + executed-agreement evidence — from
     # 'Sanctioned' without it → refused…
