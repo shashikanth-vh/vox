@@ -443,6 +443,17 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             '"schedule_kind": "EMI|Bullet|Custom"}}\n'
             "Frequency: infer from the stated timeline (monthly→Monthly, quarter→"
             "Quarterly, half-year→SemiAnnual, annual→Annual); default Monthly. "
+            "CLASSIFICATION — letters name these sections differently, so classify by "
+            "NATURE, not by heading: cp_items are ONE-TIME conditions to satisfy "
+            "BEFORE disbursement (whether headed 'Conditions Precedent', "
+            "'Pre-disbursement conditions', 'Terms and Conditions', or just listed); "
+            "cs_items are one-time conditions allowed AFTER disbursement with a "
+            "stated timeline; covenants are ONLY the ONGOING, RECURRING obligations "
+            "(periodic reporting, ratio maintenance like DSCR/FACR, insurance "
+            "renewal). A one-time act is NEVER a covenant — when in doubt between a "
+            "CP and a covenant, a condition without a recurring frequency is a CP. "
+            "A typical sanction letter yields several cp_items; an empty cp_items "
+            "list is almost always a misclassification — re-check before answering. "
             "In terms, use null for anything the documents do not state. Do not invent "
             "conditions or figures that are not in the documents.")
         extra = (f"\n\n===== CREDIT NOTE (committee approval) =====\n"
