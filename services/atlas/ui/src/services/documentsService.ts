@@ -96,10 +96,20 @@ export const documentsService = {
     const index: DocIndex = {};
     try {
       const rows = await listAll(`/entities/${entityId}/documents`, { key: 'documents' });
+      // Newest per slot wins: rows stacked in one slot before the register learned
+      // to supersede on re-upload must still show the latest file, not the first.
+      const stamp = (r: any) => String(r?.uploaded_at || r?.created_at || '');
+      const best: Record<string, Record<string, any>> = {};
       rows.forEach((r: any) => {
         if (!r?.section || !r?.slot_key) return;
         if (String(r.status) === 'Superseded') return;
-        (index[r.section] = index[r.section] || {})[r.slot_key] = toEntry(r);
+        const cur = (best[r.section] = best[r.section] || {})[r.slot_key];
+        if (!cur || stamp(r) > stamp(cur)) best[r.section][r.slot_key] = r;
+      });
+      Object.entries(best).forEach(([sec, slots]) => {
+        Object.entries(slots).forEach(([k, r]) => {
+          (index[sec] = index[sec] || {})[k] = toEntry(r);
+        });
       });
     } catch (e) {
       console.warn('[register] could not read the data register:', e);

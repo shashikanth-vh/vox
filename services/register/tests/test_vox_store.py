@@ -629,3 +629,34 @@ async def test_maker_never_checks_their_own_stage_request(client: AsyncClient):
     r = await client.post(f"/v1/requests/{rid}/approve", json={},
                           headers=_as("admin@evamfinance.com", "Admin"))
     assert r.status_code == 200, r.text
+
+
+async def test_reupload_into_a_slot_supersedes_the_old_file(client: AsyncClient):
+    """Found in the field: 'Replace' stacked a second live document in the slot and
+    the dialog kept showing the first. Uploading into an occupied slot IS the
+    replace — the old row becomes Superseded, chained to the successor."""
+    import io
+    ent = await client.post("/v1/entities", json={
+        "code": "DOCSLOT1", "legal_name": "Doc Slot Co", "entity_type": "Company"},
+        headers=MGMT)
+    eid = ent.json()["id"]
+
+    async def _up(name: str, content: bytes):
+        return await client.post(
+            f"/v1/entities/{eid}/documents/upload",
+            files={"file": (name, io.BytesIO(content), "application/pdf")},
+            data={"section": "fin", "slot_key": "af3",
+                  "title": "Audited financials", "is_required": "true"},
+            headers=MGMT)
+
+    first = await _up("fy24.pdf", b"old bytes")
+    assert first.status_code == 201, first.text
+    second = await _up("fy25.pdf", b"new bytes")
+    assert second.status_code == 201, second.text
+
+    docs = (await client.get(f"/v1/entities/{eid}/documents", headers=MGMT)).json()
+    slot = [d for d in docs if d.get("slot_key") == "af3"]
+    live = [d for d in slot if d["status"] != "Superseded"]
+    old = [d for d in slot if d["status"] == "Superseded"]
+    assert len(live) == 1 and live[0]["original_filename"] == "fy25.pdf"
+    assert len(old) == 1 and old[0]["superseded_by"] == live[0]["id"]

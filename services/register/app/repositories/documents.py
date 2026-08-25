@@ -172,7 +172,30 @@ async def store_and_register(
         # No object store configured → inline fallback (bounded by the size ceiling).
         payload["content_base64"] = base64.b64encode(data).decode()
 
-    return await register_document(session, tenant_id, actor, payload)
+    new = await register_document(session, tenant_id, actor, payload)
+    # A SLOT holds one live document — that is what the checklist row shows. Uploading
+    # into an occupied slot IS the replace: every other live doc in the slot becomes
+    # Superseded, chained to the successor (nothing deleted; the paper trail stays).
+    # Without this, "Replace" quietly stacked a second live row and the dialog kept
+    # showing the old file — the field's "replace is not working".
+    if slot_key and section:
+        from sqlalchemy import select
+        others = (await session.execute(select(Document).where(
+            Document.tenant_id == tenant_id,
+            Document.subject_type == subject_type,
+            Document.subject_id == subject_id,
+            Document.section == section,
+            Document.slot_key == slot_key,
+            Document.id != new.id,
+            Document.deleted_at.is_(None),
+            Document.status.notin_(("Superseded", "Removed", "Rejected"))))).scalars().all()
+        for old in others:
+            old.status = "Superseded"
+            old.superseded_by = new.id
+            old.updated_by = actor
+        if others:
+            await session.flush()
+    return new
 
 
 # --------------------------------------------------------------------------- #
