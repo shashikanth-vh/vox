@@ -142,18 +142,28 @@ async def create_checklist(payload: ChecklistIn,
     enforce_operation(ctx.user, "prepare_cpcs_checklist")
     _validate_items(ctx, payload)
     items = [i.model_dump(mode="json") for i in payload.items]
-    won = (await ctx.session.execute(
-        pg_insert(CpcsChecklist).values(
-            tenant_id=ctx.tenant_id, lending_id=payload.lending_id, deal_id=payload.deal_id,
-            checklist_version=payload.checklist_version, items=items, status=payload.status,
-            prepared_by=ctx.actor, prepared_by_id=_actor_id(ctx), note=payload.note,
-            created_by=ctx.actor)
-        .on_conflict_do_nothing(constraint="cp_cs_checklists_tenant_lending_version")
-        .returning(CpcsChecklist.id))).scalar_one_or_none()
+    # A DRAFT is the maker's working copy: evidence arrives over days, and losing the
+    # half-filled list to an all-or-nothing submit was the field complaint. Re-posting
+    # the SAME version over a Draft UPDATES it in place (including the final post that
+    # flips it to Completed for the checker); over any settled status (Completed /
+    # Approved / Returned) the conflict stands — open a new version.
+    stmt = (pg_insert(CpcsChecklist).values(
+        tenant_id=ctx.tenant_id, lending_id=payload.lending_id, deal_id=payload.deal_id,
+        checklist_version=payload.checklist_version, items=items, status=payload.status,
+        prepared_by=ctx.actor, prepared_by_id=_actor_id(ctx), note=payload.note,
+        created_by=ctx.actor)
+        .on_conflict_do_update(
+            constraint="cp_cs_checklists_tenant_lending_version",
+            set_={"items": items, "status": payload.status, "note": payload.note,
+                  "prepared_by": ctx.actor, "prepared_by_id": _actor_id(ctx),
+                  "updated_by": ctx.actor},
+            where=(CpcsChecklist.status == "Draft"))
+        .returning(CpcsChecklist.id))
+    won = (await ctx.session.execute(stmt)).scalar_one_or_none()
     if won is None:
         raise ConflictError(
             f"A CP/CS checklist v{payload.checklist_version} already exists for Lending "
-            f"{payload.lending_id!r}; open a new version.")
+            f"{payload.lending_id!r} and is past Draft; open a new version.")
     ctx.session.add(AuditLog(
         tenant_id=ctx.tenant_id, actor=ctx.actor, action="cpcs.prepare",
         resource_type="cp_cs_checklists", resource_id=str(won),

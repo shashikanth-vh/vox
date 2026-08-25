@@ -151,3 +151,32 @@ async def test_cpcs_reject_is_terminal_and_four_eyed(client):
     q = await client.get("/v1/internal/cpcs-checklists",
                          params={"lending_id": lid, "status": "Completed"}, headers=ADMIN)
     assert all(row["id"] != cid for row in q.json())
+
+
+async def test_a_draft_checklist_saves_updates_and_completes_in_place(client):
+    """Evidence arrives over days: a Draft at version N re-saves in place as often
+    as the maker likes — pending required CPs and all — and the final Completed
+    post flips the SAME row for the checker. A settled version still conflicts."""
+    lid = await _lending(client)
+    body = {"lending_id": lid, "checklist_version": 1, "status": "Draft",
+            "items": [{"key": "charge", "condition_type": "CP", "status": "Pending"}]}
+    first = await client.post("/v1/internal/cpcs-checklists", json=body, headers=ADMIN)
+    assert first.status_code == 201, first.text
+    cid = first.json()["id"]
+    # a later save with more work lands on the SAME row
+    body["items"].append({"key": "insurance", "condition_type": "CS", "status": "Pending"})
+    again = await client.post("/v1/internal/cpcs-checklists", json=body, headers=ADMIN)
+    assert again.status_code == 201, again.text
+    assert again.json()["id"] == cid
+    assert len(again.json()["items"]) == 2
+    # the final send flips the draft to Completed in place
+    body["status"] = "Completed"
+    body["items"][0]["status"] = "Completed"
+    body["items"][0]["evidence_ref"] = "doc/charge-1"
+    done = await client.post("/v1/internal/cpcs-checklists", json=body, headers=ADMIN)
+    assert done.status_code == 201, done.text
+    assert done.json()["id"] == cid and done.json()["status"] == "Completed"
+    # past Draft, the version is settled — a re-post conflicts
+    clash = await client.post("/v1/internal/cpcs-checklists", json=body, headers=ADMIN)
+    assert clash.status_code == 409, clash.text
+    assert "open a new version" in clash.text

@@ -3963,6 +3963,10 @@ def create_app() -> FastAPI:
                     latest = max(rows, key=lambda r: int(r.get("checklist_version") or 0))
                     latest_checklist_status = str(latest.get("status") or "")
                     latest_checklist_items = list(latest.get("items") or [])
+                    # A live DRAFT continues under its own number — serving +1 here
+                    # would orphan the saved work behind a version nobody opens.
+                    if latest_checklist_status == "Draft":
+                        next_version = int(latest.get("checklist_version") or 1)
             # The committee reads the CAM — so "Send to credit committee" waits for one.
             # Fail-open on an unreadable answer (the gate informs, it must not wedge).
             cams, cam_err = await _register_get_as(

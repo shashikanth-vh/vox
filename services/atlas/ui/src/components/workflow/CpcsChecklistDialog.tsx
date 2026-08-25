@@ -82,6 +82,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
   const [version, setVersion] = useState(1);
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
+  const [savedMsg, setSavedMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
 
@@ -275,6 +276,42 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
     const doneStates = half === 'CP'
       ? ['Completed', 'Waived', 'Deferred as CS'] : ['Completed', 'Waived'];
     return ` (${rel.filter((r) => doneStates.includes(r.status)).length}/${rel.length})`;
+  };
+
+  const itemOut = (r: CpcsItem) => ({
+    key: (r.key.trim() || r.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 80),
+    label: r.label.trim(),
+    condition_type: r.condition_type,
+    required: r.required,
+    status: r.status,
+    ...(r.evidence_ref.trim() ? { evidence_ref: r.evidence_ref.trim() } : {}),
+    ...(r.reason.trim() ? { reason: r.reason.trim() } : {}),
+    ...(r.expiry_date ? { expiry_date: r.expiry_date } : {}),
+  });
+
+  // Evidence arrives over days: a DRAFT saves whatever stands — pending CPs and
+  // all — straight onto the register (same version, updated in place), so the
+  // desk closes the dialog without losing the chase. Send for checking stays the
+  // all-conditions-settled gate.
+  const saveDraft = async () => {
+    const named = items.filter((r) => r.label.trim());
+    if (!named.length) { setErr('Nothing to save yet — add or read the conditions first.'); return; }
+    setBusy(true); setErr(''); setSavedMsg('');
+    try {
+      const { api } = await import('../../api/http');
+      await api.post('/internal/cpcs-checklists', {
+        lending_id: String(action?.body?.lending_id || ''),
+        ...(action?.body?.deal_id ? { deal_id: String(action.body.deal_id) } : {}),
+        checklist_version: version, status: 'Draft',
+        ...(note.trim() ? { note: note.trim() } : {}),
+        items: [...named, ...carried].map(itemOut),
+      });
+      setLatestStatus('Draft');
+      setSavedMsg(`Draft v${version} saved — continue anytime; Send for checking when every condition is settled.`);
+    } catch (e: any) {
+      setErr(e?.response?.data?.error?.detail || e?.message || String(e));
+    }
+    setBusy(false);
   };
 
   const set = (i: number, patch: Partial<CpcsItem>) =>
@@ -527,11 +564,18 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
           <TextField fullWidth multiline minRows={2} size="small" label="Note for the checker"
             value={note} onChange={(e) => setNote(e.target.value)} sx={{ mt: 1.4 }} />
         )}
+        {savedMsg && <Alert severity="success" sx={{ mt: 1.2, py: 0, fontSize: 12 }}
+          onClose={() => setSavedMsg('')}>{savedMsg}</Alert>}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} variant="outlined" disabled={busy}>
           {ro ? 'Close' : 'Cancel'}
         </Button>
+        {!ro && phase === 'CP' && (
+          <Button onClick={() => void saveDraft()} variant="outlined" disabled={busy}>
+            Save draft
+          </Button>
+        )}
         {!ro && (
           <Button onClick={submit} variant="contained" disabled={busy}>
             {busy ? (phase === 'CS' ? 'Saving…' : 'Sending…')
