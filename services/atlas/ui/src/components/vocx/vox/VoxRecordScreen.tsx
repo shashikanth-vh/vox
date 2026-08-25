@@ -517,7 +517,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         {(phase === 'idle' || phase === 'error') && (
           <label className="rec-quick-row">
             <input type="checkbox" checked={quick} onChange={toggleQuick} />
-            <span>⚡ Quick transcript — faster</span>
+            <span>⚡ Quick transcript</span>
           </label>
         )}
         {(phase === 'idle' || phase === 'error') && (
