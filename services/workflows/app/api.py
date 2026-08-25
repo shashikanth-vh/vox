@@ -17,6 +17,7 @@ Run it:  python -m app.api   (same image as the worker; a second container/deplo
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 
 import orjson
@@ -2110,6 +2111,9 @@ def create_app() -> FastAPI:
     # reference can be garbage-collected mid-flight — the CPCS auto-approval died
     # silently exactly this way in the field (no auto_approved, no failure line).
     _bg_tasks: set = set()
+    app.state.auto_tasks = _bg_tasks   # reachable for tests / a debugger on a live box
+    # The CPCS poll cadence; module-visible so a test can shrink the wait to nothing.
+    _AUTO_POLL_SECONDS = float(os.environ.get("WORKFLOWS_AUTO_POLL_SECONDS", "2"))
 
     def _hold(task) -> None:  # noqa: ANN001
         _bg_tasks.add(task)
@@ -2577,67 +2581,6 @@ def create_app() -> FastAPI:
                 note=note,
                 approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
-        if settings.auto_approve:
-            # The prepare run is short (one activity). Await its checklist id in the
-            # background, then walk the SAME approve door as a checker would — under
-            # the policy identity, which trivially satisfies maker-checker. A restart
-            # in the window degrades to the manual gate; nothing is lost.
-            _tenant = caller.tenant
-            _wfid = handle.id
-
-            _lending = str(payload.lending_id)
-            _version = int(payload.checklist_version or 1)
-
-            async def _auto_cpcs() -> None:
-                # The REGISTER is the source of truth the approval needs — poll it
-                # for the Completed checklist row instead of waiting on the Temporal
-                # handle (whose result-wait proved able to hang without a word in
-                # the field). The worker writes the row within seconds; two minutes
-                # of patience covers a busy queue, and every exit path logs.
-                try:
-                    chk_id = ""
-                    for _ in range(60):
-                        await asyncio.sleep(2)
-                        rows, perr = await _register_get_as(
-                            request,
-                            f"/v1/internal/cpcs-checklists?lending_id={_lending}&limit=50",
-                            _POLICY_BY, _policy_ctx(_tenant))
-                        if perr is not None or not isinstance(rows, list):
-                            continue
-                        match = [r for r in rows
-                                 if int(r.get("checklist_version") or 0) == _version
-                                 and r.get("status") == "Completed"]
-                        if match:
-                            chk_id = str(match[0].get("id") or "")
-                            break
-                    if not chk_id:
-                        log.warning("auto_approve_failed",
-                                    extra={"workflow": _wfid, "kind": "cpcs",
-                                           "error": "no Completed checklist appeared "
-                                                    "within the wait window"})
-                        return
-                    out = await _approve_cpcs_core(
-                        request, chk_id, _POLICY_BY, _policy_ctx(_tenant),
-                        _POLICY_NOTE)
-                    ok = getattr(out, "status_code", 500) < 300
-                    (log.info if ok else log.warning)(
-                        "auto_approved" if ok else "auto_approve_failed",
-                        extra={"workflow": _wfid, "kind": "cpcs",
-                               "checklist": chk_id})
-                except asyncio.CancelledError:
-                    log.warning("auto_approve_failed",
-                                extra={"workflow": _wfid, "kind": "cpcs",
-                                       "error": "task cancelled (shutdown?)"})
-                    raise
-                except Exception as exc:  # noqa: BLE001 — degrade to the manual checker
-                    log.warning("auto_approve_failed",
-                                extra={"workflow": _wfid, "kind": "cpcs",
-                                       "error": str(exc)})
-
-            _hold(asyncio.create_task(_auto_cpcs()))
-            return ORJSONResponse(status_code=202, content={
-                "workflow_id": handle.id, "status": "prepared — auto-approval (policy) queued",
-                "status_url": f"/v1/workflows/{handle.id}"})
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
             "status_url": f"/v1/workflows/{handle.id}"})
@@ -2979,6 +2922,66 @@ def create_app() -> FastAPI:
                 checklist_version=payload.checklist_version, note=payload.note,
                 approver_notify=settings.approver_notify_list()),
             wf_id, restart_if_closed=True, memo=memo)
+        if settings.auto_approve:
+            # The prepare run is short (one activity). Wait for its checklist row in
+            # the background, then walk the SAME approve door as a checker would —
+            # under the policy identity, which trivially satisfies maker-checker. A
+            # restart in the window degrades to the manual gate; nothing is lost.
+            _tenant = caller.tenant
+            _wfid = handle.id
+            _lending = str(payload.lending_id)
+            _version = int(payload.checklist_version or 1)
+
+            async def _auto_cpcs() -> None:
+                # The REGISTER is the source of truth the approval needs — poll it
+                # for the Completed checklist row instead of waiting on the Temporal
+                # handle (whose result-wait proved able to hang without a word in
+                # the field). The worker writes the row within seconds; two minutes
+                # of patience covers a busy queue, and every exit path logs.
+                try:
+                    chk_id = ""
+                    for _ in range(60):
+                        await asyncio.sleep(_AUTO_POLL_SECONDS)
+                        rows, perr = await _register_get_as(
+                            request,
+                            f"/v1/internal/cpcs-checklists?lending_id={_lending}&limit=50",
+                            _POLICY_BY, _policy_ctx(_tenant))
+                        if perr is not None or not isinstance(rows, list):
+                            continue
+                        match = [r for r in rows
+                                 if int(r.get("checklist_version") or 0) == _version
+                                 and r.get("status") == "Completed"]
+                        if match:
+                            chk_id = str(match[0].get("id") or "")
+                            break
+                    if not chk_id:
+                        log.warning("auto_approve_failed",
+                                    extra={"workflow": _wfid, "kind": "cpcs",
+                                           "error": "no Completed checklist appeared "
+                                                    "within the wait window"})
+                        return
+                    out = await _approve_cpcs_core(
+                        request, chk_id, _POLICY_BY, _policy_ctx(_tenant),
+                        _POLICY_NOTE)
+                    ok = getattr(out, "status_code", 500) < 300
+                    (log.info if ok else log.warning)(
+                        "auto_approved" if ok else "auto_approve_failed",
+                        extra={"workflow": _wfid, "kind": "cpcs",
+                               "checklist": chk_id})
+                except asyncio.CancelledError:
+                    log.warning("auto_approve_failed",
+                                extra={"workflow": _wfid, "kind": "cpcs",
+                                       "error": "task cancelled (shutdown?)"})
+                    raise
+                except Exception as exc:  # noqa: BLE001 — degrade to the manual checker
+                    log.warning("auto_approve_failed",
+                                extra={"workflow": _wfid, "kind": "cpcs",
+                                       "error": str(exc)})
+
+            _hold(asyncio.create_task(_auto_cpcs()))
+            return ORJSONResponse(status_code=202, content={
+                "workflow_id": handle.id, "status": "prepared — auto-approval (policy) queued",
+                "status_url": f"/v1/workflows/{handle.id}"})
         return ORJSONResponse(status_code=202, content={
             "workflow_id": handle.id, "status": "prepared",
             "status_url": f"/v1/workflows/{handle.id}"})
