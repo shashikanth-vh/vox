@@ -132,10 +132,17 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
       return next;
     });
     if (out.covenants.length) {
-      setCovs(out.covenants.map((c) => ({
-        ...blankCov(), name: c.name + (c.timeline ? ` (${c.timeline})` : ''),
-        frequency: c.frequency,
-      })));
+      // The register caps a covenant name at 200 chars. The engine clamps name and
+      // timeline SEPARATELY, so appending the timeline here could push a legal name
+      // over the limit and wedge the save with a 422 — append it only when it fits.
+      setCovs(out.covenants.map((c) => {
+        const base = c.name.slice(0, 200);
+        const withTimeline = c.timeline ? `${base} (${c.timeline})` : base;
+        return {
+          ...blankCov(), name: withTimeline.length <= 200 ? withTimeline : base,
+          frequency: c.frequency,
+        };
+      }));
     }
     setInfo(`Filled from ${source}: ${Object.keys(t).length} term field(s), `
       + `${out.covenants.length} covenant(s). Review, then Save terms & seed.`);
@@ -301,7 +308,9 @@ export default function SanctionTermsDialog({ action, onClose, onDone }: {
         // CP/CS are worked in their own screens, which read the letter directly.
         cp_items: [], cs_items: [],
         covenants: covenants.map((c) => ({
-          name: c.name.trim(), covenant_type: c.covenant_type,
+          // Hard cap at the register's schema limit whatever the source — an engine
+          // fill, a stale cache, or a hand-pasted paragraph must never wedge the save.
+          name: c.name.trim().slice(0, 200), covenant_type: c.covenant_type,
           ...(c.metric ? { metric: c.metric } : {}),
           ...(c.covenant_type === 'Financial' ? { operator: c.operator, threshold: Number(c.threshold) } : {}),
           frequency: c.frequency,
