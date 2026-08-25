@@ -484,6 +484,11 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             "CP and a covenant, a condition without a recurring frequency is a CP. "
             "A typical sanction letter yields several cp_items; an empty cp_items "
             "list is almost always a misclassification — re-check before answering. "
+            "GROUNDING: every item must correspond to a clause actually written in "
+            "the letter — one listed clause yields ONE item (split only when a "
+            "single clause plainly names distinct obligations), and the total item "
+            "count across the three lists should track the letter's own "
+            "enumeration, never exceed it by padding or paraphrase variants. "
             "In terms, use null for anything the documents do not state. Do not invent "
             "conditions or figures that are not in the documents.")
         extra = (f"\n\n===== CREDIT NOTE (committee approval) =====\n"
