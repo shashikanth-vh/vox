@@ -2600,19 +2600,26 @@ def create_app() -> FastAPI:
             return _problem(409, "Conflict",
                             f"The line is {stage!r} — disbursement follows the CP "
                             "checklist approval.")
-        # Stage + proposed figures: fold "Move to Ready for Disbursement" into the verb.
+        # Proposed figures ALWAYS persist to the row — the CP approval now stages the
+        # line to 'Ready for Disbursement' by itself, so this verb usually arrives at a
+        # line already there whose row still has NO drawdown figures; skipping the write
+        # in that state left the handover refusing with "must be set before handover".
+        # The stage move stays folded in only for the states that still need it.
         amount = payload.proposed_amount or line.get("proposed_disbursement_amount")
         date_ = payload.proposed_date or line.get("proposed_disbursement_date")
+        if not amount or not date_:
+            return _problem(422, "Validation failed",
+                            "Enter the proposed drawdown amount and date — they "
+                            "travel with the disbursement request.")
+        changes: dict[str, Any] = {"proposed_disbursement_amount": amount,
+                                   "proposed_disbursement_date": str(date_)}
         if stage in ("Sanctioned", "CP/CS Completed"):
-            if not amount or not date_:
-                return _problem(422, "Validation failed",
-                                "Enter the proposed drawdown amount and date — they "
-                                "travel with the disbursement request.")
+            changes["stage"] = "Ready for Disbursement"
+        if ("stage" in changes
+                or str(line.get("proposed_disbursement_amount") or "") != str(amount)
+                or str(line.get("proposed_disbursement_date") or "") != str(date_)):
             moved = await _register_patch_as(
-                request, f"/v1/lending/{lid}", who, caller,
-                {"stage": "Ready for Disbursement",
-                 "proposed_disbursement_amount": amount,
-                 "proposed_disbursement_date": str(date_)})
+                request, f"/v1/lending/{lid}", who, caller, changes)
             if not (isinstance(moved, ORJSONResponse) and moved.status_code == 200):
                 return moved
         # Every CP condition NOT met rides with the request — the partner sees exactly

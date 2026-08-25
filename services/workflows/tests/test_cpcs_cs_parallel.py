@@ -286,3 +286,68 @@ async def test_a_fully_ticked_checklist_with_the_checker_stays_shut(monkeypatch)
     cp = by_key["cpcs.prepare"]
     assert cp["enabled"] is False and "satisfied" in cp["reason"]
     get_settings.cache_clear()
+
+
+class _DisburseRegister(_Http):
+    """The register the Disburse verb talks to: serves the line, records the PATCH
+    (where the proposed figures must land), and answers the handover prep + submit."""
+
+    def __init__(self, row: dict) -> None:
+        super().__init__(row)
+        self.patches: list[dict] = []
+
+    async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        u = str(url)
+        if "/submit" in u:
+            return httpx.Response(200, request=httpx.Request("POST", u),
+                                  json={"package_sha256": "abc123"})
+        if "handover-packages" in u:
+            return httpx.Response(200, request=httpx.Request("POST", u), json={"id": "p1"})
+        return httpx.Response(200, request=httpx.Request("POST", u), json={})
+
+    async def patch(self, url, **kwargs):  # noqa: ANN001, ANN003
+        self.patches.append(dict(kwargs.get("json") or {}))
+        return httpx.Response(200, request=httpx.Request("PATCH", str(url)), json=self.row)
+
+
+async def test_disburse_at_rfd_persists_the_proposed_figures(monkeypatch):
+    """The CP approval stages the line to 'Ready for Disbursement' by itself, so the
+    Disburse verb usually arrives at a line ALREADY there whose row has no drawdown
+    figures. They must still persist — skipping the write in that state left the
+    handover refusing with 'must be set before handover'."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    reg = _DisburseRegister({"id": LID, "stage": "Ready for Disbursement",
+                             "proposed_disbursement_amount": None,
+                             "proposed_disbursement_date": None})
+    app.state.http = reg
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        r = await c.post("/v1/workflows/disburse",
+                         json={"lending_id": LID, "requested_by": "ch@evamfinance.com",
+                               "proposed_amount": 1.6, "proposed_date": "2026-08-26"},
+                         headers={"X-API-Key": "k", "X-User-Email": "ch@evamfinance.com",
+                                  "X-User-Roles": "Credit Head"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "Requested"
+    assert reg.patches == [{"proposed_disbursement_amount": 1.6,
+                            "proposed_disbursement_date": "2026-08-26"}], reg.patches
+    get_settings.cache_clear()
+
+
+async def test_disburse_at_rfd_with_figures_already_on_the_row_writes_nothing(monkeypatch):
+    """A resend (or T2 recording) on a row that already carries the figures must not
+    re-PATCH the register — the verb only writes what actually changed."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    reg = _DisburseRegister({"id": LID, "stage": "Ready for Disbursement",
+                             "proposed_disbursement_amount": 1.6,
+                             "proposed_disbursement_date": "2026-08-26"})
+    app.state.http = reg
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        r = await c.post("/v1/workflows/disburse",
+                         json={"lending_id": LID, "requested_by": "ch@evamfinance.com"},
+                         headers={"X-API-Key": "k", "X-User-Email": "ch@evamfinance.com",
+                                  "X-User-Roles": "Credit Head"})
+    assert r.status_code == 200, r.text
+    assert reg.patches == [], reg.patches
+    get_settings.cache_clear()
