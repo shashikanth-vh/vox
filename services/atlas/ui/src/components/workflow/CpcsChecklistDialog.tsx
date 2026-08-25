@@ -83,6 +83,10 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [savedMsg, setSavedMsg] = useState('');
+  // The prefill reads the register (and can wait behind a seeding still in
+  // flight) — until it settles, the screen says it is LOOKING, never "nothing
+  // here": an empty message during the fetch reads as a broken dialog.
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
 
@@ -149,6 +153,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
     const lid = String(action?.body?.lending_id || '');
     if (!lid) return;
     let alive = true;
+    setLoading(true);
     void (async () => {
       try {
         const { api } = await import('../../api/http');
@@ -250,6 +255,7 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
           setAll(loaded);
         }
       } catch { /* the phase's starter stays */ }
+      if (alive) setLoading(false);
     })();
     return () => { alive = false; };
   }, [open, action]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -478,9 +484,10 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
         </Button>
         {items.length === 0 && (
           <Typography sx={{ fontSize: 12, color: tokens.muted, mb: 1 }}>
-            {ro ? `No ${phase} conditions on record.`
-              : `No ${phase} conditions yet — read them from the sanction letter above, `
-                + 'or add them by hand.'}
+            {loading ? 'Loading the saved checklist…'
+              : ro ? `No ${phase} conditions on record.`
+                : `No ${phase} conditions yet — read them from the sanction letter above, `
+                  + 'or add them by hand.'}
           </Typography>
         )}
 
