@@ -53,8 +53,14 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
   return (
     <>
       {data.pipeline && (
-        <PipelineStepper steps={data.pipeline} actions={data.actions}
-          onOpen={(a, ro) => { setViewOnly(!!ro); setOpen(a); }} />
+        <>
+          <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '.8px',
+            textTransform: 'uppercase', color: tokens.muted, mb: 0.6 }}>
+            Credit pipeline
+          </Typography>
+          <PipelineStepper steps={data.pipeline} actions={data.actions}
+            onOpen={(a, ro) => { setViewOnly(!!ro); setOpen(a); }} />
+        </>
       )}
       {data.run && (
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.8 }}>
