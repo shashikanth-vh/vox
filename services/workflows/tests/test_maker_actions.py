@@ -761,3 +761,37 @@ def test_disburse_waits_for_the_cp_approval():
     # inputs (stages) so the loop's condition stays reachable.
     spec = next(s for s in _MAKER_ACTIONS["Lending"] if s["key"] == "disburse")
     assert "Sanctioned" in spec["stages"] and "Ready for Disbursement" in spec["stages"]
+
+
+def test_pipeline_money_on_the_book_paints_disbursement_wherever_the_stage_sits():
+    """A line that completed to 'CP/CS Completed' with tranches already booked (or was
+    break-glassed there) must read as DRAWN, not as 'prepare the request'."""
+    part = _strip(stage="CP/CS Completed", checklist_status="Approved",
+                  row={"disbursed_amount": 4, "proposed_disbursement_amount": 10})
+    assert part["disbursement"]["state"] == "active"
+    assert "4 of 10" in part["disbursement"]["note"]
+    full = _strip(stage="CP/CS Completed", checklist_status="Approved",
+                  row={"disbursed_amount": 10, "proposed_disbursement_amount": 10})
+    assert full["disbursement"]["state"] == "done"
+    assert "Fully disbursed" in full["disbursement"]["note"]
+
+
+def test_pipeline_cp_approval_opens_the_money_even_if_the_auto_stage_missed():
+    """The auto-move to 'Ready for Disbursement' is best-effort — when it missed
+    (register unreachable at approval), the strip must still show the money step as
+    open, because the Disburse verb stages the line as part of sending."""
+    s = _strip(stage="Sanctioned", checklist_status="Approved",
+               checklist_items=[{"condition_type": "CP", "status": "Completed",
+                                 "required": True}])
+    assert s["disbursement"]["state"] == "active"
+    assert "CP approved" in s["disbursement"]["note"]
+
+
+def test_pipeline_imported_line_past_cp_says_so_on_the_cs_box_too():
+    """Same honesty as the CP box: a line imported straight at 'Disbursed' has no
+    checklist — the CS box says the history is imported instead of claiming the step
+    is still ahead."""
+    s = _strip(stage="Disbursed", row={"disbursed_amount": 5})
+    assert s["cs"]["state"] == "pending"
+    assert "imported" in s["cs"]["note"]
+    assert s["cp"]["state"] == "pending" and "imported" in s["cp"]["note"]

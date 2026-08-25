@@ -511,16 +511,24 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
         done_n, total_n = _checklist_half(checklist_items, "CP", checklist_status)
         cp = (cp[0], f"{done_n}/{total_n} — {cp[1]}")
 
-    # Disbursement — the money, in parallel with the CS chase.
+    # Disbursement — the money, in parallel with the CS chase. Booked tranches paint
+    # the box wherever the stage sits: a line that completed to 'CP/CS Completed'
+    # (or was break-glassed there) with money already on the book must read as drawn,
+    # not as "prepare the request".
     drawn = float(row.get("disbursed_amount") or 0)
     ceiling = float(row.get("proposed_disbursement_amount") or row.get("amount_cr") or 0)
-    if stage == "Disbursed" and (not ceiling or drawn + 1e-9 >= ceiling):
+    if drawn > 0 and (not ceiling or drawn + 1e-9 >= ceiling):
         disb = ("done", f"Fully disbursed — {drawn:g} Cr on the book")
-    elif stage == "Disbursed":
+    elif drawn > 0:
         disb = ("active", f"{drawn:g} of {ceiling:g} Cr drawn — later tranches open")
-    elif stage in ("CP/CS Completed", "Ready for Disbursement"):
+    elif stage in ("CP/CS Completed", "Ready for Disbursement", "Disbursed"):
         disb = ("active", f"Package {package_status}" if package_status
                 else "Prepare the disbursement request")
+    elif checklist_status == "Approved":
+        # CP approved but the auto-stage to 'Ready for Disbursement' did not land
+        # (register briefly unreachable at approval) — the money step is open NOW;
+        # the Disburse verb stages the line as part of sending.
+        disb = ("active", "CP approved — prepare the disbursement request")
     else:
         disb = ("pending", "Follows the CP approval")
 
@@ -533,6 +541,11 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
               f"{cs_done}/{cs_total} conditions subsequent closed")
     elif checklist_status == "Approved":
         cs = ("done", "No conditions subsequent to chase")
+    elif stage in ("CP/CS Completed", "Disbursed") and not checklist_status:
+        # Same honesty as the CP box: an imported line parked at a post-CP stage has
+        # no checklist to read — say so instead of claiming the step is still ahead.
+        cs = ("pending", "Stage has passed, but no checklist is on file — imported "
+                         "history or worked off-platform")
     else:
         cs = ("pending", "Opens with the CP approval")
 

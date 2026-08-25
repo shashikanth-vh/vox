@@ -797,7 +797,19 @@ async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str
 
     result: dict[str, Any] = {"delivered": False, "channel": "log"}
     if s.notifications_enabled and isinstance(notify, dict):
-        result.update(await _fan_out_notifications(payload, notify))
+        # Under WORKFLOWS_AUTO_APPROVE the three policy-resolved waits exist for
+        # seconds — but their "Awaiting …" inbox card would sit on Today forever,
+        # reading as a person's pending work next to the very card that says the
+        # policy already decided it. Suppress ONLY those three; every other wait
+        # (syndication, asset-monetisation, SLA reminders) is a real human queue
+        # whatever the flag says, and the decision cards themselves always land.
+        _policy_resolved = {"awaiting_conversion_decision",
+                            "awaiting_committee_decision",
+                            "awaiting_checker_approval"}
+        if s.auto_approve and event in _policy_resolved:
+            result["suppressed"] = "auto-approve policy resolves this wait"
+        else:
+            result.update(await _fan_out_notifications(payload, notify))
 
     if not s.ops_webhook_url:
         return result
