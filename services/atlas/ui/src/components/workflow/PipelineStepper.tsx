@@ -48,6 +48,9 @@ function StepBox({ s, verbs, onPick }: {
       <Tooltip title={s.note || ''} placement="top" arrow>
         <Box onClick={onClick} sx={{
           border: `2px solid ${EDGE[s.state]}`, borderRadius: '7px', px: 0.9, py: 0.1,
+          // uniform boxes: every step the same width, label centred — the strip
+          // reads as one instrument instead of a ragged word row
+          minWidth: 104, textAlign: 'center',
           fontSize: 11.5, fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap',
           color: pending ? tokens.muted : EDGE[s.state],
           backgroundColor: s.state === 'active' ? '#EAF2F8'

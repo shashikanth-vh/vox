@@ -430,6 +430,7 @@ def _checklist_half(items: list, want: str, checklist_status: str) -> tuple[int,
 
 
 def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
+                      letter_doc_on_file: bool = False,
                       checklist_status: str, checklist_items: list,
                       cam_ready: bool, package_status: str,
                       row: dict) -> list[dict]:
@@ -482,13 +483,15 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     else:
         ccr = ("pending", "Send to credit committee once the CAM is ready")
 
-    # Sanction — green only with the LETTER on file: the stage alone says the word
-    # was typed; the evidence says it happened.
-    if past_sanction and "sanction_letter" in on_file:
+    # Sanction — green only when the LETTER DOCUMENT is uploaded. The stage says the
+    # word was typed; an evidence reference says a decision recorded it (the
+    # auto-approval path files one to move the stage); only the uploaded letter
+    # itself paints the box. Anything less is a TO-DO the note spells out.
+    if past_sanction and letter_doc_on_file:
         san = ("done", "Sanctioned — letter on file")
     elif past_sanction:
-        san = ("pending", "Sanctioned by stage, but the sanction letter is not on "
-                          "file — upload it (Enter sanction terms files it)")
+        san = ("pending", "To do: upload the sanction letter — 'Enter sanction terms' "
+                          "files it and reads the conditions out of it")
     else:
         san = ("pending", "Reached through the committee's approval")
 
@@ -4173,6 +4176,7 @@ def create_app() -> FastAPI:
         if subject_type == "Lending":
             payload["pipeline"] = _lending_pipeline(
                 stage=stage, run_state=run_state, on_file=on_file,
+                letter_doc_on_file=letter_on_file,
                 checklist_status=latest_checklist_status,
                 checklist_items=latest_checklist_items,
                 cam_ready=cam_on_file, package_status=package_status, row=row)

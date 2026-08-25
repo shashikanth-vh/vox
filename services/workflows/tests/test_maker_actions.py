@@ -217,7 +217,8 @@ def test_pipeline_walks_the_happy_path_box_by_box():
 
     # Approved and sanctioned: three greens, CP becomes the working step.
     s = _strip(stage="Sanctioned", cam_ready=True,
-               on_file={"credit_committee_approval", "sanction_letter"})
+               on_file={"credit_committee_approval", "sanction_letter"},
+               letter_doc_on_file=True)
     assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["done"] * 3
     assert s["cp"]["state"] == "active" and "letter" in s["sanction"]["note"]
 
@@ -251,7 +252,8 @@ def test_pipeline_paints_the_rejections_red_where_they_happened():
     # A checker-rejected CP checklist reddens CP while the sanction STAYS green —
     # the paperwork was refused, never the credit.
     s = _strip(stage="Sanctioned", cam_ready=True, checklist_status="Rejected",
-               on_file={"credit_committee_approval", "sanction_letter"})
+               on_file={"credit_committee_approval", "sanction_letter"},
+               letter_doc_on_file=True)
     assert s["sanction"]["state"] == "done" and s["cp"]["state"] == "rejected"
 
 
@@ -299,10 +301,17 @@ def test_pipeline_greens_only_what_is_on_file():
     s = _strip(stage="Sanctioned")
     assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["pending"] * 3
     assert "no CAM is on file" in s["cam"]["note"]
-    assert "not on file" in s["sanction"]["note"]
+    assert "To do: upload the sanction letter" in s["sanction"]["note"]
+    evidenced = _strip(stage="Sanctioned",
+                       on_file={"credit_committee_approval", "sanction_letter"})
+    assert evidenced["ccr"]["state"] == "done"
+    # the EVIDENCE reference (auto-filed by the approval path) does not paint the
+    # box — only the uploaded letter document does, and until then it is a to-do
+    assert evidenced["sanction"]["state"] == "pending"
+    assert "To do: upload the sanction letter" in evidenced["sanction"]["note"]
     lettered = _strip(stage="Sanctioned",
-                      on_file={"credit_committee_approval", "sanction_letter"})
-    assert lettered["ccr"]["state"] == "done"
+                      on_file={"credit_committee_approval", "sanction_letter"},
+                      letter_doc_on_file=True)
     assert lettered["sanction"]["state"] == "done"
 
 
