@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Stack, Tooltip, Typography, Alert } from '@mui/material';
+import { Box, Button, Stack, Tooltip, Typography, Alert } from '@mui/material';
 import ActionFormDialog from './ActionFormDialog';
 import CpcsChecklistDialog from './CpcsChecklistDialog';
 import HandoverPackageDialog from './HandoverPackageDialog';
@@ -53,14 +53,27 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
   return (
     <>
       {data.pipeline && (
-        <>
-          <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '.8px',
-            textTransform: 'uppercase', color: tokens.muted, mb: 0.6 }}>
-            Credit pipeline
-          </Typography>
+        <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 2,
+          p: 1.3, pb: 0.6, mt: 1.6, mb: 1.6 }}>
+          <Stack direction="row" alignItems="center" spacing={0.6} sx={{ mb: 0.9 }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '.8px',
+              textTransform: 'uppercase', color: tokens.muted }}>
+              Credit pipeline
+            </Typography>
+            <Tooltip arrow placement="top" title={
+              'The credit governance journey for this lending line: CAM (credit note) '
+              + '→ CCR (credit committee decision) → Sanction → CP (conditions '
+              + 'precedent from the sanction letter). After the CP approval, '
+              + 'Disbursement and the CP/CS chase (conditions subsequent) run in '
+              + 'parallel. Green = done, blue = in progress, grey = ahead — tap any '
+              + 'box to open that step.'}>
+              <Box component="span" sx={{ fontSize: 13, color: tokens.muted,
+                cursor: 'help', lineHeight: 1, userSelect: 'none' }}>ⓘ</Box>
+            </Tooltip>
+          </Stack>
           <PipelineStepper steps={data.pipeline} actions={data.actions}
             onOpen={(a, ro) => { setViewOnly(!!ro); setOpen(a); }} />
-        </>
+        </Box>
       )}
       {data.run && (
         <Typography sx={{ fontSize: 11.8, color: tokens.muted, mb: 0.8 }}>
