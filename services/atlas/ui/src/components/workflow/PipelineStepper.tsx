@@ -115,7 +115,9 @@ export default function PipelineStepper({ steps, actions = [], onOpen }: {
         <>
           <Arrow />
           {/* After CP the journey forks: the money and the CS chase run side by side. */}
-          <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+          {/* the fork sizes to its labels — "Disbursement" never truncates; the
+              four line slots share whatever width remains equally */}
+          <Stack spacing={0.5} sx={{ flex: '0 0 auto' }}>
             {fork.map((s) => <StepBox key={s.key} s={s} verbs={verbsOf(s)} onPick={pick} />)}
           </Stack>
         </>
