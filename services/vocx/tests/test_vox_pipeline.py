@@ -87,6 +87,7 @@ def _valid_model_json():
             "requirement_quantum_cr": cell(25, "medium"),
             "company_turnover_cr": cell(None, "n/a"),
             "existing_bankers": cell(None, "n/a"),
+            "project_location": cell(None, "n/a"),
             "present_requirement": cell("25 Cr project finance"),
             "remarks": cell(None, "n/a"),
         },
@@ -375,6 +376,7 @@ def test_blocks_present_with_no_detected_tags_infer_the_tags():
             "facility_nature": {"value": "term_loan_syndication", "confidence": "medium"},
             "deal_size_cr": {"value": None, "confidence": "n/a"},
             "existing_lenders": {"value": None, "confidence": "n/a"},
+            "project_location": {"value": None, "confidence": "n/a"},
             "probable_lenders": {"value": "AIF appetite being explored", "confidence": "medium"},
             "remarks": {"value": None, "confidence": "n/a"},
         }

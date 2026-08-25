@@ -1,6 +1,6 @@
 {
  "registry_version": "v1",
- "description": "VOX field registry — the single source every other component derives from: the AI prompt, the schema contract validator, and the review renderer. Change something here and you change it everywhere (Build Specification, Section 9). Machine names are the JSON keys; labels are the UI copy.",
+ "description": "VOX field registry \u2014 the single source every other component derives from: the AI prompt, the schema contract validator, and the review renderer. Change something here and you change it everywhere (Build Specification, Section 9). Machine names are the JSON keys; labels are the UI copy.",
  "use_cases": [
   "lending",
   "syndication",
@@ -97,7 +97,7 @@
    "type": "string",
    "control": "textarea",
    "judgement": true,
-   "notes": "A 2-4 sentence narrative of the meeting: who met whom (names and roles), where, and each distinct thread discussed with its headline numbers — written like a colleague's crisp debrief, e.g. 'Kannan met R. Sharma (MD, Suryodaya EPC) in Whitefield. Three threads: a ₹25 Cr project-finance requirement...'. Confidence n/a."
+   "notes": "A 2-4 sentence narrative of the meeting: who met whom (names and roles), where, and each distinct thread discussed with its headline numbers \u2014 written like a colleague's crisp debrief, e.g. 'Kannan met R. Sharma (MD, Suryodaya EPC) in Whitefield. Three threads: a \u20b925 Cr project-finance requirement...'. Confidence n/a."
   },
   {
    "key": "action_items",
@@ -219,14 +219,14 @@
     },
     {
      "key": "requirement_quantum_cr",
-     "label": "Quantum (₹ Cr)",
+     "label": "Quantum (\u20b9 Cr)",
      "type": "number",
      "control": "number",
      "notes": "Null flags, never blocks."
     },
     {
      "key": "company_turnover_cr",
-     "label": "Turnover (₹ Cr)",
+     "label": "Turnover (\u20b9 Cr)",
      "type": "number",
      "control": "number"
     },
@@ -236,6 +236,13 @@
      "type": "string",
      "control": "text",
      "notes": "Who is already lending, and at what, if stated."
+    },
+    {
+     "key": "project_location",
+     "label": "Project location",
+     "type": "string",
+     "control": "text",
+     "notes": "Where the financed project sits \u2014 site, city, state(s), country, as spoken. Distinct from the meeting venue."
     },
     {
      "key": "present_requirement",
@@ -294,7 +301,7 @@
     },
     {
      "key": "deal_size_cr",
-     "label": "Deal size (₹ Cr)",
+     "label": "Deal size (\u20b9 Cr)",
      "type": "number",
      "control": "number"
     },
@@ -304,6 +311,13 @@
      "type": "string",
      "control": "text",
      "notes": "Already in the deal/portfolio."
+    },
+    {
+     "key": "project_location",
+     "label": "Project location",
+     "type": "string",
+     "control": "text",
+     "notes": "Where the syndicated projects sit \u2014 may span several states; list them as spoken. Distinct from the meeting venue."
     },
     {
      "key": "probable_lenders",
@@ -322,7 +336,7 @@
   },
   "asset_monetisation": {
    "label": "Asset monetisation",
-   "ui_note": "Branches on party_role — the first determination is always which side of the table the counterparty sits on. 'Both' renders the owner block and the buyer block together, in that order. All fields beyond party_role are optional.",
+   "ui_note": "Branches on party_role \u2014 the first determination is always which side of the table the counterparty sits on. 'Both' renders the owner block and the buyer block together, in that order. All fields beyond party_role are optional.",
    "fields": [
     {
      "key": "party_role",
@@ -352,7 +366,7 @@
      "type": "string",
      "control": "text",
      "applies_to": "always",
-     "notes": "Free text (₹ / EV, indicative) — owner-decided as free text, not a parsed number."
+     "notes": "Free text (\u20b9 / EV, indicative) \u2014 owner-decided as free text, not a parsed number."
     },
     {
      "key": "offer_components",
@@ -397,6 +411,13 @@
      ]
     },
     {
+     "key": "asset_location",
+     "label": "Asset location",
+     "type": "string",
+     "control": "text",
+     "notes": "Where the asset on offer sits \u2014 site, city, state, as spoken. Distinct from the meeting venue."
+    },
+    {
      "key": "offer_notes",
      "label": "Offer notes",
      "type": "string",
@@ -409,7 +430,7 @@
      "type": "string",
      "control": "text",
      "applies_to": "buyer",
-     "notes": "e.g. \"20–50 MW operational\"."
+     "notes": "e.g. \"20\u201350 MW operational\"."
     },
     {
      "key": "valuation_approach",
@@ -533,7 +554,7 @@
   "Solar-EPC": [
    {
     "key": "order_book",
-    "label": "Order book (MW / ₹ Cr)",
+    "label": "Order book (MW / \u20b9 Cr)",
     "conf": "hi",
     "control": "text"
    },
@@ -717,7 +738,7 @@
   "BESS-EPC": [
    {
     "key": "order_book",
-    "label": "Order book (MWh / ₹ Cr)",
+    "label": "Order book (MWh / \u20b9 Cr)",
     "conf": "hi",
     "control": "text"
    },
@@ -889,7 +910,7 @@
   "Energy Efficiency": [
    {
     "key": "contracted_savings",
-    "label": "Contracted savings (MWh / ₹ Cr)",
+    "label": "Contracted savings (MWh / \u20b9 Cr)",
     "conf": "hi",
     "control": "text"
    },
@@ -1206,7 +1227,7 @@
   "Agri-fintech and warehouse receipts": [
    {
     "key": "aum_disbursed_cr",
-    "label": "AUM / disbursed (₹ Cr)",
+    "label": "AUM / disbursed (\u20b9 Cr)",
     "conf": "hi",
     "control": "text"
    },
