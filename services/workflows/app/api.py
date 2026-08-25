@@ -490,8 +490,10 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     if past_sanction and letter_doc_on_file:
         san = ("done", "Sanctioned — letter on file")
     elif past_sanction:
-        san = ("pending", "To do: upload the sanction letter — 'Enter sanction terms' "
-                          "files it and reads the conditions out of it")
+        # BLUE marks the thing to do next: after the committee, uploading the
+        # letter IS the working step — not a distant grey.
+        san = ("active", "To do: upload the sanction letter — 'Enter sanction terms' "
+                         "files it and reads the conditions out of it")
     else:
         san = ("pending", "Reached through the committee's approval")
 
@@ -509,8 +511,10 @@ def _lending_pipeline(*, stage: str, run_state: str, on_file: set[str],
     elif checklist_status in ("Draft", "Returned"):
         cp = ("active", "Being prepared" if checklist_status == "Draft"
               else "Returned — amend and resubmit")
-    elif stage == "Sanctioned":
+    elif stage == "Sanctioned" and letter_doc_on_file:
         cp = ("active", "Prepare the CP checklist from the sanction letter")
+    elif stage == "Sanctioned":
+        cp = ("pending", "Opens once the sanction letter is on file")
     else:
         cp = ("pending", "Opens at Sanctioned")
     if cp_items and cp[0] in ("active", "done"):

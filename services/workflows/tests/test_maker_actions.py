@@ -299,15 +299,20 @@ def test_pipeline_greens_only_what_is_on_file():
     artefacts shows grey boxes that SAY why — never a green the register cannot back;
     the artefacts landing is what paints them."""
     s = _strip(stage="Sanctioned")
-    assert [s[k]["state"] for k in ("cam", "ccr", "sanction")] == ["pending"] * 3
+    assert [s[k]["state"] for k in ("cam", "ccr")] == ["pending"] * 2
     assert "no CAM is on file" in s["cam"]["note"]
+    # the letter upload is the WORKING step — blue, with the to-do named — and the
+    # CP box waits grey until the letter exists
+    assert s["sanction"]["state"] == "active"
     assert "To do: upload the sanction letter" in s["sanction"]["note"]
+    assert s["cp"]["state"] == "pending"
+    assert "sanction letter" in s["cp"]["note"]
     evidenced = _strip(stage="Sanctioned",
                        on_file={"credit_committee_approval", "sanction_letter"})
     assert evidenced["ccr"]["state"] == "done"
     # the EVIDENCE reference (auto-filed by the approval path) does not paint the
     # box — only the uploaded letter document does, and until then it is a to-do
-    assert evidenced["sanction"]["state"] == "pending"
+    assert evidenced["sanction"]["state"] == "active"   # blue: the to-do is the working step
     assert "To do: upload the sanction letter" in evidenced["sanction"]["note"]
     lettered = _strip(stage="Sanctioned",
                       on_file={"credit_committee_approval", "sanction_letter"},
