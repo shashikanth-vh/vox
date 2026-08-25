@@ -3002,12 +3002,32 @@ def create_app() -> FastAPI:
                        if str(i.get("condition_type")) == "CS"
                        and str(i.get("status") or "Pending") not in ("Completed", "Waived")]
             if open_cs:
-                row["next"] = (
-                    f"CP approved — the line can disburse. {len(open_cs)} condition"
-                    f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
-                    f" ({', '.join(str(i.get('label') or i.get('key')) for i in open_cs[:3])}"
-                    f"{', …' if len(open_cs) > 3 else ''}); the line reaches "
-                    "'CP/CS Completed' when they are satisfied.")
+                cs_names = ', '.join(str(i.get('label') or i.get('key'))
+                                     for i in open_cs[:3])
+                cs_tail = ', …' if len(open_cs) > 3 else ''
+                # CP approved, CS still open: finalise for disbursement NOW — the
+                # evidence just minted is exactly what the 'Ready for Disbursement'
+                # gate reads. Best-effort: a line without a proposed drawdown yet
+                # stays 'Sanctioned' and the Disburse action stages it when the
+                # amount and date are proposed.
+                moved = await _register_patch_as(
+                    request, f"/v1/lending/{lending_id}", approved_by, checker,
+                    {"stage": "Ready for Disbursement"})
+                if isinstance(moved, ORJSONResponse) and moved.status_code == 200:
+                    row["stage"] = "Ready for Disbursement"
+                    row["next"] = (
+                        f"CP approved — the line is at 'Ready for Disbursement'; "
+                        f"disbursement can proceed. {len(open_cs)} condition"
+                        f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
+                        f" ({cs_names}{cs_tail}); 'CP/CS Completed' lands when they "
+                        "are satisfied.")
+                else:
+                    row["next"] = (
+                        f"CP approved — the line can disburse. {len(open_cs)} condition"
+                        f"{'s' if len(open_cs) > 1 else ''} subsequent still open"
+                        f" ({cs_names}{cs_tail}); propose the drawdown in Disburse to "
+                        "finalise for disbursement; 'CP/CS Completed' lands when the "
+                        "conditions subsequent are satisfied.")
                 return ORJSONResponse(status_code=200, content=row)
             # Best-effort — a failed move leaves the fallback action and says so.
             moved = await _register_patch_as(

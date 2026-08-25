@@ -401,3 +401,34 @@ async def test_unknown_lifecycle_value_is_rejected_on_create_and_patch(client):
     # A real ENTRY vocabulary value is accepted as the first stage.
     ok = await client.patch(f"/v1/lending/{lid}", json={"stage": "Diligence"})
     assert ok.status_code == 200, ok.text
+
+
+async def test_cp_approval_unblocks_disbursement_straight_from_sanctioned(client):
+    """The parallel-CS design: with the CP checklist approved (cp_cs_completion on
+    file) a Sanctioned line finalises for disbursement DIRECTLY — no pass through
+    'CP/CS Completed', which stays the both-halves-done milestone. Without the CP
+    evidence the same move is refused."""
+    eid = await _entity(client)
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    await _advance(client, "lending", lid, ["Note Circulated", "Sanctioned"])
+    # no CP evidence yet: the direct edge is gated shut
+    r = await client.patch(f"/v1/lending/{lid}",
+                           json={"stage": "Ready for Disbursement",
+                                 "proposed_disbursement_amount": 5,
+                                 "proposed_disbursement_date": "2026-09-01"},
+                           headers=ADMIN)
+    assert r.status_code == 422, r.text
+    assert "cp_cs_completion" in r.text
+    # CP approved (evidence minted) → the same move lands; CS may still be open
+    await _attach_cpcs_evidence(client, "lending", lid)
+    r = await client.patch(f"/v1/lending/{lid}",
+                           json={"stage": "Ready for Disbursement",
+                                 "proposed_disbursement_amount": 5,
+                                 "proposed_disbursement_date": "2026-09-01"},
+                           headers=ADMIN)
+    assert r.status_code == 200, r.text
+    assert r.json()["stage"] == "Ready for Disbursement"
+    # and the money can move
+    r = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"}, headers=ADMIN)
+    assert r.status_code == 200, r.text

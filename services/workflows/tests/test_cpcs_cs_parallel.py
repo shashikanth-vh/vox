@@ -56,6 +56,9 @@ async def _approve(app):
 
 
 async def test_an_open_cs_keeps_the_line_out_of_cp_cs_completed(monkeypatch):
+    """Open CS: the milestone stage stays out of reach, but the CP approval now
+    FINALISES the line for disbursement — it moves to 'Ready for Disbursement'
+    (never 'CP/CS Completed'), and the CS chase carries on in parallel."""
     app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
     reg = _Register({"id": LID, "stage": "Sanctioned"}, [
         {"key": "cp1", "condition_type": "CP", "status": "Completed"},
@@ -67,8 +70,9 @@ async def test_an_open_cs_keeps_the_line_out_of_cp_cs_completed(monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["cp_cs_completion"] == "e1", "the evidence still mints — disbursement is unblocked"
-    assert not reg.patches, f"the stage must not move: {reg.patches}"
+    assert reg.patches == [{"stage": "Ready for Disbursement"}], reg.patches
     assert "CP approved" in body["next"] and "NOC from lender" in body["next"]
+    assert "CP/CS Completed" in body["next"]      # the milestone still waits for the CS
     get_settings.cache_clear()
 
 

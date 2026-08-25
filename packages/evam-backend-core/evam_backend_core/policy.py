@@ -133,6 +133,10 @@ EVIDENCE_FOR_STAGE: dict[str, dict[str, list[str]]] = {
         # themselves, and a separate typed digest step only stalled the line. From here
         # the terminal (current product scope) is 'Disbursed'.
         "CP/CS Completed": ["cp_cs_completion"],
+        # Reachable straight from 'Sanctioned' (CP approved, CS still being chased) —
+        # so the CP evidence gate rides on THIS stage too, or the direct edge would
+        # let a typed stage skip the checklist entirely.
+        "Ready for Disbursement": ["cp_cs_completion"],
         # 'Disbursed' itself carries no evidence gate here: interactively it is reached through
         # the senior-locked maker-checker handover approval, and the dormant
         # advaya_acknowledgement kind (future Advaya integration) would add downstream

@@ -100,8 +100,12 @@ _CREDIT_PIPELINE: dict[str, set[str]] = {
     "Diligence":       {"Note Circulated", "Data Awaited", "On Hold", "Rejected"},
     "Note Circulated": {"Sanctioned", "Diligence", "On Hold", "Rejected"},
     # Post-sanction, the conditions precedent / subsequent and the executed agreement are worked
-    # to completion before the facility is prepared for disbursement.
-    "Sanctioned":      {"CP/CS Completed", "Note Circulated", "On Hold"},
+    # to completion before the facility is prepared for disbursement. The CP approval alone
+    # UNBLOCKS disbursement: 'Ready for Disbursement' is reachable straight from 'Sanctioned' —
+    # gated by the cp_cs_completion evidence (policy.EVIDENCE_STAGE_GATES) and the proposed
+    # drawdown fields — so the CS chase runs in parallel with the money. 'CP/CS Completed'
+    # remains the milestone that closes BOTH halves.
+    "Sanctioned":      {"CP/CS Completed", "Ready for Disbursement", "Note Circulated", "On Hold"},
     "CP/CS Completed": {"Ready for Disbursement", "Sanctioned", "On Hold"},
     # 'Ready for Disbursement' is the internal finalisation (proposed amount/date fixed); the
     # move to 'Disbursed' is senior-locked (ROW_LOCKS) and normally made by the maker-checker
