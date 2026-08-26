@@ -325,6 +325,18 @@ async def _enforce_transition(ctx: "RequestContext", spec: "ResourceSpec",
             raise ForbiddenError(violation.message)
         raise ValidationAppError(violation.message)
 
+    # 'CP/CS Completed' is EARNED from checklist truth, not typed: the evidence gate
+    # alone cannot hold this line (cp_cs_completion is minted at CP approval, while the
+    # CS chase is usually still live). Entering the milestone requires every condition
+    # subsequent on the approved checklist to be settled. Same audited break-glass as
+    # the evidence gate — an imported/off-platform history is exactly what it is for.
+    if (spec.subject_type == "Lending" and data.get("stage") == "CP/CS Completed"
+            and current.get("stage") != "CP/CS Completed" and not break_glass):
+        from app.api.tranches import cs_milestone_error
+        cs_err = await cs_milestone_error(ctx, str(obj_id))
+        if cs_err is not None:
+            raise ValidationAppError(cs_err)
+
     # Record an audit trail whenever a break-glass ACTUALLY bypassed a missing-evidence gate, so a
     # senior override of the evidence requirement is never invisible.
     if break_glass:

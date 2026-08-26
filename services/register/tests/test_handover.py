@@ -59,7 +59,9 @@ async def _ready_lending(client, eid) -> str:  # noqa: ANN001
     chk = await client.post(
         "/v1/internal/cpcs-checklists",
         json={"lending_id": lid, "status": "Completed",
-              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"}]}, headers=ADMIN)
+              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"},
+                        {"key": "cs1", "condition_type": "CS", "status": "Completed"}]},
+        headers=ADMIN)
     assert chk.status_code == 201, chk.text
     assert (await client.post(f"/v1/internal/cpcs-checklists/{chk.json()['id']}/approve",
                               headers=CREDIT_HEAD)).status_code == 200

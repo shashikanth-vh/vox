@@ -82,7 +82,9 @@ async def _attach_cpcs_evidence(client, kind, oid):  # noqa: ANN001
     chk = await client.post(
         "/v1/internal/cpcs-checklists",
         json={"lending_id": str(oid), "status": "Completed",
-              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"}]}, headers=ADMIN)
+              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"},
+                        {"key": "cs1", "condition_type": "CS", "status": "Completed"}]},
+        headers=ADMIN)
     assert chk.status_code == 201, chk.text
     cid = chk.json()["id"]
     appr = await client.post(f"/v1/internal/cpcs-checklists/{cid}/approve", headers=CREDIT_HEAD)
@@ -461,3 +463,65 @@ async def test_money_on_the_book_shuts_the_on_hold_rewind(client):
     assert "already disbursed" in rewind.text
     resume = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"})
     assert resume.status_code == 200, resume.text
+
+
+async def test_the_milestone_is_earned_from_checklist_truth(client):
+    """'CP/CS Completed' may not be TYPED onto a disbursed line while conditions
+    subsequent are still open — the evidence gate alone cannot hold this (the
+    cp_cs_completion evidence minted at CP approval). Settling the last CS is what
+    opens the label."""
+    import uuid as _uuid
+
+    from sqlalchemy import text
+
+    from app.db.session import get_sessionmaker
+    eid = await _entity(client)
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    await _advance(client, "lending", lid, ["Note Circulated", "Sanctioned"])
+    # An approved checklist whose CS half is STILL OPEN, its evidence duly minted —
+    # exactly the state a line is in when the money moves first.
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": str(lid), "status": "Completed",
+              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"},
+                        {"key": "cs-noc", "condition_type": "CS", "status": "Pending"}]},
+        headers=ADMIN)
+    assert chk.status_code == 201, chk.text
+    cid = chk.json()["id"]
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/approve",
+                              headers=CREDIT_HEAD)).status_code == 200
+    assert (await client.post(
+        "/v1/evidence",
+        json={"subject_type": "Lending", "subject_id": str(lid),
+              "evidence_kind": "cp_cs_completion", "reference": "cpcs/1",
+              "sha256": "a" * 64, "decision_ref": cid}, headers=ADMIN)).status_code == 201
+    assert (await client.patch(f"/v1/lending/{lid}",
+                               json={"stage": "Ready for Disbursement"})).status_code == 200
+    assert (await client.patch(
+        f"/v1/lending/{lid}",
+        json={"stage": "Disbursed", "proposed_disbursement_amount": 1.6,
+              "proposed_disbursement_date": "2026-08-26"})).status_code == 200
+    # Open CS → the label is refused, with the checklist named as the reason.
+    typed = await client.patch(f"/v1/lending/{lid}", json={"stage": "CP/CS Completed"})
+    assert typed.status_code == 422, typed.text
+    assert "does not show that yet" in typed.text
+    # The last CS settles → the same edit is earned. (The executed-agreement evidence
+    # gate also guards this stage; seed its decision as the orchestrator would have.)
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{cid}/cs-progress",
+                              json={"items": [{"key": "cs-noc", "status": "Completed"}]},
+                              headers=ADMIN)).status_code == 200
+    wf = f"docs-{_uuid.uuid4().hex[:12]}"
+    sm = get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text(_DECISION_SQL["lending"]),
+                        {"wf": wf, "st": "Lending", "sid": str(lid)})
+        await s.commit()
+    assert (await client.post(
+        "/v1/evidence",
+        json={"subject_type": "Lending", "subject_id": str(lid),
+              "evidence_kind": "executed_agreement", "reference": "ea/1",
+              "sha256": "a" * 64, "workflow_id": wf, "run_id": "run-1"},
+        headers=ADMIN)).status_code == 201
+    earned = await client.patch(f"/v1/lending/{lid}", json={"stage": "CP/CS Completed"})
+    assert earned.status_code == 200, earned.text

@@ -354,6 +354,15 @@ async def _decide(ctx: RequestContext, request_id: uuid.UUID, approve: bool,
                 raise ForbiddenError(
                     f"Approving this change is refused: {violation.message}")
             raise ConflictError(violation.message)
+        # The milestone is earned from checklist truth on this path too — an approved
+        # change request must not hand out 'CP/CS Completed' while CS are still open.
+        if (req.subject_type == "Lending" and req.field == "stage"
+                and req.to_value == "CP/CS Completed"
+                and current_row.get("stage") != "CP/CS Completed"):
+            from app.api.tranches import cs_milestone_error
+            cs_err = await cs_milestone_error(ctx, str(req.subject_id))
+            if cs_err is not None:
+                raise ConflictError(cs_err)
         # Apply the change through the standard repository so history auto-appends and
         # the audit trail records it (stage auto-stamping = the existing history hook).
         model = SUBJECTS[req.subject_type]

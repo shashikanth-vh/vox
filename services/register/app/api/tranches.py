@@ -166,6 +166,24 @@ async def record_tranche(lending_id: str, payload: TrancheIn,
     return await apply_tranche(ctx, lending_id, payload)
 
 
+async def cs_milestone_error(ctx: RequestContext, lending_id: str) -> str | None:
+    """Why this line may NOT take the 'CP/CS Completed' label right now, or None.
+
+    The label claims BOTH halves are done — and the cp_cs_completion evidence alone
+    cannot vouch for that (it is minted at CP approval, while the CS chase is usually
+    still live). Entry to the milestone is therefore earned from CHECKLIST TRUTH:
+    the latest approved checklist must carry conditions subsequent and every one of
+    them must be settled. Shared by the direct stage edit, the change-request
+    approval, and the settlement's own automatic move."""
+    if await _cs_all_settled(ctx, lending_id):
+        return None
+    return ("'CP/CS Completed' says every condition — precedent AND subsequent — is "
+            "settled, and the approved checklist does not show that yet. Record the "
+            "remaining CS receipts on the checklist (the stage moves itself when the "
+            "last one closes); a facility whose checklist has no conditions "
+            "subsequent ends at 'Disbursed'.")
+
+
 async def _cs_all_settled(ctx: RequestContext, lending_id: str) -> bool:
     """Whether the latest APPROVED CP/CS checklist HAS conditions subsequent and every
     one of them is settled. No approved checklist, or a checklist with no CS at all →
