@@ -335,7 +335,8 @@ export default function SanctionTermsDialog({ action, stage, onClose, onDone }: 
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
+      fullScreen={typeof window !== 'undefined' && window.innerWidth < 600}>
       <DialogTitle sx={{ fontSize: 16 }}>
         Sanction terms
         {loading && <CircularProgress size={13} sx={{ ml: 1, verticalAlign: 'middle' }} />}
@@ -429,7 +430,7 @@ export default function SanctionTermsDialog({ action, stage, onClose, onDone }: 
               Terms were entered by {existing.note ? 'the credit team' : 'the credit team'} and are
               read-only — corrections go through an amendment, not a second entry.
             </Alert>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, fontSize: 13 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr' }, gap: 1, fontSize: 13 }}>
               {[['Amount ₹ Cr', existing.amount_cr], ['Rate', `${existing.rate_kind} ${existing.rate_pct ?? '—'}%`],
                 ['Spread %', existing.spread_pct], ['Tenor (months)', existing.tenor_months],
                 ['EMI', existing.emi_amount], ['Repayment from', existing.repayment_start],
@@ -454,7 +455,7 @@ export default function SanctionTermsDialog({ action, stage, onClose, onDone }: 
               Entered once, at committee approval — the letter fills these on upload; review
               and save. CP/CS are worked in their own screens, which read the letter directly.
             </Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', sm: '1fr 1fr 1fr' }, gap: 1 }}>
               <TextField size="small" label="Amount ₹ Cr" type="number" value={f.amount_cr || ''} onChange={(e) => set('amount_cr', e.target.value)} />
               <TextField size="small" select label="Rate kind" value={f.rate_kind || 'Fixed'} onChange={(e) => set('rate_kind', e.target.value)}>
                 {['Fixed', 'Floating'].map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}

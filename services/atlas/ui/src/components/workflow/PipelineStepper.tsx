@@ -102,11 +102,15 @@ export default function PipelineStepper({ steps, actions = [], onOpen }: {
     // ONE row, always: equal flex slots for each step (the fork's two boxes stack
     // inside one slot), arrows fixed between them — the strip reads as a single
     // instrument at any drawer width instead of wrapping into a ragged second line.
-    <Stack direction="row" spacing={0.7} alignItems="center" sx={{ mb: 1 }}>
+    // On a PHONE the equal-slot squeeze crushes every label to "C…" — there the strip
+    // scrolls sideways instead, each box at its natural width, which is exactly what a
+    // finger expects of a strip. Desktop keeps the one-row equal-slot instrument.
+    <Stack direction="row" spacing={0.7} alignItems="center"
+      sx={{ mb: 1, overflowX: { xs: 'auto', sm: 'visible' }, pb: { xs: 0.5, sm: 0 } }}>
       {line.map((s, i) => (
         <Fragment key={s.key}>
           {i > 0 && <Arrow />}
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Box sx={{ flex: { xs: '0 0 auto', sm: 1 }, minWidth: { xs: 92, sm: 0 } }}>
             <StepBox s={s} verbs={verbsOf(s)} onPick={pick} />
           </Box>
         </Fragment>

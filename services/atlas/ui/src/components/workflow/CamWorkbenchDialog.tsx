@@ -367,7 +367,8 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
-      PaperProps={{ sx: { height: '92vh' } }}>
+      fullScreen={typeof window !== 'undefined' && window.innerWidth < 600}
+      PaperProps={{ sx: { height: { xs: '100dvh', sm: '92vh' } } }}>
       <DialogTitle sx={{ fontSize: 16, py: 1.2 }}>
         CAM workbench
         {loading && <CircularProgress size={13} sx={{ ml: 1, verticalAlign: 'middle' }} />}
@@ -689,8 +690,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                 </Alert>
               )}
               {/* The question box — Enter sends, Shift+Enter for a new line. */}
+              {/* On a phone the two buttons cannot share the textarea's row — they wrap
+                  underneath instead of pushing the composer into a sideways scroll. */}
               <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-end', p: 1,
-                borderTop: `1px solid ${tokens.line}` }}>
+                borderTop: `1px solid ${tokens.line}`, flexWrap: { xs: 'wrap', sm: 'nowrap' } }}>
                 <TextField fullWidth size="small" multiline maxRows={6}
                   placeholder={'Ask anything — Enter to send, Shift+Enter for a new line'
                     + (sel.size ? ` · ${sel.size} document(s) will ride along` : '')}
