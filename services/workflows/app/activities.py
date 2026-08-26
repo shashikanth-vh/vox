@@ -803,10 +803,17 @@ async def emit_operational_event(event: str, detail: dict[str, Any]) -> dict[str
         # policy already decided it. Suppress ONLY those three; every other wait
         # (syndication, asset-monetisation, SLA reminders) is a real human queue
         # whatever the flag says, and the decision cards themselves always land.
-        _policy_resolved = {"awaiting_conversion_decision",
-                            "awaiting_committee_decision",
-                            "awaiting_checker_approval"}
-        if s.auto_approve and event in _policy_resolved:
+        #
+        # 'awaiting_checker_approval' is raised by TWO gates that share the name:
+        # the CPCS checklist (policy-resolved — its payload carries checklist_id)
+        # and the ADVAYA HANDOVER package (a real human money gate the policy
+        # deliberately does not touch — payload carries package_id). Only the
+        # checklist's wait may go quiet; silencing the handover checker's queue
+        # would hide genuine pending work.
+        _policy_resolved = (
+            event in ("awaiting_conversion_decision", "awaiting_committee_decision")
+            or (event == "awaiting_checker_approval" and payload.get("checklist_id")))
+        if s.auto_approve and _policy_resolved:
             result["suppressed"] = "auto-approve policy resolves this wait"
         else:
             result.update(await _fan_out_notifications(payload, notify))
