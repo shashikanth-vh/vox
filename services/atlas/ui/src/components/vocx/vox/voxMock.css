@@ -382,6 +382,12 @@
 @media (max-width: 640px) {
   .vox-app .summary-body {font-size:15px; line-height:1.65;}
   .vox-app .transcript-body {font-size:14.5px; line-height:1.7;}
+  /* The Recent/Memory cards are read at arm's length in the field — the snippet is
+     the payload a thumb scans for, so it steps up with the company name; desktop
+     keeps the denser sizes. */
+  .vox-app .cc-co {font-size:16px;}
+  .vox-app .cc-snip {font-size:14px; line-height:1.5;}
+  .vox-app .cc-time {font-size:11px;}
 }
 
 .vox-app .rec-meta-discard {color:var(--danger); cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-weight:600; opacity:0.9;}
