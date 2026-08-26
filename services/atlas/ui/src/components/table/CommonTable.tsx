@@ -12,8 +12,9 @@ import {
 } from "material-react-table";
 import {
   Box, IconButton, Tooltip, Stack, Popover, Paper, Typography, InputBase, Drawer,
-  MenuItem, ListItemIcon, Divider, Badge, Button, useMediaQuery,
+  MenuItem, ListItemIcon, Divider, Badge, Button, Collapse, useMediaQuery,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import SearchIcon from "@mui/icons-material/Search";
 import TuneIcon from "@mui/icons-material/Tune";
@@ -40,6 +41,25 @@ const V12_HEAD_BG = "#F7F9FA";
 const MOBILE_QUERY = "(max-width:760px)";
 
 /**
+ * Drop a `maxWidth` from a column's body-cell props, keeping everything else it sets.
+ * Only used on the column that grows — see the call site for why the cap has to go there
+ * and may stay everywhere else. Handles the props/sx being either an object or MRT's
+ * function form; a function `sx` is left alone rather than guessed at.
+ */
+function uncapWidth<T extends Record<string, any>>(
+  props: MRT_ColumnDef<T>["muiTableBodyCellProps"],
+): MRT_ColumnDef<T>["muiTableBodyCellProps"] {
+  const strip = (p: any) => {
+    if (!p || typeof p.sx !== "object" || p.sx === null) return p;
+    return { ...p, sx: { ...p.sx, maxWidth: "none" } };
+  };
+  if (typeof props === "function") {
+    return ((args: any) => strip((props as any)(args))) as any;
+  }
+  return strip(props);
+}
+
+/**
  * The headline of a phone card — what the row is, and its one number worth reading at a
  * glance:
  *
@@ -55,6 +75,123 @@ const MOBILE_QUERY = "(max-width:760px)";
 export interface MobileCardSpec<T> {
   primary: (row: T) => React.ReactNode;
   value?: (row: T) => React.ReactNode;
+}
+
+/**
+ * One phone card: a headline that is always readable, and the full row behind a chevron.
+ *
+ * Collapsed by default. A card carries EVERY column, which on the wider registers is a
+ * dozen fields — expanded, four rows filled the screen and the list stopped being a list.
+ * Closed, the headline is the row; open, it is the record.
+ *
+ * Declared at module scope on purpose: a component defined inside the table's render is a
+ * new type on every render, so React would unmount and remount it and every card would
+ * snap shut the moment anything upstream changed.
+ */
+function MobileCard<T extends Record<string, any>>({
+  row, index, card, columns, cellNode, actions, onOpenRow, rowSx,
+}: {
+  row: T;
+  index: number;
+  card: MobileCardSpec<T>;
+  columns: MRT_ColumnDef<T>[];
+  cellNode: (row: T, c: MRT_ColumnDef<T>, index: number) => React.ReactNode;
+  actions?: React.ReactNode;
+  onOpenRow?: (row: T) => void;
+  rowSx?: (row: T) => object;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Paper
+      variant="outlined"
+      onClick={onOpenRow ? () => onOpenRow(row) : undefined}
+      sx={{
+        borderColor: tokens.line, borderRadius: "12px", px: 1.4, py: 1.2,
+        minWidth: 0, maxWidth: "100%",
+        cursor: onOpenRow ? "pointer" : "default",
+        "&:active": { bgcolor: "#F4FAF9" },
+        // A page's row state (v12 gray/rowok/rowbad) tints the whole card here,
+        // which is what it tints per-cell in the grid.
+        ...(rowSx?.(row) ?? {}),
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "flex-start", gap: "10px", minWidth: 0 }}>
+        {/* Title truncates rather than wraps — the untruncated value is in the field
+            list, one tap away. */}
+        <Box sx={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600,
+          lineHeight: 1.3, color: tokens.ink,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {card.primary(row)}
+        </Box>
+        {card.value && (
+          <Box sx={{ textAlign: "right", flexShrink: 1, maxWidth: "48%", minWidth: 0,
+            fontSize: 15, lineHeight: 1.3, color: tokens.ink,
+            overflowWrap: "anywhere" }}>
+            {card.value(row)}
+          </Box>
+        )}
+        {/* stopPropagation: the card body still opens the row the way it always did, so
+            the chevron has to claim its own tap rather than doing both. */}
+        <IconButton
+          size="small"
+          aria-expanded={open}
+          aria-label={open ? "Hide details" : "Show details"}
+          onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+          sx={{ p: "2px", mt: "-2px", mr: "-4px", flexShrink: 0 }}
+        >
+          <ExpandMoreIcon sx={{ fontSize: 20, color: tokens.muted,
+            transition: "transform 160ms", transform: open ? "rotate(180deg)" : "none" }} />
+        </IconButton>
+      </Box>
+
+      {/* unmountOnExit, not just hidden: a collapsed card renders none of the grid's cell
+          renderers, so a page of rows does not mount a page of <select>s nobody is
+          looking at. */}
+      <Collapse in={open} unmountOnExit>
+        {/* The whole row, field by field — the card carries everything the grid column
+            set carries, so nothing is only-on-desktop. */}
+        <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${tokens.line}`,
+          display: "grid", gridTemplateColumns: "minmax(76px, 34%) minmax(0, 1fr)",
+          columnGap: 1.2, rowGap: 0.9, alignItems: "baseline" }}>
+          {columns.map((c, ci) => (
+            <Fragment key={String(c.id ?? c.accessorKey ?? ci)}>
+              <Box sx={{ fontSize: 10.6, fontWeight: 700, textTransform: "uppercase",
+                letterSpacing: ".5px", color: tokens.muted,
+                minWidth: 0, overflowWrap: "anywhere" }}>
+                {String(c.header ?? "")}
+              </Box>
+              <Box sx={{
+                fontSize: 12.8, minWidth: 0, maxWidth: "100%",
+                wordBreak: "break-word", overflowWrap: "anywhere",
+                // Cells are the grid's own renderers, sized for a wide column: a
+                // fixed-width <select>, a nowrap pill, a row of chips. Inside a
+                // phone card they have to give way to the card, not the reverse.
+                "& > *": { maxWidth: "100%" },
+                "& .MuiTextField-root, & .MuiInputBase-root": {
+                  minWidth: 0, width: "100%", maxWidth: "100%",
+                },
+                "& .MuiStack-root": { flexWrap: "wrap" },
+                "& .MuiChip-root": { maxWidth: "100%" },
+              }}>
+                {cellNode(row, c, index)}
+              </Box>
+            </Fragment>
+          ))}
+        </Box>
+
+        {/* The grid's Actions column, on the card. Same buttons, same handlers —
+            allowed to wrap here, where a page's extra actions can outrun the
+            width the pinned column always had. */}
+        {actions && (
+          <Box sx={{ mt: 1, pt: 0.8, borderTop: `1px solid ${tokens.line}`,
+            "& .MuiStack-root": { flexWrap: "wrap" } }}>
+            {actions}
+          </Box>
+        )}
+      </Collapse>
+    </Paper>
+  );
 }
 
 // A committed column filter is just the SET OF CHECKED VALUES. The popup's text box
@@ -848,6 +985,19 @@ export default function CommonTable<T extends Record<string, any>>(
           ...c,
           enableSorting: canSort,
           grow: last,
+          // The growing column has to be free to grow in the BODY as well as the head.
+          // Pages cap a wide prose column's body cell (Clients' About: `maxWidth: 330`,
+          // so long text cannot stretch the grid) — MRT spreads that sx over its own
+          // sizing, and on the LAST column it fights `grow`: the head cell has no cap and
+          // fills the table, the body cell stops dead at 330px, and everything after it
+          // sits in a different place in the header than in the rows. The pinned Actions
+          // column shows it worst — label at the far right, icons hundreds of pixels
+          // short. The header decides the column's width, so the cap is lifted here to
+          // match it. Non-last columns keep theirs: nothing stretches them, so nothing
+          // fights.
+          muiTableBodyCellProps: last
+            ? uncapWidth(c.muiTableBodyCellProps)
+            : c.muiTableBodyCellProps,
           // Own the header content — v12's label + funnel. MRT still supplies the
           // native sort icon around it; our funnel drives our own filter state.
           Header: ({ column }: any) => (
@@ -1339,78 +1489,17 @@ export default function CommonTable<T extends Record<string, any>>(
               so one long unbroken value would push the whole card wider than the screen. */}
           <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1 }}>
             {feedRows.map((r, i) => (
-              <Paper
+              <MobileCard<T>
                 key={String(r.id ?? r.code ?? i)}
-                variant="outlined"
-                onClick={onRowClick ? () => onRowClick(r) : undefined}
-                sx={{
-                  borderColor: tokens.line, borderRadius: "12px", px: 1.4, py: 1.2,
-                  minWidth: 0, maxWidth: "100%",
-                  cursor: onRowClick ? "pointer" : "default",
-                  "&:active": { bgcolor: "#F4FAF9" },
-                  // A page's row state (v12 gray/rowok/rowbad) tints the whole card here,
-                  // which is what it tints per-cell in the grid.
-                  ...(rowSx?.(r) ?? {}),
-                }}
-              >
-                <Box sx={{ display: "flex", alignItems: "flex-start", gap: "10px", minWidth: 0 }}>
-                  {/* Title truncates rather than wraps — the untruncated value is in the
-                      field list directly below, so nothing is actually lost. */}
-                  <Box sx={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600,
-                    lineHeight: 1.3, color: tokens.ink,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {card.primary(r)}
-                  </Box>
-                  {card.value && (
-                    <Box sx={{ textAlign: "right", flexShrink: 1, maxWidth: "48%", minWidth: 0,
-                      fontSize: 15, lineHeight: 1.3, color: tokens.ink,
-                      overflowWrap: "anywhere" }}>
-                      {card.value(r)}
-                    </Box>
-                  )}
-                </Box>
-
-                {/* The whole row, field by field — the card carries everything the grid
-                    column set carries, so nothing is only-on-desktop. */}
-                <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${tokens.line}`,
-                  display: "grid", gridTemplateColumns: "minmax(76px, 34%) minmax(0, 1fr)",
-                  columnGap: 1.2, rowGap: 0.9, alignItems: "baseline" }}>
-                  {columns.map((c, ci) => (
-                    <Fragment key={String(c.id ?? c.accessorKey ?? ci)}>
-                      <Box sx={{ fontSize: 10.6, fontWeight: 700, textTransform: "uppercase",
-                        letterSpacing: ".5px", color: tokens.muted,
-                        minWidth: 0, overflowWrap: "anywhere" }}>
-                        {String(c.header ?? "")}
-                      </Box>
-                      <Box sx={{
-                        fontSize: 12.8, minWidth: 0, maxWidth: "100%",
-                        wordBreak: "break-word", overflowWrap: "anywhere",
-                        // Cells are the grid's own renderers, sized for a wide column: a
-                        // fixed-width <select>, a nowrap pill, a row of chips. Inside a
-                        // phone card they have to give way to the card, not the reverse.
-                        "& > *": { maxWidth: "100%" },
-                        "& .MuiTextField-root, & .MuiInputBase-root": {
-                          minWidth: 0, width: "100%", maxWidth: "100%",
-                        },
-                        "& .MuiStack-root": { flexWrap: "wrap" },
-                        "& .MuiChip-root": { maxWidth: "100%" },
-                      }}>
-                        {cellNode(r, c, i)}
-                      </Box>
-                    </Fragment>
-                  ))}
-                </Box>
-
-                {/* The grid's Actions column, on the card. Same buttons, same handlers —
-                    allowed to wrap here, where a page's extra actions can outrun the
-                    width the pinned column always had. */}
-                {actionsEnabled && (
-                  <Box sx={{ mt: 1, pt: 0.8, borderTop: `1px solid ${tokens.line}`,
-                    "& .MuiStack-root": { flexWrap: "wrap" } }}>
-                    {rowActions(r, i, "flex-end")}
-                  </Box>
-                )}
-              </Paper>
+                row={r}
+                index={i}
+                card={card}
+                columns={columns}
+                cellNode={cellNode}
+                actions={actionsEnabled ? rowActions(r, i, "flex-end") : undefined}
+                onOpenRow={onRowClick}
+                rowSx={rowSx}
+              />
             ))}
           </Box>
 

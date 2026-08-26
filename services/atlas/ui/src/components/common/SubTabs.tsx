@@ -12,7 +12,13 @@ export default function SubTabs({ items, value, onChange, right }: {
 }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px', mb: '12px', pb: '2px', flexWrap: 'wrap' }}>
-      <Box sx={{ display: 'flex', gap: '6px', overflowX: 'auto', flex: 1, minWidth: 0 }}>
+      {/* Desktop keeps the single scrolling strip. A phone does not: four pills do not
+          fit 360px, and a sideways scroll hides tabs behind an edge with nothing to say
+          they are there — Reconciliation was simply invisible. Wrapping shows every tab
+          at once, which is what a sub-switch is for. `overflowX: visible` has to go with
+          the wrap, or the (now taller) strip would still be a scroll container. */}
+      <Box sx={{ display: 'flex', gap: '6px', overflowX: 'auto', flex: 1, minWidth: 0,
+        [MOBILE]: { flexWrap: 'wrap', rowGap: '6px', overflowX: 'visible' } }}>
         {items.map((it) => {
           const on = it.id === value;
           return (
