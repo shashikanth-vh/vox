@@ -113,8 +113,15 @@ export async function loadUnsentTake(rm?: string): Promise<StoredTake | null> {
     const metas = (await withTx([STORE], 'readonly', (tx) =>
       reqDone(tx.objectStore(STORE).getAll()))) as TakeMeta[];
     metas.sort((a, b) => (a.startedAt || '').localeCompare(b.startedAt || ''));
+    // Recovery is only worth OFFERING for a take a person would want back. A tap
+    // of Record closed within the same breath leaves a legal-looking take of one
+    // sliver chunk and 0–1 seconds — to the user, a "00:00 recovered" card for
+    // something they never did, i.e. a bug. Anything under this floor is an
+    // aborted start: cleaned up silently, exactly like the no-chunks case.
+    const worthRecovering = (elapsed: number | undefined) => (elapsed || 0) >= 2;
     for (const m of metas) {
       if (Array.isArray(m.chunks) && m.chunks.length) {
+        if (!worthRecovering(m.elapsed)) { void deleteTake(m.id); continue; }
         if (!owns(m.rm)) continue;               // another login's audio — never offered
         return { ...(m as StoredTake) };
       }
@@ -122,6 +129,7 @@ export async function loadUnsentTake(rm?: string): Promise<StoredTake | null> {
         reqDone(tx.objectStore(CHUNKS).getAll(
           IDBKeyRange.bound([m.id, 0], [m.id, Infinity]))))) as { idx: number; chunk: Blob }[];
       if (!rows.length) { void deleteTake(m.id); continue; }   // aborted start — clean, move on
+      if (!worthRecovering(m.elapsed)) { void deleteTake(m.id); continue; }
       if (!owns(m.rm)) continue;
       rows.sort((a, b) => a.idx - b.idx);
       return { id: m.id, startedAt: m.startedAt, elapsed: m.elapsed,
