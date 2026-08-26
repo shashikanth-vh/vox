@@ -679,10 +679,17 @@ export default function CommonTable<T extends Record<string, any>>(
           // meta.filterRowValue reads the row's underlying key (entity_id) instead, so
           // the facet stays on names while the request carries ids.
           const rowValue = (col.meta as any)?.filterRowValue as ((r: T) => string) | undefined;
+          // The facet options are comma-split TOKENS of the cell, so the row lookup
+          // must accept a token match as well as the whole value — a grouped company
+          // ("EV Duniya, Nikol EV") is found by its "Nikol EV" option, not skipped.
+          const cellMatches = (cell: string, display: string) =>
+            cell === display
+            || cell.split(/,\s*/).some((tok) => tok.trim() === display);
           const out = rowValue
             ? values
                 .map((display) => {
-                  const hit = facetRows.find((r) => String(columnValue(r, col)) === display);
+                  const hit = facetRows.find(
+                    (r) => cellMatches(String(columnValue(r, col)), display));
                   return hit ? String(rowValue(hit) || "") : "";
                 })
                 .filter(Boolean)

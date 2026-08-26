@@ -39,7 +39,18 @@ export function applyQuery<T extends Record<string, any>>(rows: T[], q: TableQue
       const needle = String(v.q ?? '').toLowerCase();
       if (needle) out = out.filter((r) => String(r[cf.id] ?? '').toLowerCase().includes(needle));
       const vals: string[] = v.vals ?? [];
-      if (vals.length) { const set = new Set(vals.map(String)); out = out.filter((r) => set.has(String(r[cf.id] ?? ''))); }
+      if (vals.length) {
+        const set = new Set(vals.map(String));
+        // The popover's options are COMMA-SPLIT tokens of the cell (a grouped
+        // company "EV Duniya, Nikol EV" offers "Nikol EV" as its own option) —
+        // so the row match must speak tokens too, exactly like the Array branch
+        // below: ticking "Nikol EV" finds the grouped row instead of nothing.
+        out = out.filter((r) => {
+          const cell = String(r[cf.id] ?? '');
+          if (set.has(cell)) return true;
+          return cell.split(/,\s*/).some((tok) => set.has(tok.trim()));
+        });
+      }
       return;
     }
     if (Array.isArray(v)) {
