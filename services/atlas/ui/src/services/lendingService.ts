@@ -116,6 +116,17 @@ export const lendingService = {
    * refusal now reaches the caller instead of being swallowed, so the screen and the
    * register cannot disagree.
    */
+  /** The SERVER moved the stage (auto-approval, CS auto-move, tranche settlement) —
+   *  reflect it into the local store WITHOUT writing anything back, so the drawer's
+   *  Stage field catches up without a manual refresh. */
+  syncStage(id: string, stage: string) {
+    const r = this.find(id);
+    if (!r || !stage || r.stage === stage) return;
+    r.stage = stage; r.updated = today();
+    (r.h = r.h || []).push({ stage, t: today(), by: 'workflow' });
+    if (LEND_GREEN.includes(stage) && !r.sanc) r.sanc = today();
+  },
+
   async updateStage(id: string, stage: string, by: string): Promise<{ ok: boolean; error?: string }> {
     const r = this.find(id);
     const from = r?.stage;

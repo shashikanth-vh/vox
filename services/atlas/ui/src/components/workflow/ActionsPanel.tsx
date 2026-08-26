@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Stack, Tooltip, Typography, Alert } from '@mui/material';
 import ActionFormDialog from './ActionFormDialog';
 import CpcsChecklistDialog from './CpcsChecklistDialog';
@@ -22,26 +22,52 @@ import { tokens } from '../../theme';
  * dropdown, which offered four stages the register would always refuse and explained
  * none of them.
  */
-export default function ActionsPanel({ subjectType, subjectId, code, entityId }: {
+export default function ActionsPanel({ subjectType, subjectId, code, entityId, onStage }: {
   subjectType: SubjectType;
   subjectId: string;
   /** The company — the handover package picks its documents from that file. */
   code?: string;
   entityId?: string;
+  /** The SERVER moved the subject's stage (auto-approval, auto-move) — the parent can
+   *  reflect it into its own fields without a page refresh. */
+  onStage?: (stage: string) => void;
 }) {
   const [data, setData] = useState<SubjectActions | null>(null);
   const [open, setOpen] = useState<WorkflowAction | null>(null);
   // A settled CP / CP-CS box opens its recorded checklist to LOOK at, not to edit.
   const [viewOnly, setViewOnly] = useState(false);
   const [done, setDone] = useState('');
+  const lastStage = useRef('');
+  const settleTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(() => {
     let alive = true;
-    workflowActionsService.forSubject(subjectType, subjectId).then((d) => { if (alive) setData(d); });
+    workflowActionsService.forSubject(subjectType, subjectId).then((d) => {
+      if (!alive) return;
+      setData(d);
+      const s = String((d as any)?.subject?.stage || '');
+      if (s && lastStage.current && s !== lastStage.current) onStage?.(s);
+      if (s) lastStage.current = s;
+    });
     return () => { alive = false; };
-  }, [subjectType, subjectId]);
+  }, [subjectType, subjectId, onStage]);
 
   useEffect(load, [load]);
+  useEffect(() => () => { if (settleTimer.current) clearInterval(settleTimer.current); }, []);
+
+  // The auto-approval and the automatic stage moves land seconds AFTER a dialog
+  // closes — the strip (and the drawer, via onStage) must catch the settled state
+  // without a manual refresh. A short re-poll after every completed action covers
+  // the policy's poll-approve-move window; it stops by itself.
+  const finish = useCallback((m: string) => {
+    setDone(m); load();
+    if (settleTimer.current) clearInterval(settleTimer.current);
+    let n = 0;
+    settleTimer.current = setInterval(() => {
+      n += 1; load();
+      if (n >= 8 && settleTimer.current) { clearInterval(settleTimer.current); settleTimer.current = null; }
+    }, 2500);
+  }, [load]);
 
   if (!data || !data.actions.length) return null;
 
@@ -100,25 +126,25 @@ export default function ActionsPanel({ subjectType, subjectId, code, entityId }:
       {/* A step with its own screen opens that screen; everything else is built from the
           form the plane sent. The panel does not know what either screen contains. */}
       <ActionFormDialog action={open && !open.screen ? open : null}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
       <CpcsChecklistDialog action={open?.screen === 'cpcs-checklist' ? open : null}
         readOnly={viewOnly}
         onClose={() => { setOpen(null); setViewOnly(false); }}
-        onDone={(m) => { setDone(m); load(); }} />
+        onDone={finish} />
       <HandoverPackageDialog action={open?.screen === 'handover-package' ? open : null}
         code={code || ''} entityId={entityId}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
       <ExecutedAgreementDialog action={open?.screen === 'executed-agreement' ? open : null}
         code={code || ''} entityId={entityId}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
       <CamWorkbenchDialog action={open?.screen === 'cam-workbench' ? open : null}
         subjectId={subjectId} entityId={entityId}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
       <SanctionTermsDialog action={open?.screen === 'sanction-terms' ? open : null}
         stage={String((data as any)?.subject?.stage || '')}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
       <DisburseDialog action={open?.screen === 'disburse' ? open : null}
-        onClose={() => setOpen(null)} onDone={(m) => { setDone(m); load(); }} />
+        onClose={() => setOpen(null)} onDone={finish} />
     </>
   );
 }
