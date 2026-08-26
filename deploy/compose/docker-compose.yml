@@ -248,12 +248,14 @@ services:
     build:
       context: ../..
       dockerfile: services/stt/Dockerfile
-      # medium is the production default: the small->medium step is the steep part
-      # of the accuracy curve (names, accents, the translate path) at ~2x small's
-      # decode time. Override with STT_MODEL_SIZE=large-v3 when a GPU box arrives.
-      # medium is the default; small ships alongside it as the quick-transcript
-      # lane, selectable per recording from the VOCX recorder.
-      args: { STT_MODEL_SIZE: "${STT_MODEL_SIZE:-medium}",
+      # small is the default for now: on CPU boxes the medium decode proved too slow
+      # (a 20s take blew the 240s cap on the stage VM), and one decode at a time is
+      # the STT design — speed IS throughput here. The small->medium step buys the
+      # steep part of the accuracy curve (names, accents, the translate path) at ~2x
+      # the decode time: when a bigger/GPU box arrives, set STT_MODEL_SIZE=medium (or
+      # large-v3) in deploy/compose/.env and rebuild — the quick-transcript lane
+      # (STT_EXTRA_MODELS=small) then becomes a genuinely faster alternative again.
+      args: { STT_MODEL_SIZE: "${STT_MODEL_SIZE:-small}",
               STT_EXTRA_MODELS: "${STT_EXTRA_MODELS:-small}" }
     environment:
       STT_API_KEYS: "${STT_API_KEY:-compose-stt-key}"
