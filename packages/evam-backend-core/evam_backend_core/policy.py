@@ -242,6 +242,32 @@ class PolicyViolation(NamedTuple):
     message: str
 
 
+# Stages a Lending line may still hold once money is on the book. Everything earlier
+# (Data Awaited … Ready for Disbursement) claims the credit process is still running —
+# a claim a booked tranche has already falsified.
+_POST_MONEY_STAGES: dict[str, set[str]] = {
+    "Lending": {"Disbursed", "CP/CS Completed", "On Hold"},
+}
+
+
+def money_guard_error(subject_type: str, to_stage: str, merged: dict) -> str | None:
+    """The stage edit ``to_stage`` against the merged row: an error string when money is
+    already booked and the target stage would rewind past it, else None."""
+    allowed = _POST_MONEY_STAGES.get(subject_type)
+    if not allowed or to_stage in allowed:
+        return None
+    try:
+        drawn = float(merged.get("disbursed_amount") or 0)
+    except (TypeError, ValueError):
+        drawn = 0.0
+    if drawn > 0:
+        return (f"{drawn:g} Cr is already disbursed on this facility — the stage can only "
+                f"be 'Disbursed', 'CP/CS Completed' or 'On Hold' now, not {to_stage!r}. "
+                "To unwind a wrongly booked tranche, correct the tranche record itself; "
+                "the earlier stages reopen once no money is booked.")
+    return None
+
+
 def check_write(subject_type: str | None, *, current: dict, changes: dict,
                 roles: Iterable[str] | None = None,
                 is_creation: bool = False,
@@ -317,6 +343,19 @@ def check_write(subject_type: str | None, *, current: dict, changes: dict,
                 terr = transition_error(subject_type, field, current.get(field), to_value)
                 if terr is not None:
                     return PolicyViolation("validation", terr)
+        # (B2) The MONEY guard — once a booked tranche exists, the pre-money pipeline is
+        # history, not workflow. The transition graph alone cannot hold this line: it
+        # allows 'On Hold' from anywhere and 'On Hold' resumes to anywhere, which turns
+        # a paused disbursed line into a two-hop rewind to 'Diligence'. This rule reads
+        # the DATA instead: with money on the book, no stage edit — direct, via
+        # approval, or through an On Hold detour — may claim the credit process is
+        # still running. Binds everyone; undoing a wrongly booked tranche (drawn back
+        # to zero) is what reopens the earlier stages, never a stage edit.
+        if stage_field and changes.get(stage_field):
+            gerr = money_guard_error(subject_type, str(changes[stage_field]),
+                                     {**current, **changes})
+            if gerr is not None:
+                return PolicyViolation("validation", gerr)
 
     # (C) Row locks — moving a field INTO a locked TARGET value (human callers only). After the
     #     lifecycle gate so a reserved-at-creation state is a 422, but before mandatory so a

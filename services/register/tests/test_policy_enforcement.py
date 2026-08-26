@@ -436,3 +436,28 @@ async def test_cp_approval_unblocks_disbursement_straight_from_sanctioned(client
     # and the money can move
     r = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"}, headers=ADMIN)
     assert r.status_code == 200, r.text
+
+
+async def test_money_on_the_book_shuts_the_on_hold_rewind(client):
+    """Disbursed → On Hold is a pause; On Hold → Diligence on a line with booked money
+    would rewind the book past the tranche — the money guard refuses it on the real
+    route, while resuming to 'Disbursed' stays open."""
+    eid = await _entity(client)
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    await _advance(client, "lending", lid,
+                   ["Note Circulated", "Sanctioned", "CP/CS Completed",
+                    "Ready for Disbursement"])
+    ok = await client.patch(
+        f"/v1/lending/{lid}",
+        json={"stage": "Disbursed", "proposed_disbursement_amount": 1.6,
+              "proposed_disbursement_date": "2026-08-26",
+              "disbursed_amount": 1.6})
+    assert ok.status_code == 200, ok.text
+    assert (await client.patch(f"/v1/lending/{lid}",
+                               json={"stage": "On Hold"})).status_code == 200
+    rewind = await client.patch(f"/v1/lending/{lid}", json={"stage": "Diligence"})
+    assert rewind.status_code == 422, rewind.text
+    assert "already disbursed" in rewind.text
+    resume = await client.patch(f"/v1/lending/{lid}", json={"stage": "Disbursed"})
+    assert resume.status_code == 200, resume.text

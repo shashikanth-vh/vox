@@ -183,3 +183,32 @@ def test_check_write_is_the_single_authority_across_paths():
     v = policy.check_write("Lending", current={}, changes={"stage": "Disbursed"},
                            roles=None, is_creation=True)
     assert v is not None and v.kind == "validation"
+
+
+def test_money_on_the_book_locks_out_the_pre_money_stages():
+    """Once a tranche is booked, no stage edit may claim the credit process is still
+    running — including the two-hop rewind through 'On Hold', which the transition
+    graph alone cannot stop (On Hold is reachable from anywhere and resumes to
+    anywhere)."""
+    drawn = {"stage": "Disbursed", "disbursed_amount": 1.6}
+    # Pausing and completing stay open…
+    assert policy.check_write("Lending", current=drawn,
+                              changes={"stage": "On Hold"}, roles=["Admin"]) is None
+    # …but resuming a PAUSED disbursed line to Diligence is the laundering path — shut.
+    held = {"stage": "On Hold", "disbursed_amount": 1.6,
+            "proposed_disbursement_amount": 1.6,
+            "proposed_disbursement_date": "2026-08-26"}
+    v = policy.check_write("Lending", current=held,
+                           changes={"stage": "Diligence"}, roles=["Admin"])
+    assert v is not None and v.kind == "validation" and "already disbursed" in v.message
+    # Resuming back to where the money says it is stays legal.
+    assert policy.check_write("Lending", current=held,
+                              changes={"stage": "Disbursed"}, roles=["Admin"]) is None
+    # A completed book with money on it cannot re-open to Sanctioned either.
+    done = {"stage": "CP/CS Completed", "disbursed_amount": 1.6}
+    v = policy.check_write("Lending", current=done,
+                           changes={"stage": "Sanctioned"}, roles=["Admin"])
+    assert v is not None and "already disbursed" in v.message
+    # BEFORE any money: the refer-back rework loop is untouched.
+    assert policy.money_guard_error(
+        "Lending", "Sanctioned", {"stage": "CP/CS Completed", "disbursed_amount": 0}) is None
