@@ -28,7 +28,9 @@ export function toDealRow(r: any): DealRow {
     temp: r?.temperature || '',
     lens: r?.lens || '',
     source: r?.source || '',
-    sourceDetail: r?.source_name || '',
+    // WRITE goes to source_detail; the read-back mapped source_name (a LEAD field a
+    // Deal row never carries) — so a saved detail rendered blank on every reload.
+    sourceDetail: r?.source_detail || r?.source_name || '',
     createdAt: (r?.created_at || '').slice(0, 10),
     remarks: r?.note || r?.remarks || '',
     stage: r?.stage || '',
