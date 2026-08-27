@@ -134,3 +134,60 @@ async def test_an_empty_checklist_is_accepted_and_auto_approves(monkeypatch):
     assert any("/approve" in p for p in reg.posts), reg.posts
     assert reg.patches == [{"stage": "Ready for Disbursement"}], reg.patches
     get_settings.cache_clear()
+
+
+class _HealRegister:
+    """An imported lending line with NO Deals row: the send must create the deal,
+    link the line, and only then carry on. The mint step answers 500 here so the
+    test stops cleanly after the healing it is about."""
+
+    def __init__(self) -> None:
+        self.posts: list[tuple[str, dict]] = []
+        self.patches: list[dict] = []
+
+    async def get(self, url, **kwargs):  # noqa: ANN001, ANN003
+        return httpx.Response(200, request=httpx.Request("GET", str(url)), json={
+            "id": LID, "entity_id": "e-777", "stage": "Diligence", "rm": "Shubh Dave"})
+
+    async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
+        u = str(url)
+        self.posts.append((u, dict(kwargs.get("json") or {})))
+        if u.endswith("/v1/deals"):
+            return httpx.Response(201, request=httpx.Request("POST", u), json={"id": "d-heal"})
+        return httpx.Response(500, request=httpx.Request("POST", u), json={})
+
+    async def patch(self, url, **kwargs):  # noqa: ANN001, ANN003
+        self.patches.append(dict(kwargs.get("json") or {}))
+        return httpx.Response(200, request=httpx.Request("PATCH", str(url)),
+                              json={"id": LID, "deal_id": "d-heal"})
+
+
+async def test_send_to_committee_heals_a_line_with_no_deal(monkeypatch):
+    """An imported line answered 'deal_id: Field required' to the committee send — a
+    field name the user cannot act on. With lending_id in the payload the send now
+    creates the Deals row, links the line, and proceeds."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k")
+    app.state.temporal = _Temporal()
+    reg = _HealRegister()
+    app.state.http = reg
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        r = await c.post("/v1/workflows/deal-structurings",
+                         json={"lending_id": LID, "requested_by": "da@evamfinance.com"},
+                         headers={"X-API-Key": "k", "X-User-Email": "da@evamfinance.com",
+                                  "X-User-Roles": "Deal Analyst"})
+        # The mint intentionally 500s in this fake — what matters is the healing that
+        # happened before it, not the status of this particular send.
+        deal_posts = [(u, b) for u, b in reg.posts if u.endswith("/v1/deals")]
+        assert deal_posts and deal_posts[0][1]["entity_id"] == "e-777", reg.posts
+        assert deal_posts[0][1]["is_lending"] is True
+        assert reg.patches == [{"deal_id": "d-heal"}], reg.patches
+        assert r.status_code != 422, r.text
+
+        # And with NEITHER id the refusal names the way out.
+        bad = await c.post("/v1/workflows/deal-structurings",
+                           json={"requested_by": "da@evamfinance.com"},
+                           headers={"X-API-Key": "k", "X-User-Email": "da@evamfinance.com",
+                                    "X-User-Roles": "Deal Analyst"})
+        assert bad.status_code == 422 and "lending_id" in bad.text
+    get_settings.cache_clear()

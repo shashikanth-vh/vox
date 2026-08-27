@@ -160,7 +160,7 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "stages": {"Data Awaited", "Diligence", "Note Circulated"},
             "stage_reason": "The committee decision has already been taken on this facility.",
             "run_reason": "A committee run is already open on this deal.",
-            "prefill": {"deal_id": "deal_id"},
+            "prefill": {"deal_id": "deal_id", "lending_id": "id"},
             "form": [_f("credit_note_reference", "Credit note reference",
                         placeholder="Auto-numbered — CN/<company>/<yyyymm>-<seq>",
                         help_text="Leave blank and the register issues the next number "
@@ -947,7 +947,12 @@ class LeadQualificationIn(BaseModel):
 
 class DealStructuringIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    deal_id: str
+    # deal_id may be blank WHEN lending_id is given: an imported lending line can sit
+    # without a Deals row, and the send SELF-HEALS it (creates the deal, links the
+    # line) instead of answering "deal_id: Field required" to a user who cannot know
+    # what that means.
+    deal_id: str = ""
+    lending_id: str | None = Field(default=None, max_length=64)
     requested_by: str = Field(max_length=200)
     product_type: str | None = Field(default=None, max_length=60)
     rm: str | None = Field(default=None, max_length=120)
@@ -2426,9 +2431,40 @@ def create_app() -> FastAPI:
                                 ) -> Any:
         if (resp := denied(x_api_key)) is not None:
             return resp
-        _, err = await _verified_email(request, payload.requested_by)
+        who, err = await _verified_email(request, payload.requested_by)
         if err is not None:
             return err
+        if not payload.deal_id:
+            # SELF-HEAL the imported line: the committee decision is recorded on the
+            # DEAL, and import reconciliation left lending lines with no Deals row.
+            # Rather than refuse with a field name, create the deal for the line's
+            # entity, link the line to it, and carry on with the send.
+            if not payload.lending_id:
+                return _problem(422, "Validation failed",
+                                "deal_id is required (or lending_id, so the missing "
+                                "Deals row can be created and linked automatically).")
+            _caller, _v = _caller_context(request, who)
+            row, rerr = await _register_get_as(
+                request, f"/v1/lending/{payload.lending_id}", who, _caller)
+            if rerr is not None:
+                return rerr
+            healed = str(row.get("deal_id") or "")
+            if not healed:
+                made = await _register_post_as(
+                    request, "/v1/deals", who, _caller,
+                    {"entity_id": str(row.get("entity_id") or ""), "is_lending": True,
+                     **({"rm": row.get("rm")} if row.get("rm") else {})})
+                if not (isinstance(made, ORJSONResponse) and made.status_code < 300):
+                    return made
+                healed = str(orjson.loads(made.body).get("id") or "")
+                linked = await _register_patch_as(
+                    request, f"/v1/lending/{payload.lending_id}", who, _caller,
+                    {"deal_id": healed})
+                # The link must LAND — a healed deal the line does not point at would
+                # mint a fresh deal on every send.
+                if not (isinstance(linked, ORJSONResponse) and linked.status_code == 200):
+                    return linked
+            payload = payload.model_copy(update={"deal_id": healed})
         # ONE live committee request per deal — checked BEFORE any number is minted, so
         # a refused send never burns a series number. Without this, a second send while
         # a run was open (returned or not) answered 202 "started" while silently
