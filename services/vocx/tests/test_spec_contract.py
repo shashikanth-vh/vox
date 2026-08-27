@@ -2,6 +2,7 @@
 validates, and a broken object never best-efforts its way past the gate."""
 
 import copy
+import json
 
 import pytest
 
@@ -545,3 +546,69 @@ def test_the_synonym_tables_point_at_real_taxonomy_names():
     subs = {s for lst in reg["taxonomy"].values() for s in lst}
     assert set(_SECTOR_SYN.values()) <= set(reg["taxonomy"])
     assert set(_SUBSECTOR_SYN.values()) <= subs
+
+
+# --------------------------------------------------- the salvage tier (last resort)
+
+def test_a_report_that_defies_repair_salvages_instead_of_dying():
+    """The user's rule: a field the machine could not read becomes an empty field
+    the reviewer fills in — never a dead take. Two model rounds return the same
+    stubborn cell; the report survives with that cell cleared, flagged, and
+    everything else intact."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    stubborn = _valid_report()
+    stubborn["asset_monetisation"]["party_role"] = _cell("landlord")  # no coercion fits
+    stubborn["lending"]["requirement_quantum_cr"] = _cell("2-3 Cr", "low")  # a range, not a number
+    payload = json.dumps(stubborn)
+    calls = []
+
+    def ask(model, system, user):
+        calls.append(user)
+        return payload  # the repair round echoes, exactly as seen in the field
+
+    out = structure_transcript("we met the landlord", mode="note", ask_model=ask,
+                               capture_ts="2026-08-27T10:00:00Z")
+    assert len(calls) == 2  # initial + repair — salvage costs no third model round
+    r = out["report"]
+    assert r["asset_monetisation"]["party_role"]["value"] is None
+    assert r["lending"]["requirement_quantum_cr"]["value"] is None
+    # what stood, stands
+    assert r["asset_monetisation"]["asset_status"]["value"] == "under_construction"
+    assert r["common"]["sector"]["value"] == "Renewables"
+    flags = r["common"]["data_quality_flags"]["value"]
+    assert any("salvaged" in f for f in flags)
+    assert any("landlord" in f for f in flags)
+    assert any("2-3 Cr" in f for f in flags)
+
+
+def test_salvage_forces_the_skeleton_right():
+    from app.vocx.pipeline.structure import _salvage
+
+    wreck = {"detected_use_cases": ["lending", "leasing"],  # one real, one invented
+             "lending": {"requirement_nature": _cell("project_finance")},  # sparse
+             "made_up_block": {"x": 1},
+             "entity_candidates": ["Suryodaya EPC", 42]}
+    out = _salvage(wreck)
+    assert out is not None
+    assert out["detected_use_cases"] == ["lending"]
+    assert "made_up_block" not in out
+    assert out["lending"]["requirement_nature"]["value"] == "project_finance"
+    assert out["lending"]["requirement_quantum_cr"]["value"] is None
+    assert out["entity_candidates"] == ["Suryodaya EPC"]
+    assert out["common"]["meeting_type"]["value"] is None
+
+    # Nothing detected, nothing heard: the note files under operations for re-filing.
+    bare = _salvage({})
+    assert bare is not None and bare["detected_use_cases"] == ["operations"]
+    assert any("operations" in f for f in bare["common"]["data_quality_flags"]["value"])
+
+
+def test_no_json_object_at_all_still_fails_into_retry():
+    from app.vocx.pipeline.structure import StructuringError, structure_transcript
+
+    def ask(model, system, user):
+        return "I'm sorry, I can't structure that."
+
+    with pytest.raises(StructuringError):
+        structure_transcript("hello", mode="note", ask_model=ask)

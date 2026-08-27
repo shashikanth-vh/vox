@@ -10,6 +10,7 @@ write, never a best-effort parse.
 
 from __future__ import annotations
 
+import copy as _copy
 import json
 import re as _re
 from datetime import date as _date
@@ -482,6 +483,113 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
     return obj
 
 
+def _salvage(obj: dict, registry_version: str | None = None) -> dict | None:
+    """The human can fix a field; nobody can fix a dead take.
+
+    Last resort AFTER coercion and the repair round have both lost: force the
+    skeleton right, then keep every cell that stands on its own and clear every
+    cell that does not — null plus a data-quality flag naming what was heard,
+    never an invented value. The reviewer updates or selects what they need on
+    the report screen before approving, which is exactly what the flags point
+    at. The validator itself is the oracle: each pass clears precisely the
+    cells it names, so this never drifts from the contract. Returns a VALID
+    report, or None when there is nothing usable to keep (the caller's
+    StructuringError — and its retry — still own that case)."""
+    registry = load_registry(registry_version)
+    obj = _copy.deepcopy(obj)
+    ucs = list(registry["use_cases"])
+    blocks = registry.get("blocks", {})
+    notes: list[str] = []
+
+    # -- the skeleton, forced right ------------------------------------------
+    if not isinstance(obj.get("common"), dict):
+        obj["common"] = {}
+        notes.append("the common block could not be read — cleared for review")
+    _fill_block(obj["common"], registry.get("common") or [])
+
+    raw_detected = obj.get("detected_use_cases")
+    detected = list(dict.fromkeys(
+        u for u in (raw_detected if isinstance(raw_detected, list) else [])
+        if isinstance(u, str) and u in ucs))
+    if not detected:
+        detected = [uc for uc in ucs if isinstance(obj.get(uc), dict) and obj[uc]]
+    if not detected:
+        # A tag is a filter, not a fact: operations carries no fields, so
+        # nothing is fabricated — the reviewer re-files it.
+        detected = ["operations"]
+        notes.append("use case not determinable — filed under operations for review")
+    obj["detected_use_cases"] = detected
+    known_top = {"detected_use_cases", "common", "entity_candidates",
+                 "subsector_details", *ucs}
+    for k in list(obj):
+        if k not in known_top:
+            del obj[k]
+    for uc in ucs:
+        fields = (blocks.get(uc) or {}).get("fields") or []
+        if uc in detected:
+            if not isinstance(obj.get(uc), dict):
+                obj[uc] = {}
+            if fields:
+                _fill_block(obj[uc], fields)
+            elif obj[uc]:
+                obj[uc] = {}
+        elif uc in obj:
+            del obj[uc]
+    cands = obj.get("entity_candidates")
+    obj["entity_candidates"] = [c for c in cands if isinstance(c, str)] \
+        if isinstance(cands, list) else []
+
+    # -- the cells, validator-guided -----------------------------------------
+    ok = False
+    for _ in range(6):
+        try:
+            validate_report(obj, registry_version)
+            ok = True
+            break
+        except ContractError as exc:
+            progress = False
+            for err in exc.errors:
+                where = err.split(":", 1)[0].strip()
+                if where.startswith("subsector_details"):
+                    if obj.get("subsector_details") is not None:
+                        obj["subsector_details"] = None
+                        progress = True
+                    continue
+                m = _re.match(r"^([a-z_]+)\.([A-Za-z0-9_]+)", where)
+                if not m:
+                    continue
+                blk, key = m.group(1), m.group(2)
+                target = obj.get(blk)
+                if not isinstance(target, dict):
+                    continue
+                if "unknown field" in err:
+                    target.pop(key, None)
+                    progress = True
+                    continue
+                cell = target.get(key)
+                orig = cell.get("value") if isinstance(cell, dict) else cell
+                if orig not in (None, "", []):
+                    notes.append(f"{blk}.{key} {str(orig)[:80]!r} could not be "
+                                 f"structured — cleared for review")
+                target[key] = {"value": None, "confidence": "n/a"}
+                progress = True
+            if not progress:
+                return None
+    if not ok:
+        return None
+
+    flag_cell = obj["common"].get("data_quality_flags")
+    if not isinstance(flag_cell, dict) or not isinstance(flag_cell.get("value"), list):
+        flag_cell = obj["common"]["data_quality_flags"] = {"value": [], "confidence": "n/a"}
+    flag_cell["value"] = list(dict.fromkeys([
+        "structuring was salvaged — review the cleared fields before approving",
+        *flag_cell["value"], *notes]))
+    try:
+        return validate_report(obj, registry_version)
+    except ContractError:  # pragma: no cover — flags are plain strings
+        return None
+
+
 def _parse_strict(raw: str) -> dict:
     """The model was told: only the JSON object, no fences. Be tolerant of exactly
     one thing (fences it was told not to add), strict about everything else."""
@@ -544,19 +652,35 @@ def structure_transcript(
             else ask_model(model, system, u)
 
     raw = _ask(user)
+    obj1: dict | None = None
     try:
-        report = validate_report(_normalize(_parse_strict(raw), registry_version), registry_version)
+        obj1 = _normalize(_parse_strict(raw), registry_version)
+        report = validate_report(obj1, registry_version)
     except (ContractError, StructuringError) as first:
         # One self-repair round: the model sees its own violations, verbatim.
         detail = "; ".join(first.errors) if isinstance(first, ContractError) else str(first)
         repair = (f"{user}\n\nYour previous output violated the contract:\n{detail}\n"
                   f"Return the corrected single JSON object only.")
         raw = _ask(repair)
+        obj2: dict | None = None
         try:
-            report = validate_report(_normalize(_parse_strict(raw), registry_version), registry_version)
+            obj2 = _normalize(_parse_strict(raw), registry_version)
+            report = validate_report(obj2, registry_version)
         except (ContractError, StructuringError) as second:
-            detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
-            raise StructuringError(f"contract violation after repair round: {detail2}") from second
+            # The take must not die for a field: salvage what stands (repair
+            # round first — it saw the violations), flag what was cleared, and
+            # let the reviewer update or select the rest. Only output with
+            # nothing usable in it (no JSON object at all) still fails here,
+            # into the runner's retry path.
+            report = None
+            for cand in (obj2, obj1):
+                if isinstance(cand, dict):
+                    report = _salvage(cand, registry_version)
+                    if report is not None:
+                        break
+            if report is None:
+                detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
+                raise StructuringError(f"contract violation after repair round: {detail2}") from second
 
     # A post-meeting note is recorded when the meeting just happened: if the
     # model still left meeting_date null (nothing spoken, older prompt), the
