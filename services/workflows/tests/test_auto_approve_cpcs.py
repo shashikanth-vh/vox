@@ -110,3 +110,27 @@ async def test_the_flag_off_leaves_the_checker_gate_alone(monkeypatch):
     assert not app.state.auto_tasks
     assert reg.posts == [] and reg.patches == []
     get_settings.cache_clear()
+
+
+async def test_an_empty_checklist_is_accepted_and_auto_approves(monkeypatch):
+    """An unconditional letter's checklist has zero items — the start endpoint takes it
+    and the policy walks the same approve door; with no CS at all, the book will end at
+    'Disbursed' (the stage still moves to Ready for Disbursement here)."""
+    app = _app(monkeypatch, WORKFLOWS_API_KEYS="k", WORKFLOWS_AUTO_APPROVE="true",
+               WORKFLOWS_AUTO_POLL_SECONDS="0")
+    app.state.temporal = _Temporal()
+    reg = _Register([])
+    app.state.http = reg
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://orch") as c:
+        r = await c.post(
+            "/v1/workflows/cpcs-checklists",
+            json={"lending_id": LID, "requested_by": "maker@evamfinance.com",
+                  "checklist_version": 1, "items": []},
+            headers={"X-API-Key": "k", "X-User-Email": "maker@evamfinance.com",
+                     "X-User-Roles": "Credit Analyst"})
+    assert r.status_code == 202, r.text
+    await asyncio.gather(*list(app.state.auto_tasks))
+    assert any("/approve" in p for p in reg.posts), reg.posts
+    assert reg.patches == [{"stage": "Ready for Disbursement"}], reg.patches
+    get_settings.cache_clear()

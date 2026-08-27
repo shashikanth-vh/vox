@@ -61,11 +61,14 @@ async def test_cpcs_maker_checker_and_evidence_minting(client):
     assert bare.status_code == 422 and "checklist" in bare.text.lower()
 
 
-async def test_cpcs_empty_checklist_is_rejected(client):
+async def test_cpcs_empty_checklist_is_accepted(client):
+    """Design change (field-driven): a sanction letter can be UNCONDITIONAL, and the
+    empty checklist is its honest record — refusing it made disbursement unreachable
+    on such letters (no checklist, no approval, no cp_cs_completion evidence)."""
     lid = await _lending(client)
     r = await client.post("/v1/internal/cpcs-checklists",
                           json={"lending_id": lid, "items": []}, headers=ADMIN)
-    assert r.status_code == 422, r.text
+    assert r.status_code == 201, r.text
 
 
 async def test_cpcs_completed_requires_all_required_cp_items(client):
@@ -180,3 +183,35 @@ async def test_a_draft_checklist_saves_updates_and_completes_in_place(client):
     clash = await client.post("/v1/internal/cpcs-checklists", json=body, headers=ADMIN)
     assert clash.status_code == 409, clash.text
     assert "open a new version" in clash.text
+
+
+async def test_an_unconditional_letter_yields_an_empty_checklist_that_approves(client):
+    """A sanction letter can carry NO conditions at all. The empty checklist, sent and
+    approved by a different checker, is the four-eyes record that there is nothing to
+    work — and the cp_cs_completion evidence minted from it releases disbursement
+    exactly like a worked checklist's would."""
+    import uuid as _uuid
+    code = "EMP" + _uuid.uuid4().hex[:6].upper()
+    eid = (await client.post("/v1/entities",
+                             json={"code": code, "legal_name": "Unconditional Co",
+                                   "entity_type": "Company"})).json()["id"]
+    lid = (await client.post("/v1/lending",
+                             json={"entity_id": eid, "stage": "Diligence"})).json()["id"]
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": str(lid), "status": "Completed", "items": []},
+        headers={"X-User-Email": "maker@evamfinance.com", "X-User-Roles": "Admin"})
+    assert chk.status_code == 201, chk.text
+    cid = chk.json()["id"]
+    appr = await client.post(
+        f"/v1/internal/cpcs-checklists/{cid}/approve",
+        headers={"X-User-Email": "checker@evamfinance.com", "X-User-Roles": "Credit Head"})
+    assert appr.status_code == 200, appr.text
+    assert appr.json()["status"] == "Approved"
+    ev = await client.post(
+        "/v1/evidence",
+        json={"subject_type": "Lending", "subject_id": str(lid),
+              "evidence_kind": "cp_cs_completion", "reference": "cpcs/1",
+              "sha256": "a" * 64, "decision_ref": cid},
+        headers={"X-User-Email": "checker@evamfinance.com", "X-User-Roles": "Admin"})
+    assert ev.status_code == 201, ev.text

@@ -385,7 +385,12 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
       return;
     }
     const named = items.filter((r) => r.label.trim() || r.key.trim());
-    if (!named.length) { setErr('A checklist needs at least one condition.'); return; }
+    // A letter can be UNCONDITIONAL. Sending with no conditions is legal — but only
+    // deliberately: the checker (or the auto-approve policy) then approves that there
+    // is nothing to work, which releases disbursement with nothing to chase.
+    if (!named.length && !window.confirm(
+      'Send with NO conditions?\n\nThis records that the sanction letter is '
+      + 'unconditional — approval releases disbursement with nothing to chase.')) return;
     const unlabelled = named.findIndex((r) => !r.label.trim());
     if (unlabelled >= 0) { setErr(`Condition ${unlabelled + 1} needs a description.`); return; }
     // Everything below mirrors a rule the register enforces. Checking it here is not
@@ -511,7 +516,9 @@ export default function CpcsChecklistDialog({ action, onClose, onDone, readOnly 
             {loading ? 'Loading the saved checklist…'
               : ro ? `No ${phase} conditions on record.`
                 : `No ${phase} conditions yet — read them from the sanction letter above, `
-                  + 'or add them by hand.'}
+                  + 'or add them by hand. A genuinely unconditional letter can be sent '
+                  + 'as-is: the approval records that there is nothing to work, and '
+                  + 'disbursement is released.'}
           </Typography>
         )}
 

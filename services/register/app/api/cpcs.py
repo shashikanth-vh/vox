@@ -56,7 +56,10 @@ class ChecklistIn(BaseModel):
     lending_id: str = Field(min_length=1, max_length=64)
     deal_id: str | None = Field(default=None, max_length=64)
     checklist_version: int = Field(default=1, ge=1)
-    items: list[ChecklistItem] = Field(min_length=1)
+    # min_length=0: a sanction letter can be UNCONDITIONAL — the empty checklist,
+    # sent and approved, is the four-eyes record that there is nothing to work,
+    # and its approval releases disbursement exactly like a worked one.
+    items: list[ChecklistItem] = Field(min_length=0)
     # 'Draft' keeps it editable; 'Completed' asserts the maker has finished it (ready for approval).
     status: str = Field(default="Completed", pattern="^(Draft|Completed)$")
     note: str | None = None
@@ -67,8 +70,10 @@ def _actor_id(ctx: RequestContext) -> str | None:
 
 
 def _validate_items(ctx: RequestContext, payload: ChecklistIn) -> None:
-    """Per-item governance: distinguish CP/CS, require ≥1 item, and enforce waiver/CS-deferment
-    controls (authority, reason, expiry). Raises on the first violation."""
+    """Per-item governance: distinguish CP/CS and enforce waiver/CS-deferment controls
+    (authority, reason, expiry). An EMPTY list is legal — an unconditional sanction
+    letter's checklist records that there is nothing to work. Raises on the first
+    violation."""
     waived_or_deferred = [i for i in payload.items if i.status in ("Waived", "Deferred as CS")]
     # Waiver / deferral authority — only senior credit authority may do it (humans; a delegated
     # service acts under the authority the orchestrator already verified).

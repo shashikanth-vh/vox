@@ -1055,7 +1055,7 @@ class CpcsChecklistIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lending_id: str
     requested_by: str = Field(max_length=200)          # the maker (authenticated)
-    items: list[CpcsItemIn] = Field(min_length=1)
+    items: list[CpcsItemIn] = Field(min_length=0)   # empty = unconditional letter
     deal_id: str | None = Field(default=None, max_length=64)
     checklist_version: int = Field(default=1, ge=1)
     note: str | None = Field(default=None, max_length=2000)
