@@ -316,7 +316,10 @@ export default function AppLayout() {
             [MOBILE]: {
               px: 1.25,
               py: 1.5,
-              pb: "calc(76px + env(safe-area-inset-bottom))",
+              // 76px cleared the BOTTOM NAV but not the copilot bubble floating
+              // above it — a list's last row (its action button especially) sat
+              // under the bubble with no way to scroll past. Clear both.
+              pb: "calc(150px + env(safe-area-inset-bottom))",
             },
           }}
         >

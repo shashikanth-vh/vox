@@ -331,14 +331,17 @@ export default function NewsRadar() {
           placeholder="🔎 Search any name — company, owner, partner, plant…"
           sx={{ flex: '1 1 200px', minWidth: 0 }} />
         <Button variant="contained" onClick={searchGo}
-          sx={adhoc.running ? { background: 'linear-gradient(135deg,#B3432B,#C85A3F)' } : undefined}>
+          sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' },
+            ...(adhoc.running ? { background: 'linear-gradient(135deg,#B3432B,#C85A3F)' } : {}) }}>
           {adhoc.running ? '■ Stop' : 'Search news'}
         </Button>
       </Box>
       <Box sx={{ display: 'flex', gap: 1.2, alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
         <TextField type="date" label="From" InputLabelProps={{ shrink: true }} value={adhoc.dfrom}
+          sx={{ flex: { xs: '1 1 40%', sm: '0 0 auto' } }}
           onChange={(e) => setAdhoc((a) => ({ ...a, dfrom: e.target.value }))} />
         <TextField type="date" label="To" InputLabelProps={{ shrink: true }} value={adhoc.dto}
+          sx={{ flex: { xs: '1 1 40%', sm: '0 0 auto' } }}
           onChange={(e) => setAdhoc((a) => ({ ...a, dto: e.target.value }))} />
         <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>leave blank = last 3 months</Typography>
         <Box sx={{ flex: 1 }} />
