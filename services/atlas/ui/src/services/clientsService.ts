@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, errText, remote, withFallback, USE_REAL_API } from '../api/http';
+import { api, errText, remote, remoteDebounced, withFallback, USE_REAL_API } from '../api/http';
 import { writeAudit } from './auditService';
 import { entitiesService, entityError } from './entitiesService';
 import { mintCode } from './conversionService';
@@ -114,7 +114,7 @@ export const clientsService = {
     const body: Record<string, any> = {};
     Object.entries(patch).forEach(([k, v]) => { if (wire[k]) body[wire[k]] = v; });
     if (row.entityId && Object.keys(body).length) {
-      remote('patch', '/entities/' + row.entityId, body);
+      remoteDebounced('patch', '/entities/' + row.entityId, body);
     }
     Object.assign(db().clients[code], patch);
     writeAudit(by, 'Client updated', code, Object.keys(patch).join(','));

@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, listAll, withFallback, remote, errText, toCursorParams, asRows, nextCursorOf, totalOf, isRegisterId, USE_REAL_API } from '../api/http';
+import { api, listAll, withFallback, remote, remoteDebounced, errText, toCursorParams, asRows, nextCursorOf, totalOf, isRegisterId, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -177,7 +177,7 @@ export const lendingService = {
       proposedAmt: 'proposed_disbursement_amount', proposedDate: 'proposed_disbursement_date',
     };
     if (isRegisterId(id) && wire[key as string]) {
-      remote('patch', '/lending/' + id, { [wire[key as string]]: value === '' ? null : value });
+      remoteDebounced('patch', '/lending/' + id, { [wire[key as string]]: value === '' ? null : value });
     }
     (r as any)[key] = value; writeAudit(by, 'Lending updated', r.code, String(key));
   },

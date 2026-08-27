@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, errText, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API, listAll } from '../api/http';
+import { api, errText, withFallback, remote, remoteDebounced, toCursorParams, asRows, nextCursorOf, totalOf, USE_REAL_API, listAll } from '../api/http';
 import { fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -80,7 +80,7 @@ export const dealsService = {
       sourceDetail: 'source_detail', remarks: 'remarks',
     };
     if ((d as any).apiId && wire[key as string]) {
-      remote('patch', '/deals/' + (d as any).apiId, { [wire[key as string]]: value || null });
+      remoteDebounced('patch', '/deals/' + (d as any).apiId, { [wire[key as string]]: value || null });
     }
     (d as any)[key] = value; writeAudit(by, 'Deal updated', code, String(key));
   },

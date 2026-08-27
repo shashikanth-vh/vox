@@ -212,3 +212,25 @@ export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any
   if (!USE_REAL_API) return;
   api[method](url, data).catch((e) => console.warn('[api] write failed:', method, url, e));
 }
+
+// FIELD edits fire on every keystroke — and a remote() per keystroke turned one typed
+// remark ("Disbursed- 85 Lakh Facility") into ~25 register PATCHes and ~25 audit rows:
+// the Activity hub read like a keylogger. The LOCAL store still updates per keystroke
+// (typing stays live); the REGISTER gets one write with the settled value once the
+// typing pauses. Keyed per url+field so two fields edited quickly never clobber each
+// other. Best-effort flush on pagehide covers the type-and-close-the-tab tail.
+const _debounced = new Map<string, { t: ReturnType<typeof setTimeout>; fire: () => void }>();
+export function remoteDebounced(method: 'post' | 'patch' | 'del', url: string,
+                                data?: any, ms = 700): void {
+  if (!USE_REAL_API) return;
+  const key = `${method} ${url} ${Object.keys(data || {}).sort().join(',')}`;
+  const prev = _debounced.get(key);
+  if (prev) clearTimeout(prev.t);
+  const fire = () => { _debounced.delete(key); remote(method, url, data); };
+  _debounced.set(key, { t: setTimeout(fire, ms), fire });
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    _debounced.forEach(({ t, fire }) => { clearTimeout(t); fire(); });
+  });
+}

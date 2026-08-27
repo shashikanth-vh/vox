@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, asRows, USE_REAL_API, listAll } from '../api/http';
+import { api, withFallback, remote, remoteDebounced, asRows, USE_REAL_API, listAll } from '../api/http';
 import { syndicationService } from './syndicationService';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
@@ -121,7 +121,7 @@ export const fiService = {
   },
   update(index: number, patch: Partial<FiRow>, by: string) {
     const f = db().lenders[index]; if (!f) return;
-    if (f.apiId) remote('patch', '/counterparties/' + f.apiId, toFiPatch(patch));
+    if (f.apiId) remoteDebounced('patch', '/counterparties/' + f.apiId, toFiPatch(patch));
     Object.assign(f, patch); writeAudit(by, 'FI updated', f.name, Object.keys(patch).join(','));
   },
 };

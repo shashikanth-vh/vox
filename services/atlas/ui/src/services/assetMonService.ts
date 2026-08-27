@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId, USE_REAL_API } from '../api/http';
+import { api, withFallback, remote, remoteDebounced, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId, USE_REAL_API } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -167,7 +167,7 @@ export const assetMonService = {
       teaser: 'teaser_date', notes: 'notes',
     };
     if (isRegisterId(id) && wire[key as string]) {
-      remote('patch', AM_PATH + '/' + id, { [wire[key as string]]: value === '' ? null : value });
+      remoteDebounced('patch', AM_PATH + '/' + id, { [wire[key as string]]: value === '' ? null : value });
     }
     const old = (r as any)[key]; (r as any)[key] = value;
     writeAudit(by, key === 'status' ? 'Asset Mon status' : 'Asset Mon updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));

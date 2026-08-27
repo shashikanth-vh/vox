@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, asRows, USE_REAL_API, listAll } from '../api/http';
+import { api, withFallback, remote, remoteDebounced, asRows, USE_REAL_API, listAll } from '../api/http';
 import { fillFromDeal, fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -149,7 +149,7 @@ export const syndicationService = {
   update(id: string, key: keyof SynRow, value: any, by: string) {
     const r = this.find(id); if (!r) return;
     const wire = WIRE_FIELD[key as string];
-    if (r.apiId && wire) remote('patch', '/syndication/' + r.apiId, { [wire]: value });
+    if (r.apiId && wire) remoteDebounced('patch', '/syndication/' + r.apiId, { [wire]: value });
     const old = (r as any)[key]; (r as any)[key] = value;
     if (key === 'status') (r.h = r.h || []).push({ status: value, t: today(), by });
     writeAudit(by, key === 'status' ? 'Platform Deals status' : 'Platform Deals updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
@@ -179,7 +179,7 @@ export const syndicationService = {
     const body: any = { status: st, since: today() };
     if (opts?.note?.trim()) body.note = opts.note.trim();
     if (opts?.amountCr != null) body.amount_cr = opts.amountCr;
-    if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, body);
+    if (r?.apiId && e.apiId) remoteDebounced('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, body);
     const before = e.st; e.st = st; e.since = today(); e.resp = today();
     if (body.note) e.note = body.note;
     if (body.amount_cr != null) e.amt = body.amount_cr;
