@@ -279,6 +279,14 @@ def build_tool_schema(registry_version: str | None = None) -> dict:
         ftype = fdef.get("type")
         if ftype == "enum" and fdef.get("options"):
             return {"enum": [o["value"] for o in fdef["options"]] + ["not_specified", None]}
+        if ftype == "enum" and fdef.get("options_from"):
+            # sector/subsector: the taxonomy's EXACT names in the schema, so the
+            # model cannot spell "Renewable Energy" on the forced-tool path at
+            # all (the sector/subsector pairing stays _check_taxonomy's job).
+            taxonomy = registry["taxonomy"]
+            if "subsector" in fdef["options_from"]:
+                return {"enum": [s for subs in taxonomy.values() for s in subs] + [None]}
+            return {"enum": list(taxonomy) + [None]}
         if ftype == "number":
             return {"type": ["number", "null"]}
         if ftype == "int":

@@ -303,3 +303,245 @@ def test_normalize_coerces_spoken_enum_forms():
         raise AssertionError("a genuinely unknown enum value must still fail")
     except ContractError:
         pass
+
+
+# ----------------------------------------------- the speech-echo class, closed
+# Every coercion below is one deterministic spelling away from a validated field
+# failure (the Chikballapur bundle) or its exact sibling. The rule throughout:
+# a different spelling of the same fact folds; a different fact still fails.
+
+from app.vocx.pipeline.structure import _normalize  # noqa: E402
+
+
+def test_taxonomy_coercion_covers_every_sector_and_every_subsector():
+    """The user's ask, verbatim: consider all sectors and subsectors too. The
+    model echoing 'solar-epc', 'SOLAR EPC' or 'Solar EPC' for 'Solar-EPC' must
+    fold to the registry's exact name — for all six sectors and all 32 subsectors."""
+    reg = load_registry()
+    for sector, subs in reg["taxonomy"].items():
+        for spoken_sector in (sector.lower(), sector.upper(), sector.replace("&", "and")):
+            r = _valid_report()
+            r["common"]["sector"] = _cell(spoken_sector)
+            r["common"]["subsector"] = _cell(None, "n/a")
+            out = validate_report(_normalize(r))
+            assert out["common"]["sector"]["value"] == sector, spoken_sector
+        for sub in subs:
+            for spoken in (sub.lower(), sub.upper(), sub.replace("-", " ")):
+                r = _valid_report()
+                r["common"]["sector"] = _cell(sector)
+                r["common"]["subsector"] = _cell(spoken, "medium")
+                r.pop("subsector_details", None)
+                out = validate_report(_normalize(r))
+                assert out["common"]["subsector"]["value"] == sub, (sector, spoken)
+
+
+def test_sector_spoken_names_fold_to_the_locked_six():
+    cases = {"Renewable Energy": "Renewables", "renewable": "Renewables",
+             "Energy Storage": "BESS", "Battery Storage": "BESS",
+             "EV": "EV Mobility", "Electric Mobility": "EV Mobility",
+             "Agriculture": "Climate Resilience",
+             "Industrial Decarbonization": "Industrial Decarbonisation",  # z-spelling
+             "Water Treatment": "Water Treatment & Waste Management",
+             "Solar": "Renewables"}  # names four subsectors — one shared roof
+    for spoken, want in cases.items():
+        r = _valid_report()
+        r["common"]["sector"] = _cell(spoken)
+        r["common"]["subsector"] = _cell(None, "n/a")
+        out = validate_report(_normalize(r))
+        assert out["common"]["sector"]["value"] == want, spoken
+
+
+def test_a_subsector_names_its_parent_sector():
+    r = _valid_report()
+    r["common"]["sector"] = _cell(None, "n/a")
+    r["common"]["subsector"] = _cell("Wind", "medium")
+    out = validate_report(_normalize(r))
+    assert out["common"]["sector"]["value"] == "Renewables"
+
+    # And the more specific claim wins a contradiction — with a flag saying so.
+    r = _valid_report()
+    r["common"]["sector"] = _cell("BESS")
+    r["common"]["subsector"] = _cell("Wind", "medium")
+    out = validate_report(_normalize(r))
+    assert out["common"]["sector"]["value"] == "Renewables"
+    assert any("aligned" in f for f in out["common"]["data_quality_flags"]["value"])
+
+
+def test_speech_outside_the_taxonomy_clears_with_a_flag_never_kills_the_take():
+    r = _valid_report()
+    r["common"]["sector"] = _cell("Textiles")
+    r["common"]["subsector"] = _cell("Spinning mills", "medium")
+    out = validate_report(_normalize(r))  # the take SURVIVES
+    assert out["common"]["sector"]["value"] is None
+    assert out["common"]["subsector"]["value"] is None
+    flags = out["common"]["data_quality_flags"]["value"]
+    assert any("Textiles" in f for f in flags) and any("Spinning" in f for f in flags)
+
+
+def test_numbers_spoken_as_strings_fold_to_the_cr_denomination():
+    r = _valid_report()
+    r["lending"]["requirement_quantum_cr"] = _cell("25 Cr", "high")
+    r["lending"]["company_turnover_cr"] = _cell("₹1,200", "medium")
+    out = validate_report(_normalize(r))
+    assert out["lending"]["requirement_quantum_cr"]["value"] == 25.0
+    assert out["lending"]["company_turnover_cr"]["value"] == 1200.0
+
+    r = _valid_report()
+    r["lending"]["requirement_quantum_cr"] = _cell("50 lakhs", "high")
+    out = validate_report(_normalize(r))
+    assert out["lending"]["requirement_quantum_cr"]["value"] == 0.5  # exactly
+
+    # deal_size is a STRING field — spoken prose stays prose.
+    assert _normalize(_valid_report())["asset_monetisation"]["deal_size"]["value"] \
+        == "~180 Cr EV (indicative)"
+
+
+def test_a_unit_key_is_folded_by_arithmetic_never_dropped():
+    """{"value": 25, "unit": "lakh"} naively stripped becomes 25 Cr — a 100x lie.
+    Lakh divides, Cr spellings drop, and an alien unit (USD mn) stays put so the
+    validator refuses the cell instead of us mis-reading it."""
+    r = _valid_report()
+    r["lending"]["requirement_quantum_cr"] = {"value": 25, "unit": "lakh", "confidence": "high"}
+    out = validate_report(_normalize(r))
+    assert out["lending"]["requirement_quantum_cr"]["value"] == 0.25
+
+    r = _valid_report()
+    r["lending"]["requirement_quantum_cr"] = {"value": 25, "unit": "Cr", "confidence": "high"}
+    assert validate_report(_normalize(r))["lending"]["requirement_quantum_cr"]["value"] == 25
+
+    bad = _valid_report()
+    bad["lending"]["requirement_quantum_cr"] = {"value": 5, "unit": "USD mn", "confidence": "high"}
+    with pytest.raises(ContractError):
+        validate_report(_normalize(bad))
+
+
+def test_score_arrives_as_json_float_or_string():
+    for spoken in (4.0, "4"):
+        r = _valid_report()
+        r["common"]["opportunity_score"] = _cell(spoken, "medium")
+        out = validate_report(_normalize(r))
+        assert out["common"]["opportunity_score"]["value"] == 4
+    bad = _valid_report()
+    bad["common"]["opportunity_score"] = _cell("nine", "medium")
+    with pytest.raises(ContractError):
+        validate_report(_normalize(bad))
+
+
+def test_dates_in_every_spoken_shape():
+    for spoken in ("2026-09-15T10:00:00+05:30", "15/09/2026", "15-09-2026",
+                   "15th September 2026", "September 15, 2026", "15 Sep 2026"):
+        r = _valid_report()
+        r["common"]["follow_up_date"] = _cell(spoken, "medium")
+        out = validate_report(_normalize(r))
+        assert out["common"]["follow_up_date"]["value"] == "2026-09-15", spoken
+    # An impossible date is never guessed into a possible one.
+    bad = _valid_report()
+    bad["common"]["follow_up_date"] = _cell("31/02/2026", "medium")
+    with pytest.raises(ContractError):
+        validate_report(_normalize(bad))
+
+
+def test_list_fields_spoken_as_sentences_wrap_never_split():
+    r = _valid_report()
+    r["common"]["attendees_counterparty"] = _cell("R. Sharma and the CFO", "medium")
+    r["common"]["action_items"] = _cell(["Call SBI on the term sheet",
+                                         {"task": "Share DPR", "owner": "RM"}], "medium")
+    out = validate_report(_normalize(r))
+    assert out["common"]["attendees_counterparty"]["value"] == ["R. Sharma and the CFO"]
+    assert out["common"]["action_items"]["value"][0] == {"action": "Call SBI on the term sheet"}
+    assert out["common"]["action_items"]["value"][1]["action"] == "Share DPR"
+
+
+def test_confidence_spellings_fold_to_the_four_words():
+    r = _valid_report()
+    r["common"]["location"] = {"value": "Whitefield", "confidence": "High"}
+    r["lending"]["existing_bankers"] = {"value": "SBI", "confidence": "med"}
+    r["common"]["meeting_summary"] = {"value": None, "confidence": "N/A"}
+    out = validate_report(_normalize(r))
+    assert out["common"]["location"]["confidence"] == "high"
+    assert out["lending"]["existing_bankers"]["confidence"] == "medium"
+    assert out["common"]["meeting_summary"]["confidence"] == "n/a"
+
+
+def test_omitted_fields_become_the_contracts_null():
+    r = _valid_report()
+    for k in ("location", "next_steps", "follow_up_date", "meeting_summary"):
+        del r["common"][k]
+    del r["lending"]["remarks"]
+    out = validate_report(_normalize(r))
+    assert out["common"]["location"] == {"value": None, "confidence": "n/a"}
+    assert out["lending"]["remarks"]["value"] is None
+
+
+def test_the_use_case_declaration_in_spoken_shapes():
+    # A lone string, a spoken spelling, and a block filed under the spoken name.
+    r = _valid_report()
+    r["detected_use_cases"] = "lending"
+    del r["asset_monetisation"]
+    out = validate_report(_normalize(r))
+    assert out["detected_use_cases"] == ["lending"]
+
+    r = _valid_report()
+    r["detected_use_cases"] = ["lending", "Asset Monetisation"]
+    r["Asset Monetisation"] = r.pop("asset_monetisation")
+    out = validate_report(_normalize(r))
+    assert out["detected_use_cases"] == ["lending", "asset_monetisation"]
+    assert out["asset_monetisation"]["party_role"]["value"] == "owner"
+
+    # Detected with nothing heard: the block exists, every field null, flags nudge.
+    r = _valid_report()
+    r["detected_use_cases"] = ["lending", "asset_monetisation", "syndication"]
+    out = validate_report(_normalize(r))
+    assert out["syndication"]["deal_size_cr"]["value"] is None
+    assert "Deal size" in " ".join(compute_data_quality_flags(out))
+
+
+def test_entity_candidates_null_and_null_entries():
+    r = _valid_report()
+    r["entity_candidates"] = None
+    assert validate_report(_normalize(r))["entity_candidates"] == []
+    r = _valid_report()
+    r["entity_candidates"] = ["Suryodaya EPC", None, "SBI"]
+    assert validate_report(_normalize(r))["entity_candidates"] == ["Suryodaya EPC", "SBI"]
+
+
+def test_decorative_cell_keys_drop_but_meaningful_ones_refuse():
+    r = _valid_report()
+    r["lending"]["existing_bankers"] = {"value": "SBI", "confidence": "medium",
+                                        "note": "per the CFO"}
+    out = validate_report(_normalize(r))
+    assert set(out["lending"]["existing_bankers"]) == {"value", "confidence"}
+
+
+def test_subsector_details_spoken_keys_bare_values_and_inventions():
+    r = _valid_report()
+    r["subsector_details"] = {
+        "Operating / under-construction capacity (MW)": _cell("40 MW", "high"),  # label
+        "portfolio_stage": "Under construction",       # bare value, no cell
+        "promoter_pedigree": _cell("strong", "high"),  # invented — nowhere to render
+    }
+    out = validate_report(_normalize(r))
+    d = out["subsector_details"]
+    assert d["operating_uc_capacity_mw"]["value"] == "40 MW"
+    assert d["portfolio_stage"] == {"value": "Under construction", "confidence": "medium"}
+    assert "promoter_pedigree" not in d
+
+
+def test_the_tool_schema_locks_the_taxonomy():
+    from app.vocx.spec import build_tool_schema
+    reg = load_registry()
+    schema = build_tool_schema()
+    common_props = schema["properties"]["common"]["properties"]
+    assert set(common_props["sector"]["properties"]["value"]["enum"]) \
+        == set(reg["taxonomy"]) | {None}
+    subs = {s for lst in reg["taxonomy"].values() for s in lst}
+    assert set(common_props["subsector"]["properties"]["value"]["enum"]) == subs | {None}
+
+
+def test_the_synonym_tables_point_at_real_taxonomy_names():
+    """Registry drift must break loudly here, not silently mis-file conversations."""
+    from app.vocx.pipeline.structure import _SECTOR_SYN, _SUBSECTOR_SYN
+    reg = load_registry()
+    subs = {s for lst in reg["taxonomy"].values() for s in lst}
+    assert set(_SECTOR_SYN.values()) <= set(reg["taxonomy"])
+    assert set(_SUBSECTOR_SYN.values()) <= subs

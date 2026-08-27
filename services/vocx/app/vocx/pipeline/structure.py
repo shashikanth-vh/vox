@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re as _re
+from datetime import date as _date
 from typing import Any, Callable
 
 from ..spec import (
@@ -56,73 +57,375 @@ def build_prompt(registry_version: str | None = None) -> str:
     )
 
 
-def _normalize(obj: dict, registry_version: str | None = None) -> dict:
-    """Deterministic shape aliases — NOT best-effort repair. Each one observed in the
-    field, each isomorphic to the contract shape; anything genuinely broken still
-    fails validation.
+# --------------------------------------------------------------------------
+# Deterministic coercion vocabulary. Everything below serves ONE failure
+# class, seen live with the Chikballapur bundle: the transcript's word for a
+# thing is not the contract's token for it, the model echoes the speech, the
+# strict validator refuses it — and the repair round echoes the speech again.
+# Coercions are exact and isomorphic (a different spelling of the same fact);
+# anything genuinely outside the vocabulary still fails validation.
 
-    1. detected_use_cases empty/missing while use-case blocks are present: the
-       blocks ARE the declaration — infer the tags from the non-empty blocks, and
-       drop any empty stragglers that then declare nothing.
-    2. subsector_details nested under the subsector's own name instead of keyed
-       flat by canonical field: unwrap."""
+# Spoken synonyms for closed enums: the word people say for the token we store.
+_ENUM_SYN = {"party_role": {"seller": "owner", "selling": "owner", "vendor": "owner",
+                            "purchaser": "buyer", "acquirer": "buyer", "buying": "buyer"}}
+
+# Spoken names for the six locked sectors that no spelling rule can reach.
+_SECTOR_SYN = {
+    "green_energy": "Renewables", "clean_energy": "Renewables",
+    "energy_storage": "BESS", "battery_storage": "BESS",
+    "battery_energy_storage": "BESS", "battery_energy_storage_system": "BESS",
+    "electric_mobility": "EV Mobility", "e_mobility": "EV Mobility",
+    "emobility": "EV Mobility",
+    "agriculture": "Climate Resilience", "agri": "Climate Resilience",
+}
+
+# Spoken names for subsectors whose registry names share no tokens with the
+# way people actually say them. Values MUST be exact taxonomy strings.
+_SUBSECTOR_SYN = {
+    "charge_point_operator": "CPO", "charge_point_operators": "CPO",
+    "ev_charging": "CPO",
+    "cold_storage": "Post-harvest infrastructure (cold chain, warehousing, "
+                    "processing, packaging)",
+}
+
+_CONF_MAP = {"high": "high", "hi": "high", "medium": "medium", "med": "medium",
+             "moderate": "medium", "low": "low",
+     "n_a": "n/a", "na": "n/a", "none": "n/a", "not_applicable": "n/a"}
+
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july",
+     "august", "september", "october", "november", "december"])}
+
+_NUM_RE = _re.compile(
+    r"^[~₹$\s]*(?:rs\.?\s*|inr\s*)?([\d,]+(?:\.\d+)?)\s*"
+    r"(cr|crore|crores|lakh|lakhs|lac|lacs|l)?\.?$", _re.IGNORECASE)
+_DMY_RE = _re.compile(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$")
+_TEXTDATE_RE = _re.compile(
+    r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)|([A-Za-z]+)\s+(\d{1,2})"
+    r"(?:st|nd|rd|th)?)[,\s]+(\d{4})$")
+
+
+def _canon(t: str) -> str:
+    # z→s folds -ize/-ization spellings into the registry's -ise forms; both
+    # sides of every comparison run through here, so only consistency matters.
+    return _re.sub(r"[^a-z0-9]+", "_", t.strip().lower().replace("z", "s")).strip("_")
+
+
+def _tokens(t: str) -> frozenset:
+    # Trailing-s strip folds singular/plural ("Renewables"/"renewable energy").
+    return frozenset(w[:-1] if len(w) > 2 and w.endswith("s") else w
+                     for w in _canon(t).split("_") if w)
+
+
+def _match_one(spoken: str, candidates: list) -> str | None:
+    """The single candidate the spoken form names, or None. Exact canonical
+    spelling first, then token containment either way round ("Cold chain" IS
+    inside the post-harvest subsector's name; "Renewable Energy" CONTAINS
+    Renewables) — and only when the match is unambiguous: "Solar" names four
+    subsectors, so as a subsector it names none of them."""
+    c = _canon(spoken)
+    exact = [x for x in candidates if _canon(x) == c]
+    if len(exact) == 1:
+        return exact[0]
+    st = _tokens(spoken)
+    if not st:
+        return None
+    near = [x for x in candidates if st <= _tokens(x) or _tokens(x) <= st]
+    return near[0] if len(near) == 1 else None
+
+
+def _number_from(text: str) -> float | None:
+    """"25 Cr" / "₹1,200" / "50 lakhs" as the float the register stores. The
+    field is denominated in Cr, and 100 lakh is exactly 1 Cr — arithmetic, not
+    interpretation. Anything else ("2-3 Cr", "USD 5mn") returns None and the
+    validator keeps refusing it."""
+    m = _NUM_RE.match(text.strip())
+    if not m:
+        return None
+    try:
+        n = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    if (m.group(2) or "").lower() in ("lakh", "lakhs", "lac", "lacs", "l"):
+        n = n / 100.0
+    return n
+
+
+def _date_from(text: str) -> str | None:
+    """ISO datetimes lose their time part; 15/09/2026 reads day-first (this is
+    an Indian book — a US-ordered date lands on an impossible month and fails
+    honestly); "15th September 2026" and "September 15, 2026" spell out. An
+    unparseable or impossible date returns None — never a guessed one."""
+    t = text.strip()
+    if _re.match(r"^\d{4}-\d{2}-\d{2}[T ]", t):
+        return t[:10]
+    m = _DMY_RE.match(t)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = _TEXTDATE_RE.match(t)
+        if not m:
+            return None
+        d = int(m.group(1) or m.group(4))
+        name = (m.group(2) or m.group(3)).lower()
+        hits = [i for mth, i in _MONTHS.items() if len(name) >= 3 and mth.startswith(name)]
+        if len(hits) != 1:
+            return None
+        mo, y = hits[0], int(m.group(5))
+    try:
+        return _date(y, mo, d).isoformat()
+    except ValueError:
+        return None
+
+
+def _coerce_cell_value(fdef: dict, cell: dict) -> None:
+    """One cell's value into its field's type, when the two spell the same fact."""
+    v = cell.get("value")
+    ftype = fdef.get("type")
+    if ftype == "enum" and fdef.get("options") and isinstance(v, str):
+        vals = {o["value"] for o in fdef["options"]}
+        if v in vals:
+            return
+        c = _canon(v)
+        if c in vals:
+            cell["value"] = c
+            return
+        by_label = {_canon(o.get("label", "")): o["value"] for o in fdef["options"]}
+        if c in by_label:
+            cell["value"] = by_label[c]
+            return
+        syn = _ENUM_SYN.get(fdef["key"], {})
+        if c in syn:
+            cell["value"] = syn[c]
+    elif ftype == "number" and isinstance(v, str):
+        n = _number_from(v)
+        if n is not None:
+            cell["value"] = n
+    elif ftype == "int":
+        # JSON's 4.0 is the same 4; "4" spoken as a string is too.
+        if isinstance(v, float) and not isinstance(v, bool) and v.is_integer():
+            cell["value"] = int(v)
+        elif isinstance(v, str) and v.strip().lstrip("+-").isdigit():
+            cell["value"] = int(v.strip())
+    elif ftype == "date" and isinstance(v, str):
+        d = _date_from(v)
+        if d is not None and d != v:
+            cell["value"] = d
+    elif ftype == "list":
+        # A list field spoken as one sentence is a one-item list — wrapped, never
+        # split: comma-splitting a name like "Sharma, R." is interpretation.
+        if isinstance(v, str) and v.strip():
+            v = cell["value"] = [v]
+        if fdef.get("item_shape") and isinstance(v, list):
+            cell["value"] = v = [({"action": item} if isinstance(item, str) else item)
+                                 for item in v]
+            for item in v:
+                if isinstance(item, dict) and "action" not in item:
+                    for alias in ("task", "item", "description"):
+                        if isinstance(item.get(alias), str):
+                            item["action"] = item.pop(alias)
+                            break
+    elif ftype == "string":
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            cell["value"] = str(v)
+        elif isinstance(v, list) and v and all(isinstance(x, str) for x in v):
+            joiner = "\n" if (fdef.get("judgement") or fdef.get("system")) else ", "
+            cell["value"] = joiner.join(x for x in v if x.strip()) or None
+
+
+def _scrub_cell(fdef: dict, cell: dict) -> None:
+    """Bring one cell to {value, confidence(, user_override)}.
+
+    A "unit" key on a number is NEVER just dropped — {"value": 25, "unit":
+    "lakh"} dropped naively becomes 25 Cr, a 100× lie. Lakh folds by division,
+    Cr/INR spellings fold away, and any other unit (mn, USD) stays put so the
+    validator refuses the cell and the repair round sees it. Decorative extras
+    (notes, reasoning) carry no meaning for the stored value and drop; the
+    confidence's spelling folds to the four legal words."""
+    if fdef.get("type") == "number" and isinstance(cell.get("value"), (int, float)) \
+            and not isinstance(cell.get("value"), bool):
+        u = _canon(cell["unit"]) if isinstance(cell.get("unit"), str) else None
+        if u in ("lakh", "lakhs", "lac", "lacs", "l"):
+            cell["value"] = cell["value"] / 100.0
+            del cell["unit"]
+        elif u in ("cr", "crore", "crores", "inr", "rs", "rupees", "inr_cr", "rs_cr"):
+            del cell["unit"]
+    keep = {"value", "confidence", "unit"}
+    if fdef.get("key") == "opportunity_score":
+        keep.add("user_override")
+    for k in list(cell):
+        if k not in keep:
+            del cell[k]
+    conf = cell.get("confidence")
+    if isinstance(conf, str) and conf not in ("high", "medium", "low", "n/a"):
+        cell["confidence"] = _CONF_MAP.get(_canon(conf), conf)
+    if "confidence" not in cell and (fdef.get("judgement") or fdef.get("system")):
+        cell["confidence"] = "n/a"  # the only value it may carry anyway
+    _coerce_cell_value(fdef, cell)
+
+
+def _fill_block(block_obj: dict, fields: list) -> None:
+    """Every registry field present: a key the model omitted IS the contract's
+    null ("missing values are null, never invented") — this generalises the
+    additive-fields default that meeting_summary/follow_up_time shipped with.
+    Present cells get scrubbed and type-coerced; extra keys the model invented
+    stay for the validator to name (misfiled data is repair's job, not ours)."""
+    for fdef in fields:
+        if fdef["key"] not in block_obj:
+            block_obj[fdef["key"]] = {"value": None, "confidence": "n/a"}
+        cell = block_obj[fdef["key"]]
+        if isinstance(cell, dict) and "value" in cell:
+            _scrub_cell(fdef, cell)
+
+
+def _normalize(obj: dict, registry_version: str | None = None) -> dict:
+    """Deterministic shape aliases — NOT best-effort repair. Each one observed in
+    the field or one exact spelling away from it, each isomorphic to the contract
+    shape; anything genuinely broken still fails validation. The passes, in order:
+
+    1. the use-case declaration (string→list, spoken spellings→registry keys,
+       blocks-imply-tags, detected-but-missing block → all-null block);
+    2. every block filled to the full registry key set, cells scrubbed and
+       type-coerced (enum labels/synonyms, "25 Cr"→25.0, 4.0→4, datetime→date,
+       sentence→[sentence], unit folding);
+    3. judgement confidences pinned to "n/a";
+    4. the TAXONOMY — all six sectors, every subsector: spoken spellings resolve
+       against the locked lists; a subsector names its parent when the sector is
+       missing or wrong; speech genuinely outside the taxonomy clears to null
+       WITH a data-quality flag, because "not determinable" is the truthful
+       answer and a whole take must not die for a filter chip;
+    5. entity_candidates flattened to plain names, null→[];
+    6. subsector_details unwrapped, label-spelled keys → canonical keys, bare
+       values wrapped with the registry's own hi/md default, invented data
+       points dropped (they have nowhere to render), orphans cleared."""
     registry = load_registry(registry_version)
+    ucs = list(registry["use_cases"])
+    blocks = registry.get("blocks", {})
+
+    # -- 1. the use-case declaration ---------------------------------------
     detected = obj.get("detected_use_cases")
+    if isinstance(detected, str):
+        detected = obj["detected_use_cases"] = [detected]
+    by_canon_uc = {_canon(u): u for u in ucs}
+    if isinstance(detected, list):
+        fixed = [by_canon_uc.get(_canon(u), u) if isinstance(u, str) else u
+                 for u in detected]
+        if all(isinstance(u, str) for u in fixed):
+            fixed = list(dict.fromkeys(fixed))
+        obj["detected_use_cases"] = detected = fixed
+    known_top = {"detected_use_cases", "common", "entity_candidates",
+                 "subsector_details", *ucs}
+    for k in list(obj):
+        if k not in known_top and isinstance(obj.get(k), dict):
+            uc = by_canon_uc.get(_canon(k))
+            if uc and uc not in obj:
+                obj[uc] = obj.pop(k)
     if not (isinstance(detected, list) and detected):
-        present = [uc for uc in registry["use_cases"]
-                   if isinstance(obj.get(uc), dict) and obj[uc]]
+        present = [uc for uc in ucs if isinstance(obj.get(uc), dict) and obj[uc]]
         if present:
-            obj["detected_use_cases"] = present
-            for uc in registry["use_cases"]:
+            obj["detected_use_cases"] = detected = present
+            for uc in ucs:
                 if uc not in present and obj.get(uc) == {}:
                     del obj[uc]
+    if isinstance(detected, list):
+        for uc in detected:
+            if isinstance(uc, str) and uc not in obj \
+                    and (blocks.get(uc) or {}).get("fields"):
+                obj[uc] = {}  # filled to all-null below: detected, nothing heard
 
-    # 3. ENUM VALUES spoken as their labels or everyday synonyms: the transcript
-    #    says "seller" and the contract says "owner"; the model echoes the speech and
-    #    the strict enum refuses it — twice, because the repair round echoes it too
-    #    (the Chikballapur bundle failed structuring exactly this way in the field).
-    #    Deterministic, isomorphic coercion only: canonical form of the value, then
-    #    the option's label, then a short spoken-synonym table. Anything genuinely
-    #    outside the vocabulary still fails validation.
-    _SYN = {"party_role": {"seller": "owner", "selling": "owner", "vendor": "owner",
-                           "purchaser": "buyer", "acquirer": "buyer", "buying": "buyer"}}
+    # -- 2. blocks to full shape, cells coerced -----------------------------
+    common = obj.get("common")
+    if isinstance(common, dict):
+        _fill_block(common, registry.get("common") or [])
+    for uc in ucs:
+        if isinstance(obj.get(uc), dict) and (blocks.get(uc) or {}).get("fields"):
+            _fill_block(obj[uc], blocks[uc]["fields"])
 
-    def _canon(t: str) -> str:
-        return _re.sub(r"[^a-z0-9]+", "_", t.strip().lower()).strip("_")
+    # -- 3. judgement prose never grades itself -----------------------------
+    if isinstance(common, dict):
+        for fdef in registry.get("common", []):
+            if not (fdef.get("judgement") or fdef.get("system")):
+                continue
+            cell = common.get(fdef["key"])
+            if isinstance(cell, dict) and cell.get("confidence") in ("high", "medium", "low"):
+                cell["confidence"] = "n/a"
 
-    def _coerce_block(block_obj: dict, fields: list) -> None:
-        for fdef in fields:
-            if fdef.get("type") != "enum" or not fdef.get("options"):
-                continue
-            cell = block_obj.get(fdef["key"])
-            if not isinstance(cell, dict) or not isinstance(cell.get("value"), str):
-                continue
-            vals = {o["value"] for o in fdef["options"]}
-            v = cell["value"]
-            if v in vals:
-                continue
-            c = _canon(v)
-            if c in vals:
-                cell["value"] = c
-                continue
-            by_label = {_canon(o.get("label", "")): o["value"] for o in fdef["options"]}
-            if c in by_label:
-                cell["value"] = by_label[c]
-                continue
-            syn = _SYN.get(fdef["key"], {})
-            if c in syn:
-                cell["value"] = syn[c]
+    # -- 4. the taxonomy, all six sectors and every subsector ----------------
+    if isinstance(common, dict):
+        taxonomy = registry["taxonomy"]
+        sectors = list(taxonomy)
+        parent_of = {sub: sec for sec, subs in taxonomy.items() for sub in subs}
+        notes: list[str] = []
 
-    for uc in registry["use_cases"]:
-        if isinstance(obj.get(uc), dict):
-            _coerce_block(obj[uc], (registry.get("blocks", {}).get(uc) or {}).get("fields", []))
-    if isinstance(obj.get("common"), dict):
-        # registry["common"] is the field list itself (blocks nest theirs under "fields").
-        _coerce_block(obj["common"], registry.get("common") or [])
+        def _val(key: str):
+            cell = common.get(key)
+            return cell.get("value") if isinstance(cell, dict) else None
 
-    # entity_candidates as objects instead of plain names: take the one string
-    # each object unambiguously carries ("name" key, or a single string value).
+        def _set(key: str, value, conf: str | None = None) -> None:
+            if not isinstance(common.get(key), dict):
+                common[key] = {"value": None, "confidence": "n/a"}
+            common[key]["value"] = value
+            if value is None:
+                common[key]["confidence"] = "n/a"
+            elif conf and common[key].get("confidence") not in ("high", "medium", "low"):
+                # A derived value (sector from its subsector) lands in a cell
+                # holding "n/a" — it inherits the confidence of its evidence.
+                common[key]["confidence"] = conf
+
+        sector, subsector = _val("sector"), _val("subsector")
+        if isinstance(sector, str) and sector not in taxonomy:
+            fixed = _match_one(sector, sectors) or _SECTOR_SYN.get(_canon(sector))
+            if not fixed:
+                # "Solar" is not a sector — but every subsector that word names
+                # lives under one roof, and the roof is the answer.
+                fam = {parent_of[s] for s in parent_of if _tokens(sector) <= _tokens(s)}
+                fixed = fam.pop() if len(fam) == 1 else None
+            if fixed:
+                sector = fixed
+                _set("sector", sector)
+        if isinstance(subsector, str):
+            pool = taxonomy[sector] if isinstance(sector, str) and sector in taxonomy \
+                else list(parent_of)
+            if subsector not in pool:
+                fixed = _match_one(subsector, pool)
+                if not fixed:
+                    syn = _SUBSECTOR_SYN.get(_canon(subsector))
+                    fixed = syn if syn in pool else None
+                if fixed:
+                    subsector = fixed
+                    _set("subsector", subsector)
+            # The subsector is the more specific claim: it names its parent when
+            # the sector is absent — or contradicts it.
+            if subsector in parent_of and sector != parent_of[subsector]:
+                if isinstance(sector, str) and sector in taxonomy:
+                    notes.append(f"sector aligned to subsector "
+                                 f"'{subsector}' (was '{sector}')")
+                sector = parent_of[subsector]
+                sub_conf = (common.get("subsector") or {}).get("confidence")
+                _set("sector", sector,
+                     sub_conf if sub_conf in ("high", "medium", "low") else "medium")
+        if isinstance(sector, str) and sector not in taxonomy:
+            notes.append(f"sector '{sector}' is outside the locked taxonomy — cleared")
+            _set("sector", None)
+            sector = None
+        if isinstance(subsector, str) and subsector not in taxonomy.get(sector or "", []):
+            notes.append(f"subsector '{subsector}' is outside the locked taxonomy — cleared")
+            _set("subsector", None)
+            subsector = None
+            if isinstance(obj.get("subsector_details"), dict):
+                obj["subsector_details"] = None  # orphaned with its subsector
+        if notes:
+            cell = common.get("data_quality_flags")
+            if not isinstance(cell, dict):
+                cell = common["data_quality_flags"] = {"value": [], "confidence": "n/a"}
+            cell["value"] = list(dict.fromkeys([*(cell.get("value") or []), *notes]))
+
+    # -- 5. entity_candidates: plain names ----------------------------------
+    if obj.get("entity_candidates") is None:
+        obj["entity_candidates"] = []
     cands = obj.get("entity_candidates")
+    if isinstance(cands, list) and any(c is None for c in cands):
+        cands = obj["entity_candidates"] = [c for c in cands if c is not None]
     if isinstance(cands, list) and any(isinstance(c, dict) for c in cands):
         flat: list = []
         ok = True
@@ -144,42 +447,38 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
         if ok:
             obj["entity_candidates"] = flat
 
-    # meeting_summary and follow_up_time were added to the registry after v1
-    # shipped; an older model snapshot (or a cached stub) that omits them still
-    # satisfies the contract as explicit nulls — additive fields default, they
-    # never fail old outputs.
-    common0 = obj.get("common")
-    if isinstance(common0, dict):
-        for added in ("meeting_summary", "follow_up_time"):
-            if added not in common0:
-                common0[added] = {"value": None, "confidence": "n/a"}
-
-    # Judgement prose fields: the model keeps grading its own judgement ("medium"
-    # on competitive_intelligence) or bulleting it as a list — both isomorphic to
-    # the contract shape. Confidence coerces to the only legal value; a list of
-    # strings joins to the newline-separated prose the UI already stores.
-    if isinstance(common0, dict):
-        for fdef in registry.get("common", []):
-            if not (fdef.get("judgement") or fdef.get("system")):
-                continue
-            cell = common0.get(fdef["key"])
-            if not isinstance(cell, dict):
-                continue
-            v = cell.get("value")
-            if (fdef.get("type") == "string" and isinstance(v, list)
-                    and all(isinstance(x, str) for x in v)):
-                cell["value"] = "\n".join(x for x in v if x.strip()) or None
-            if cell.get("confidence") in ("high", "medium", "low"):
-                cell["confidence"] = "n/a"
-
+    # -- 6. subsector_details ------------------------------------------------
     details = obj.get("subsector_details")
-    common = obj.get("common")
-    if isinstance(details, dict) and isinstance(common, dict):
-        subsector = ((common.get("subsector") or {}).get("value")
-                     if isinstance(common.get("subsector"), dict) else None)
-        if subsector and set(details.keys()) == {subsector} \
-                and isinstance(details[subsector], dict):
-            obj["subsector_details"] = details[subsector]
+    subsector = ((common.get("subsector") or {}).get("value")
+                 if isinstance(common, dict) and isinstance(common.get("subsector"), dict)
+                 else None)
+    if isinstance(details, dict) and subsector and set(details.keys()) == {subsector} \
+            and isinstance(details[subsector], dict):
+        obj["subsector_details"] = details = details[subsector]
+    if isinstance(details, dict) and details and subsector:
+        canon_fields = {f["key"]: f for f in
+                        registry.get("subsector_canonicals", {}).get(subsector, [])}
+        if canon_fields:
+            by_alias: dict = {}
+            for key, f in canon_fields.items():
+                by_alias[_canon(key)] = key
+                if f.get("label"):
+                    by_alias[_canon(f["label"])] = key
+            fixed_details: dict = {}
+            for k, cell in details.items():
+                key = k if k in canon_fields else by_alias.get(_canon(k))
+                if key is None:
+                    continue  # an invented data point has nowhere to render
+                default = "high" if canon_fields[key].get("conf") == "hi" else "medium"
+                if not isinstance(cell, dict) or "value" not in cell:
+                    cell = {"value": cell, "confidence": default}
+                elif "confidence" not in cell:
+                    cell = {**cell, "confidence": default}
+                conf = cell.get("confidence")
+                if isinstance(conf, str) and conf not in ("high", "medium", "low", "n/a"):
+                    cell["confidence"] = _CONF_MAP.get(_canon(conf), conf)
+                fixed_details[key] = cell
+            obj["subsector_details"] = fixed_details
     return obj
 
 
