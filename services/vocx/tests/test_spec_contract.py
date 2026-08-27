@@ -278,3 +278,28 @@ def test_dict_entries_in_detected_use_cases_are_named_not_crashed():
     r = _valid_report()
     r["detected_use_cases"] = [{"use_case": "lending"}, "asset_monetisation"]
     _expect_error(r, "entries must be plain use-case strings")
+
+
+def test_normalize_coerces_spoken_enum_forms():
+    """The transcript says "Seller" and "Under Construction"; the contract says
+    "owner" and "under_construction". The model echoes the speech — and the strict
+    enum refused it twice in the field (the Chikballapur bundle). _normalize now
+    coerces label forms and everyday synonyms deterministically; garbage still fails."""
+    from app.vocx.pipeline.structure import _normalize
+
+    r = _valid_report()
+    r["asset_monetisation"]["party_role"] = _cell("Seller")
+    r["asset_monetisation"]["asset_status"] = _cell("Under Construction")
+    r["common"]["meeting_type"] = _cell("In person")
+    out = validate_report(_normalize(r))
+    assert out["asset_monetisation"]["party_role"]["value"] == "owner"
+    assert out["asset_monetisation"]["asset_status"]["value"] == "under_construction"
+    assert out["common"]["meeting_type"]["value"] == "in_person"
+
+    bad = _valid_report()
+    bad["asset_monetisation"]["party_role"] = _cell("landlord")
+    try:
+        validate_report(_normalize(bad))
+        raise AssertionError("a genuinely unknown enum value must still fail")
+    except ContractError:
+        pass

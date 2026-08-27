@@ -11,6 +11,7 @@ write, never a best-effort parse.
 from __future__ import annotations
 
 import json
+import re as _re
 from typing import Any, Callable
 
 from ..spec import (
@@ -75,6 +76,49 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
             for uc in registry["use_cases"]:
                 if uc not in present and obj.get(uc) == {}:
                     del obj[uc]
+
+    # 3. ENUM VALUES spoken as their labels or everyday synonyms: the transcript
+    #    says "seller" and the contract says "owner"; the model echoes the speech and
+    #    the strict enum refuses it — twice, because the repair round echoes it too
+    #    (the Chikballapur bundle failed structuring exactly this way in the field).
+    #    Deterministic, isomorphic coercion only: canonical form of the value, then
+    #    the option's label, then a short spoken-synonym table. Anything genuinely
+    #    outside the vocabulary still fails validation.
+    _SYN = {"party_role": {"seller": "owner", "selling": "owner", "vendor": "owner",
+                           "purchaser": "buyer", "acquirer": "buyer", "buying": "buyer"}}
+
+    def _canon(t: str) -> str:
+        return _re.sub(r"[^a-z0-9]+", "_", t.strip().lower()).strip("_")
+
+    def _coerce_block(block_obj: dict, fields: list) -> None:
+        for fdef in fields:
+            if fdef.get("type") != "enum" or not fdef.get("options"):
+                continue
+            cell = block_obj.get(fdef["key"])
+            if not isinstance(cell, dict) or not isinstance(cell.get("value"), str):
+                continue
+            vals = {o["value"] for o in fdef["options"]}
+            v = cell["value"]
+            if v in vals:
+                continue
+            c = _canon(v)
+            if c in vals:
+                cell["value"] = c
+                continue
+            by_label = {_canon(o.get("label", "")): o["value"] for o in fdef["options"]}
+            if c in by_label:
+                cell["value"] = by_label[c]
+                continue
+            syn = _SYN.get(fdef["key"], {})
+            if c in syn:
+                cell["value"] = syn[c]
+
+    for uc in registry["use_cases"]:
+        if isinstance(obj.get(uc), dict):
+            _coerce_block(obj[uc], (registry.get("blocks", {}).get(uc) or {}).get("fields", []))
+    if isinstance(obj.get("common"), dict):
+        # registry["common"] is the field list itself (blocks nest theirs under "fields").
+        _coerce_block(obj["common"], registry.get("common") or [])
 
     # entity_candidates as objects instead of plain names: take the one string
     # each object unambiguously carries ("name" key, or a single string value).
