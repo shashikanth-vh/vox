@@ -114,7 +114,13 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
         </span>
         {badge && <Chip tone={badge[1]} color="#155E63">{badge[0]}</Chip>}
         {lanes.map((l) => <Chip key={l} tone="#E8F0FE" color="#1A4B8F">{l}</Chip>)}
-        {leadBadge && i.refType === 'Lead' && <Chip tone="#FFF3E0" color="#9A6A00">LEAD PHASE</Chip>}
+        {/* WHICH lead, not just "a lead": on a company running several opportunities,
+            the number is the answer to the reader's actual question. */}
+        {leadBadge && i.refType === 'Lead' && (
+          <Chip tone="#FFF3E0" color="#9A6A00">
+            {i.refId && i.refId !== 'undefined' ? `LEAD · ${i.refId}` : 'LEAD PHASE'}
+          </Chip>
+        )}
         {!open && intel.length > 0 && <Chip tone="#FdF6E3" color="#8A6D00">💡 intel · {intel.length}</Chip>}
         {!open && (i.nextSteps?.length ?? 0) > 0 && <Chip>☑ steps · {i.nextSteps!.length}</Chip>}
         {!open && i.transcript && !badge && <Chip>🎙 transcript</Chip>}
