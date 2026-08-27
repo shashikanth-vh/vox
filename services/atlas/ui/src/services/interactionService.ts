@@ -1,4 +1,5 @@
 import { db } from '../api/atlasStore';
+import { localMinute, localDay } from '../api/time';
 import { writeAudit } from './auditService';
 import { api, withFallback, errText, USE_REAL_API } from '../api/http';
 
@@ -63,7 +64,7 @@ function fromWire(r: any, refId: string, refType = 'Lead'): Interaction {
   return {
     interactionId: r?.id || newId(),
     refId, refType,
-    occurredAt: at.slice(0, 10),
+    occurredAt: localDay(at),
     loggedAt: r?.created_at || at,
     person: r?.performed_by || '',
     interactionType: r?.interaction_type || '',

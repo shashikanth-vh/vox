@@ -1,4 +1,5 @@
 import { db } from '../api/atlasStore';
+import { localMinute, localDay } from '../api/time';
 import { api, errText, listAll, USE_REAL_API } from '../api/http';
 import { writeAudit } from './auditService';
 
@@ -73,7 +74,7 @@ function toEntry(r: any): DocEntry {
     name: r.original_filename || r.title || 'document',
     size: Number(r.size_bytes) || 0,
     type: r.content_type || 'file',
-    when: String(r.uploaded_at || r.created_at || '').slice(0, 16).replace('T', ' '),
+    when: localMinute(String(r.uploaded_at || r.created_at || '')),
     by: r.uploaded_by || r.created_by || '',
     label: r.title || '',
     status: r.status,

@@ -8,6 +8,7 @@
 import { Box, Chip, CircularProgress, TextField, Typography } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
 import { voxService } from '../../../services/voxService';
+import { localMinute } from '../../../api/time';
 import type { VoxConversation, VoxRegistry } from '../../../services/voxService';
 import { banner, card, chip, microHeading, vx } from '../vocxStyles';
 
@@ -18,7 +19,7 @@ const UC_SHORT: Record<string, string> = {
 };
 
 function Row({ c, onOpen }: { c: VoxConversation; onOpen: (id: string) => void }) {
-  const when = (c.created_at || '').replace('T', ' ').slice(0, 16);
+  const when = localMinute(c.created_at || '');
   return (
     <Box onClick={() => onOpen(c.id)}
       sx={{ display: 'flex', gap: 1.2, py: 1.1, px: 0.4, cursor: 'pointer',

@@ -1,4 +1,5 @@
 import { db, nowStamp } from '../api/atlasStore';
+import { localMinute, localDay } from '../api/time';
 import { applyQuery, delay } from '../api/queryEngine';
 import { api, withFallback, asRows } from '../api/http';
 import { emitSave } from '../utils/saveIndicator';
@@ -28,7 +29,7 @@ export const AUDIT_LIMIT = 200;
 /** An API audit entry read back as the row the trail renders. */
 export function toAuditRow(r: any): AuditRow {
   // The trail renders `t` verbatim, and the local store writes "YYYY-MM-DD HH:MM".
-  const t = String(r?.created_at || r?.at || r?.timestamp || '').replace('T', ' ').slice(0, 16);
+  const t = localMinute(String(r?.created_at || r?.at || r?.timestamp || ''));
   const act = r?.action || r?.event || '';
   // `detail` may arrive as a structured `changes` object rather than a sentence. The
   // grid gets the one-line summary; the raw object rides along so the row dialog can
