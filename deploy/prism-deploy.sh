@@ -375,6 +375,29 @@ prune_old() {
   fi
   ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
   ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
+
+  # DOCKER IMAGES accumulate the same way the release trees did: every upgrade tags
+  # ~18 prism-rollback/<service>:<stamp> images and each rebuild orphans the previous
+  # build's layers. Keep EXACTLY the rollback stamp that matches the .previous tree —
+  # the one `rollback` would restore — and drop the older stamps, then the dangling
+  # layers. Deliberately conservative: if the matching stamp cannot be confirmed among
+  # the tags, nothing is deleted (an over-eager trim here is how a rollback finds
+  # nothing to roll back to). The build CACHE is untouched — it is what keeps the next
+  # upgrade fast.
+  local keep_stamp=""
+  if [[ -n "$keep" ]]; then
+    keep_stamp="$(basename "$keep")"; keep_stamp="${keep_stamp#previous-}"
+  fi
+  if [[ -n "$keep_stamp" ]] && docker images "prism-rollback/*" --format '{{.Tag}}' \
+      2>/dev/null | grep -qx "$keep_stamp"; then
+    local trimmed
+    trimmed=$(docker images "prism-rollback/*" --format '{{.Repository}}:{{.Tag}}' \
+      | grep -v ":${keep_stamp}\$" | tee -a "$LOG" | wc -l)
+    docker images "prism-rollback/*" --format '{{.Repository}}:{{.Tag}}' \
+      | grep -v ":${keep_stamp}\$" | xargs -r docker rmi >>"$LOG" 2>&1 || true
+    (( trimmed > 0 )) && say "  removed $trimmed old rollback image tag(s) (kept :$keep_stamp)"
+  fi
+  docker image prune -f >>"$LOG" 2>&1 || true
 }
 
 # ── commands ─────────────────────────────────────────────────────────────────
