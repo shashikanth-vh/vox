@@ -115,13 +115,22 @@ export const interactionService = {
    * badge them. Falls back to the local store (mock mode / unreachable register).
    */
   async forCompany(entityId: string | null | undefined, code: string): Promise<Interaction[]> {
-    if (!USE_REAL_API || !entityId) return this.for(code);
+    if (!USE_REAL_API) return this.for(code);
+    // The drawer can arrive by a TRACKER number (the syndication page opens Greenpill
+    // as "S011") — no client record exists under that code, so entityId comes in
+    // empty and every register read silently skipped: a chase logged minutes ago
+    // "showed nowhere" after a refresh. The mandate row itself knows its entity —
+    // heal from it, and read its own chase ledger besides.
+    const synRows: any[] = (db().syn || []).filter((r: any) => r.code === code && r.apiId);
+    const eid = entityId || synRows[0]?.entityId || null;
+    if (!eid && !synRows.length) return this.for(code);
     try {
       const rowsOf = (d: any): any[] =>
         (Array.isArray(d) ? d : (d?.items ?? d?.results ?? d?.interactions ?? d?.leads ?? []));
       const [entData, leadData] = await Promise.all([
-        api.get<any>(`/entities/${entityId}/interactions`).catch(() => []),
-        api.get<any>('/leads', { entity_id: entityId, limit: 20 }).catch(() => null),
+        eid ? api.get<any>(`/entities/${eid}/interactions`).catch(() => []) : Promise.resolve([]),
+        eid ? api.get<any>('/leads', { entity_id: eid, limit: 20 }).catch(() => null)
+            : Promise.resolve(null),
       ]);
       // THE ENTITY TIMELINE ALREADY CONTAINS THE LEAD ROWS. The register's Entity
       // timeline is a ROLL-UP — "every interaction rolled up to the entity" — so a note
@@ -144,6 +153,17 @@ export const interactionService = {
         api.get<any>(`/leads/${l.id}/interactions`).then(rowsOf).catch(() => [])));
       perLead.forEach((rows, i) => rows.forEach((r: any) => {
         const it = fromWire(r, leadRows[i].lead_no || code, 'Lead');
+        byId.set(keyOf(it, r), it);
+      }));
+      // The LENDER CHASE LEDGER — Log chase / Log reply write real interactions
+      // against the mandate, and the register keeps them durably. The entity
+      // roll-up already carries these rows when the linkage is healthy; fetching
+      // per-mandate covers the tracker-number door too, and the id-keyed map
+      // collapses the overlap.
+      const perSyn = await Promise.all(synRows.map((r: any) =>
+        api.get<any>(`/syndication/${r.apiId}/interactions`).then(rowsOf).catch(() => [])));
+      perSyn.forEach((rows) => rows.forEach((r: any) => {
+        const it = fromWire(r, code, 'Platform Deals');
         byId.set(keyOf(it, r), it);
       }));
       const out: Interaction[] = [...byId.values()];
