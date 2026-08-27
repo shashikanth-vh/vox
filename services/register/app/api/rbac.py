@@ -573,10 +573,19 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
             note="Auto-assigned on lead conversion.", created_by=ctx.actor,
             updated_by=ctx.actor))
 
+    # The deal's origin is the LEAD's origin, carried across the conversion —
+    # "Referral / Rahul Mehta", never "Converted from lead <uuid>": a raw id
+    # tells the reader nothing, and a stamped detail LOCKS the field (it is
+    # editable only while empty), so the RM could never enter the real detail.
+    # The conversion's lineage already lives in remarks (the note), the lead's
+    # converted_deal_id, and the audit trail. The approver joins the remarks.
     approver = (payload.approved_by or "").strip() or None
-    source_detail = f"Converted from lead {lead_id}"
+    source = getattr(lead, "source", None) or "RM"
+    source_detail = getattr(lead, "source_name", None) or None
+    remarks = payload.note
     if approver:
-        source_detail += f" (approved by {approver})"
+        remarks = f"{remarks} (approved by {approver})" if remarks \
+            else f"Approved by {approver}"
 
     # A supplied line status must be a legal BIRTH state — the same allowlist creation
     # obeys — so a push cannot mint a row deep in governance (a lending line born
@@ -613,8 +622,8 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
         # An approved conversion is a committed opportunity with live product lines — it enters
         # the COMMERCIAL funnel at 'In Pipeline'. Credit execution starts on the lending line
         # (created below at 'Data Awaited'), never on the deal.
-        "stage": "In Pipeline", "source": "RM",
-        "source_detail": source_detail, "remarks": payload.note,
+        "stage": "In Pipeline", "source": source,
+        "source_detail": source_detail, "remarks": remarks,
     })
     line_ids: dict[str, Any] = {}
     row: Any

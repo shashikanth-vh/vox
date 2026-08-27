@@ -44,7 +44,9 @@ async def test_recording_the_disbursement_is_the_disbursement(client):
     assert dis.json()["tranche"]["booking_status"] == "Booked"
 
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed"
+    # The fixture checklist's CS half was settled at approval, so the settlement
+    # closes the book with both halves done (the simple line, CS-first ordering).
+    assert line["stage"] == "CP/CS Completed"
     assert float(line["disbursed_amount"]) == 5.0
 
     sched = (await client.get(f"/v1/lending/{lid}/tranches", headers=ADMIN)).json()
@@ -109,7 +111,8 @@ async def test_a_later_tranche_is_recorded_on_the_same_screen(client):
 
     line = (await client.get(f"/v1/lending/{lid}")).json()
     assert float(line["disbursed_amount"]) == 6.0
-    assert line["stage"] == "Disbursed"
+    # CS settled at approval + the money in — the book ends at the closing milestone.
+    assert line["stage"] == "CP/CS Completed"
 
 
 async def test_the_ceiling_still_holds(client):

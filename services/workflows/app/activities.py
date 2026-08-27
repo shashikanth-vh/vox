@@ -484,6 +484,13 @@ async def get_lead(lead_id: str,
 async def create_deal(inp: LeadConversionInput, entity_id: str,
                       idempotency_key: str) -> dict[str, Any]:
     async with _client(inp.caller) as reg:
+        # The deal's origin is the LEAD's origin, carried across the conversion —
+        # "Referral / Rahul Mehta", never "Converted from lead <uuid>": a raw id
+        # tells the reader nothing, and a stamped detail LOCKS the field (it is
+        # editable only while empty). Lineage lives in remarks, converted_deal_id
+        # and the audit trail.
+        lead = await reg.get("leads", inp.lead_id,
+                             request_id=activity.info().workflow_id)
         return await reg.create("deals", {
             "entity_id": entity_id,
             "product_type": inp.product_type,
@@ -496,8 +503,8 @@ async def create_deal(inp: LeadConversionInput, entity_id: str,
             # 'In Pipeline'. Credit execution lives on the lending line (created separately
             # at 'Data Awaited').
             "stage": "In Pipeline",
-            "source": "RM",
-            "source_detail": f"Converted from lead {inp.lead_id}",
+            "source": (lead or {}).get("source") or "RM",
+            "source_detail": (lead or {}).get("source_name") or None,
             "remarks": inp.note,
         }, idempotency_key=idempotency_key, request_id=activity.info().workflow_id)
 

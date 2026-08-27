@@ -30,7 +30,13 @@ export function toDealRow(r: any): DealRow {
     source: r?.source || '',
     // WRITE goes to source_detail; the read-back mapped source_name (a LEAD field a
     // Deal row never carries) — so a saved detail rendered blank on every reload.
-    sourceDetail: r?.source_detail || r?.source_name || '',
+    // Rows converted before fixes148 carry "Converted from lead <uuid>" here — a
+    // provenance stamp, not a detail. It reads as blank so the field is fillable
+    // (it locks once non-empty); the lineage stays in remarks and the audit trail.
+    sourceDetail: (() => {
+      const v = r?.source_detail || r?.source_name || '';
+      return /^Converted from lead [0-9a-f][0-9a-f-]{7,}/i.test(v) ? '' : v;
+    })(),
     createdAt: (r?.created_at || '').slice(0, 10),
     remarks: r?.note || r?.remarks || '',
     stage: r?.stage || '',

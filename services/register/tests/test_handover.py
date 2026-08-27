@@ -253,10 +253,12 @@ async def test_advaya_boundary_reject_resubmit_accept_then_disbursement(client, 
                                   "disbursed_on": "2026-03-05"})
         assert t1.status_code == 201, t1.text
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed"
+    # The fixture checklist's CS half was settled at approval — the settlement
+    # closes the book with both halves done (simple line, CS-first ordering).
+    assert line["stage"] == "CP/CS Completed"
     assert float(line["disbursed_amount"]) == 5.0
     assert line["disbursement_date"] == "2026-03-05"
-    assert (line["stage_history"] or [])[-1]["source"] == "advaya-disbursement"
+    assert (line["stage_history"] or [])[-1]["source"].startswith("advaya-disbursement")
 
 
 async def test_checker_reject_is_terminal_then_fresh_cycle_allowed(client):
@@ -380,6 +382,8 @@ async def test_the_lane_the_ui_drives_end_to_end(client):
                              json={"event": "accepted"}, headers=ADMIN)
     assert bare.status_code == 422, bare.text
 
-    # And the line ends where the lifecycle says it should.
+    # And the line ends where the lifecycle says it should (CP/CS Completed when
+    # the money landed on a checklist whose CS half was already settled).
     final = (await client.get(f"/v1/lending/{lid}")).json()
-    assert final["stage"] in ("Disbursed", "Ready for Disbursement"), final["stage"]
+    assert final["stage"] in ("CP/CS Completed", "Disbursed",
+                              "Ready for Disbursement"), final["stage"]

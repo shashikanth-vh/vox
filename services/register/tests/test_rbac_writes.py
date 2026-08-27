@@ -316,7 +316,10 @@ async def test_direct_convert_and_lock_transitions_blocked(client: AsyncClient):
             chk = await client.post(
                 "/v1/internal/cpcs-checklists",
                 json={"lending_id": lend["id"], "status": "Completed",
-                      "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"}]},
+                      # The milestone-truth guard demands the checklist SHOW both
+                      # halves done — a settled CS rides along with the CP.
+                      "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"},
+                                {"key": "cs1", "condition_type": "CS", "status": "Completed"}]},
                 headers=ADMIN)
             assert chk.status_code == 201, chk.text
             assert (await client.post(

@@ -248,3 +248,37 @@ async def test_conversion_numbers_the_rows_it_creates(client: AsyncClient):
     assert lending["tracker_no"], lending
     syn = (await client.get(f"/v1/syndication/{body['syndication_id']}")).json()
     assert syn["tracker_no"], syn
+
+
+async def test_conversion_carries_the_leads_origin_not_a_uuid(client: AsyncClient):
+    """Source detail must read "Rahul Mehta", never "Converted from lead <uuid>" —
+    a raw id tells the reader nothing, and a stamped detail LOCKS the field (it is
+    editable only while empty), so the RM could never enter the real detail. The
+    lead's own origin crosses the conversion; a lead with no origin leaves the
+    field empty and fillable. Lineage lives in remarks and the audit trail."""
+    ent = (await client.post("/v1/entities", json={
+        "code": f"ORG{uuid.uuid4().hex[:6].upper()}", "legal_name": "Origin Carries"})).json()
+    assert (await client.post("/v1/people", json={
+        "name": "Asha", "full_name": "Asha Nair", "role": "BDRM"})).status_code == 201
+    lead = (await client.post("/v1/leads", json={
+        "company": "Origin Carries", "entity_id": ent["id"], "status": "Active",
+        "temperature": "Hot", "source": "Referral", "source_name": "Rahul Mehta"})).json()
+    r = await client.post(f"/v1/leads/{lead['id']}/convert", json={
+        "is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": "Asha"})
+    assert r.status_code == 200, r.text
+    deal = (await client.get(f"/v1/deals/{r.json()['deal_id']}")).json()
+    assert deal["source"] == "Referral"
+    assert deal["source_detail"] == "Rahul Mehta"
+    assert "Converted from lead" not in (deal["source_detail"] or "")
+
+    ent2 = (await client.post("/v1/entities", json={
+        "code": f"ORG{uuid.uuid4().hex[:6].upper()}", "legal_name": "Origin Empty"})).json()
+    lead2 = (await client.post("/v1/leads", json={
+        "company": "Origin Empty", "entity_id": ent2["id"], "status": "Active",
+        "temperature": "Hot"})).json()
+    r2 = await client.post(f"/v1/leads/{lead2['id']}/convert", json={
+        "is_lending": True, "product_type": "Term Loan", "amount_cr": 5, "rm": "Asha"})
+    assert r2.status_code == 200, r2.text
+    deal2 = (await client.get(f"/v1/deals/{r2.json()['deal_id']}")).json()
+    assert deal2["source"] == "RM"                       # the fallback, unchanged
+    assert not deal2["source_detail"]                    # empty stays fillable

@@ -124,8 +124,10 @@ async def test_booking_gate_pending_four_eyes_approve(client):
     assert ok.json()["booking_status"] == "Booked"
 
     # The settlement ran: stage, actuals, and the loan account with its ledger row.
+    # (The fixture checklist's CS half was settled at approval, so the settlement
+    # closes the book with both halves done — the simple line, CS-first ordering.)
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed" and float(line["disbursed_amount"]) == 5.0
+    assert line["stage"] == "CP/CS Completed" and float(line["disbursed_amount"]) == 5.0
     body = (await client.get(f"/v1/lending/{lid}/loan-account", headers=ADMIN)).json()
     assert body["account"]["amount"] == 5.0 and body["account"]["rate_pct"] == 14.0
     assert body["entries"][0]["entry_type"] == "Disbursement"
@@ -441,7 +443,17 @@ async def test_cs_finished_first_settlement_closes_the_book_with_both_audit_even
 async def test_no_cs_chase_means_the_book_ends_at_disbursed(client):
     """A CP-only checklist has no conditions subsequent to finish — the settlement ends
     the line at 'Disbursed' and nothing invents the closing milestone."""
-    lid = await _accepted_manual_line(client)   # fixture checklist v1 is CP-only
+    lid = await _accepted_manual_line(client)
+    # The fixture's v1 carries a settled CS (the milestone-truth guard needs it on its
+    # own walk) — a NEW CP-only version makes "no CS chase" the checklist truth here.
+    chk = await client.post(
+        "/v1/internal/cpcs-checklists",
+        json={"lending_id": lid, "status": "Completed", "checklist_version": 2,
+              "items": [{"key": "cp1", "condition_type": "CP", "status": "Completed"}]},
+        headers=ADMIN)
+    assert chk.status_code == 201, chk.text
+    assert (await client.post(f"/v1/internal/cpcs-checklists/{chk.json()['id']}/approve",
+                              headers=CREDIT_HEAD)).status_code == 200
     dis = await client.post(f"/v1/lending/{lid}/advaya-events", headers=CREDIT_HEAD,
                             json={"event": "disbursed", "reference": "UTR-7778",
                                   "amount_cr": 2.0})

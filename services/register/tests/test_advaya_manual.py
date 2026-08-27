@@ -84,11 +84,13 @@ async def test_manual_attestation_full_boundary(client: AsyncClient, _lms_on):
     assert ok.json()["booking_status"] == "Booked"
     assert ok.json()["booked_by"] == "authz@evamfinance.com"
     line = (await client.get(f"/v1/lending/{lid}")).json()
-    assert line["stage"] == "Disbursed"
+    # The fixture's CS half was settled at approval — the settlement closes the book.
+    assert line["stage"] == "CP/CS Completed"
     assert float(line["disbursed_amount"]) == 5.0
     assert line["disbursement_date"] == "2026-08-01"
-    # Provenance survives on the stage history: the approval moved the line.
-    assert line["stage_history"][-1]["source"] == "lms-booking-approval"
+    # Provenance survives on the stage history: the approval moved the line (the
+    # closing event carries the same source, suffixed cs-already-complete).
+    assert line["stage_history"][-1]["source"].startswith("lms-booking-approval")
 
 
 async def test_manual_attestation_guards(client: AsyncClient):
