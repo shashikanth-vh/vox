@@ -6,6 +6,68 @@
   },
   "item": [
     {
+      "name": "Activity",
+      "item": [
+        {
+          "name": "GET /v1/activity",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/activity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "activity"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "since",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "action",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Advaya",
       "item": [
         {
@@ -133,6 +195,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -933,6 +1010,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -1244,6 +1336,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -1945,6 +2052,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -2990,6 +3112,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -3344,6 +3481,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -5152,6 +5304,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -5929,6 +6096,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -6324,6 +6506,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -7252,6 +7449,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -7668,102 +7880,6 @@
     {
       "name": "Internal",
       "item": [
-        {
-          "name": "POST /v1/internal/advaya-handoffs",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "{{actor}}"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{bearerToken}}",
-                "disabled": true
-              },
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "disabled": true
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/internal/advaya-handoffs",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "internal",
-                "advaya-handoffs"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"acknowledgement_id\": \"{{id}}\",\n  \"handoff_key\": \"sample handoff_key\",\n  \"lending_id\": \"{{id}}\",\n  \"note\": \"sample note\",\n  \"payload_sha256\": \"sample payload_sha256\",\n  \"run_id\": \"{{id}}\",\n  \"status\": \"sample status\",\n  \"workflow_id\": \"{{id}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "GET /v1/internal/advaya-handoffs/{{handoff_key}}",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Tenant",
-                "value": "{{tenant}}"
-              },
-              {
-                "key": "X-User-Email",
-                "value": "{{userEmail}}"
-              },
-              {
-                "key": "X-Actor",
-                "value": "{{actor}}"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{bearerToken}}",
-                "disabled": true
-              },
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "disabled": true
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/internal/advaya-handoffs/{{handoff_key}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "internal",
-                "advaya-handoffs",
-                "{{handoff_key}}"
-              ]
-            }
-          }
-        },
         {
           "name": "GET /v1/internal/cam-reports",
           "request": {
@@ -10070,6 +10186,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -11187,6 +11318,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -11498,6 +11644,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -11848,6 +12009,510 @@
       ]
     },
     {
+      "name": "Other",
+      "item": [
+        {
+          "name": "POST /v1/vox/consents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/consents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "consents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"certification_text\": \"sample certification_text\",\n  \"conversation_id\": \"{{id}}\",\n  \"device_meta\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/vox/conversations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "recorder",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "mine",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "entity_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "lead_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "use_case",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "date_from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "date_to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "include_erased",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/vox/conversations",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audio_ref\": \"sample audio_ref\",\n  \"capture_id\": \"{{id}}\",\n  \"consent_id\": \"{{id}}\",\n  \"duration_seconds\": 1,\n  \"entity_id\": \"{{entityId}}\",\n  \"latitude\": 1.0,\n  \"lead_id\": \"{{id}}\",\n  \"longitude\": 1.0,\n  \"recorder_email\": \"sample recorder_email\",\n  \"recorder_name\": \"sample recorder_name\",\n  \"recording_mode\": \"sample recording_mode\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/vox/conversations/{{conversation_id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/vox/conversations/{{conversation_id}}/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}",
+                "approve"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/vox/conversations/{{conversation_id}}/edits",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}/edits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}",
+                "edits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"corrected_transcript\": \"sample corrected_transcript\",\n  \"deal_id\": \"{{id}}\",\n  \"edits\": [\n    {\n      \"field_path\": \"sample field_path\",\n      \"new_value\": {}\n    }\n  ],\n  \"entity_id\": \"{{entityId}}\",\n  \"interaction_id\": \"{{id}}\",\n  \"lead_id\": \"{{id}}\",\n  \"proposed_lead_company\": \"sample proposed_lead_company\",\n  \"proposed_lead_rm\": \"sample proposed_lead_rm\",\n  \"use_cases\": [\n    \"sample use_cases\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/vox/conversations/{{conversation_id}}/erase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}/erase",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}",
+                "erase"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/vox/conversations/{{conversation_id}}/pipeline",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"1\"",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}/pipeline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}",
+                "pipeline"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audio_ref\": \"sample audio_ref\",\n  \"duration_seconds\": 1,\n  \"entity_candidates\": [\n    \"sample entity_candidates\"\n  ],\n  \"language_detected\": \"sample language_detected\",\n  \"processing_error\": \"sample processing_error\",\n  \"processing_stage\": \"sample processing_stage\",\n  \"prompt_version\": \"sample prompt_version\",\n  \"raw_transcript\": \"sample raw_transcript\",\n  \"registry_version\": \"sample registry_version\",\n  \"retry_increment\": false,\n  \"status\": \"sample status\",\n  \"structured_report\": {},\n  \"transcript_segments\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/vox/conversations/{{conversation_id}}/regenerate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant",
+                "value": "{{tenant}}"
+              },
+              {
+                "key": "X-User-Email",
+                "value": "{{userEmail}}"
+              },
+              {
+                "key": "X-Actor",
+                "value": "{{actor}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}",
+                "disabled": true
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/vox/conversations/{{conversation_id}}/regenerate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "vox",
+                "conversations",
+                "{{conversation_id}}",
+                "regenerate"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "People",
       "item": [
         {
@@ -11915,6 +12580,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }
@@ -12817,6 +13497,21 @@
                   "key": "with_total",
                   "value": "",
                   "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
+                  "value": "",
+                  "disabled": true
                 }
               ]
             }
@@ -13091,6 +13786,21 @@
                 },
                 {
                   "key": "with_total",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_by",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "order_dir",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "offset",
                   "value": "",
                   "disabled": true
                 }

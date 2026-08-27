@@ -1466,7 +1466,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"credit_note_reference\": \"sample credit_note_reference\",\n  \"deal_id\": \"{{id}}\",\n  \"decision_timeout_hours\": 1,\n  \"product_type\": \"sample product_type\",\n  \"requested_by\": \"sample requested_by\",\n  \"rm\": \"sample rm\"\n}",
+              "raw": "{\n  \"credit_note_reference\": \"sample credit_note_reference\",\n  \"deal_id\": \"{{id}}\",\n  \"decision_timeout_hours\": 1,\n  \"lending_id\": \"{{id}}\",\n  \"product_type\": \"sample product_type\",\n  \"requested_by\": \"sample requested_by\",\n  \"rm\": \"sample rm\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

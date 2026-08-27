@@ -580,7 +580,7 @@
             "items": {
               "$ref": "#/components/schemas/CpcsItemIn"
             },
-            "minItems": 1,
+            "minItems": 0,
             "title": "Items",
             "type": "array"
           },
@@ -750,6 +750,7 @@
             "type": "string"
           },
           "deal_id": {
+            "default": "",
             "title": "Deal Id",
             "type": "string"
           },
@@ -759,6 +760,18 @@
             "minimum": 1.0,
             "title": "Decision Timeout Hours",
             "type": "integer"
+          },
+          "lending_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lending Id"
           },
           "product_type": {
             "anyOf": [
@@ -791,7 +804,6 @@
           }
         },
         "required": [
-          "deal_id",
           "requested_by"
         ],
         "title": "DealStructuringIn",
