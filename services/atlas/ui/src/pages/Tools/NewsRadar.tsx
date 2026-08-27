@@ -431,13 +431,18 @@ export default function NewsRadar() {
             TransitionProps={{ unmountOnExit: true }}
             sx={{ borderColor: tokens.line, mb: 0.8, '&:before': { display: 'none' } }}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', pr: 1 }}>
-                <Typography component="b" sx={{ fontSize: 13.2, fontWeight: 700 }}>{c.name || code}</Typography>
+              {/* On a phone this row cannot be one line: the name got squeezed to a
+                  word per line while Scan/Policy ran off the right edge. The name takes
+                  its own full-width line there and the meta/controls wrap beneath it. */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', pr: 1,
+                flexWrap: { xs: 'wrap', sm: 'nowrap' }, rowGap: 0.4 }}>
+                <Typography component="b" sx={{ fontSize: 13.2, fontWeight: 700,
+                  flex: { xs: '1 1 100%', sm: '0 1 auto' }, minWidth: 0 }}>{c.name || code}</Typography>
                 <CodeText code={code} />
                 <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
                   {items.length} item{items.length > 1 ? 's' : ''}
                 </Typography>
-                <Box sx={{ flex: 1 }} />
+                <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
                 {isLiveBorrower(code) && (
                   <Chip label="live exposure" size="small" variant="outlined"
                     title="Our money is out to this firm, so good-looking news is flagged for review rather than filed as a win."
