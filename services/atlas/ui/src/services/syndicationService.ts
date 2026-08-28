@@ -393,7 +393,7 @@ export const LSTATES = ['Identified', 'IM Under Preparation', 'IM Circulated', '
  *  Map here, never at call sites, so any future rename is one line. */
 export const lenderLabel = (st: string): string => st;
 export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM Circulated', 'Queries received',
-  'Approval track', 'Sanctioned', 'Declined', 'IM under preparation', 'On Hold', 'Dropped', 'Disbursed'];
+  'IP Received', 'Sanctioned', 'Declined', 'IM under preparation', 'On Hold', 'Dropped', 'Disbursed'];
 // state -> colour: yellow / orange / blue / purple (approval track) / green / red,
 // then the adopted field states: prep-gold / hold-grey / dropped-maroon / money-green
 export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B',
@@ -409,7 +409,7 @@ export const LSTATE_COLOR: Record<string, string> = Object.fromEntries(
 export const MATRIX_PRESETS = [
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
   { id: 'ballus', label: 'Ball with us ≥5d', states: [3], dwell: 5, scope: 'Live' as const },
-  { id: 'appr', label: 'Approval track', states: [4], dwell: '', scope: 'Live' as const },
+  { id: 'appr', label: 'IP Received', states: [4], dwell: '', scope: 'Live' as const },
   { id: 'sanc', label: 'Sanctioned', states: [5], dwell: '', scope: 'All' as const },
   { id: 'decl', label: 'Declined', states: [6], dwell: '', scope: 'All' as const },
   { id: 'noout', label: 'No outreach yet', states: [] as number[], dwell: '', scope: 'Live' as const, noout: true },
