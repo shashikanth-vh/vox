@@ -12130,6 +12130,11 @@
                   "disabled": true
                 },
                 {
+                  "key": "capture_id",
+                  "value": "",
+                  "disabled": true
+                },
+                {
                   "key": "use_case",
                   "value": "",
                   "disabled": true

@@ -660,3 +660,18 @@ async def test_reupload_into_a_slot_supersedes_the_old_file(client: AsyncClient)
     old = [d for d in slot if d["status"] == "Superseded"]
     assert len(live) == 1 and live[0]["original_filename"] == "fy25.pdf"
     assert len(old) == 1 and old[0]["superseded_by"] == live[0]["id"]
+
+
+async def test_the_recovery_card_can_ask_whether_a_capture_landed(client: AsyncClient):
+    """The 'unsent take recovered' card asks the register before it shows: a send
+    that completed as the window closed leaves the LOCAL copy behind, and the
+    capture_id filter is how the panel learns it is a done deal, not a ghost."""
+    cap = f"landed-{uuid.uuid4()}"
+    row = await _make(client, capture_id=cap)
+    hit = (await client.get("/v1/vox/conversations",
+                            params={"capture_id": cap}, headers=RECORDER)).json()
+    assert hit["total"] == 1 and hit["items"][0]["id"] == row["id"]
+    miss = (await client.get("/v1/vox/conversations",
+                             params={"capture_id": f"never-{uuid.uuid4()}"},
+                             headers=RECORDER)).json()
+    assert miss["total"] == 0 and miss["items"] == []

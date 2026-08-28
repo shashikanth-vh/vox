@@ -83640,6 +83640,23 @@
           },
           {
             "in": "query",
+            "name": "capture_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Capture Id"
+            }
+          },
+          {
+            "in": "query",
             "name": "use_case",
             "required": false,
             "schema": {

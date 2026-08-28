@@ -115,7 +115,16 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   }, []);
   useEffect(() => {
     if (phase !== 'idle') return;
-    void loadUnsentTake(user.full).then(setRecovered);
+    // A recovered take is only OFFERED when the server does not already hold it:
+    // a send that completed as the window closed leaves the local copy behind,
+    // and that copy is a done deal, not an unsent take — cleaned up silently.
+    void loadUnsentTake(user.full).then(async (t) => {
+      if (t && await voxService.captureLanded(t.id)) {
+        void deleteTake(t.id);
+        return;
+      }
+      setRecovered(t);
+    });
     voxService.streamUnfinished().then(setServerTakes).catch(() => {});
   }, [phase]);
   useEffect(() => () => stopFlushing(), []);
@@ -278,7 +287,9 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         if (flushedRef.current >= chunksRef.current.length) {
           const out = await voxService.streamFinish({
             captureId: captureIdRef.current, ...common });
-          void deleteTake(captureIdRef.current);
+          // AWAITED: the window often closes right after a send — a lost delete
+          // resurrects the take as a scary "unsent" card next open.
+          await deleteTake(captureIdRef.current);
           setRecording(false);
           onCaptured(out.conversation_id);
           return;
@@ -289,7 +300,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       const out = await voxService.capture(blob, {
         captureId: captureIdRef.current, ...common });
       void voxService.streamDiscard(captureIdRef.current).catch(() => {});
-      void deleteTake(captureIdRef.current);
+      await deleteTake(captureIdRef.current);
       setRecording(false);
       onCaptured(out.conversation_id);
     } catch (e: any) {
@@ -313,7 +324,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
-      void deleteTake(captureIdRef.current);
+      await deleteTake(captureIdRef.current);
       setRecording(false);
       onCaptured(out.conversation_id);
     } catch (e: any) { setErr(String(e?.message || e)); setPhase('error'); }

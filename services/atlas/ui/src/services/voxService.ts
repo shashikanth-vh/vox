@@ -199,12 +199,26 @@ export const voxService = {
 
   list(params: {
     status?: string; mine?: boolean; use_case?: string; q?: string;
-    entity_id?: string; lead_id?: string; date_from?: string; date_to?: string;
+    entity_id?: string; lead_id?: string; capture_id?: string;
+    date_from?: string; date_to?: string;
     limit?: number; offset?: number;
   } = {}): Promise<{ items: VoxConversation[]; total: number }> {
     const clean = Object.fromEntries(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== '' && v !== false));
     return api.get('/vox/conversations', clean);
+  },
+
+  /** "Did this capture ever land?" — true when the capture id already became a
+   *  conversation, i.e. the send DID complete even if the local cleanup never
+   *  ran (window closed on the last beat). The recovery card asks this before
+   *  showing, so a safely-sent take is cleaned up instead of haunting the
+   *  recorder as an 'unsent' ghost. Unreachable server → false: offering the
+   *  card is safe either way, because a re-send replays by capture id. */
+  async captureLanded(captureId: string): Promise<boolean> {
+    try {
+      const r = await this.list({ capture_id: captureId, limit: 1 });
+      return (r.items || []).length > 0;
+    } catch { return false; }
   },
 
   get(id: string): Promise<VoxConversation> {

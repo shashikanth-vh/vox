@@ -47,7 +47,18 @@ export default function VoxRecord({ onCaptured }: {
 
   useEffect(() => () => { if (tickRef.current) clearInterval(tickRef.current); }, []);
   useEffect(() => {
-    if (phase === 'idle') void loadUnsentTake().then((t) => setRecovered(t));
+    // Only offer a take the server does NOT already hold: a send that completed
+    // as the page closed leaves the local copy behind — a done deal, not an
+    // unsent take. Cleaned up silently instead of haunting the recorder.
+    if (phase === 'idle') {
+      void loadUnsentTake().then(async (t) => {
+        if (t && await voxService.captureLanded(t.id)) {
+          void deleteTake(t.id);
+          return;
+        }
+        setRecovered(t);
+      });
+    }
   }, [phase]);
   // The close guard stops the polite exits; this warns on the impolite ones (F5,
   // tab close). The chunks are ALSO in IndexedDB, so even an ignored warning
@@ -152,7 +163,7 @@ export default function VoxRecord({ onCaptured }: {
         durationSeconds: elapsedRef.current,
         ...gpsRef.current,
       });
-      void deleteTake(captureIdRef.current);   // safely on the server
+      await deleteTake(captureIdRef.current);   // safely on the server
       setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);
@@ -178,7 +189,7 @@ export default function VoxRecord({ onCaptured }: {
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
       });
-      void deleteTake(captureIdRef.current);
+      await deleteTake(captureIdRef.current);
       setRecording(false);
       setPhase('done');
       onCaptured(out.conversation_id);

@@ -348,6 +348,7 @@ async def list_conversations(
         mine: bool = Query(default=False),
         entity_id: str | None = Query(default=None),
         lead_id: str | None = Query(default=None),
+        capture_id: str | None = Query(default=None, max_length=120),
         use_case: str | None = Query(default=None),
         q: str | None = Query(default=None, max_length=200),
         date_from: date | None = Query(default=None),
@@ -377,6 +378,11 @@ async def list_conversations(
         # the dossier for a company that is still lead-only — no entity exists
         # yet, so its story is keyed by the lead itself
         stmt = stmt.where(VoxConversation.lead_id == uuid.UUID(lead_id))
+    if capture_id:
+        # "did this capture ever land?" — the recovery card asks before it shows,
+        # so a take whose send DID complete is cleaned up instead of haunting the
+        # recorder as an 'unsent' ghost (capture_id is unique per tenant).
+        stmt = stmt.where(VoxConversation.capture_id == capture_id)
     if use_case:
         if use_case not in _USE_CASES:
             raise ValidationAppError(f"use_case must be among {sorted(_USE_CASES)}")
