@@ -217,7 +217,11 @@ backup_db() {
   if ! dc "$LIVE" ps --status running --services 2>/dev/null | grep -qx postgres; then
     die "postgres is not running — start the stack, or take the backup by hand, before upgrading"
   fi
-  dc "$LIVE" exec -T postgres pg_dumpall -U prism 2>>"$LOG" | gzip > "$dump" || die "pg_dumpall failed"
+  # --clean --if-exists: the dump carries its own DROPs, so restore-db can load it
+  # over a cluster that already has databases. Without them a restore over existing
+  # data is a silent no-op — every CREATE/COPY collides, psql exits 0 anyway, and
+  # the operator is left staring at the OLD data believing it is the new.
+  dc "$LIVE" exec -T postgres pg_dumpall -U prism --clean --if-exists 2>>"$LOG" | gzip > "$dump" || die "pg_dumpall failed"
   gzip -t "$dump" 2>>"$LOG" || die "the dump is corrupt (gzip -t failed): $dump"
   local bytes; bytes="$(stat -c%s "$dump")"
   (( bytes > 100000 )) || die "the dump is only ${bytes} bytes — refusing to treat that as a backup"
@@ -565,15 +569,46 @@ cmd_restore_db() {
   step "Stopping the services that hold connections"
   run dc "$LIVE" stop "${writers[@]}" || true
 
+  # Drop every application database FIRST, whatever the dump carries. Older dumps
+  # were taken without --clean; loaded over existing databases they collide on every
+  # CREATE/COPY, psql exits 0 anyway, and the operator is left staring at the OLD
+  # data believing it is the new. Pre-dropping makes the restore deterministic for
+  # any dump vintage ('postgres' and the templates stay — the dump reconnects
+  # through them).
+  step "Dropping the application databases (the safety dump above is the way back)"
+  local _dbs; _dbs="$(dc "$LIVE" exec -T postgres psql -U prism -d postgres -Atc \
+    "SELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1')" 2>>"$LOG")"
+  local _db
+  for _db in $_dbs; do
+    dc "$LIVE" exec -T postgres psql -U prism -d postgres \
+      -c "DROP DATABASE IF EXISTS \"$_db\" WITH (FORCE);" >>"$LOG" 2>&1 ||
+      die "could not drop database '$_db' — nothing has been restored; see $LOG"
+  done
+
   step "Restoring $dump"
   if ! gunzip -c "$dump" | dc "$LIVE" exec -T postgres psql -U prism -d postgres >>"$LOG" 2>&1; then
     warn "the restore reported errors — see $LOG"
     warn "the pre-restore state is at $now"
   fi
 
+  # A cross-box restore carries the SOURCE box's role password (pg_dumpall includes
+  # ALTER ROLE). This tree's services authenticate with the .env password — re-assert
+  # it so a production dump cannot lock a test box out of its own database.
+  local _pw
+  _pw="$(grep -E '^PRISM_DB_PASSWORD=' "$LIVE/deploy/compose/.env" 2>/dev/null |
+         head -1 | cut -d= -f2- | sed 's/[[:space:]]*#.*$//' | tr -d '"' | xargs || true)"
+  _pw="${_pw:-prism}"
+  dc "$LIVE" exec -T postgres psql -U prism -d postgres \
+    -v pw="$_pw" -c "ALTER ROLE prism PASSWORD :'pw';" >>"$LOG" 2>&1 ||
+    warn "could not re-assert the prism role password — services may fail to connect; see $LOG"
+
   step "Starting the services again"
   run dc "$LIVE" start "${writers[@]}" || dc "$LIVE" up -d
   wait_healthy || warn "not healthy after the restore — check the log"
+  # nginx resolves its upstreams once at start — after the writers came back on new
+  # addresses the edge must look again, or the UI reports 'cannot reach' services
+  # that are perfectly healthy.
+  run dc "$LIVE" restart nginx || true
   say "  safety dump: $now"
 }
 
