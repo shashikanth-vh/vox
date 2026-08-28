@@ -1,6 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, remoteDebounced, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId, USE_REAL_API } from '../api/http';
+import { api, withFallback, remote, remoteDebounced, toCursorParams, asRows, nextCursorOf, totalOf, listAll, isRegisterId, USE_REAL_API, errText } from '../api/http';
 import { fillFromDeal } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -173,9 +173,19 @@ export const assetMonService = {
     const old = (r as any)[key]; (r as any)[key] = value;
     writeAudit(by, key === 'status' ? 'Asset Mon status' : 'Asset Mon updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
   },
-  remove(id: string, by: string) {
-    if (isRegisterId(id)) remote('del', AM_PATH + '/' + id);
+  /** AWAITED delete, refusal surfaced — see lendingService.remove. */
+  async remove(id: string, by: string): Promise<{ ok: boolean; error?: string }> {
+    if (USE_REAL_API && !isRegisterId(id)) {
+      return { ok: false, error: 'This row has not finished saving to the register yet — refresh and try again.' };
+    }
+    if (USE_REAL_API) {
+      try { await api.del(AM_PATH + '/' + id); } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data)
+          || `The register refused the delete (HTTP ${e?.response?.status ?? '?'}).` };
+      }
+    }
     const i = db().am.findIndex((r: AmRow) => r.id === id);
     if (i > -1) { const [x] = db().am.splice(i, 1); writeAudit(by, 'Asset Mon deleted', x.code, x.id); }
+    return { ok: true };
   },
 };

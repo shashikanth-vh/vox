@@ -21,6 +21,7 @@ export default function AssetMonPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
   const [del, setDel] = useState<AmRow | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
   const refresh = () => qc.invalidateQueries();
 
   // Wrap + truncate to N chars, full text on hover (v12 trunc()).
@@ -91,7 +92,16 @@ export default function AssetMonPage() {
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       <ConfirmDialog open={!!del} title="Delete asset" message={`Remove ${del?._name}'s asset mandate?`}
-        onCancel={() => setDel(null)} onConfirm={() => { if (del) assetMonService.remove(del.id, user.full); setDel(null); refresh(); }} />
+        onCancel={() => setDel(null)} onConfirm={() => {
+          const d = del; setDel(null);
+          if (!d) return;
+          void assetMonService.remove(d.id, user.full).then((r) => {
+            if (!r.ok) setDelErr(r.error || 'The register refused the delete.');
+            refresh();
+          });
+        }} />
+      <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
+        onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
     </>
   );
 }

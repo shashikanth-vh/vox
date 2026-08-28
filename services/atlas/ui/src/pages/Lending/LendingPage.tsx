@@ -37,6 +37,7 @@ export default function LendingPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
   const [del, setDel] = useState<LendingRow | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
   const refresh = () => qc.invalidateQueries();
   const [stageErr, setStageErr] = useState('');
   // The register REFUSES a governed stage on a direct change (Sanctioned, CP/CS
@@ -100,7 +101,16 @@ export default function LendingPage() {
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       <ConfirmDialog open={!!del} title="Delete lending row" message={`Delete ${del?._name}'s lending facility?`}
-        onCancel={() => setDel(null)} onConfirm={() => { if (del) lendingService.remove(del.id, user.full); setDel(null); refresh(); }} />
+        onCancel={() => setDel(null)} onConfirm={() => {
+          const d = del; setDel(null);
+          if (!d) return;
+          void lendingService.remove(d.id, user.full).then((r) => {
+            if (!r.ok) setDelErr(r.error || 'The register refused the delete.');
+            refresh();
+          });
+        }} />
+      <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
+        onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
     </>
   );
 }

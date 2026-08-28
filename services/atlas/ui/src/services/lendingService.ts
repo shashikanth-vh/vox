@@ -184,9 +184,20 @@ export const lendingService = {
     }
     (r as any)[key] = value; writeAudit(by, 'Lending updated', r.code, String(key));
   },
-  remove(id: string, by: string) {
-    if (isRegisterId(id)) remote('del', '/lending/' + id);
+  /** AWAITED delete, refusal surfaced — a fire-and-forget delete that the register
+   *  refused looked exactly like success until the next refetch resurrected the row. */
+  async remove(id: string, by: string): Promise<{ ok: boolean; error?: string }> {
+    if (USE_REAL_API && !isRegisterId(id)) {
+      return { ok: false, error: 'This row has not finished saving to the register yet — refresh and try again.' };
+    }
+    if (USE_REAL_API) {
+      try { await api.del('/lending/' + id); } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data)
+          || `The register refused the delete (HTTP ${e?.response?.status ?? '?'}).` };
+      }
+    }
     const i = db().lending.findIndex((r: LendingRow) => r.id === id);
     if (i > -1) { const [x] = db().lending.splice(i, 1); writeAudit(by, 'Lending deleted', x.code, x.id); }
+    return { ok: true };
   },
 };

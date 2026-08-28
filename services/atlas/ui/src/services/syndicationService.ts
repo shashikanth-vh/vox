@@ -1,6 +1,6 @@
 import { db, today } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
-import { api, withFallback, remote, remoteDebounced, asRows, USE_REAL_API, listAll } from '../api/http';
+import { api, withFallback, remote, remoteDebounced, asRows, USE_REAL_API, listAll, errText } from '../api/http';
 import { fillFromDeal, fillCompanyFromEntity } from './nameResolver';
 import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
@@ -278,11 +278,16 @@ export const syndicationService = {
     writeAudit(by, 'Lender response', code, name + (note ? ': ' + note.slice(0, 80) : ' (inbound)'));
     if (note) { db().interactions = db().interactions || []; db().interactions.push({ refId: code, refType: 'Platform Deals', occurredAt: today(), person: by, direction: 'inbound', lenderName: name, notes: note }); }
   },
-  remove(id: string, by: string) {
+  /** AWAITED delete, refusal surfaced — see lendingService.remove. */
+  async remove(id: string, by: string): Promise<{ ok: boolean; error?: string }> {
     const r = this.find(id);
-    remote('del', '/syndication/' + (r?.apiId || id));
+    try { await api.del('/syndication/' + (r?.apiId || id)); } catch (e: any) {
+      return { ok: false, error: errText(e?.response?.data)
+        || `The register refused the delete (HTTP ${e?.response?.status ?? '?'}).` };
+    }
     const i = db().syn.findIndex((x: SynRow) => x === r || x.id === id);
     if (i > -1) { const [x] = db().syn.splice(i, 1); writeAudit(by, 'Platform Deals deleted', x.code, x.id); }
+    return { ok: true };
   },
 
   // ---- Register by bank (v12 vSynReg) ----
