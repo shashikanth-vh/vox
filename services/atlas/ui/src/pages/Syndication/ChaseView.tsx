@@ -19,8 +19,8 @@ interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chase
 const dotColor = (st?: string) => LSTATE_COLOR[st || 'Identified'] || '#94a3b8';
 
 // A small pill (v12 `.pill hot/warm`).
-function Pill({ tone, children }: { tone: 'red' | 'amber' | 'grey' | 'green'; children: React.ReactNode }) {
-  const map = { red: ['#FBE9E4', '#A93B22'], amber: ['#FBF3E1', '#8F6512'], grey: ['#EDF1F3', '#5F6E76'], green: ['#E4F3EA', '#1F6B41'] } as const;
+function Pill({ tone, children }: { tone: 'red' | 'amber' | 'grey'; children: React.ReactNode }) {
+  const map = { red: ['#FBE9E4', '#A93B22'], amber: ['#FBF3E1', '#8F6512'], grey: ['#EDF1F3', '#5F6E76'] } as const;
   const [bg, fg] = map[tone];
   return <Box component="span" sx={{ display: 'inline-block', borderRadius: 999, px: '8px', py: '2px', fontSize: 10.8, fontWeight: 700, bgcolor: bg, color: fg, whiteSpace: 'nowrap' }}>{children}</Box>;
 }
@@ -64,29 +64,21 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' | 'Dropped' } | null>(null);
   const [outNote, setOutNote] = useState('');
   const [outAmt, setOutAmt] = useState('');
-  // Live is the WORK QUEUE (exactly as before); Closed answers "where did AUK go?"
-  // — a mandate that finished (Sanctioned/Disbursed) or died (Dropped/Withdrawn/
-  // Rejected) leaves the queue but stays one click away, read-only.
-  const [scope, setScope] = useState<'Live' | 'Closed' | 'All'>('Live');
   const bump = () => force((n) => n + 1);
   const th = db().th || { lenderSilent: 7 };
 
   const q = search.trim().toLowerCase();
   const match = (name: string, code: string) => !q || name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
 
-  const finished = (r: any) => SYN_TERM.includes(r.status) || SYN_CLOSED.includes(r.status);
-  const allFiles = db().syn
+  const files = db().syn
+    .filter((r: any) => !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status))
     .map((r: any) => ({ r, co: clientsService.get(r.code).name, live: (r.lenders || []).filter((l: Lender) => !l.ex && l.st).length }))
     .filter((x: any) => match(x.co, x.r.code))
     .sort((a: any, b: any) => b.live - a.live);
-  const files = allFiles.filter(({ r }: any) =>
-    scope === 'All' ? true : scope === 'Closed' ? finished(r) : !finished(r));
 
   // Attention: silent lenders (IM out > threshold), unanswered queries, stale chases.
-  // Always computed over the LIVE mandates — a closed book needs no chasing,
-  // whatever scope the list below is showing.
   const attention: any[] = [];
-  allFiles.filter(({ r }: any) => !finished(r)).forEach(({ r, co }: any) => (r.lenders || []).forEach((l: Lender) => {
+  files.forEach(({ r, co }: any) => (r.lenders || []).forEach((l: Lender) => {
     if (l.ex) return;
     const rd = daysSince(l.resp); const chased = daysSince(l.chased);
     if (l.st === 'IM Circulated' && rd != null && rd > th.lenderSilent) attention.push({ code: r.code, co, l, reason: 'silent', age: rd, sev: rd > 14 ? 'red' : 'amber' });
@@ -135,28 +127,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
     saveCsv(toCsv(['Company', 'Group Code', 'Ask Cr', 'Lender', 'Status', 'Inbound days', 'Chased days'], rows), 'atlas_chase');
   };
 
-  const scopeChips = (
-    <Box sx={{ display: 'flex', gap: 0.8, alignItems: 'center' }}>
-      {(['Live', 'Closed', 'All'] as const).map((sc) => (
-        <Button key={sc} size="small" onClick={() => setScope(sc)}
-          variant={scope === sc ? 'contained' : 'outlined'}
-          sx={{ borderRadius: 999, minWidth: 0, px: 1.5, py: 0.2, textTransform: 'none', fontSize: 12 }}>
-          {sc}
-        </Button>
-      ))}
-    </Box>
-  );
-
-  if (!files.length) {
-    return (
-      <Box>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>{scopeChips}</Box>
-        <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>
-          {scope === 'Closed' ? 'No closed Platform Deals files.' : 'No live Platform Deals files.'}
-        </Box>
-      </Box>
-    );
-  }
+  if (!files.length) return <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>No live Platform Deals files.</Box>;
 
   // v12 `.chco > .chline` banner: indented, left-bordered, alternating backgrounds.
   const CHLINE = {
@@ -168,10 +139,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        {scopeChips}
-        <ExportBar onCsv={exportCsv} />
-      </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}><ExportBar onCsv={exportCsv} /></Box>
       {/* Attention strip */}
       {attention.length > 0 && (
         <Box component="details" open sx={{ bgcolor: '#fff7ed', border: '1px solid #fed7aa', borderLeft: '4px solid #f97316', borderRadius: '8px', mb: 1.6, p: '8px 12px' }}>
@@ -218,16 +186,13 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
         if (c.d) bits.push(<span key="d" style={{ color: LSTATE_COLOR['Declined'] }}>{c.d} declined</span>);
         const counts = bits.length ? bits.reduce((acc: React.ReactNode[], b, i) => (i ? [...acc, ' · ', b] : [b]), []) : `${outreach.length} lenders`;
 
-        const frozen = finished(r);
-        const rowRo = ro || frozen;
         return (
-          <Box component="details" key={r.id} sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: '8px', p: '8px 12px', my: 1, ...(frozen ? { opacity: 0.92 } : {}) }}>
+          <Box component="details" key={r.id} sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: '8px', p: '8px 12px', my: 1 }}>
             <Box component="summary" sx={{ cursor: 'pointer', listStyle: 'none', display: 'flex', gap: 1.2, alignItems: 'center', flexWrap: 'wrap', '&::-webkit-details-marker': { display: 'none' } }}>
               <ExpandMoreIcon sx={{ fontSize: 18, color: tokens.muted }} />
               <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenCompany(r.code); }}>{co}</Box>
               <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
-              {frozen && <Pill tone={SYN_CLOSED.includes(r.status) ? 'green' : 'grey'}>{r.status}</Pill>}
               {/* density strip */}
               <Box sx={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }}>
                 {outreach.length ? outreach.map((l, i) => {
@@ -257,7 +222,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   ...(silent ? { borderLeft: '3px solid #f59e0b', pl: '8px' } : { '&:hover': { bgcolor: '#eef2f6' } }),
                 }}>
                   <Box component="b" sx={{ color: tokens.navy, minWidth: 150 }}>{l.name}</Box>
-                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={rowRo} onChange={(v) => setSt(r.code, l.name, v)} />
+                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={ro} onChange={(v) => setSt(r.code, l.name, v)} />
                   <Typography component="span" sx={{ fontSize: 11.6, color: tokens.muted }}>
                     {rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}
                     {l.st === 'Sanctioned' && l.amt != null ? <b style={{ color: LSTATE_COLOR['Sanctioned'] }}> · ₹{fmt(l.amt, 1)} Cr</b> : ''}
@@ -267,7 +232,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                     “{l.note}”
                   </Typography>}
                   <Box sx={{ flex: 1 }} />
-                  {!rowRo && <><MiniBtn onClick={() => chase(r.code, l.name)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name)}>Log reply</MiniBtn></>}
+                  {!ro && <><MiniBtn onClick={() => chase(r.code, l.name)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name)}>Log reply</MiniBtn></>}
                 </Box>
               );
             }) : <Box sx={{ ...CHLINE, bgcolor: '#fafbfc', color: tokens.muted, fontSize: '11.6px' }}>No lenders yet. Add one below.</Box>}
@@ -275,7 +240,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
             {/* add lender (v12 `.chco > .addl`) — picks from the FI master so one bank
                 is always ONE spelling across mandates; free typing still allowed for a
                 lender the master does not know yet. */}
-            {!rowRo && (
+            {!ro && (
               <Box sx={{ ...CHLINE, bgcolor: '#f8fafc' }}>
                 <Autocomplete freeSolo size="small" sx={{ flex: 1, minWidth: 180 }}
                   options={(db().lenders || [])
