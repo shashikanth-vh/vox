@@ -161,15 +161,27 @@ def ledger_syn_rows(wb) -> list[dict]:
 # bank "Rejected" (PRISM: Declined) and tracks lender-level "Disbursed" (PRISM keeps
 # Disbursed at MANDATE level; the lender row lands Sanctioned and the original word is
 # preserved on the note + reported as a translation).
-LENDER_STATUS_MAP = {"rejected": "Declined", "disbursed": "Sanctioned"}
-LENDER_VOCAB = {"Identified", "IM Circulated", "Docs Pending", "Queries Received",
-                "IP Received", "Sanctioned", "Declined"}
+LENDER_STATUS_MAP = {
+    "rejected": "Declined",
+    # "Disbursed" is a first-class lender status now (…Sanctioned → Disbursed,
+    # uniform with the Lending book) — the old translation to Sanctioned is gone.
+    "im in prep": "IM Under Preparation", "im under prep": "IM Under Preparation",
+    "im under preparation": "IM Under Preparation",
+    "im in preparation": "IM Under Preparation",
+    "im sent": "IM Circulated", "im submitted": "IM Circulated",
+    "onhold": "On Hold", "hold": "On Hold", "drop": "Dropped",
+    "approved": "Sanctioned",
+}
+LENDER_VOCAB = {"Identified", "IM Under Preparation", "IM Circulated", "Docs Pending",
+                "Queries Received", "IP Received", "Sanctioned", "Disbursed",
+                "Declined", "Dropped", "On Hold"}
 
 # Forward order of the lender pipeline — a DUPLICATE ledger row for the same bank
 # upgrades the row only when it sits further along ('Declined' ranks lowest so a live
 # duplicate outranks a stale rejection; re-importing the identical file changes nothing).
-LENDER_RANK = {"Declined": 1, "Identified": 2, "Docs Pending": 3, "IM Circulated": 4,
-               "Queries Received": 5, "IP Received": 6, "Sanctioned": 7}
+LENDER_RANK = {"Dropped": 1, "Declined": 1, "On Hold": 1.5, "Identified": 2,
+               "IM Under Preparation": 2.5, "Docs Pending": 3, "IM Circulated": 4,
+               "Queries Received": 5, "IP Received": 6, "Sanctioned": 7, "Disbursed": 8}
 
 
 def canon_lender_status(value: str | None) -> tuple[str | None, bool]:

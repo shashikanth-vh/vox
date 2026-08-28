@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Autocomplete, Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
+import { syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
 import { db } from '../../api/atlasStore';
 import { daysSince, fmt } from '../../utils/format';
@@ -28,8 +28,8 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'grey'; children: Re
 // v12 `.chline .lsel`: 1px --line box, 4px radius, 12px, tight padding. Offers only
 // the CURRENT status plus its legal next steps — the register enforces the same
 // transition map, so a free-for-all list would just collect 422s.
-const LSel = ({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) => {
-  const opts = [value, ...(LENDER_NEXT[value] ?? [])].filter((s, i, a) => s && a.indexOf(s) === i);
+const LSel = ({ value, disabled, onChange, heldFrom }: { value: string; disabled: boolean; onChange: (v: string) => void; heldFrom?: string }) => {
+  const opts = [value, ...lenderNext(value, heldFrom)].filter((s, i, a) => s && a.indexOf(s) === i);
   return (
     <Select size="small" value={value} disabled={disabled || opts.length <= 1} onClick={(e) => e.stopPropagation()}
       onChange={(e) => onChange(e.target.value)}
@@ -61,7 +61,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const [logNote, setLogNote] = useState('');
   // The two OUTCOMES carry substance the register insists on: a decline says why,
   // a sanction says how much — captured here before the status write goes out.
-  const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' } | null>(null);
+  const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' | 'Dropped' } | null>(null);
   const [outNote, setOutNote] = useState('');
   const [outAmt, setOutAmt] = useState('');
   const bump = () => force((n) => n + 1);
@@ -89,7 +89,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
 
   const setSt = (code: string, name: string, st: string) => {
     if (ro) return;
-    if (st === 'Sanctioned' || st === 'Declined') { setOutNote(''); setOutAmt(''); setOutDlg({ code, name, st }); return; }
+    if (st === 'Sanctioned' || st === 'Declined' || st === 'Dropped') { setOutNote(''); setOutAmt(''); setOutDlg({ code, name, st }); return; }
     syndicationService.setLenderStatus(code, name, st, user.full); bump();
   };
   const submitOut = () => {
@@ -155,7 +155,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   <Pill tone={a.sev === 'red' ? 'red' : 'amber'}>{tag}</Pill>
                   <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }} onClick={() => onOpenCompany(a.code)}>{a.co}</Box>
                   <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{a.l.name}</Typography>
-                  <LSel value={a.l.st || 'Identified'} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v)} />
+                  <LSel value={a.l.st || 'Identified'} heldFrom={a.l.heldFrom} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v)} />
                   <Box sx={{ flex: 1 }} />
                   <MiniBtn onClick={() => chase(a.code, a.l.name)}>Log chase</MiniBtn>
                   <MiniBtn onClick={() => reply(a.code, a.l.name)}>Log reply</MiniBtn>
@@ -178,7 +178,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
           else if (l.st === 'IM Circulated') c.im++; else if (l.st === 'Declined') c.d++; else if (l.st === 'Identified') c.id++;
         });
         const bits: React.ReactNode[] = [];
-        if (c.s) bits.push(<span key="s" style={{ color: LSTATE_COLOR['Sanctioned'] }}>{c.s} approved</span>);
+        if (c.s) bits.push(<span key="s" style={{ color: LSTATE_COLOR['Sanctioned'] }}>{c.s} sanctioned</span>);
         if (c.ip) bits.push(<span key="ip" style={{ color: LSTATE_COLOR['IP Received'] }}>{c.ip} IP</span>);
         if (c.q) bits.push(<span key="q" style={{ color: LSTATE_COLOR['Queries Received'] }}>{c.q} queries</span>);
         if (c.im) bits.push(<span key="im" style={{ color: LSTATE_COLOR['IM Circulated'] }}>{c.im} IM circ</span>);
@@ -222,7 +222,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   ...(silent ? { borderLeft: '3px solid #f59e0b', pl: '8px' } : { '&:hover': { bgcolor: '#eef2f6' } }),
                 }}>
                   <Box component="b" sx={{ color: tokens.navy, minWidth: 150 }}>{l.name}</Box>
-                  <LSel value={l.st || 'Identified'} disabled={ro} onChange={(v) => setSt(r.code, l.name, v)} />
+                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={ro} onChange={(v) => setSt(r.code, l.name, v)} />
                   <Typography component="span" sx={{ fontSize: 11.6, color: tokens.muted }}>
                     {rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}
                     {l.st === 'Sanctioned' && l.amt != null ? <b style={{ color: LSTATE_COLOR['Sanctioned'] }}> · ₹{fmt(l.amt, 1)} Cr</b> : ''}
@@ -282,23 +282,26 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
       {/* Sanction / decline outcome capture */}
       <Dialog open={!!outDlg} onClose={() => setOutDlg(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ color: outDlg ? LSTATE_COLOR[outDlg.st] : undefined }}>
-          {outDlg?.st === 'Sanctioned' ? 'Approve' : 'Decline'}{outDlg ? ` — ${outDlg.name}` : ''}
+          {outDlg?.st === 'Sanctioned' ? 'Sanction' : outDlg?.st === 'Dropped' ? 'Drop' : 'Decline'}{outDlg ? ` — ${outDlg.name}` : ''}
         </DialogTitle>
         <DialogContent>
           {outDlg?.st === 'Sanctioned' && (
-            <TextField autoFocus fullWidth type="number" sx={{ mt: 1 }} label="Approved amount (₹ Cr)"
+            <TextField autoFocus fullWidth type="number" sx={{ mt: 1 }} label="Sanctioned amount (₹ Cr)"
               value={outAmt} onChange={(e) => setOutAmt(e.target.value)} inputProps={{ min: 0, step: 0.5 }} />
           )}
           <TextField fullWidth multiline minRows={2} sx={{ mt: 1.5 }}
-            autoFocus={outDlg?.st === 'Declined'}
-            label={outDlg?.st === 'Declined' ? 'Why did they decline? (required)' : 'Note (optional)'}
-            placeholder={outDlg?.st === 'Declined' ? 'Sector cap, pricing, exposure, credit view…' : 'Terms, conditions, next step'}
+            autoFocus={outDlg?.st !== 'Sanctioned'}
+            label={outDlg?.st === 'Declined' ? 'Why did they decline? (required)'
+              : outDlg?.st === 'Dropped' ? 'Why are we dropping this bank? (required)' : 'Note (optional)'}
+            placeholder={outDlg?.st === 'Declined' ? 'Sector cap, pricing, exposure, credit view…'
+              : outDlg?.st === 'Dropped' ? 'Client chose another bank, sanction lapsed, pricing…'
+              : 'Terms, conditions, next step'}
             value={outNote} onChange={(e) => setOutNote(e.target.value)} />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOutDlg(null)}>Cancel</Button>
           <Button variant="contained" disabled={!outOk} onClick={submitOut}>
-            {outDlg?.st === 'Sanctioned' ? 'Confirm approval' : 'Confirm decline'}
+            {outDlg?.st === 'Sanctioned' ? 'Confirm sanction' : outDlg?.st === 'Dropped' ? 'Confirm drop' : 'Confirm decline'}
           </Button>
         </DialogActions>
       </Dialog>

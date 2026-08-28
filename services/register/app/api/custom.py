@@ -251,28 +251,59 @@ async def add_syndication_lender(
 
 
 # The lender pipeline's ordered, FORWARD-ONLY transitions (Platform Deals matrix):
-# Identified → IM Circulated → Queries Received → IP Received → Sanctioned/Declined.
-# Review decision: a dot never moves backwards — the manual tracker never regresses
-# a bank (a fresh round of queries stays at Queries Received) — and never skips the
-# IM. Decline is allowed from any live state; both outcomes are final. Enforced
-# where every write lands so neither the matrix popover nor the chase list nor
-# Postman can bend it. "Docs Pending" is legacy (imports may carry it); it too can
-# only move forward.
+# Identified → IM Under Preparation → IM Circulated → Queries Received →
+# IP Received → Sanctioned → Disbursed. Review decision: a dot never moves
+# backwards — the manual tracker never regresses a bank (a fresh round of queries
+# stays at Queries Received). On Hold / Declined / Dropped are settable from ANY
+# live state (a chase pauses or dies mid-flight); the one exception is Sanctioned,
+# where "Declined" makes no sense (they already approved) — from there the moves
+# are Disbursed (money landed) or Dropped (sanction lapsed / client chose another
+# bank). On Hold resumes anywhere forward. Enforced where every write lands so
+# neither the matrix popover nor the chase list nor Postman can bend it.
+# "Docs Pending" is legacy (imports); it too can only move forward.
+_LENDER_ANYTIME = {"On Hold", "Declined", "Dropped"}
 _LENDER_TRANSITIONS: dict[str, set[str]] = {
     "": {"Identified"},
-    "Identified": {"IM Circulated", "Declined"},
-    "IM Circulated": {"Queries Received", "IP Received", "Declined"},
-    "Docs Pending": {"Queries Received", "IP Received", "Declined"},
-    "Queries Received": {"IP Received", "Declined"},
-    "IP Received": {"Sanctioned", "Declined"},
-    "Sanctioned": set(),
+    "Identified": {"IM Under Preparation", "IM Circulated"} | _LENDER_ANYTIME,
+    "IM Under Preparation": {"IM Circulated"} | _LENDER_ANYTIME,
+    "IM Circulated": {"Queries Received", "IP Received"} | _LENDER_ANYTIME,
+    "Docs Pending": {"Queries Received", "IP Received"} | _LENDER_ANYTIME,
+    "Queries Received": {"IP Received"} | _LENDER_ANYTIME,
+    "IP Received": {"Sanctioned"} | _LENDER_ANYTIME,
+    "Sanctioned": {"Disbursed", "Dropped"},
+    "Disbursed": set(),
     "Declined": set(),
+    "Dropped": set(),
+    "On Hold": {"Identified", "IM Under Preparation", "IM Circulated",
+                "Queries Received", "IP Received", "Declined", "Dropped"},
 }
+
+# The Excel books wrote the same fact many ways ("IM in Prep", "IM under
+# preparation", "On hold"). Rows carrying those spellings must MOVE, not sit
+# locked — both the current status and an incoming one canonicalise here, so a
+# stuck import comes alive without waiting for the stored value to be
+# normalised (scripts/maintenance/normalize_lender_status does that part).
+_LENDER_ALIASES: dict[str, str] = {
+    "im in prep": "IM Under Preparation", "im under prep": "IM Under Preparation",
+    "im under preparation": "IM Under Preparation",
+    "im in preparation": "IM Under Preparation", "im prep": "IM Under Preparation",
+    "im preparation": "IM Under Preparation",
+    "im sent": "IM Circulated", "im submitted": "IM Circulated",
+    "im circulated": "IM Circulated",
+    "on hold": "On Hold", "onhold": "On Hold", "hold": "On Hold",
+    "dropped": "Dropped", "drop": "Dropped", "disbursed": "Disbursed",
+    "approved": "Sanctioned", "sanctioned": "Sanctioned",
+}
+
+
+def _canon_lender_status(value: str | None) -> str:
+    text = (value or "").strip()
+    return _LENDER_ALIASES.get(text.lower(), text)
 
 
 async def _notify_syn_outcome(ctx: RequestContext, syn: Any, lender: Any,
                               outcome: str) -> None:
-    """A bank's Sanctioned/Declined is news the desk should not discover by staring at
+    """A bank's outcome (Sanctioned/Disbursed/Declined/Dropped) is news the desk should not discover by staring at
     the matrix: notify the mandate's RM and analyst (resolved to their register
     e-mails; names without one are skipped silently)."""
     from app.api.notify import notify_maker
@@ -286,15 +317,15 @@ async def _notify_syn_outcome(ctx: RequestContext, syn: Any, lender: Any,
         Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
         or_(Person.name.in_(names), Person.full_name.in_(names))))).scalars().all()
     amt = f" · ₹{float(lender.amount_cr):g} Cr" if lender.amount_cr is not None else ""
-    # The stored status stays 'Sanctioned' (canonical); the desk's word is "Approved".
-    label = "Approved" if outcome == "Sanctioned" else outcome
+    # One vocabulary with the Lending book: the notification says Sanctioned /
+    # Disbursed / Declined / Dropped, exactly as the matrix does.
     for p in rows:
         await notify_maker(
             ctx, recipient=(p.email or "").strip() or None,
-            event=f"lender.{label.lower()}",
-            title=f"{lender.lender_name} {label}{amt} — {syn.tracker_no or 'mandate'}",
+            event=f"lender.{outcome.lower().replace(' ', '-')}",
+            title=f"{lender.lender_name} {outcome}{amt} — {syn.tracker_no or 'mandate'}",
             body=(lender.note or None),
-            severity="info" if outcome == "Sanctioned" else "warning",
+            severity="info" if outcome in ("Sanctioned", "Disbursed") else "warning",
             subject_type="Syndication", subject_id=str(syn.id),
             dedupe_key=f"ntf:synlender:{lender.id}:{outcome}")
 
@@ -320,26 +351,33 @@ async def update_syndication_lender(
         raise NotFoundError(
             f"lender '{lender_id}' is not on syndication '{syndication_id}'.")
     data = payload.model_dump(exclude_unset=True)
-    new_status = (data.get("status") or "").strip() if "status" in data else None
-    if new_status is not None and new_status != (row.status or ""):
-        allowed = _LENDER_TRANSITIONS.get(row.status or "", set())
+    new_status = _canon_lender_status(data.get("status")) if "status" in data else None
+    current = _canon_lender_status(row.status)
+    if new_status is not None and new_status != current:
+        data["status"] = new_status  # store the canonical spelling, always
+        allowed = _LENDER_TRANSITIONS.get(current, set())
         if new_status not in allowed:
             raise ValidationAppError(
                 f"A lender at {row.status or 'no status'!r} cannot move to "
                 f"{new_status!r} — next steps are: "
                 f"{', '.join(sorted(allowed)) or 'none (terminal)'}.")
-        # The two outcomes carry their substance: a decline says WHY, a sanction
-        # says HOW MUCH.
-        if new_status == "Declined" and not (data.get("note") or row.note or "").strip():
+        # The outcomes carry their substance: a decline or a drop says WHY, a
+        # sanction says HOW MUCH.
+        if new_status in ("Declined", "Dropped") \
+                and not (data.get("note") or row.note or "").strip():
             raise ValidationAppError(
-                "A decline must say why — the note reaches the RM and the record.")
+                ("A decline must say why — the note reaches the RM and the record."
+                 if new_status == "Declined" else
+                 "Dropping a bank must say why — the note reaches the RM and the record."))
         if new_status == "Sanctioned" and data.get("amount_cr") is None \
                 and row.amount_cr is None:
             raise ValidationAppError(
-                "An approval records the bank's allocation — supply amount_cr (₹ Cr).")
+                "A sanction records the bank's allocation — supply amount_cr (₹ Cr).")
+    elif new_status is not None:
+        data["status"] = new_status  # same state, canonical spelling
     obj = await _synlender_repo.update(
         ctx.session, ctx.tenant_id, lender_id, ctx.actor, data)
-    if new_status in ("Sanctioned", "Declined"):
+    if new_status in ("Sanctioned", "Declined", "Dropped", "Disbursed"):
         syn = await load_subject(ctx.session, ctx.tenant_id, "Syndication",
                                  syndication_id)
         if syn is not None:

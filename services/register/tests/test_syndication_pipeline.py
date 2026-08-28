@@ -118,17 +118,16 @@ async def test_terminal_outcome_notifies_the_mandate_rm(client: AsyncClient):
 
     inbox = (await client.get("/v1/notifications", params={"unread_only": "true"},
                               headers=RM)).json()
-    mine = [n for n in inbox["items"] if n["event"] == "lender.approved"]
+    mine = [n for n in inbox["items"] if n["event"] == "lender.sanctioned"]
     assert mine, inbox
-    # The desk's word is "Approved" (stored status stays 'Sanctioned').
-    assert "Approved" in mine[0]["title"]
+    # One vocabulary with the Lending book: the word is "Sanctioned" everywhere.
+    assert "Sanctioned" in mine[0]["title"]
     assert "Kotak Mahindra" in mine[0]["title"] and "SYN-NOTI-1" in mine[0]["title"]
     assert "4" in mine[0]["title"]  # the allocation travels in the headline
 
     # The same outcome does not double-send (dedupe key is lender+outcome).
-    # A second PATCH is a terminal-state 422 anyway — the ledger holds one row.
     again = (await client.get("/v1/notifications", headers=RM)).json()
-    assert len([n for n in again["items"] if n["event"] == "lender.approved"]) == 1
+    assert len([n for n in again["items"] if n["event"] == "lender.sanctioned"]) == 1
 
 
 async def test_fi_master_seed_is_idempotent_and_respects_deletes(client: AsyncClient):
@@ -161,3 +160,68 @@ async def test_fi_master_seed_is_idempotent_and_respects_deletes(client: AsyncCl
                               {"t": str(tenant_id)})
         assert await seed_fi_master(session, tenant_id) == 0  # the delete sticks
         await session.commit()
+
+
+# --------------------------------------------- the field vocabulary, adopted
+
+
+async def test_an_imported_spelling_moves_without_waiting_for_normalisation(client: AsyncClient):
+    """The Excel books wrote "IM in Prep"; those rows sat LOCKED (an unknown status
+    has no next steps). The API canonicalises BOTH sides of the transition check, so
+    a stuck import comes alive — and the move stores the canonical spelling."""
+    syn_id = await _mandate(client, code="ALIA")
+    lid = (await _lender(client, syn_id, status="IM in Prep"))["id"]
+    r = await _move(client, syn_id, lid, status="IM Circulated")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "IM Circulated"
+
+
+async def test_on_hold_anytime_and_resume_remembers(client: AsyncClient):
+    """On Hold is settable from any live status; the resume goes back to work (the
+    status it left is first in the history), and On Hold itself never dead-ends."""
+    syn_id = await _mandate(client, code="HOLD")
+    lid = (await _lender(client, syn_id, status="Queries Received"))["id"]
+    r = await _move(client, syn_id, lid, status="On Hold")
+    assert r.status_code == 200, r.text
+    hops = r.json()["status_history"] or []
+    assert hops[-1]["to"] == "On Hold" and hops[-1]["from"] == "Queries Received"
+    back = await _move(client, syn_id, lid, status="Queries Received")
+    assert back.status_code == 200, back.text
+
+
+async def test_dropped_anytime_needs_its_why_and_is_terminal(client: AsyncClient):
+    syn_id = await _mandate(client, code="DROP")
+    lid = (await _lender(client, syn_id, status="IM Circulated"))["id"]
+    bare = await _move(client, syn_id, lid, status="Dropped")
+    assert bare.status_code == 422 and "why" in bare.text.lower()
+    ok = await _move(client, syn_id, lid, status="Dropped",
+                     note="Client chose another bank")
+    assert ok.status_code == 200, ok.text
+    stuck = await _move(client, syn_id, lid, status="Identified")
+    assert stuck.status_code == 422 and "terminal" in stuck.text.lower()
+
+
+async def test_sanctioned_disburses_but_never_declines(client: AsyncClient):
+    """Money follows the approval — Sanctioned's only moves are Disbursed (landed)
+    or Dropped (lapsed); a bank that already approved cannot 'decline'."""
+    syn_id = await _mandate(client, code="DISB")
+    lid = (await _lender(client, syn_id, status="IP Received"))["id"]
+    assert (await _move(client, syn_id, lid, status="Sanctioned",
+                        amount_cr=5)).status_code == 200
+    no = await _move(client, syn_id, lid, status="Declined", note="x")
+    assert no.status_code == 422, no.text
+    ok = await _move(client, syn_id, lid, status="Disbursed")
+    assert ok.status_code == 200, ok.text
+    done = await _move(client, syn_id, lid, status="Identified")
+    assert done.status_code == 422 and "terminal" in done.text.lower()
+
+
+async def test_the_prep_step_sits_before_the_im(client: AsyncClient):
+    syn_id = await _mandate(client, code="PREP")
+    lid = (await _lender(client, syn_id, status="Identified"))["id"]
+    assert (await _move(client, syn_id, lid,
+                        status="IM Under Preparation")).status_code == 200
+    # ...and from prep the IM goes out; it cannot jump the circulation.
+    skip = await _move(client, syn_id, lid, status="Queries Received")
+    assert skip.status_code == 422, skip.text
+    assert (await _move(client, syn_id, lid, status="IM Circulated")).status_code == 200

@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover, useMediaQuery } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
 import {
-  syndicationService, SYN_TERM, SYN_CLOSED, LENDER_NEXT, lenderLabel,
+  syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
 } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
@@ -88,7 +88,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
 
   // state counts within scope (before state filtering); index 0 counts the
   // Un-Assigned cells — FI-master banks not yet in play on that mandate.
-  const cnt = [0, 0, 0, 0, 0, 0, 0];
+  const cnt = Array(11).fill(0);
   codes.forEach((c) => order.forEach((l) => { const s = cellS(c, l); if (s) cnt[s]++; else cnt[0]++; }));
 
   if (mf.noout) codes = codes.filter((c) => live(c) && order.every((l) => !cellS(c, l)));
@@ -127,7 +127,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   };
   // A next-step click: outcomes pause for their substance, plain moves apply at once.
   const pick = (st: string) => {
-    if (st === 'Sanctioned' || st === 'Declined') { setTarget(st); return; }
+    if (st === 'Sanctioned' || st === 'Declined' || st === 'Dropped') { setTarget(st); return; }
     commit(st);
   };
   const canConfirm = target === 'Sanctioned' ? +amount > 0 : note.trim().length > 0;
@@ -213,7 +213,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
 
       {/* filter bar */}
       <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.2, mb: 1.2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-        {[1, 0, 2, 3, 4, 5, 6].map((s) => (
+        {[1, 7, 0, 2, 3, 4, 5, 10, 6, 9, 8].map((s) => (
           <Box key={s} onClick={() => togState(s)}
             sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.8, border: `1.4px solid ${mf.states.includes(s) ? tokens.navy : tokens.line}`,
               bgcolor: mf.states.includes(s) ? '#F2F6F5' : '#fff', borderRadius: 999, px: 1.2, py: 0.5, fontSize: 12, cursor: 'pointer',
@@ -344,7 +344,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           const st = row?.st || '';
           const s = st ? (ST2DOT[st] || 1) : 0;
           const d = row?.since ? daysSince(row.since) : null;
-          const nexts = ro ? [] : (LENDER_NEXT[st] ?? []);
+          const nexts = ro ? [] : lenderNext(st, row?.heldFrom);
           // History rows arrive in two shapes: the register appends {from,to,at,by},
           // local echoes push {st,t,by} — render either, newest first.
           const hist = (row?.h || []).slice(-4).reverse().map((x: any) => ({
@@ -414,21 +414,24 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               {!ro && target && (
                 <Box sx={{ borderTop: `1px solid ${tokens.line}`, mt: 0.8, pt: 1 }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.8, color: MATRIX_COLORS[ST2DOT[target] || 1] }}>
-                    {target === 'Sanctioned' ? 'Approve — record the allocation' : 'Decline — record the reason'}
+                    {target === 'Sanctioned' ? 'Sanction — record the allocation'
+                      : target === 'Dropped' ? 'Drop — record why we walked away' : 'Decline — record the reason'}
                   </Typography>
                   {target === 'Sanctioned' && (
-                    <TextField size="small" fullWidth type="number" label="Approved amount (₹ Cr)" value={amount}
+                    <TextField size="small" fullWidth type="number" label="Sanctioned amount (₹ Cr)" value={amount}
                       onChange={(e) => setAmount(e.target.value)} sx={{ mb: 0.8 }} autoFocus
                       inputProps={{ min: 0, step: 0.5 }} />
                   )}
                   <TextField size="small" fullWidth multiline minRows={2} value={note}
-                    label={target === 'Declined' ? 'Why did they decline? (required)' : 'Note (optional)'}
-                    onChange={(e) => setNote(e.target.value)} autoFocus={target === 'Declined'} />
+                    label={target === 'Declined' ? 'Why did they decline? (required)'
+                      : target === 'Dropped' ? 'Why are we dropping this bank? (required)' : 'Note (optional)'}
+                    onChange={(e) => setNote(e.target.value)} autoFocus={target !== 'Sanctioned'} />
                   <Box sx={{ display: 'flex', gap: 0.8, mt: 1, justifyContent: 'flex-end' }}>
                     <Button size="small" onClick={() => setTarget('')}>Back</Button>
                     <Button size="small" variant="contained" disabled={!canConfirm} onClick={() => commit(target)}
                       sx={{ bgcolor: MATRIX_COLORS[ST2DOT[target] || 1] }}>
-                      {target === 'Sanctioned' ? 'Confirm approval' : 'Confirm decline'}
+                      {target === 'Sanctioned' ? 'Confirm sanction'
+                        : target === 'Dropped' ? 'Confirm drop' : 'Confirm decline'}
                     </Button>
                   </Box>
                 </Box>

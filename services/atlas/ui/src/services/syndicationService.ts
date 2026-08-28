@@ -11,12 +11,34 @@ import { localDay } from '../api/time';
 export const SYN_TERM = ['Dropped', 'Withdrawn', 'Rejected'];
 export const SYN_CLOSED = ['Sanctioned', 'Disbursed'];
 
-// ST2DOT — maps a lender chase status to a matrix dot state (1..6). Sanctioned is
-// its OWN state (green): the desk reads "who actually approved" straight off the
-// grid instead of sharing a colour with the approval track.
+// ST2DOT — maps a lender chase status to a matrix dot state. Sanctioned is
+// its OWN state (green): the desk reads "who actually sanctioned" straight off the
+// grid instead of sharing a colour with the approval track. 7-10 joined when the
+// field vocabulary was adopted (IM prep / On Hold / Dropped / Disbursed) — before
+// that, rows in those states fell back to dot 1 and the export called every one
+// of them "Identified".
 export const ST2DOT: Record<string, number> = {
   'Identified': 1, 'IM Circulated': 2, 'Docs Pending': 2, 'Queries Received': 3,
   'IP Received': 4, 'Sanctioned': 5, 'Declined': 6,
+  'IM Under Preparation': 7, 'On Hold': 8, 'Dropped': 9, 'Disbursed': 10,
+};
+
+// Imported/spoken spellings of lender statuses → the canonical vocabulary. The
+// Excel books wrote the same fact many ways ("IM in Prep", "IM under preparation");
+// canon at the wire boundary means every dropdown, dot and export speaks one
+// language even before the stored rows are normalised.
+export const LENDER_ALIASES: Record<string, string> = {
+  'im in prep': 'IM Under Preparation', 'im under prep': 'IM Under Preparation',
+  'im under preparation': 'IM Under Preparation', 'im in preparation': 'IM Under Preparation',
+  'im prep': 'IM Under Preparation', 'im preparation': 'IM Under Preparation',
+  'im sent': 'IM Circulated', 'im submitted': 'IM Circulated', 'im circulated': 'IM Circulated',
+  'on hold': 'On Hold', 'onhold': 'On Hold', 'hold': 'On Hold',
+  'dropped': 'Dropped', 'drop': 'Dropped', 'disbursed': 'Disbursed',
+  'approved': 'Sanctioned', 'sanctioned': 'Sanctioned',
+};
+export const canonLenderStatus = (s?: string | null): string => {
+  const t = (s || '').trim();
+  return LENDER_ALIASES[t.toLowerCase()] || t;
 };
 
 // The legal next steps per lender status — the client-side mirror of the register's
@@ -24,15 +46,36 @@ export const ST2DOT: Record<string, number> = {
 // the server will accept. FORWARD-ONLY (review decision): a bank never regresses —
 // a fresh round of queries stays at Queries Received, remarks carry the nuance.
 // 'Docs Pending' is legacy (imports); it can only move forward too.
+// On Hold / Declined / Dropped are settable from ANY live status (a chase pauses
+// or dies mid-flight); the one exception is Sanctioned, where "Declined" makes no
+// sense (they already approved) — from there the moves are Disbursed (the money
+// landed) or Dropped (sanction lapsed / client chose another bank). On Hold
+// resumes anywhere forward — lenderNext() offers the held-from status first.
+const ANYTIME = ['On Hold', 'Declined', 'Dropped'];
 export const LENDER_NEXT: Record<string, string[]> = {
   '': ['Identified'],
-  'Identified': ['IM Circulated', 'Declined'],
-  'IM Circulated': ['Queries Received', 'IP Received', 'Declined'],
-  'Docs Pending': ['Queries Received', 'IP Received', 'Declined'],
-  'Queries Received': ['IP Received', 'Declined'],
-  'IP Received': ['Sanctioned', 'Declined'],
-  'Sanctioned': [],
+  'Identified': ['IM Under Preparation', 'IM Circulated', ...ANYTIME],
+  'IM Under Preparation': ['IM Circulated', ...ANYTIME],
+  'IM Circulated': ['Queries Received', 'IP Received', ...ANYTIME],
+  'Docs Pending': ['Queries Received', 'IP Received', ...ANYTIME],
+  'Queries Received': ['IP Received', ...ANYTIME],
+  'IP Received': ['Sanctioned', ...ANYTIME],
+  'Sanctioned': ['Disbursed', 'Dropped'],
+  'Disbursed': [],
   'Declined': [],
+  'Dropped': [],
+  'On Hold': ['Identified', 'IM Under Preparation', 'IM Circulated',
+              'Queries Received', 'IP Received', 'Declined', 'Dropped'],
+};
+
+/** Next steps for a lender row, resume-aware: a row On Hold offers the status it
+ *  left FIRST (read from the server-appended status_history), then the rest. */
+export const lenderNext = (st: string, heldFrom?: string): string[] => {
+  const base = LENDER_NEXT[st] ?? [];
+  if (st === 'On Hold' && heldFrom && base.includes(heldFrom)) {
+    return [heldFrom, ...base.filter((x) => x !== heldFrom)];
+  }
+  return base;
 };
 
 // ---------------------------------------------------------------------------
@@ -49,13 +92,16 @@ function toLender(l: any): SynLender {
     apiId: l?.id,
     name: l?.lender_name || '',
     ex: !!l?.is_existing,
-    st: l?.status || '',
+    st: canonLenderStatus(l?.status),
     since: l?.since || '',
     resp: l?.response_date || '',
     chased: l?.chased_date || null,
     note: l?.note || '',
     amt: l?.amount_cr == null ? null : Number(l.amount_cr),
     h: l?.status_history || [],
+    // The status this row was doing when it went On Hold — resume offers it first.
+    heldFrom: canonLenderStatus([...(l?.status_history || [])].reverse()
+      .find((x: any) => canonLenderStatus(x?.to) === 'On Hold')?.from),
   };
 }
 
@@ -336,16 +382,21 @@ export interface BankRow {
 }
 
 // Lender chase workflow states + colours (mirrors template LSTATES / ST_COLOR)
-export const LSTATES = ['Identified', 'IM Circulated', 'Docs Pending', 'Queries Received', 'IP Received', 'Sanctioned', 'Declined'];
+export const LSTATES = ['Identified', 'IM Under Preparation', 'IM Circulated', 'Docs Pending',
+  'Queries Received', 'IP Received', 'Sanctioned', 'Disbursed', 'Declined', 'Dropped', 'On Hold'];
 
-/** Display name for a lender status. The STORED value stays 'Sanctioned' (one
- *  canonical term across history, transitions and the mandate-level statuses);
- *  every human-facing surface says "Approved" — the desk's word for a bank
- *  saying yes. Map here, never at call sites, so the rename is one line. */
-export const lenderLabel = (st: string): string => (st === 'Sanctioned' ? 'Approved' : st);
-export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM submitted', 'Queries received', 'Approval track', 'Approved', 'Declined'];
-// state -> colour: yellow / orange / blue / purple (approval track) / green / red
-export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B'];
+/** Display name for a lender status. The STORED value stays 'IM Circulated' (one
+ *  canonical term across history and transitions); every human-facing surface
+ *  says "IM submitted" — the desk's word. 'Sanctioned' shows AS Sanctioned for
+ *  uniformity with the Lending book (…Sanctioned → Disbursed on both sides).
+ *  Map here, never at call sites, so a rename is one line. */
+export const lenderLabel = (st: string): string => (st === 'IM Circulated' ? 'IM submitted' : st);
+export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM submitted', 'Queries received',
+  'Approval track', 'Sanctioned', 'Declined', 'IM under preparation', 'On Hold', 'Dropped', 'Disbursed'];
+// state -> colour: yellow / orange / blue / purple (approval track) / green / red,
+// then the adopted field states: prep-gold / hold-grey / dropped-maroon / money-green
+export const MATRIX_COLORS = ['transparent', '#E0B400', '#E07B1F', '#2D6FC4', '#6B5AAE', '#2E7D4F', '#B3432B',
+  '#B08A2E', '#7C8798', '#7A2E20', '#1B5E20'];
 
 // ONE palette everywhere: a lender status colours identically in the chase list,
 // the matrix, the by-bank register and the dashboards — derived from the matrix
@@ -358,7 +409,7 @@ export const MATRIX_PRESETS = [
   { id: 'await', label: 'Awaiting lender ≥7d', states: [2], dwell: 7, scope: 'Live' as const },
   { id: 'ballus', label: 'Ball with us ≥5d', states: [3], dwell: 5, scope: 'Live' as const },
   { id: 'appr', label: 'Approval track', states: [4], dwell: '', scope: 'Live' as const },
-  { id: 'sanc', label: 'Approved', states: [5], dwell: '', scope: 'All' as const },
+  { id: 'sanc', label: 'Sanctioned', states: [5], dwell: '', scope: 'All' as const },
   { id: 'decl', label: 'Declined', states: [6], dwell: '', scope: 'All' as const },
   { id: 'noout', label: 'No outreach yet', states: [] as number[], dwell: '', scope: 'Live' as const, noout: true },
 ];
