@@ -13,7 +13,7 @@ import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
 // density dot strip and inline lender rows (status select + log chase/reply).
-interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; amt?: number | null; }
+interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; amt?: number | null; heldFrom?: string; }
 
 // Chase-list status → dot colour (v12 ST_COLOR == LSTATE_COLOR).
 const dotColor = (st?: string) => LSTATE_COLOR[st || 'Identified'] || '#94a3b8';
