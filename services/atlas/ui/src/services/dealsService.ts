@@ -221,10 +221,29 @@ export const dealsService = {
 
   // Delete a deal row (Admin only — gated at the page). Removes the deal record; the
   // product-line registers (Lending / Syn / AM) keep their own rows.
-  remove(code: string, by: string) {
+  /**
+   * Delete a deal — AWAITED, refusal surfaced. The old path looked the row up in
+   * the LOCAL store (which can hold a stale copy without the register id), fired
+   * the DELETE without waiting, and the caller refetched at once — so a refusal
+   * was swallowed and the row marched straight back ("delete not happening").
+   * The grid row's own register id travels in; the register answers before the
+   * grid refreshes.
+   */
+  async remove(code: string, by: string, apiId?: string): Promise<{ ok: boolean; error?: string }> {
     const d = this.find(code);
-    if ((d as any)?.apiId) remote('del', '/deals/' + (d as any).apiId);
-    const i = db().deals.findIndex((d: Deal) => d.code === code);
+    const id = apiId || (d as any)?.apiId;
+    if (USE_REAL_API && id) {
+      try {
+        await api.del('/deals/' + id);
+      } catch (e: any) {
+        return { ok: false, error: errText(e?.response?.data)
+          || `The register refused the delete (HTTP ${e?.response?.status ?? '?'}).` };
+      }
+    } else if (USE_REAL_API && !id) {
+      return { ok: false, error: 'This row has no register id in the local cache — refresh the page and try again.' };
+    }
+    const i = db().deals.findIndex((x: Deal) => x.code === code);
     if (i > -1) { const [x] = db().deals.splice(i, 1); writeAudit(by, 'Deal deleted', code, x.code); }
+    return { ok: true };
   },
 };

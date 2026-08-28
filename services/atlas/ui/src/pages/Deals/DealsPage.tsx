@@ -17,6 +17,7 @@ export default function DealsPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
   const [del, setDel] = useState<DealRow | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
   const refreshAll = () => { qc.invalidateQueries(); };
 
@@ -54,7 +55,16 @@ export default function DealsPage() {
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refreshAll} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refreshAll} />
       <ConfirmDialog open={!!del} title="Delete deal" message={`Delete the deal for ${del?._name || del?.code}? This cannot be undone.`}
-        onCancel={() => setDel(null)} onConfirm={() => { if (del) dealsService.remove(del.code, user.full); setDel(null); refreshAll(); }} />
+        onCancel={() => setDel(null)} onConfirm={() => {
+          const d = del; setDel(null);
+          if (!d) return;
+          void dealsService.remove(d.code, user.full, (d as any).apiId).then((r) => {
+            if (!r.ok) setDelErr(r.error || 'The register refused the delete.');
+            refreshAll();
+          });
+        }} />
+      <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
+        onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
     </>
   );
 }
