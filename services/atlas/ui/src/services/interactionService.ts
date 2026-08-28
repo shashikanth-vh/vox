@@ -35,7 +35,7 @@ const leadPath = (r: LeadRef) => r.apiId || r.id;
 
 /** A `YYYY-MM-DD` from the form widened to the timestamp the API stores. */
 const toStamp = (d?: string | null) => {
-  const day = (d || '').trim() || new Date().toISOString().slice(0, 10);
+  const day = (d || '').trim() || localDay(new Date().toISOString());
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day}T00:00:00Z` : day;
 };
 
@@ -98,7 +98,7 @@ export const interactionService = {
     if (!db().interactions) db().interactions = [];
     const full: Interaction = {
       interactionId: newId(), refId: rec.refId || '', refType: rec.refType || 'General',
-      occurredAt: rec.occurredAt || new Date().toISOString().slice(0, 10), loggedAt: new Date().toISOString(),
+      occurredAt: rec.occurredAt || localDay(new Date().toISOString()), loggedAt: new Date().toISOString(),
       person: rec.person || by, interactionType: rec.interactionType || '',
       direction: rec.direction || null, lenderName: rec.lenderName || null,
       notes: rec.notes || '', nextAction: rec.nextAction || null, nextActionDate: rec.nextActionDate || null,

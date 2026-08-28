@@ -1,5 +1,6 @@
 import { db } from '../api/atlasStore';
 import { applyQuery, delay } from '../api/queryEngine';
+import { localMinute } from '../api/time';
 import { api, withFallback, toCursorParams, asRows, nextCursorOf, totalOf } from '../api/http';
 import type { TableQuery, Paged } from './types';
 
@@ -109,7 +110,9 @@ function enrich(): ActivityRow[] {
  */
 export function fromActivityWire(r: any): ActivityRow {
   return {
-    t: String(r?.at || '').replace('T', ' ').slice(0, 16),
+    // localMinute, not a slice: the wire is UTC, the reader lives in IST — the
+    // heal that ran at 06:23 must not read "00:53".
+    t: localMinute(String(r?.at || '')),
     by: r?.actor || '',
     area: r?.area || 'Other',
     text: r?.summary || '',
@@ -123,7 +126,7 @@ export function toActivityRow(r: any): ActivityRow {
   const act = r?.action || r?.event_type || r?.type || r?.title || '';
   const code = r?.subject_no || r?.code || r?.subject_id || '';
   // `t` is rendered verbatim, and the local store writes "YYYY-MM-DD HH:MM".
-  const t = String(r?.created_at || r?.occurred_at || '').replace('T', ' ').slice(0, 16);
+  const t = localMinute(String(r?.created_at || r?.occurred_at || ''));
   const detail = r?.detail || r?.body || '';
   return {
     t,

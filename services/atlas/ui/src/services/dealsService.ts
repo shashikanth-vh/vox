@@ -7,6 +7,7 @@ import { clientsService } from './clientsService';
 import type { TableQuery, Paged } from './types';
 import type { Deal, DealRow } from '../pages/Deals/deal.types';
 import { inScope, type RowScope } from '../auth/rbac';
+import { localDay } from '../api/time';
 
 /**
  * An API deal read back as the row the grid renders. The wire is snake_case and uses the
@@ -37,7 +38,7 @@ export function toDealRow(r: any): DealRow {
       const v = r?.source_detail || r?.source_name || '';
       return /^Converted from lead [0-9a-f][0-9a-f-]{7,}/i.test(v) ? '' : v;
     })(),
-    createdAt: (r?.created_at || '').slice(0, 10),
+    createdAt: localDay(r?.created_at || ''),
     remarks: r?.note || r?.remarks || '',
     stage: r?.stage || '',
     productType: r?.product_type || '',

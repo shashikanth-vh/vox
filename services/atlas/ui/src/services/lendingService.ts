@@ -7,6 +7,7 @@ import { clientsService } from './clientsService';
 import type { TableQuery, Paged } from './types';
 import type { LendingRow } from '../pages/Lending/lending.types';
 import { inScope, type RowScope } from '../auth/rbac';
+import { localDay } from '../api/time';
 
 export const LEND_GREEN = ['Sanctioned', 'Documentation', 'Disbursed'];
 
@@ -29,10 +30,12 @@ export function toLendingRow(r: any): LendingRow {
     rm: r?.rm || '',
     an: r?.analyst || '',
     stage: r?.stage || '',
-    updated: (r?.stage_updated_at || r?.updated_at || '').slice(0, 10),
-    sanc: r?.sanctioned_at ? String(r.sanctioned_at).slice(0, 10) : null,
+    // localDay, not a slice: a stage moved after 18:30 IST must not read as
+    // YESTERDAY (the wire is UTC; bare DATE values pass through unchanged).
+    updated: localDay(r?.stage_updated_at || r?.updated_at || ''),
+    sanc: r?.sanctioned_at ? localDay(String(r.sanctioned_at)) : null,
     pendingWith: r?.pending_with || '',
-    createdAt: (r?.created_at || '').slice(0, 10),
+    createdAt: localDay(r?.created_at || ''),
     remarks: r?.remarks || '',
     proposedAmt: Number(r?.proposed_disbursement_amount) || 0,
     proposedDate: r?.proposed_disbursement_date || null,

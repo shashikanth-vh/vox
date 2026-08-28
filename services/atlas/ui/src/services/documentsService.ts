@@ -146,7 +146,7 @@ export const documentsService = {
     }
     // Mock mode: the session store, exactly as the prototype behaved.
     const entry: DocEntry = { name: file.name, size: file.size, type: file.type || 'file',
-      when: new Date().toISOString().slice(0, 16).replace('T', ' '), by, label: title };
+      when: localMinute(new Date().toISOString()), by, label: title };
     if (file.size <= INLINE_MAX) {
       entry.data = await new Promise<string>((res) => {
         const r = new FileReader();

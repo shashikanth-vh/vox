@@ -7,6 +7,7 @@ import { clientsService } from './clientsService';
 import type { TableQuery, Paged } from './types';
 import type { AmRow } from '../pages/AssetMonetisation/am.types';
 import { inScope, type RowScope } from '../auth/rbac';
+import { localDay } from '../api/time';
 
 /** The register's path — `asset-monetisation`, as the collection spells it. */
 const AM_PATH = '/asset-monetisation';
@@ -71,7 +72,7 @@ export function toAmRow(r: any): AmRow {
     itype: r?.investor_type || '',
     status: r?.status || '',
     teaser: r?.teaser ?? null,
-    createdAt: (r?.created_at || '').slice(0, 10),
+    createdAt: localDay(r?.created_at || ''),
     notes: r?.notes || '',
   };
 }

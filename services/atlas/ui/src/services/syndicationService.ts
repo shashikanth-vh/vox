@@ -6,6 +6,7 @@ import { writeAudit } from './auditService';
 import { clientsService } from './clientsService';
 import type { TableQuery } from './types';
 import type { SynRow, SynLender } from '../pages/Syndication/syndication.types';
+import { localDay } from '../api/time';
 
 export const SYN_TERM = ['Dropped', 'Withdrawn', 'Rejected'];
 export const SYN_CLOSED = ['Sanctioned', 'Disbursed'];
@@ -89,7 +90,7 @@ function toSynRow(r: any): SynRow {
     pendingWith: r?.pending_with || '',
     lenders: (r?.lenders || []).map(toLender),
     h: r?.status_history || [],
-    createdAt: (r?.created_at || '').slice(0, 10),
+    createdAt: localDay(r?.created_at || ''),
     remarks: r?.remarks || '',
   };
 }

@@ -8,10 +8,16 @@
  */
 const p = (n: number) => String(n).padStart(2, '0');
 
+/** Every PRISM wire datetime is UTC. A NAIVE one ("…T00:53:12", no Z, no
+ *  offset) would parse as LOCAL time and convert nothing — stamp the Z it
+ *  meant, so naive and aware strings read the same. */
+const utc = (iso: string): string =>
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[\d:.]*$/.test(iso) ? `${iso}Z` : iso;
+
 /** "2026-08-27 20:05" in the viewer's timezone. */
 export function localMinute(iso?: string | null): string {
   if (!iso) return '';
-  const d = new Date(iso);
+  const d = new Date(utc(String(iso)));
   if (Number.isNaN(d.getTime())) return String(iso).replace('T', ' ').slice(0, 16);
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
@@ -21,7 +27,7 @@ export function localDay(iso?: string | null): string {
   if (!iso) return '';
   // A bare date ("2026-08-27") has no time to convert — pass it through.
   if (/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return String(iso);
-  const d = new Date(iso);
+  const d = new Date(utc(String(iso)));
   if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
