@@ -43,6 +43,7 @@ ALIASES = {
     "on hold": "On Hold", "onhold": "On Hold", "hold": "On Hold",
     "dropped": "Dropped", "drop": "Dropped", "disbursed": "Disbursed",
     "approved": "Sanctioned", "sanctioned": "Sanctioned",
+    "final sanction received": "Sanctioned",
     "rejected": "Declined", "declined": "Declined", "identified": "Identified",
     "queries received": "Queries Received", "ip received": "IP Received",
     "docs pending": "Docs Pending",

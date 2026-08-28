@@ -170,7 +170,7 @@ LENDER_STATUS_MAP = {
     "im in preparation": "IM Under Preparation",
     "im sent": "IM Circulated", "im submitted": "IM Circulated",
     "onhold": "On Hold", "hold": "On Hold", "drop": "Dropped",
-    "approved": "Sanctioned",
+    "approved": "Sanctioned", "final sanction received": "Sanctioned",
 }
 LENDER_VOCAB = {"Identified", "IM Under Preparation", "IM Circulated", "Docs Pending",
                 "Queries Received", "IP Received", "Sanctioned", "Disbursed",

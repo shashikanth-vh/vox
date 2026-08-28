@@ -225,3 +225,15 @@ async def test_the_prep_step_sits_before_the_im(client: AsyncClient):
     skip = await _move(client, syn_id, lid, status="Queries Received")
     assert skip.status_code == 422, skip.text
     assert (await _move(client, syn_id, lid, status="IM Circulated")).status_code == 200
+
+
+async def test_the_mis_wording_for_a_sanction_is_a_sanction(client: AsyncClient):
+    """Production carried 10 lender rows saying 'Final sanction received' — the MIS's
+    phrase for Sanctioned (the mandate import already translates it). The row must
+    behave as Sanctioned: Disbursed is its move, and 'Declined' makes no sense."""
+    syn_id = await _mandate(client, code="FSR")
+    lid = (await _lender(client, syn_id, status="Final sanction received"))["id"]
+    no = await _move(client, syn_id, lid, status="Declined", note="x")
+    assert no.status_code == 422, no.text
+    ok = await _move(client, syn_id, lid, status="Disbursed")
+    assert ok.status_code == 200 and ok.json()["status"] == "Disbursed"

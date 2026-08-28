@@ -293,6 +293,9 @@ _LENDER_ALIASES: dict[str, str] = {
     "on hold": "On Hold", "onhold": "On Hold", "hold": "On Hold",
     "dropped": "Dropped", "drop": "Dropped", "disbursed": "Disbursed",
     "approved": "Sanctioned", "sanctioned": "Sanctioned",
+    # The MIS's wording for a bank's sanction — the mandate-level import already
+    # translates this exact phrase to Sanctioned (from_xlsx._WORDING_ALIASES).
+    "final sanction received": "Sanctioned",
 }
 
 

@@ -35,6 +35,7 @@ export const LENDER_ALIASES: Record<string, string> = {
   'on hold': 'On Hold', 'onhold': 'On Hold', 'hold': 'On Hold',
   'dropped': 'Dropped', 'drop': 'Dropped', 'disbursed': 'Disbursed',
   'approved': 'Sanctioned', 'sanctioned': 'Sanctioned',
+  'final sanction received': 'Sanctioned',
 };
 export const canonLenderStatus = (s?: string | null): string => {
   const t = (s || '').trim();
