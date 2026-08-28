@@ -385,13 +385,13 @@ export interface BankRow {
 export const LSTATES = ['Identified', 'IM Under Preparation', 'IM Circulated', 'Docs Pending',
   'Queries Received', 'IP Received', 'Sanctioned', 'Disbursed', 'Declined', 'Dropped', 'On Hold'];
 
-/** Display name for a lender status. The STORED value stays 'IM Circulated' (one
- *  canonical term across history and transitions); every human-facing surface
- *  says "IM submitted" — the desk's word. 'Sanctioned' shows AS Sanctioned for
+/** Display name for a lender status. ONE vocabulary, stored and shown alike:
+ *  'IM Circulated' reads as IM Circulated (user decision — the legend's old
+ *  "IM submitted" wording is retired), 'Sanctioned' as Sanctioned for
  *  uniformity with the Lending book (…Sanctioned → Disbursed on both sides).
- *  Map here, never at call sites, so a rename is one line. */
-export const lenderLabel = (st: string): string => (st === 'IM Circulated' ? 'IM submitted' : st);
-export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM submitted', 'Queries received',
+ *  Map here, never at call sites, so any future rename is one line. */
+export const lenderLabel = (st: string): string => st;
+export const MATRIX_LABELS = ['Un-Assigned', 'Identified', 'IM Circulated', 'Queries received',
   'Approval track', 'Sanctioned', 'Declined', 'IM under preparation', 'On Hold', 'Dropped', 'Disbursed'];
 // state -> colour: yellow / orange / blue / purple (approval track) / green / red,
 // then the adopted field states: prep-gold / hold-grey / dropped-maroon / money-green
