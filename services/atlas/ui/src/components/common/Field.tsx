@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { TextField, MenuItem, Box, Typography, Select, Checkbox, ListItemText, Chip, Stack } from '@mui/material';
 import { tokens } from '../../theme';
 
@@ -36,11 +37,26 @@ export function FieldShell({ label, required, children }: { label: string; requi
 }
 
 export function TextFld({ label, value, onChange, disabled, required, type = 'text', multiline, placeholder, minRows }: Base & { type?: string; multiline?: boolean; placeholder?: string; minRows?: number }) {
+  // COMMIT ON LEAVING THE FIELD, not per keystroke. The old per-keystroke onChange
+  // reached remoteDebounced, whose trailing 700ms fired at every typing PAUSE — one
+  // slowly-typed remark became six PATCHes and six audit rows ("Updated … remarks
+  // a → ab → abc"). Keystrokes now edit a local draft; the parent hears exactly one
+  // change when the field blurs (a click on Save blurs first, so dialogs never miss
+  // the final value), or on Enter for a single-line field.
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const v = type === 'number' ? (Number(draft) || 0) : draft;
+    if (v !== (value ?? (type === 'number' ? 0 : ''))) onChange(v);
+    setDraft(null);
+  };
   return (
     <FieldShell label={label} required={required}>
-      <TextField value={value ?? ''} disabled={disabled} type={type} multiline={multiline}
+      <TextField value={draft ?? value ?? ''} disabled={disabled} type={type} multiline={multiline}
         minRows={multiline ? (minRows ?? 2) : undefined} placeholder={placeholder}
-        onChange={(e) => onChange(type === 'number' ? Number(e.target.value) || 0 : e.target.value)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={multiline ? undefined : (e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         fullWidth size="small" sx={CONTROL_SX} />
     </FieldShell>
   );

@@ -94,6 +94,10 @@ export default function TodayPage() {
     // The register caps a single page at 200 rows — the old per-list pull silently
     // truncated a real book. hydrateBook pulls every page of every resource.
     void hydrateBook().then(() => force((n) => n + 1));
+    // The background-tab wake (bookHydration) refreshed the store — repaint.
+    const on = () => force((n) => n + 1);
+    window.addEventListener('prism:book-rehydrated', on);
+    return () => window.removeEventListener('prism:book-rehydrated', on);
   }, []);
 
   // Stage-change requests: approvers see pending items they can decide; requesters see
