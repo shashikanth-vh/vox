@@ -708,15 +708,33 @@ services:
       PGUSER: prism
       PGPASSWORD: "${PRISM_DB_PASSWORD:-prism}"
       KEEP_DAYS: "${PGBACKUP_KEEP:-14}"
+      # Below this, a "dump" is treated as a failure — an honest fresh install
+      # passes once migrations have run; an auth-failure empty archive never does.
+      MIN_BYTES: "${PGBACKUP_MIN_BYTES:-10000}"
     volumes:
       - pgbackups:/backups
     entrypoint: ["/bin/sh", "-c"]
+    # VERIFIED, or nothing: the dump goes to a .partial, must pass gzip -t and a
+    # size floor, and only then moves into place. A pipeline where pg_dumpall dies
+    # instantly still exits 0 through gzip and writes a perfectly valid EMPTY
+    # archive — a worthless backup that would be trusted (and synced offsite) for
+    # weeks. Failures now delete the partial and stamp /backups/PGBACKUP_FAILED,
+    # which prism-offsite.sh surfaces on every sync and status.
     command:
       - |
         while true; do
           ts=$$(date +%Y%m%d-%H%M%S)
+          tmp="/backups/.prism-$$ts.partial"
           echo "[pgbackup] $$ts dumping all databases..."
-          pg_dumpall --clean --if-exists | gzip > "/backups/prism-$$ts.sql.gz"             && echo "[pgbackup] wrote /backups/prism-$$ts.sql.gz"             || echo "[pgbackup] DUMP FAILED"
+          if pg_dumpall --clean --if-exists | gzip > "$$tmp"              && gzip -t "$$tmp"              && [ "$$(stat -c%s "$$tmp")" -ge "$${MIN_BYTES:-10000}" ]; then
+            mv "$$tmp" "/backups/prism-$$ts.sql.gz"
+            rm -f /backups/PGBACKUP_FAILED
+            echo "[pgbackup] wrote /backups/prism-$$ts.sql.gz ($$(stat -c%s /backups/prism-$$ts.sql.gz) bytes, verified)"
+          else
+            rm -f "$$tmp"
+            echo "$$ts dump failed or came back empty" >> /backups/PGBACKUP_FAILED
+            echo "[pgbackup] DUMP FAILED — nothing kept (see /backups/PGBACKUP_FAILED)"
+          fi
           find /backups -name 'prism-*.sql.gz' -mtime "+$$KEEP_DAYS" -delete
           sleep 86400
         done
@@ -738,12 +756,24 @@ services:
       - miniodata:/data:ro
       - pgbackups:/backups
     entrypoint: ["/bin/sh", "-c"]
+    # Same verified-or-nothing discipline as pgbackup: archive to a .partial,
+    # gzip -t it, then move into place — a failed tar no longer leaves a partial
+    # file behind to be synced offsite as if it were a backup.
     command:
       - |
         while true; do
           ts=$$(date +%Y%m%d-%H%M%S)
+          tmp="/backups/.minio-$$ts.partial"
           echo "[filebackup] $$ts archiving the document store..."
-          tar -czf "/backups/minio-$$ts.tar.gz" -C /data .             && echo "[filebackup] wrote /backups/minio-$$ts.tar.gz"             || echo "[filebackup] ARCHIVE FAILED"
+          if tar -czf "$$tmp" -C /data . && gzip -t "$$tmp"; then
+            mv "$$tmp" "/backups/minio-$$ts.tar.gz"
+            rm -f /backups/FILEBACKUP_FAILED
+            echo "[filebackup] wrote /backups/minio-$$ts.tar.gz (verified)"
+          else
+            rm -f "$$tmp"
+            echo "$$ts archive failed" >> /backups/FILEBACKUP_FAILED
+            echo "[filebackup] ARCHIVE FAILED — nothing kept (see /backups/FILEBACKUP_FAILED)"
+          fi
           find /backups -name 'minio-*.tar.gz' -mtime "+$$KEEP_DAYS" -delete
           sleep 86400
         done

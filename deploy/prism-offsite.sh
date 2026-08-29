@@ -71,9 +71,20 @@ cmd_sync() {
   fi
 
   # No --delete anywhere: the standby only accumulates. Age is the only pruner, and
-  # only when asked (KEEP_REMOTE_DAYS=0 keeps everything forever).
+  # only when asked (KEEP_REMOTE_DAYS=0 keeps everything forever). Logs and image
+  # manifests age out on the same clock as the archives they accompanied.
   if (( KEEP_REMOTE_DAYS > 0 )); then
-    _ssh "find '$DEST_DIR' -name '*.gz' -mtime +$KEEP_REMOTE_DAYS -delete" || true
+    _ssh "find '$DEST_DIR' \( -name '*.gz' -o -name '*.log' -o -name '*.tsv' \) -mtime +$KEEP_REMOTE_DAYS -delete" || true
+  fi
+
+  # The sidecars stamp a marker when a nightly archive failed verification —
+  # surface it HERE so the courier's own log carries the warning every night
+  # until the chain is healthy again.
+  if [[ -n "$vpath" ]]; then
+    local m
+    for m in "$vpath/PGBACKUP_FAILED" "$vpath/FILEBACKUP_FAILED"; do
+      [[ -f "$m" ]] && say "WARNING: $(basename "$m") — $(tail -1 "$m" 2>/dev/null) — the latest nightly archive is MISSING, investigate the sidecar"
+    done
   fi
   say "sync complete"
 }
@@ -101,6 +112,14 @@ cmd_uninstall() {
 cmd_status() {
   say "managed cron entry (run with sudo to see root's crontab):"
   crontab -l 2>/dev/null | grep -F "$SELF" || echo "  (none installed)"
+  local vpath; vpath="$(volume_path)"
+  if [[ -n "$vpath" ]]; then
+    local m; local any=0
+    for m in "$vpath/PGBACKUP_FAILED" "$vpath/FILEBACKUP_FAILED"; do
+      [[ -f "$m" ]] && { say "WARNING: $(basename "$m") — $(tail -1 "$m" 2>/dev/null)"; any=1; }
+    done
+    (( any )) || say "nightly sidecars: healthy (no failure markers)"
+  fi
   say "last log lines ($LOG):"
   tail -5 "$LOG" 2>/dev/null || echo "  (no log yet)"
   say "the standby holds (newest first):"

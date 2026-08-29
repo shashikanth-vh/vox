@@ -644,6 +644,9 @@ cmd_restore_files() {
   step "Starting the services again"
   run dc "$LIVE" start minio register workflows || dc "$LIVE" up -d
   wait_healthy || warn "not healthy after the restore — check the log"
+  # nginx resolves upstreams once at start — the restarted writers may be on new
+  # addresses, so the edge looks again (same lesson as restore-db).
+  run dc "$LIVE" restart nginx || true
   say "  safety snapshot: $now"
   say "  restore the MATCHING database dump too if you have not — the rows and the"
   say "  objects reference each other and must come from the same moment."
