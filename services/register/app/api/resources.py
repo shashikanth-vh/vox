@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
+from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
 from app.models import (
     AssetMonetisation,
@@ -196,6 +197,11 @@ _SPECS: list[ResourceSpec] = [
                     "entity_id", "deal_id", "is_required"],
         include_create=False,  # creation goes through the subject-aware register endpoint
         view_name="clients", company_scoped=True, write_operation="upload_remove_documents",
+        # Removal is part of the SAME desk workflow as upload (the grant is named
+        # upload_REMOVE_documents) — not the global Admin-only delete_row. The
+        # lifecycle guard keeps Verified evidence in place for everyone but Admin.
+        delete_operation="upload_remove_documents",
+        pre_delete=_document_pre_delete,
     ),
     ResourceSpec(
         name="document checklist item", prefix="/v1/document-checklist", tags=["Documents"],

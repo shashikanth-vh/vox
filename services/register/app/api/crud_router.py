@@ -52,6 +52,7 @@ class ResourceSpec:
         include_create: bool = True,
         include_update: bool = True,
         include_delete: bool = True,
+        delete_operation: str = "delete_row",
         subject_type: str | None = None,
         view_name: str | None = None,
         company_scoped: bool = False,
@@ -72,6 +73,11 @@ class ResourceSpec:
         # Append-only resources (e.g. the interaction timeline) omit update/delete.
         self.include_update = include_update
         self.include_delete = include_delete
+        # Which matrix operation governs DELETE/RESTORE. The default is the global
+        # Admin-only 'delete_row'; a resource whose removal is part of normal desk
+        # work (documents — the grant is literally named upload_REMOVE_documents)
+        # names its own operation here instead.
+        self.delete_operation = delete_operation
         # RBAC: line resources (Lead/Deal/Lending/Syndication/AssetMonetisation) enforce
         # scoped writes (assignment-driven) and scoped list filtering when a user context
         # is present. None = not a line resource; only the delete gate applies.
@@ -728,13 +734,16 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             if_match: str | None = Header(default=None, alias="If-Match"),
             expected_version: int | None = Query(default=None),
         ) -> Response:
-            # RBAC: "Delete a row — Admin ONLY" (checked whenever a user context is
-            # present; machine-to-machine behaviour follows REGISTER_ENFORCE_RBAC).
+            # RBAC: the spec's delete_operation — 'delete_row' (Admin only) by
+            # default; a desk-workflow removal (documents) names its own grant.
+            # Company-scoped resources additionally scope the delete like any
+            # other write, so a SCOPED role can only remove within its companies.
             from app.authz import enforce_operation
             from app.authz.revalidate import revalidate_sensitive
 
-            enforce_operation(ctx.user, "delete_row")
-            await revalidate_sensitive(ctx, "delete_row")
+            enforce_operation(ctx.user, spec.delete_operation)
+            await revalidate_sensitive(ctx, spec.delete_operation)
+            await _enforce_company_write(ctx, spec, obj_id)
             if spec.pre_delete is not None:
                 await spec.pre_delete(ctx, obj_id)
             expected = expected_version if expected_version is not None else _parse_if_match(if_match)
@@ -749,12 +758,12 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             obj_id: uuid.UUID,
             ctx: RequestContext = Depends(get_context),
         ) -> Any:
-            # RBAC: restoring a soft-deleted row mirrors the delete gate (Admin-only).
+            # RBAC: restoring a soft-deleted row mirrors the delete gate.
             from app.authz import enforce_operation
             from app.authz.revalidate import revalidate_sensitive
 
-            enforce_operation(ctx.user, "delete_row")
-            await revalidate_sensitive(ctx, "delete_row")
+            enforce_operation(ctx.user, spec.delete_operation)
+            await revalidate_sensitive(ctx, spec.delete_operation)
             obj = await repo.restore(ctx.session, ctx.tenant_id, obj_id, ctx.actor)
             return spec.read_schema.model_validate(obj)
 

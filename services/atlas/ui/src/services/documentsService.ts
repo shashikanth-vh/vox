@@ -219,6 +219,19 @@ export const documentsService = {
     }
   },
 
+  /** Rename an ad-hoc document's title — the register's DocumentUpdate carries
+   *  `title`, the dialog just never exposed it ("example_file" was forever). */
+  async rename(docId: string, title: string): Promise<{ ok: boolean; error?: string }> {
+    if (!USE_REAL_API) return { ok: true };
+    try {
+      await api.patch(`/documents/${docId}`, { title: title.trim().slice(0, 300) });
+    } catch (e: any) {
+      return { ok: false, error: errText(e?.response?.data)
+        || `The register refused the rename (HTTP ${e?.response?.status ?? '?'}).` };
+    }
+    return { ok: true };
+  },
+
   async remove(code: string, section: string, slotKey: string, entry: DocEntry,
                by: string, sectionTitle: string): Promise<{ ok: boolean; error?: string }> {
     if (USE_REAL_API && entry.id) {

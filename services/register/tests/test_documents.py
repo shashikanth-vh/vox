@@ -244,3 +244,50 @@ async def test_data_register_upload_flow_the_ui_drives(client: AsyncClient):
                                headers=checker)
     assert theirs.status_code == 200, theirs.text
     assert theirs.json()["status"] == "Verified"
+
+
+async def test_the_desk_removes_and_renames_its_own_files_but_verified_evidence_stays(client: AsyncClient):
+    """Field finding: Remove in the Data Register did nothing for a Management user —
+    the generic delete demanded Admin-only delete_row while the grant that governs
+    this desk workflow is literally named upload_REMOVE_documents. Deletion now runs
+    under that grant; the one thing the desk can NOT take back is Verified evidence
+    (reject it first, or Admin removes it). And an ad-hoc file's title is editable —
+    "example_file" is not forever."""
+    mgmt = {"X-User-Email": "divya.rao@evamfinance.com", "X-User-Roles": "Management"}
+    admin = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+    checker = {"X-User-Email": "checker@evamfinance.com", "X-User-Roles": "Credit Head"}
+    eid = (await client.post("/v1/entities",
+                             json={"code": f"RMDOC-{uuid.uuid4().hex[:6]}",
+                                   "legal_name": "Remove Rename Co"},
+                             headers=admin)).json()["id"]
+
+    async def _up(title: str, slot: str) -> dict:
+        r = await client.post(
+            f"/v1/entities/{eid}/documents/upload",
+            files={"file": (f"{slot}.pdf", b"%PDF-1.4 bytes", "application/pdf")},
+            data={"section": "financials", "slot_key": slot, "title": title},
+            headers=mgmt)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    # Rename: the ad-hoc title is a PATCHable fact.
+    doc = await _up("example_file", "x_adhoc1")
+    ren = await client.patch(f"/v1/documents/{doc['id']}",
+                             json={"title": "FY26 P&L — provisional"}, headers=mgmt)
+    assert ren.status_code == 200, ren.text
+    assert ren.json()["title"] == "FY26 P&L — provisional"
+
+    # Remove: the desk grant is enough for an un-verified file.
+    gone = await client.delete(f"/v1/documents/{doc['id']}", headers=mgmt)
+    assert gone.status_code == 204, gone.text
+
+    # Verified evidence stays put for the desk…
+    doc2 = await _up("Bank statement", "x_adhoc2")
+    ok = await client.post(f"/v1/documents/{doc2['id']}/validate", json={},
+                           headers=checker)
+    assert ok.status_code == 200, ok.text
+    held = await client.delete(f"/v1/documents/{doc2['id']}", headers=mgmt)
+    assert held.status_code == 422 and "Verified" in held.text, held.text
+    # …but an Admin can still remove it deliberately.
+    assert (await client.delete(f"/v1/documents/{doc2['id']}",
+                                headers=admin)).status_code == 204

@@ -99,6 +99,20 @@ def _read(row: Document) -> Any:
     return s.DocumentRead.model_validate(row)
 
 
+async def document_pre_delete(ctx: RequestContext, doc_id: uuid.UUID) -> None:
+    """Removal guard: a VERIFIED document is standing evidence — the desk that put
+    it on file cannot quietly take it back. Reject it first (with the reason the
+    record deserves), or an Admin removes it. Un-verified files (On File / Pending /
+    Rejected / Expired) are normal desk housekeeping under upload_remove_documents."""
+    row = await _document(ctx, doc_id)
+    roles = set(ctx.user.roles) if ctx.user is not None else set()
+    if row.status == "Verified" and "Admin" not in roles:
+        from app.core.errors import ValidationAppError
+        raise ValidationAppError(
+            "This document is Verified — evidence stays put. Reject it first "
+            "(with a note saying why), or ask an Admin to remove it.")
+
+
 @router.post("/v1/documents/{doc_id}/validate", response_model=s.DocumentRead,
              tags=["Documents"], summary="Verify a document (checker ≠ uploader)")
 async def validate_document(doc_id: uuid.UUID, payload: ValidateIn,

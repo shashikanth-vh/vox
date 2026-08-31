@@ -52,6 +52,16 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
     if (!r.ok) { setErr(r.error || 'The verification was refused.'); return; }
     reload();
   };
+  const [ren, setRen] = useState<{ id: string; name: string } | null>(null);
+  const [renBusy, setRenBusy] = useState(false);
+  const renameSave = async () => {
+    if (!ren || !ren.name.trim()) return;
+    setRenBusy(true); setErr('');
+    const r = await documentsService.rename(ren.id, ren.name);
+    setRenBusy(false);
+    if (!r.ok) { setErr(r.error || 'The rename was refused.'); return; }
+    setRen(null); reload();
+  };
   const remove = async (sec: string, dk: string, sectionTitle: string, e: DocEntry) => {
     if (!confirm(`Remove ${e.label} (${e.name})?`)) return;
     setErr('');
@@ -161,6 +171,12 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
                           <input type="file" hidden onChange={(ev) => void upload(s.k, dd.k, dd.n, s.t, !!dd.req, ev.target.files?.[0])} />
                         </Button>
                       )}
+                      {/* Ad-hoc documents (the + Add another rows, keys minted x_…) own
+                          their name — standard slots take theirs from the checklist. */}
+                      {e?.id && dd.k.startsWith('x_') && !ro && (
+                        <Button size="small" variant="outlined"
+                          onClick={() => setRen({ id: e.id!, name: e.label || e.name })}>Rename</Button>
+                      )}
                       {e && !ro && <Button size="small" color="error" onClick={() => void remove(s.k, dd.k, s.t, e)}>Remove</Button>}
                     </Box>
                   </Box>
@@ -196,6 +212,18 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
       <DialogActions>
         <Button onClick={onClose} variant="outlined">Done</Button>
       </DialogActions>
+      <Dialog open={!!ren} onClose={() => setRen(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename document</DialogTitle>
+        <DialogContent>
+          <TextField autoFocus fullWidth size="small" sx={{ mt: 1 }} label="Document name"
+            value={ren?.name || ''} onChange={(ev) => setRen((p2) => p2 && ({ ...p2, name: ev.target.value }))}
+            onKeyDown={(ev) => { if (ev.key === 'Enter') void renameSave(); }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRen(null)}>Cancel</Button>
+          <Button variant="contained" disabled={renBusy || !ren?.name.trim()} onClick={() => void renameSave()}>Rename</Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }
