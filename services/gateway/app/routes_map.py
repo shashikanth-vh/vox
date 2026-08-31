@@ -14,8 +14,14 @@ import re
 
 # (HTTP method, compiled path regex) → operation key from the matrix.
 _RAW: list[tuple[str, str, str]] = [
-    # Deletes — any resource ("Delete a row — IRREVERSIBLE — Admin ONLY").
-    ("DELETE", r"^/v1/(?!users|assignments|requests)[^/]+/[^/]+$", "delete_row"),
+    # Deletes — documents FIRST: removing a file from the Data Register is desk
+    # housekeeping under upload_remove_documents (the Register adds the Verified
+    # guard), not the Admin-only row purge. Without this carve-out the blanket
+    # rule below stopped a Management remove at the door and the Register's own
+    # delete gate never saw the request.
+    ("DELETE", r"^/v1/documents/[^/]+$", "upload_remove_documents"),
+    # Deletes — any other resource ("Delete a row — IRREVERSIBLE — Admin ONLY").
+    ("DELETE", r"^/v1/(?!users|assignments|requests|documents)[^/]+/[^/]+$", "delete_row"),
     # Leads.
     ("POST",   r"^/v1/leads$", "add_lead"),
     ("PATCH",  r"^/v1/leads/[^/]+$", "edit_lead"),

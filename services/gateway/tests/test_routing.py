@@ -76,6 +76,15 @@ def test_capability_routes_map_to_operations():
         "approve_stage_change"
     assert operation_for("POST", "/orchestrator/v1/workflows/docs-x/document-received") == \
         "upload_remove_documents"
+    # Removing a Data Register file is the documents desk-grant, NOT the Admin-only
+    # row purge — the blanket DELETE rule must not shadow it (the field bug: a
+    # Management remove was refused at the gateway before the Register's own
+    # delete gate could run).
+    assert operation_for("DELETE", "/v1/documents/afb3c739-f29a-461a-9d52-1") == \
+        "upload_remove_documents"
+    # Every other resource keeps the irreversible-delete gate.
+    assert operation_for("DELETE", "/v1/leads/abc123") == "delete_row"
+    assert operation_for("DELETE", "/v1/deals/abc123") == "delete_row"
 
 
 def test_tenant_admin_route_detection():
