@@ -194,8 +194,9 @@ async def test_drift_endpoint_admin_only(client: AsyncClient):
 async def test_first_boot_bootstrap_seeds_only_an_empty_database():
     """`--if-empty` (the prod-posture container start): a TRULY EMPTY authority DB is
     bootstrapped — tenant + baseline matrix + admin — because an empty Access service
-    bricks the whole platform; any NON-empty DB is never written on start (an operator
-    edit survives; the start degrades to the drift report)."""
+    bricks the whole platform; a NON-empty DB is written only ADDITIVELY on start
+    (missing default admins, missing baseline matrix cells, the visibility layer) —
+    an operator edit survives; the start degrades to the drift report."""
     from evam_backend_core.db.session import dispose_engine, get_sessionmaker, init_engine
     from sqlalchemy import text
 
@@ -240,6 +241,13 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
         await session.execute(text(
             "UPDATE access_grants SET access='SCOPED', origin='override' "
             "WHERE kind='view' AND item='deals' AND role='Syn RM'"))
+        # Simulate a RESTORED PRODUCTION database from before an operation shipped
+        # (the field case: upload_remove_documents was absent, so online revalidation
+        # resolved it to NONE and refused a grant the code matrix plainly gives).
+        # The next start must insert the missing baseline cells.
+        await session.execute(text(
+            "DELETE FROM access_grants "
+            "WHERE kind='operation' AND item='upload_remove_documents'"))
         await session.commit()
     await dispose_engine()
 
@@ -267,6 +275,14 @@ async def test_first_boot_bootstrap_seeds_only_an_empty_database():
             "WHERE kind='view' AND item='deals' AND role='Syn RM'"))).first()
         assert leads_amrm == "READ", "the shipped layer must apply on a non-empty start"
         assert tuple(deals_synrm) == ("SCOPED", "override"), "an Admin override survives"
+        # ...and the operation the old database never had was healed back in, at the
+        # shipped baseline, so /v1/resolve stops answering NONE for it.
+        urd = dict((await session.execute(text(
+            "SELECT role, access FROM access_grants "
+            "WHERE kind='operation' AND item='upload_remove_documents'"))).all())
+        assert urd, "missing matrix vocabulary must be seeded on a non-empty start"
+        assert urd.get("Management") == "FULL"
+        assert urd.get("Admin") == "FULL"
         await session.execute(text("UPDATE tenants SET name = 'Evam Finance'"))
         await session.commit()
     await dispose_engine()

@@ -162,21 +162,23 @@ async def bootstrap_if_empty() -> int:
         )).scalar_one_or_none()
         if row is not None:
             admins = await ensure_admin_user(session, row.id)
-            # The shipped visibility layer (matrix.VISIBILITY_READ) applies on every
-            # start — the second additive exception beside the admin list. Without
-            # this, the layer reached only fresh installs: a long-running production
-            # database kept its SCOPED cells and every widened role kept seeing
-            # nothing, exactly what the first deployment demonstrated.
-            from app.matrix import apply_visibility
-
-            vis = await apply_visibility(session, row.id)
+            # The shipped matrix VOCABULARY applies on every start — the same
+            # lesson as the visibility layer, learned twice now: a policy that only
+            # fresh installs receive is not a shipped policy. The field case: a
+            # restored production database predated the upload_remove_documents
+            # operation, so ONLINE REVALIDATION refused a grant the code matrix
+            # plainly gives — uploads worked (code matrix), deletes 403'd (stored
+            # matrix). seed_matrix inserts only MISSING baseline cells and applies
+            # the visibility layer; a cell an Admin has overridden stays exactly
+            # as the Admin left it.
+            cells = await seed_matrix(session, row.id)
             await session.commit()
             if admins:
                 log.info("default admin users provisioned on start: +%d", admins)
                 print(f"Default admin users provisioned: {admins}.")
-            if vis:
-                log.info("visibility layer applied on start: %d cell(s)", len(vis))
-                print(f"Visibility layer applied: {len(vis)} cell(s) -> READ.")
+            if cells:
+                log.info("matrix vocabulary healed on start: +%d cell(s)", cells)
+                print(f"Matrix vocabulary healed: {cells} baseline cell(s) added.")
     await dispose_engine()
     return await check()
 
