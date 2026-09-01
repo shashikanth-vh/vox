@@ -29,6 +29,10 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const admin = can(user.roles, 'deleteRow');
   const [del, setDel] = useState<any | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
+  // Un-assigning a bank set to 'Identified' by mistake = removing the lender row —
+  // the one correction the status ladder cannot express (there is no state before
+  // the first one). Admin-only, same confirm-and-refusal pattern as everywhere.
+  const [delL, setDelL] = useState<{ c: string; id: string; l: string } | null>(null);
   const [scope, setScope] = useState<Scope>('Live');
   const [mf, setMf] = useState<MF>({ states: [], dwell: '', preset: '', noout: false });
   const [, force] = useState(0);
@@ -479,6 +483,12 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
               {!ro && row && !target && !nexts.length && (
                 <Typography sx={{ fontSize: 11.4, color: tokens.muted, mt: 0.8 }}>Terminal state — no further moves.</Typography>
               )}
+              {admin && row && !target && (
+                <Button size="small" sx={{ mt: 0.8, px: 0.5, fontSize: 11.2, textTransform: 'none', color: '#A93B22' }}
+                  onClick={() => { const d = pop; closePop(); if (d) setDelL({ c: d.c, id: d.id, l: d.l }); }}>
+                  Remove lender — mistaken add (back to Un-Assigned)
+                </Button>
+              )}
             </Box>
           );
         })()}
@@ -495,6 +505,16 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
         }} />
       <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
         onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
+      <ConfirmDialog open={!!delL} title="Remove lender"
+        message={`Remove ${delL?.l || ''} from ${delL ? clientsService.get(delL.c).name : ''}'s mandate ${delL?.id || ''}? Use this only for a mistaken add — a bank actually engaged ends via Dropped, with the reason.`}
+        onCancel={() => setDelL(null)} onConfirm={() => {
+          const d = delL; setDelL(null);
+          if (!d) return;
+          void syndicationService.removeLender(d.c, d.l, user.full, d.id).then((res) => {
+            if (!res.ok) setDelErr(res.error || 'The register refused the removal.');
+            force((n) => n + 1);
+          });
+        }} />
       <Snackbar open={!!msg} autoHideDuration={2600} onClose={() => setMsg('')}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity="info" onClose={() => setMsg('')} sx={{ fontSize: 12.4 }}>{msg}</Alert>
