@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover, useMediaQuery } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
 import {
   syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
@@ -23,6 +24,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const { search } = useSearch();
   const { user } = useAuth();
   const ro = !can(user.roles, 'advanceMatrix');
+  // Mandate delete — Admin-only, reachable in EVERY scope (the chase list only
+  // shows live mandates; a Closed one is deletable from here).
+  const admin = can(user.roles, 'deleteRow');
+  const [del, setDel] = useState<any | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('Live');
   const [mf, setMf] = useState<MF>({ states: [], dwell: '', preset: '', noout: false });
   const [, force] = useState(0);
@@ -314,7 +320,14 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                 <tr key={r.id || r.apiId}>
                   <td style={{ position: 'sticky', left: 0, zIndex: 6, background: '#fff', minWidth: 210, maxWidth: 250, padding: '5px 9px', borderRight: `1px solid ${tokens.line}`, borderBottom: `1px solid #EFF2F4`, whiteSpace: 'normal' }}>
                     <b style={{ cursor: 'pointer' }} onClick={() => onOpenCompany(r.code)}>{cl.name}</b>
-                    <div style={{ fontSize: 10.8, color: tokens.muted }}>{subOf(r)}</div>
+                    <div style={{ fontSize: 10.8, color: tokens.muted }}>
+                      {subOf(r)}
+                      {admin && (
+                        <span onClick={(e) => { e.stopPropagation(); setDel(r); }}
+                          title={`Delete mandate ${r.id}`}
+                          style={{ marginLeft: 7, cursor: 'pointer', color: '#C43C2B', fontSize: 10 }}>delete</span>
+                      )}
+                    </div>
                   </td>
                   {cols.map((l) => {
                     const s = cellS(r, l); const d = cellDays(r, l);
@@ -468,6 +481,18 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           );
         })()}
       </Popover>
+      <ConfirmDialog open={!!del} title="Delete mandate"
+        message={`Delete ${del ? clientsService.get(del.code).name : ''}'s mandate ${del?.id || ''}? Its lender conversations go with it.`}
+        onCancel={() => setDel(null)} onConfirm={() => {
+          const d = del; setDel(null);
+          if (!d) return;
+          void syndicationService.remove(d.id, user.full).then((res) => {
+            if (!res.ok) setDelErr(res.error || 'The register refused the delete.');
+            force((n) => n + 1);
+          });
+        }} />
+      <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
+        onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
       <Snackbar open={!!msg} autoHideDuration={2600} onClose={() => setMsg('')}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity="info" onClose={() => setMsg('')} sx={{ fontSize: 12.4 }}>{msg}</Alert>

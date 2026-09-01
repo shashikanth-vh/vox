@@ -9,6 +9,7 @@ import { useSearch } from '../../context/SearchContext';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
@@ -74,6 +75,11 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   // / Syn RM work per the Operations matrix — NOT Deal Analyst (who edits the syn record
   // in the drawer). logChase shares that exact role set.
   const ro = !can(user.roles, 'logChase');
+  // Deleting a MANDATE is the Admin-only irreversible gate, same as every grid —
+  // the other three grids had their Remove, this view sent Admins to psql.
+  const admin = can(user.roles, 'deleteRow');
+  const [del, setDel] = useState<any | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
   const [, force] = useState(0);
   const [newL, setNewL] = useState<Record<string, string>>({});
   // Log chase / Log reply note capture — MUI dialog in place of window.prompt.
@@ -272,6 +278,14 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
             {/* add lender (v12 `.chco > .addl`) — picks from the FI master so one bank
                 is always ONE spelling across mandates; free typing still allowed for a
                 lender the master does not know yet. */}
+            {admin && (
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.6 }}>
+                <Box component="button" onClick={() => setDel(r)}
+                  sx={{ background: '#fff', border: '1px solid #E8C6BE', borderRadius: '8px', px: '11px', py: '4px', fontSize: '11px', cursor: 'pointer', color: '#A93B22' }}>
+                  Delete mandate
+                </Box>
+              </Box>
+            )}
             {!ro && (
               <Box sx={{ ...CHLINE, bgcolor: '#f8fafc' }}>
                 <Autocomplete freeSolo size="small" sx={{ flex: 1, minWidth: 180 }}
@@ -291,6 +305,20 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
           </Box>
         );
       })}
+
+      {/* Delete mandate — Admin only; the register's refusal is shown, never swallowed */}
+      <ConfirmDialog open={!!del} title="Delete mandate"
+        message={`Delete ${del ? clientsService.get(del.code).name : ''}'s mandate ${del?.id || ''}? Its lender conversations go with it.`}
+        onCancel={() => setDel(null)} onConfirm={() => {
+          const d = del; setDel(null);
+          if (!d) return;
+          void syndicationService.remove(d.id, user.full).then((res) => {
+            if (!res.ok) setDelErr(res.error || 'The register refused the delete.');
+            bump();
+          });
+        }} />
+      <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
+        onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
 
       {/* Log chase / Log reply note capture (replaces window.prompt) */}
       <Dialog open={!!logDlg} onClose={closeLog} maxWidth="sm" fullWidth>
