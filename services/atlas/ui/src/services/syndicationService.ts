@@ -71,6 +71,12 @@ export const LENDER_NEXT: Record<string, string[]> = {
 
 /** Next steps for a lender row, resume-aware: a row On Hold offers the status it
  *  left FIRST (read from the server-appended status_history), then the rest. */
+// Every canonical state, ladder order — the ADMIN CORRECTION LANE's menu (the
+// server holds the same bound: any state, but only a known one).
+export const LENDER_ALL = ['Identified', 'IM Under Preparation', 'IM Circulated',
+  'Queries Received', 'IP Received', 'Sanctioned', 'Disbursed', 'On Hold',
+  'Declined', 'Dropped'];
+
 export const lenderNext = (st: string, heldFrom?: string): string[] => {
   const base = LENDER_NEXT[st] ?? [];
   if (st === 'On Hold' && heldFrom && base.includes(heldFrom)) {
@@ -295,6 +301,24 @@ export const syndicationService = {
     (e.h = e.h || []).push({ st: e.st || '(response)', t: today(), by });
     writeAudit(by, 'Lender response', code, name + (note ? ': ' + note.slice(0, 80) : ' (inbound)'));
     if (note) { db().interactions = db().interactions || []; db().interactions.push({ refId: code, refType: 'Platform Deals', occurredAt: today(), person: by, direction: 'inbound', lenderName: name, notes: note }); }
+  },
+  /** Remove a MISTAKENLY ADDED lender row — Admin's correction, awaited, refusal
+   *  surfaced. A bank actually worked ends via Dropped (with the reason), never
+   *  removal; the server enforces the same line. */
+  async removeLender(code: string, name: string, by: string, mandateId?: string):
+      Promise<{ ok: boolean; error?: string }> {
+    const r = mandateOf(code, mandateId); const e = r?.lenders?.find((l: any) => l.name === name);
+    if (!r || !e) return { ok: false, error: 'Lender row not found.' };
+    if (USE_REAL_API && r.apiId && e.apiId) {
+      try { await api.del('/syndication/' + r.apiId + '/lenders/' + e.apiId); }
+      catch (err: any) {
+        return { ok: false, error: errText(err?.response?.data)
+          || `The register refused the removal (HTTP ${err?.response?.status ?? '?'}).` };
+      }
+    }
+    r.lenders = (r.lenders || []).filter((l: any) => l !== e);
+    writeAudit(by, 'Lender removed (mistaken add)', code, name);
+    return { ok: true };
   },
   /** AWAITED delete, refusal surfaced — see lendingService.remove. */
   async remove(id: string, by: string): Promise<{ ok: boolean; error?: string }> {

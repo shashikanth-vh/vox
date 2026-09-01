@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Autocomplete, Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
+import { syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LENDER_ALL, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
 import { db } from '../../api/atlasStore';
 import { daysSince, fmt } from '../../utils/format';
@@ -49,8 +49,10 @@ const SnapQuiet = ({ children, red }: { children: React.ReactNode; red?: boolean
 // v12 `.chline .lsel`: 1px --line box, 4px radius, 12px, tight padding. Offers only
 // the CURRENT status plus its legal next steps — the register enforces the same
 // transition map, so a free-for-all list would just collect 422s.
-const LSel = ({ value, disabled, onChange, heldFrom }: { value: string; disabled: boolean; onChange: (v: string) => void; heldFrom?: string }) => {
-  const opts = [value, ...lenderNext(value, heldFrom)].filter((s, i, a) => s && a.indexOf(s) === i);
+const LSel = ({ value, disabled, onChange, heldFrom, all }: { value: string; disabled: boolean; onChange: (v: string) => void; heldFrom?: string; all?: boolean }) => {
+  // `all` = the ADMIN CORRECTION LANE: any canonical state, so a mis-click can be
+  // walked back. The server allows exactly this for Admin and nobody else.
+  const opts = [value, ...(all ? LENDER_ALL : lenderNext(value, heldFrom))].filter((s, i, a) => s && a.indexOf(s) === i);
   return (
     <Select size="small" value={value} disabled={disabled || opts.length <= 1} onClick={(e) => e.stopPropagation()}
       onChange={(e) => onChange(e.target.value)}
@@ -80,6 +82,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const admin = can(user.roles, 'deleteRow');
   const [del, setDel] = useState<any | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
+  const [delL, setDelL] = useState<{ code: string; id: string; name: string } | null>(null);
   const [, force] = useState(0);
   const [newL, setNewL] = useState<Record<string, string>>({});
   // Log chase / Log reply note capture — MUI dialog in place of window.prompt.
@@ -183,7 +186,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   <Pill tone={a.sev === 'red' ? 'red' : 'amber'}>{tag}</Pill>
                   <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }} onClick={() => onOpenCompany(a.code)}>{a.co}</Box>
                   <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{a.l.name}</Typography>
-                  <LSel value={a.l.st || 'Identified'} heldFrom={a.l.heldFrom} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v, a.id)} />
+                  <LSel value={a.l.st || 'Identified'} heldFrom={a.l.heldFrom} all={admin} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v, a.id)} />
                   <Box sx={{ flex: 1 }} />
                   <MiniBtn onClick={() => chase(a.code, a.l.name, a.id)}>Log chase</MiniBtn>
                   <MiniBtn onClick={() => reply(a.code, a.l.name, a.id)}>Log reply</MiniBtn>
@@ -256,7 +259,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   ...(silent ? { borderLeft: '3px solid #f59e0b', pl: '8px' } : { '&:hover': { bgcolor: '#eef2f6' } }),
                 }}>
                   <Box component="b" sx={{ color: tokens.navy, minWidth: 150 }}>{l.name}</Box>
-                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={ro} onChange={(v) => setSt(r.code, l.name, v, r.id)} />
+                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} all={admin} disabled={ro} onChange={(v) => setSt(r.code, l.name, v, r.id)} />
                   {l.st === 'Sanctioned' && l.amt != null && (
                     <Typography component="span" sx={{ fontSize: 11.6, fontWeight: 700, color: LSTATE_COLOR['Sanctioned'] }}>₹{fmt(l.amt, 1)} Cr</Typography>
                   )}
@@ -271,6 +274,13 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                     {!hasSnap && !remark && rd == null && cd == null && <SnapQuiet>no outreach logged</SnapQuiet>}
                   </Box>
                   {!ro && <><MiniBtn onClick={() => chase(r.code, l.name, r.id)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name, r.id)}>Log reply</MiniBtn></>}
+                  {admin && (
+                    <Box component="button" title="Remove this lender (added by mistake) — Admin only"
+                      onClick={(e) => { e.stopPropagation(); setDelL({ code: r.code, id: r.id, name: l.name }); }}
+                      sx={{ background: '#fff', border: '1px solid #E8C6BE', borderRadius: '8px', px: '8px', py: '5px', fontSize: '11.5px', cursor: 'pointer', color: '#A93B22' }}>
+                      ✕
+                    </Box>
+                  )}
                 </Box>
               );
             }) : <Box sx={{ ...CHLINE, bgcolor: '#fafbfc', color: tokens.muted, fontSize: '11.6px' }}>No lenders yet. Add one below.</Box>}
@@ -319,6 +329,16 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
         }} />
       <ConfirmDialog open={!!delErr} title="Delete refused" message={delErr || ''}
         onCancel={() => setDelErr(null)} onConfirm={() => setDelErr(null)} />
+      <ConfirmDialog open={!!delL} title="Remove lender"
+        message={`Remove ${delL?.name || ''} from this mandate? Use this only for a mistaken add — a bank actually engaged ends via Dropped, with the reason.`}
+        onCancel={() => setDelL(null)} onConfirm={() => {
+          const d = delL; setDelL(null);
+          if (!d) return;
+          void syndicationService.removeLender(d.code, d.name, user.full, d.id).then((res) => {
+            if (!res.ok) setDelErr(res.error || 'The register refused the removal.');
+            bump();
+          });
+        }} />
 
       {/* Log chase / Log reply note capture (replaces window.prompt) */}
       <Dialog open={!!logDlg} onClose={closeLog} maxWidth="sm" fullWidth>

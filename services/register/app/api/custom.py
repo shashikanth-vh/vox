@@ -277,6 +277,10 @@ _LENDER_TRANSITIONS: dict[str, set[str]] = {
     "On Hold": {"Identified", "IM Under Preparation", "IM Circulated",
                 "Queries Received", "IP Received", "Declined", "Dropped"},
 }
+# Every canonical lender state — the outer bound of the ADMIN CORRECTION LANE
+# (an Admin may move a lender anywhere in this set, but never to an unknown word).
+_LENDER_STATES: set[str] = set(_LENDER_TRANSITIONS) - {""} | {
+    t for targets in _LENDER_TRANSITIONS.values() for t in targets}
 
 # The Excel books wrote the same fact many ways ("IM in Prep", "IM under
 # preparation", "On hold"). Rows carrying those spellings must MOVE, not sit
@@ -359,11 +363,25 @@ async def update_syndication_lender(
     if new_status is not None and new_status != current:
         data["status"] = new_status  # store the canonical spelling, always
         allowed = _LENDER_TRANSITIONS.get(current, set())
+        # ADMIN CORRECTION LANE: a mis-click is not a business event. An Admin may
+        # move a lender to ANY canonical state — backward, out of a terminal state,
+        # anywhere — because a wrong status the desk cannot unwind poisons every
+        # count downstream. The move still lands in status_history with the actor
+        # (the server appends {from,to,at,by}), and the outcome-substance rules
+        # below still hold, so even a correction into Declined says why.
+        is_admin = ctx.user is not None and "Admin" in (ctx.user.roles or [])
         if new_status not in allowed:
-            raise ValidationAppError(
-                f"A lender at {row.status or 'no status'!r} cannot move to "
-                f"{new_status!r} — next steps are: "
-                f"{', '.join(sorted(allowed)) or 'none (terminal)'}.")
+            if not is_admin:
+                raise ValidationAppError(
+                    f"A lender at {row.status or 'no status'!r} cannot move to "
+                    f"{new_status!r} — next steps are: "
+                    f"{', '.join(sorted(allowed)) or 'none (terminal)'}. "
+                    f"An Admin can correct a mistaken status to any state.")
+            if new_status not in _LENDER_STATES:
+                raise ValidationAppError(
+                    f"{new_status!r} is not a lender status PRISM knows — even a "
+                    f"correction stays inside the vocabulary: "
+                    f"{', '.join(sorted(_LENDER_STATES))}.")
         # The outcomes carry their substance: a decline or a drop says WHY, a
         # sanction says HOW MUCH.
         if new_status in ("Declined", "Dropped") \
@@ -386,6 +404,34 @@ async def update_syndication_lender(
         if syn is not None:
             await _notify_syn_outcome(ctx, syn, obj, new_status)
     return s.SyndicationLenderRead.model_validate(obj)
+
+
+@router.delete("/v1/syndication/{syndication_id}/lenders/{lender_id}",
+               status_code=204, tags=["Syndication Lenders"],
+               summary="Remove a lender row (Admin — mistaken add)")
+async def remove_syndication_lender(
+    syndication_id: uuid.UUID,
+    lender_id: uuid.UUID,
+    ctx: RequestContext = Depends(get_context),
+) -> Response:
+    """A bank that was actually worked stays in the history — Dropped (with the
+    reason) is how a real engagement ends. This endpoint is for the OTHER case:
+    a fat-fingered add that never was an engagement. Admin-only (the delete_row
+    gate, online-revalidated), parent-scoped, soft-delete — the audit log keeps
+    the fact that the row existed and who removed it."""
+    from app.authz import enforce_operation
+    from app.authz.revalidate import revalidate_sensitive
+
+    enforce_operation(ctx.user, "delete_row")
+    await revalidate_sensitive(ctx, "delete_row")
+    await _ensure_subject_scope(ctx, "add_lender_to_mandate", "Syndication",
+                                syndication_id)
+    row = await _synlender_repo.get(ctx.session, ctx.tenant_id, lender_id)
+    if str(row.syndication_id) != str(syndication_id):
+        raise NotFoundError(
+            f"lender '{lender_id}' is not on syndication '{syndication_id}'.")
+    await _synlender_repo.soft_delete(ctx.session, ctx.tenant_id, lender_id, ctx.actor)
+    return Response(status_code=204)
 
 
 # --------------------------------------------------------------------------- #

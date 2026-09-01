@@ -3,7 +3,7 @@ import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar
 import ExportBar from '../../components/common/ExportBar';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import {
-  syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, lenderLabel,
+  syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LENDER_ALL, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
 } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
@@ -363,7 +363,9 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           const st = row?.st || '';
           const s = st ? (ST2DOT[st] || 1) : 0;
           const d = row?.since ? daysSince(row.since) : null;
-          const nexts = ro ? [] : lenderNext(st, row?.heldFrom);
+          // Admin sees the whole vocabulary (the correction lane, matching the
+          // server); everyone else the legal next steps.
+          const nexts = ro ? [] : (admin ? LENDER_ALL.filter((x) => x !== st) : lenderNext(st, row?.heldFrom));
           // History rows arrive in two shapes: the register appends {from,to,at,by},
           // local echoes push {st,t,by} — render either, newest first.
           const hist = (row?.h || []).slice(-4).reverse().map((x: any) => ({

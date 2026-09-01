@@ -74,6 +74,52 @@ async def test_lender_never_moves_backwards(client: AsyncClient):
         assert r.status_code == 422, f"{st}: {r.text}"
 
 
+ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+
+
+async def test_admin_corrects_a_mistaken_status_and_removes_a_mistaken_add(client: AsyncClient):
+    """A mis-click is not a business event. The desk cannot move backward (above),
+    but an ADMIN can correct any state to any canonical state — the history keeps
+    the correction with the actor — and can remove a lender that was added by
+    mistake. The vocabulary still bounds the correction, and the desk-role refusal
+    now points at the Admin lane."""
+    syn_id = await _mandate(client, code="OOPS")
+    lid = (await _lender(client, syn_id, status="IM Under Preparation"))["id"]
+
+    # The desk (non-admin human) is still refused — and told an Admin can fix it.
+    r = await _move(client, syn_id, lid, status="Identified")
+    assert r.status_code == 422 and "Admin can correct" in r.text
+
+    # Admin walks it BACK — the correction lands, canonically, with history.
+    r = await client.patch(f"/v1/syndication/{syn_id}/lenders/{lid}",
+                           json={"status": "Identified"}, headers=ADMIN)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "Identified"
+    assert body["status_history"][-1]["to"] == "Identified"
+    assert body["status_history"][-1]["by"] == "admin@evamfinance.com"
+
+    # Even Admin stays inside the vocabulary.
+    r = await client.patch(f"/v1/syndication/{syn_id}/lenders/{lid}",
+                           json={"status": "Sideways"}, headers=ADMIN)
+    assert r.status_code == 422 and "not a lender status" in r.text
+
+    # A correction INTO an outcome still carries its substance.
+    r = await client.patch(f"/v1/syndication/{syn_id}/lenders/{lid}",
+                           json={"status": "Declined"}, headers=ADMIN)
+    assert r.status_code == 422 and "say why" in r.text
+
+    # Mistaken add: Admin removes the row; a desk role may not.
+    lid2 = (await _lender(client, syn_id, name="Wrong Bank"))["id"]
+    r = await client.delete(f"/v1/syndication/{syn_id}/lenders/{lid2}", headers=RM)
+    assert r.status_code == 403, r.text
+    r = await client.delete(f"/v1/syndication/{syn_id}/lenders/{lid2}", headers=ADMIN)
+    assert r.status_code == 204, r.text
+    names = [x["lender_name"] for x in
+             (await client.get(f"/v1/syndication/{syn_id}/lenders")).json()]
+    assert "Wrong Bank" not in names and "HDFC Bank" in names
+
+
 async def test_decline_requires_a_reason_and_is_terminal(client: AsyncClient):
     syn_id = await _mandate(client, code="DECL")
     lid = (await _lender(client, syn_id))["id"]
