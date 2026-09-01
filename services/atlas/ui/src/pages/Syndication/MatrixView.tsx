@@ -37,7 +37,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   // The cell popover: read-only roles get the story (status, dwell, note, history);
   // advanceMatrix roles also get the LEGAL next steps — Sanctioned captures the
   // allocation (₹ Cr), Declined the reason, exactly what the register demands.
-  const [pop, setPop] = useState<{ c: string; id: string; l: string; el: HTMLElement } | null>(null);
+  const [pop, setPop] = useState<{ c: string; id: string; dealNo?: string; l: string; el: HTMLElement } | null>(null);
   const [target, setTarget] = useState('');
   const [note, setNote] = useState('');
   const [amount, setAmount] = useState('');
@@ -71,9 +71,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   const cellDays = (r: any, l: string) => { const o = cellObj(r, l); return o?.since ? daysSince(o.since) : null; };
   const live = (r: any) => !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status);
   const closed = (r: any) => SYN_CLOSED.includes(r.status);
-  // The row label's second line: the mandate's own number (when it differs from the
-  // company code), its ask and its status — what tells sibling rows apart.
-  const subOf = (r: any) => `${r.id && r.id !== r.code ? r.id + ' · ' : ''}₹${fmt(Number(r.amt) || 0, 1)} Cr${r.status ? ' · ' + r.status : ''}`;
+  // The row label's second line: ALWAYS the mandate's own number (two mandates with
+  // the same ask must be tellable apart without opening anything), the linked deal's
+  // number when there is one (the user's backtrack to the Deals sheet), then ask and
+  // status.
+  const subOf = (r: any) => `${r.id ? r.id + ' · ' : ''}${r.dealNo ? 'deal ' + r.dealNo + ' · ' : ''}₹${fmt(Number(r.amt) || 0, 1)} Cr${r.status ? ' · ' + r.status : ''}`;
 
   const anyFilter = () => mf.noout || mf.states.length > 0 || (mf.dwell !== '' && mf.dwell != null);
   const cellHit = (r: any, l: string) => {
@@ -123,7 +125,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   // Declined the reason — the server rejects both without their substance.
   const openPop = (e: React.MouseEvent<HTMLElement>, r: any, l: string) => {
     setTarget(''); setNote(''); setAmount(''); setRemark(null);
-    setPop({ c: r.code, id: r.id, l, el: e.currentTarget });
+    setPop({ c: r.code, id: r.id, dealNo: r.dealNo, l, el: e.currentTarget });
   };
   const closePop = () => { setPop(null); setTarget(''); setNote(''); setAmount(''); setRemark(null); };
   const commit = (st: string) => {
@@ -161,11 +163,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
   };
 
   const exportCsv = () => {
-    const out = [['Company', 'Group Code', 'Mandate', 'Mandate status', 'Lender', 'State', 'Since', 'Days', 'Ask Cr']];
+    const out = [['Company', 'Group Code', 'Mandate', 'Deal', 'Mandate status', 'Lender', 'State', 'Since', 'Days', 'Ask Cr']];
     rows.forEach((r) => cols.forEach((l) => {
       const o = cellObj(r, l); if (!o) return;
       if (anyFilter() && !mf.noout && !cellHit(r, l)) return;
-      out.push([clientsService.get(r.code).name, r.code, r.id || '', r.status || '', l,
+      out.push([clientsService.get(r.code).name, r.code, r.id || '', r.dealNo || '', r.status || '', l,
         MATRIX_LABELS[o.s], o.since || '', String(daysSince(o.since) ?? ''), String(Number(r.amt) || 0)]);
     }));
     const csv = out.map((x) => x.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -361,7 +363,8 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
             <Box>
               <Typography sx={{ fontWeight: 700, fontSize: 13.2 }}>{pop.l}</Typography>
               <Typography sx={{ fontSize: 11.4, color: tokens.muted, mb: 1 }}>
-                {clientsService.get(pop.c).name}{pop.id && pop.id !== pop.c ? ` · ${pop.id}` : ''}
+                {clientsService.get(pop.c).name}{pop.id ? ` · ${pop.id}` : ''}
+                {pop.dealNo ? ` · deal ${pop.dealNo}` : ' · no linked deal'}
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mb: 0.6 }}>
                 <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s ? MATRIX_COLORS[s] : '#fff', border: `1.4px solid ${s ? MATRIX_COLORS[s] : '#C9D2D6'}` }} />

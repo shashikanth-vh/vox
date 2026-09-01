@@ -143,10 +143,10 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const exportCsv = () => {
     const rows: (string | number)[][] = [];
     files.forEach(({ r, co }: any) => (r.lenders || []).forEach((l: Lender) => {
-      rows.push([co, r.code, Number(r.amt) || 0, l.name, l.ex ? 'Existing' : (l.st || ''),
+      rows.push([co, r.code, r.id || '', r.dealNo || '', Number(r.amt) || 0, l.name, l.ex ? 'Existing' : (l.st || ''),
         l.ex ? '' : (daysSince(l.resp) ?? ''), l.ex ? '' : (daysSince(l.chased) ?? '')]);
     }));
-    saveCsv(toCsv(['Company', 'Group Code', 'Ask Cr', 'Lender', 'Status', 'Inbound days', 'Chased days'], rows), 'atlas_chase');
+    saveCsv(toCsv(['Company', 'Group Code', 'Mandate', 'Deal', 'Ask Cr', 'Lender', 'Status', 'Inbound days', 'Chased days'], rows), 'atlas_chase');
   };
 
   if (!files.length) return <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>No live Platform Deals files.</Box>;
@@ -214,7 +214,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               <ExpandMoreIcon sx={{ fontSize: 18, color: tokens.muted }} />
               <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenCompany(r.code); }}>{co}</Box>
-              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
+              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''}{r.dealNo ? ` · deal ${r.dealNo}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
               {/* density strip */}
               <Box sx={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }}>
                 {outreach.length ? outreach.map((l, i) => {
@@ -243,7 +243,6 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               // there are words to hang them on.
               const hasSnap = !!(l.chaseNote || l.replyNote);
               const awaiting = !!l.chaseNote && cd != null && (!l.resp || String(l.resp) < String(l.chased));
-              const ballWithUs = !!l.replyNote && (cd == null || String(l.chased) <= String(l.resp));
               const remark = l.note && l.note !== l.chaseNote && l.note !== l.replyNote ? l.note : '';
               return (
                 <Box key={i} sx={{
@@ -262,7 +261,6 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                       <SnapQuiet>{rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}</SnapQuiet>
                     )}
                     {awaiting && <SnapQuiet red={silent || (cd != null && cd > th.lenderSilent)}>no reply yet — {cd}d since we chased</SnapQuiet>}
-                    {ballWithUs && <SnapQuiet>ball with us — no chase after their reply</SnapQuiet>}
                     {remark && <SnapLine kind="remark" text={remark} />}
                     {!hasSnap && !remark && rd == null && cd == null && <SnapQuiet>no outreach logged</SnapQuiet>}
                   </Box>

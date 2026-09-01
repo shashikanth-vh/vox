@@ -93,8 +93,8 @@ export async function fillCompanyFromEntity<T extends { _name?: string; code?: s
  * Mutates in place, and still fails soft: an unresolvable row keeps its blanks rather
  * than failing the grid.
  */
-export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string; entityId?: string }>(rows: T[]): Promise<T[]> {
-  if (rows.some((r) => (r.dealId || r.entityId) && (!r._name || !r.code))) {
+export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string; entityId?: string; dealNo?: string }>(rows: T[]): Promise<T[]> {
+  if (rows.some((r) => (r.dealId || r.entityId) && (!r._name || !r.code || (r.dealId && !r.dealNo)))) {
     await ensure();
     rows.forEach((r) => {
       const ref = r.dealId ? dealRefs.get(String(r.dealId)) : undefined;
@@ -103,6 +103,10 @@ export async function fillFromDeal<T extends { _name?: string; code?: string; de
       // Prefer the company's group code; a deal number is not what the drawer opens on.
       if (!r.code) r.code = ent?.code || ref?.code || '';
       if (!r._name) r._name = ent?.name || '';
+      // The linked deal's own number, kept SEPARATE from the group code — it is how a
+      // user backtracks a mandate to its row on the Deals sheet (a second facility is
+      // "<code>-2" there, so the number tells sibling deals apart where the code can't).
+      if (!r.dealNo && ref?.code) r.dealNo = ref.code;
     });
   }
   return rows;
