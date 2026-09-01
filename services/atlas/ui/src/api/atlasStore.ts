@@ -79,5 +79,11 @@ if (!LIVE && (!store.interactions || store.interactions.length === 0)) {
 }
 
 export function db(): AtlasData { return store; }
-export const today = () => new Date().toISOString().slice(0, 10);
+// The VIEWER'S calendar day — never the UTC day (an IST evening is already
+// tomorrow in UTC terms after 18:30, and every date stamped from here is
+// "the day the user acted").
+export const today = () => {
+  const d = new Date(); const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+};
 export const nowStamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');

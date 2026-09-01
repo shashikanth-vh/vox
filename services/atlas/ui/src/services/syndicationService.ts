@@ -269,6 +269,10 @@ export const syndicationService = {
     // onto the matching lender row itself, so this one call is the whole write.
     if (r?.apiId) remote('post', '/syndication/' + r.apiId + '/interactions', {
       interaction_type: 'Phone Call', direction: 'outbound', lender_name: name,
+      // The user's own day, widened to the stored timestamp (the manual dialog's
+      // pattern) — otherwise the register stamps the UTC day and an IST evening
+      // chase reads "1d ago" the moment it lands.
+      occurred_at: today() + 'T00:00:00Z',
       summary: (note || 'Chase').slice(0, 300), notes: note || null, performed_by: by,
     });
     // The words land on the CHASE snapshot; the hand-typed remark stays its own.
@@ -283,6 +287,7 @@ export const syndicationService = {
     // INBOUND — the register rolls response_date onto the lender row.
     if (r?.apiId) remote('post', '/syndication/' + r.apiId + '/interactions', {
       interaction_type: 'Phone Call', direction: 'inbound', lender_name: name,
+      occurred_at: today() + 'T00:00:00Z',
       summary: (note || 'Lender response').slice(0, 300), notes: note || null, performed_by: by,
     });
     // The words land on the REPLY snapshot; the hand-typed remark stays its own.
