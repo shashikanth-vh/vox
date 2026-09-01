@@ -2,7 +2,7 @@
 // them); mock rows simply leave them unset.
 // `amt` is the bank's sanctioned allocation in ₹ Cr (register amount_cr) — set when
 // the lender reaches Sanctioned; null until then.
-export interface SynLender { apiId?: string; name: string; ex: boolean; st: string; since: string; resp: string; chased: string | null; note: string; amt?: number | null; h?: any[]; heldFrom?: string; }
+export interface SynLender { apiId?: string; name: string; ex: boolean; st: string; since: string; resp: string; chased: string | null; note: string; chaseNote?: string; replyNote?: string; amt?: number | null; h?: any[]; heldFrom?: string; }
 export interface SynRow {
   apiId?: string; entityId?: string; dealId?: string;
   id: string; code: string; toi: string; rm: string; an: string; lc: string; pri: string;

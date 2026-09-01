@@ -13,7 +13,7 @@ import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
 // density dot strip and inline lender rows (status select + log chase/reply).
-interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; amt?: number | null; heldFrom?: string; }
+interface Lender { name: string; ex?: boolean; st?: string; resp?: string; chased?: string | null; note?: string; chaseNote?: string; replyNote?: string; amt?: number | null; heldFrom?: string; }
 
 // Chase-list status → dot colour (v12 ST_COLOR == LSTATE_COLOR).
 const dotColor = (st?: string) => LSTATE_COLOR[st || 'Identified'] || '#94a3b8';
@@ -24,6 +24,26 @@ function Pill({ tone, children }: { tone: 'red' | 'amber' | 'grey'; children: Re
   const [bg, fg] = map[tone];
   return <Box component="span" sx={{ display: 'inline-block', borderRadius: 999, px: '8px', py: '2px', fontSize: 10.8, fontWeight: 700, bgcolor: bg, color: fg, whiteSpace: 'nowrap' }}>{children}</Box>;
 }
+
+// One line of the conversation snapshot: CHASE = the last thing we said, REPLY =
+// the last thing the lender said, REMARK = the desk's own margin note. Ellipsised
+// to one line; the full text rides the title tooltip.
+const SNAP_TONE = {
+  chase: ['#0E6E8A', '#E3F2F7'], reply: ['#0E8A68', '#E2F5EE'], remark: ['#7A6A2E', '#F5F0DC'],
+} as const;
+function SnapLine({ kind, when, text }: { kind: keyof typeof SNAP_TONE; when?: string; text: string }) {
+  const [fg, bg] = SNAP_TONE[kind];
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.8, minWidth: 0, whiteSpace: 'nowrap' }}>
+      <Box component="span" sx={{ flex: 'none', fontSize: 9.6, fontWeight: 700, letterSpacing: 0.4, borderRadius: '4px', px: 0.7, py: 0.1, color: fg, bgcolor: bg }}>{kind.toUpperCase()}</Box>
+      {when && <Typography component="span" sx={{ flex: 'none', fontSize: 10.8, color: tokens.muted }}>{when}</Typography>}
+      <Typography component="span" title={text} sx={{ fontSize: 11.4, color: tokens.ink, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis' }}>“{text}”</Typography>
+    </Box>
+  );
+}
+const SnapQuiet = ({ children, red }: { children: React.ReactNode; red?: boolean }) => (
+  <Typography sx={{ fontSize: 11, color: red ? '#C43C2B' : tokens.muted, fontStyle: 'italic', fontWeight: red ? 600 : 400 }}>{children}</Typography>
+);
 
 // v12 `.chline .lsel`: 1px --line box, 4px radius, 12px, tight padding. Offers only
 // the CURRENT status plus its legal next steps — the register enforces the same
@@ -57,11 +77,11 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const [, force] = useState(0);
   const [newL, setNewL] = useState<Record<string, string>>({});
   // Log chase / Log reply note capture — MUI dialog in place of window.prompt.
-  const [logDlg, setLogDlg] = useState<{ kind: 'chase' | 'reply'; code: string; name: string } | null>(null);
+  const [logDlg, setLogDlg] = useState<{ kind: 'chase' | 'reply'; code: string; name: string; id: string } | null>(null);
   const [logNote, setLogNote] = useState('');
   // The two OUTCOMES carry substance the register insists on: a decline says why,
   // a sanction says how much — captured here before the status write goes out.
-  const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' | 'Dropped' } | null>(null);
+  const [outDlg, setOutDlg] = useState<{ code: string; name: string; st: 'Sanctioned' | 'Declined' | 'Dropped'; id: string } | null>(null);
   const [outNote, setOutNote] = useState('');
   const [outAmt, setOutAmt] = useState('');
   const bump = () => force((n) => n + 1);
@@ -81,41 +101,43 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   files.forEach(({ r, co }: any) => (r.lenders || []).forEach((l: Lender) => {
     if (l.ex) return;
     const rd = daysSince(l.resp); const chased = daysSince(l.chased);
-    if (l.st === 'IM Circulated' && rd != null && rd > th.lenderSilent) attention.push({ code: r.code, co, l, reason: 'silent', age: rd, sev: rd > 14 ? 'red' : 'amber' });
-    else if (l.st === 'Queries Received' && (chased == null || chased > 3)) attention.push({ code: r.code, co, l, reason: 'queries', age: rd, sev: 'amber' });
-    else if (chased != null && chased > 10 && !['Sanctioned', 'Declined'].includes(l.st || '')) attention.push({ code: r.code, co, l, reason: 'stale-chase', age: chased, sev: 'amber' });
+    if (l.st === 'IM Circulated' && rd != null && rd > th.lenderSilent) attention.push({ code: r.code, id: r.id, co, l, reason: 'silent', age: rd, sev: rd > 14 ? 'red' : 'amber' });
+    else if (l.st === 'Queries Received' && (chased == null || chased > 3)) attention.push({ code: r.code, id: r.id, co, l, reason: 'queries', age: rd, sev: 'amber' });
+    else if (chased != null && chased > 10 && !['Sanctioned', 'Declined'].includes(l.st || '')) attention.push({ code: r.code, id: r.id, co, l, reason: 'stale-chase', age: chased, sev: 'amber' });
   }));
   attention.sort((a, b) => (a.sev === 'red' ? 0 : 1) - (b.sev === 'red' ? 0 : 1) || b.age - a.age);
 
-  const setSt = (code: string, name: string, st: string) => {
+  // Every write names the exact mandate it renders from (id) — one company can run
+  // several syndication mandates, and the same bank may sit on more than one.
+  const setSt = (code: string, name: string, st: string, id: string) => {
     if (ro) return;
-    if (st === 'Sanctioned' || st === 'Declined' || st === 'Dropped') { setOutNote(''); setOutAmt(''); setOutDlg({ code, name, st }); return; }
-    syndicationService.setLenderStatus(code, name, st, user.full); bump();
+    if (st === 'Sanctioned' || st === 'Declined' || st === 'Dropped') { setOutNote(''); setOutAmt(''); setOutDlg({ code, name, st, id }); return; }
+    syndicationService.setLenderStatus(code, name, st, user.full, undefined, id); bump();
   };
   const submitOut = () => {
     if (!outDlg) return;
     syndicationService.setLenderStatus(outDlg.code, outDlg.name, outDlg.st, user.full, {
       note: outNote.trim() || undefined,
       amountCr: outDlg.st === 'Sanctioned' && outAmt ? +outAmt : undefined,
-    });
+    }, outDlg.id);
     setOutDlg(null); bump();
   };
   const outOk = outDlg?.st === 'Sanctioned' ? +outAmt > 0 : outNote.trim().length > 0;
-  const chase = (code: string, name: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'chase', code, name }); };
-  const reply = (code: string, name: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'reply', code, name }); };
+  const chase = (code: string, name: string, id: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'chase', code, name, id }); };
+  const reply = (code: string, name: string, id: string) => { if (ro) return; setLogNote(''); setLogDlg({ kind: 'reply', code, name, id }); };
   const closeLog = () => setLogDlg(null);
   const submitLog = () => {
     if (!logDlg) return;
     const note = logNote.trim();
-    if (logDlg.kind === 'chase') syndicationService.logChase(logDlg.code, logDlg.name, note, user.full);
-    else syndicationService.logResp(logDlg.code, logDlg.name, note, user.full);
+    if (logDlg.kind === 'chase') syndicationService.logChase(logDlg.code, logDlg.name, note, user.full, logDlg.id);
+    else syndicationService.logResp(logDlg.code, logDlg.name, note, user.full, logDlg.id);
     setLogDlg(null); bump();
   };
-  const add = (code: string, name?: string) => {
+  const add = (code: string, id: string, name?: string) => {
     if (ro) return;
-    const v = (name ?? newL[code] ?? '').trim(); if (!v) return;
-    syndicationService.addLender(code, v, user.full);
-    setNewL((p) => ({ ...p, [code]: '' })); bump();
+    const v = (name ?? newL[id] ?? '').trim(); if (!v) return;
+    syndicationService.addLender(code, v, user.full, id);
+    setNewL((p) => ({ ...p, [id]: '' })); bump();
   };
 
   const exportCsv = () => {
@@ -155,10 +177,10 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                   <Pill tone={a.sev === 'red' ? 'red' : 'amber'}>{tag}</Pill>
                   <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }} onClick={() => onOpenCompany(a.code)}>{a.co}</Box>
                   <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{a.l.name}</Typography>
-                  <LSel value={a.l.st || 'Identified'} heldFrom={a.l.heldFrom} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v)} />
+                  <LSel value={a.l.st || 'Identified'} heldFrom={a.l.heldFrom} disabled={ro} onChange={(v) => setSt(a.code, a.l.name, v, a.id)} />
                   <Box sx={{ flex: 1 }} />
-                  <MiniBtn onClick={() => chase(a.code, a.l.name)}>Log chase</MiniBtn>
-                  <MiniBtn onClick={() => reply(a.code, a.l.name)}>Log reply</MiniBtn>
+                  <MiniBtn onClick={() => chase(a.code, a.l.name, a.id)}>Log chase</MiniBtn>
+                  <MiniBtn onClick={() => reply(a.code, a.l.name, a.id)}>Log reply</MiniBtn>
                 </Box>
               );
             })}
@@ -192,7 +214,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               <ExpandMoreIcon sx={{ fontSize: 18, color: tokens.muted }} />
               <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenCompany(r.code); }}>{co}</Box>
-              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
+              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
               {/* density strip */}
               <Box sx={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }}>
                 {outreach.length ? outreach.map((l, i) => {
@@ -216,23 +238,35 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               );
               const rd = daysSince(l.resp); const cd = daysSince(l.chased);
               const silent = l.st === 'IM Circulated' && rd != null && rd > th.lenderSilent;
+              // Conversation snapshot. Dates are YYYY-MM-DD strings, so who spoke
+              // last is a plain comparison; the two quiet hints only appear when
+              // there are words to hang them on.
+              const hasSnap = !!(l.chaseNote || l.replyNote);
+              const awaiting = !!l.chaseNote && cd != null && (!l.resp || String(l.resp) < String(l.chased));
+              const ballWithUs = !!l.replyNote && (cd == null || String(l.chased) <= String(l.resp));
+              const remark = l.note && l.note !== l.chaseNote && l.note !== l.replyNote ? l.note : '';
               return (
                 <Box key={i} sx={{
                   ...CHLINE, bgcolor: silent ? '#fff7ed' : evenBg(i),
                   ...(silent ? { borderLeft: '3px solid #f59e0b', pl: '8px' } : { '&:hover': { bgcolor: '#eef2f6' } }),
                 }}>
                   <Box component="b" sx={{ color: tokens.navy, minWidth: 150 }}>{l.name}</Box>
-                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={ro} onChange={(v) => setSt(r.code, l.name, v)} />
-                  <Typography component="span" sx={{ fontSize: 11.6, color: tokens.muted }}>
-                    {rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}
-                    {l.st === 'Sanctioned' && l.amt != null ? <b style={{ color: LSTATE_COLOR['Sanctioned'] }}> · ₹{fmt(l.amt, 1)} Cr</b> : ''}
-                  </Typography>
-                  {l.note && <Typography component="span" title={l.note}
-                    sx={{ fontSize: 11.4, color: tokens.ink, fontStyle: 'italic', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    “{l.note}”
-                  </Typography>}
-                  <Box sx={{ flex: 1 }} />
-                  {!ro && <><MiniBtn onClick={() => chase(r.code, l.name)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name)}>Log reply</MiniBtn></>}
+                  <LSel value={l.st || 'Identified'} heldFrom={l.heldFrom} disabled={ro} onChange={(v) => setSt(r.code, l.name, v, r.id)} />
+                  {l.st === 'Sanctioned' && l.amt != null && (
+                    <Typography component="span" sx={{ fontSize: 11.6, fontWeight: 700, color: LSTATE_COLOR['Sanctioned'] }}>₹{fmt(l.amt, 1)} Cr</Typography>
+                  )}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px', flex: 1, minWidth: 180 }}>
+                    {l.chaseNote && <SnapLine kind="chase" when={cd != null ? `${cd}d ago` : ''} text={l.chaseNote} />}
+                    {l.replyNote && <SnapLine kind="reply" when={rd != null ? `${rd}d ago` : ''} text={l.replyNote} />}
+                    {!hasSnap && (rd != null || cd != null) && (
+                      <SnapQuiet>{rd != null ? `inbound ${rd}d` : 'no inbound'}{cd != null ? ` · chased ${cd}d` : ''}{silent ? ' · SILENT' : ''}</SnapQuiet>
+                    )}
+                    {awaiting && <SnapQuiet red={silent || (cd != null && cd > th.lenderSilent)}>no reply yet — {cd}d since we chased</SnapQuiet>}
+                    {ballWithUs && <SnapQuiet>ball with us — no chase after their reply</SnapQuiet>}
+                    {remark && <SnapLine kind="remark" text={remark} />}
+                    {!hasSnap && !remark && rd == null && cd == null && <SnapQuiet>no outreach logged</SnapQuiet>}
+                  </Box>
+                  {!ro && <><MiniBtn onClick={() => chase(r.code, l.name, r.id)}>Log chase</MiniBtn><MiniBtn onClick={() => reply(r.code, l.name, r.id)}>Log reply</MiniBtn></>}
                 </Box>
               );
             }) : <Box sx={{ ...CHLINE, bgcolor: '#fafbfc', color: tokens.muted, fontSize: '11.6px' }}>No lenders yet. Add one below.</Box>}
@@ -247,13 +281,13 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
                     .filter((f: any) => f?.name && !f.inactive
                       && !(r.lenders || []).some((l: Lender) => l.name.toLowerCase() === f.name.toLowerCase()))
                     .map((f: any) => f.name)}
-                  inputValue={newL[r.code] || ''}
-                  onInputChange={(_, v) => setNewL((p) => ({ ...p, [r.code]: v }))}
-                  onChange={(_, v) => v && add(r.code, String(v))}
+                  inputValue={newL[r.id] || ''}
+                  onInputChange={(_, v) => setNewL((p) => ({ ...p, [r.id]: v }))}
+                  onChange={(_, v) => v && add(r.code, r.id, String(v))}
                   renderInput={(params) => (
                     <TextField {...params} placeholder="Add lender — pick from FI master or type" />
                   )} />
-                <MiniBtn onClick={() => add(r.code)}>+ Add</MiniBtn>
+                <MiniBtn onClick={() => add(r.code, r.id)}>+ Add</MiniBtn>
               </Box>
             )}
           </Box>

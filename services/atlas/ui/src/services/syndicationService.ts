@@ -98,6 +98,9 @@ function toLender(l: any): SynLender {
     resp: l?.response_date || '',
     chased: l?.chased_date || null,
     note: l?.note || '',
+    // Server-rolled conversation snapshot: the words behind chased/resp.
+    chaseNote: l?.last_chase_note || undefined,
+    replyNote: l?.last_reply_note || undefined,
     amt: l?.amount_cr == null ? null : Number(l.amount_cr),
     h: l?.status_history || [],
     // The status this row was doing when it went On Hold — resume offers it first.
@@ -168,6 +171,14 @@ async function loadReal(): Promise<void> {
   hydratedAt = Date.now();
 }
 
+// Resolve the mandate a lender write should land on. With a mandateId the write is
+// EXACT — the row the caller rendered from — which matters when one company runs
+// several syndication mandates at once. Without one, the historical first-mandate-
+// by-code lookup still serves single-mandate companies.
+const mandateOf = (code: string, mandateId?: string): SynRow | undefined =>
+  mandateId ? db().syn.find((x: SynRow) => x.id === mandateId || x.apiId === mandateId)
+            : db().syn.find((x: SynRow) => x.code === code);
+
 export const syndicationService = {
   /** Replace the local store with the register's rows (real mode; briefly cached).
    *  Fail-soft: on error the store keeps whatever it had, and the failure logs. */
@@ -202,8 +213,8 @@ export const syndicationService = {
     if (key === 'status') (r.h = r.h || []).push({ status: value, t: today(), by });
     writeAudit(by, key === 'status' ? 'Platform Deals status' : 'Platform Deals updated', r.code, key === 'status' ? `${old} → ${value}` : String(key));
   },
-  addLender(code: string, name: string, by: string) {
-    const r = db().syn.find((x: SynRow) => x.code === code); if (!r) return;
+  addLender(code: string, name: string, by: string, mandateId?: string) {
+    const r = mandateOf(code, mandateId); if (!r) return;
     r.lenders = r.lenders || [];
     if (r.lenders.some((l: any) => l.name.toLowerCase() === name.toLowerCase())) return;
     const local: SynLender = { name, ex: false, st: 'Identified', since: today(), resp: today(), chased: null, note: '', h: [{ st: 'Identified', t: today(), by }] };
@@ -221,8 +232,8 @@ export const syndicationService = {
    *  should hand in the reason (note), a Sanctioned move the bank's allocation
    *  (amountCr) — the register REQUIRES both, so callers capture them first. */
   setLenderStatus(code: string, name: string, st: string, by: string,
-                  opts?: { note?: string; amountCr?: number | null }) {
-    const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
+                  opts?: { note?: string; amountCr?: number | null }, mandateId?: string) {
+    const r = mandateOf(code, mandateId); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
     const body: any = { status: st, since: today() };
     if (opts?.note?.trim()) body.note = opts.note.trim();
@@ -236,23 +247,23 @@ export const syndicationService = {
       + (body.amount_cr != null ? ` · ₹${body.amount_cr} Cr` : '')
       + (body.note ? ` · ${String(body.note).slice(0, 60)}` : ''));
   },
-  /** The live lender row behind a matrix cell (first mandate carrying that bank —
-   *  the same row setLenderStatus writes). */
-  lenderRow(code: string, name: string): SynLender | undefined {
-    return db().syn.find((x: SynRow) => x.code === code)?.lenders?.find((l: any) => l.name === name);
+  /** The live lender row behind a matrix cell — the same row setLenderStatus
+   *  writes (exact mandate when mandateId is given). */
+  lenderRow(code: string, name: string, mandateId?: string): SynLender | undefined {
+    return mandateOf(code, mandateId)?.lenders?.find((l: any) => l.name === name);
   },
   /** Update ONLY the remark on a lender row — the manual tracker's Remarks column
    *  ("Reply awaited", "No update", "call with promoters Monday") lives at every
    *  stage, not just the outcomes, so it gets its own status-free write. */
-  setLenderNote(code: string, name: string, note: string, by: string) {
-    const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
+  setLenderNote(code: string, name: string, note: string, by: string, mandateId?: string) {
+    const r = mandateOf(code, mandateId); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
     if (r?.apiId && e.apiId) remote('patch', '/syndication/' + r.apiId + '/lenders/' + e.apiId, { note });
     e.note = note;
     writeAudit(by, 'Lender note', code, `${name}: ${note.slice(0, 80)}`);
   },
-  logChase(code: string, name: string, note: string, by: string) {
-    const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
+  logChase(code: string, name: string, note: string, by: string, mandateId?: string) {
+    const r = mandateOf(code, mandateId); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
     // An OUTBOUND interaction against the mandate: the register rolls chased_date
     // onto the matching lender row itself, so this one call is the whole write.
@@ -260,20 +271,22 @@ export const syndicationService = {
       interaction_type: 'Phone Call', direction: 'outbound', lender_name: name,
       summary: (note || 'Chase').slice(0, 300), notes: note || null, performed_by: by,
     });
-    e.chased = today(); if (note) e.note = note;
+    // The words land on the CHASE snapshot; the hand-typed remark stays its own.
+    e.chased = today(); e.chaseNote = note || undefined;
     (e.h = e.h || []).push({ st: e.st || '(chase)', t: today(), by });
     writeAudit(by, 'Chased lender', code, name + (note ? ': ' + note.slice(0, 80) : ' (outbound)'));
     if (note) { db().interactions = db().interactions || []; db().interactions.push({ refId: code, refType: 'Platform Deals', occurredAt: today(), person: by, direction: 'outbound', lenderName: name, notes: note }); }
   },
-  logResp(code: string, name: string, note: string, by: string) {
-    const r = db().syn.find((x: SynRow) => x.code === code); const e = r?.lenders?.find((l: any) => l.name === name);
+  logResp(code: string, name: string, note: string, by: string, mandateId?: string) {
+    const r = mandateOf(code, mandateId); const e = r?.lenders?.find((l: any) => l.name === name);
     if (!e) return;
     // INBOUND — the register rolls response_date onto the lender row.
     if (r?.apiId) remote('post', '/syndication/' + r.apiId + '/interactions', {
       interaction_type: 'Phone Call', direction: 'inbound', lender_name: name,
       summary: (note || 'Lender response').slice(0, 300), notes: note || null, performed_by: by,
     });
-    e.resp = today(); if (note) e.note = note;
+    // The words land on the REPLY snapshot; the hand-typed remark stays its own.
+    e.resp = today(); e.replyNote = note || undefined;
     (e.h = e.h || []).push({ st: e.st || '(response)', t: today(), by });
     writeAudit(by, 'Lender response', code, name + (note ? ': ' + note.slice(0, 80) : ' (inbound)'));
     if (note) { db().interactions = db().interactions || []; db().interactions.push({ refId: code, refType: 'Platform Deals', occurredAt: today(), person: by, direction: 'inbound', lenderName: name, notes: note }); }

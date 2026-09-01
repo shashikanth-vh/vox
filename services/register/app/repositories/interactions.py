@@ -93,18 +93,22 @@ async def create_interaction(
 
     obj = await _repo.create(session, tenant_id, actor, data)
 
-    # Update the lender's response / chased date from the direction.
+    # Update the lender's response / chased date from the direction — and carry the
+    # words with the clock: the note (if any) rolls onto the row's conversation
+    # snapshot. A note-less chase/reply clears the snapshot text rather than leaving
+    # an older quote against the new date — date and words always tell one story.
     if lender is not None and data.get("direction"):
         d = str(data["direction"]).lower()
+        said = (data.get("notes") or "").strip() or None
         if d == "inbound":
             await session.execute(
                 update(SyndicationLender).where(SyndicationLender.id == lender.id)
-                .values(response_date=obj.occurred_at.date())
+                .values(response_date=obj.occurred_at.date(), last_reply_note=said)
             )
         elif d == "outbound":
             await session.execute(
                 update(SyndicationLender).where(SyndicationLender.id == lender.id)
-                .values(chased_date=obj.occurred_at.date())
+                .values(chased_date=obj.occurred_at.date(), last_chase_note=said)
             )
 
     # Roll the latest interaction onto the parent lead's summary fields.

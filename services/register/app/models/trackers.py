@@ -156,6 +156,11 @@ class SyndicationLender(RegisterBase):
     response_date: Mapped[date | None] = mapped_column(Date)
     chased_date: Mapped[date | None] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(Text)
+    # The conversation snapshot the chase list shows: the words behind chased_date /
+    # response_date, rolled on by the same interaction write that stamps the dates.
+    # `note` stays the hand-typed remark — no longer overwritten by chases/replies.
+    last_chase_note: Mapped[str | None] = mapped_column(Text)
+    last_reply_note: Mapped[str | None] = mapped_column(Text)
     status_history: Mapped[list | None] = mapped_column(JSONB)
 
 

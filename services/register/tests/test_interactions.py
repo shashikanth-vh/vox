@@ -77,10 +77,23 @@ async def test_syndication_lender_response_and_chased(client: AsyncClient):
     lender = (await client.get(f"/v1/syndication/{syn_id}/lenders")).json()[0]
     assert lender["chased_date"] == "2026-06-05"
     assert lender["response_date"] == "2026-06-08"
+    # The words travel with the clocks: each direction keeps ITS OWN last note.
+    assert lender["last_chase_note"] == "Chased for IP"
+    assert lender["last_reply_note"] == "They confirmed interest"
 
-    # Both interactions are on the syndication timeline, carrying the lender.
+    # A note-less chase moves the clock and clears the snapshot text — the row
+    # never shows old words against a new date.
+    await client.post(f"/v1/syndication/{syn_id}/interactions", json={
+        "interaction_type": "Phone Call", "direction": "Outbound",
+        "lender_name": "Kotak Mahindra", "occurred_at": "2026-06-10T09:00:00Z"})
+    lender = (await client.get(f"/v1/syndication/{syn_id}/lenders")).json()[0]
+    assert lender["chased_date"] == "2026-06-10"
+    assert lender["last_chase_note"] is None
+    assert lender["last_reply_note"] == "They confirmed interest"  # untouched
+
+    # All three interactions are on the syndication timeline, carrying the lender.
     tl = (await client.get(f"/v1/syndication/{syn_id}/interactions")).json()
-    assert len(tl) == 2
+    assert len(tl) == 3
     assert all(i["lender_name"] == "Kotak Mahindra" for i in tl)
 
 

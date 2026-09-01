@@ -530,6 +530,9 @@ class SyndicationLenderRead(ReadModel):
     response_date: date | None
     chased_date: date | None
     note: str | None
+    # Server-rolled conversation snapshot (see interactions repository) — read-only.
+    last_chase_note: str | None = None
+    last_reply_note: str | None = None
     status_history: list[dict[str, Any]] | None
 
 
