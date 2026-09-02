@@ -70,6 +70,8 @@ export function toAmRow(r: any): AmRow {
     dtype: r?.deal_type || '',
     inv: r?.investor || '',
     itype: r?.investor_type || '',
+    rm: r?.rm || '',
+    an: r?.analyst || '',
     status: r?.status || '',
     teaser: r?.teaser ?? null,
     createdAt: localDay(r?.created_at || ''),
@@ -165,7 +167,7 @@ export const assetMonService = {
     const wire: Record<string, string> = {
       state: 'state', val: 'indicative_value_cr', mw: 'size_mw', nature: 'nature',
       dtype: 'deal_type', inv: 'investor', itype: 'investor_type', status: 'status',
-      teaser: 'teaser_date', notes: 'notes',
+      teaser: 'teaser_date', notes: 'notes', rm: 'rm', an: 'analyst',
     };
     if (isRegisterId(id) && wire[key as string]) {
       remoteDebounced('patch', AM_PATH + '/' + id, { [wire[key as string]]: value === '' ? null : value });
