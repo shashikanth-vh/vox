@@ -303,7 +303,7 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
         })}
         {!rows.length && <Typography sx={{ p: 3, color: tokens.muted, fontSize: 12.6 }}>No mandates match this view.</Typography>}
         <Typography sx={{ fontSize: 11.5, color: tokens.muted, p: '4px 4px 8px' }}>
-          {rows.length} mandates{person ? ` · RM / Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
+          {rows.length} mandates{person ? ` · Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
         </Typography>
       </Box>
       ) : (
@@ -364,7 +364,7 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
           </tbody>
         </table>
         <Typography sx={{ fontSize: 11.5, color: tokens.muted, p: '7px 11px' }}>
-          {rows.length} mandates{person ? ` · RM / Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
+          {rows.length} mandates{person ? ` · Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
         </Typography>
       </Box>
       )}
