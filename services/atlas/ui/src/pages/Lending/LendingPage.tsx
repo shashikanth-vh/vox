@@ -56,8 +56,12 @@ export default function LendingPage() {
     { accessorKey: '_name', header: 'Company', size: 220,
       meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'amt', header: '₹ Cr', size: 90, meta: { sortParam: 'amount_cr' }, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
-    { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
-    { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' } },
+    // Effective people: the line's own columns first, the linked deal's team as
+    // fallback — same rule as the syndication views.
+    { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' },
+      Cell: ({ row }) => row.original.rm || row.original.dealRm || '' },
+    { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' },
+      Cell: ({ row }) => row.original.an || row.original.dealAn || '' },
     {
       accessorKey: 'stage', header: 'Stage', size: 160, meta: { filterParam: 'stage' },
       // inline stage edit stamps the date automatically (template behaviour)

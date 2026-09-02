@@ -47,6 +47,12 @@ export default function AssetMonPage() {
     { accessorKey: 'dtype', header: 'Deal Type', size: 140, meta: { filterParam: 'deal_type' } },
     { accessorKey: 'inv', header: 'Investor', size: 180, ...truncCell(55) },
     { accessorKey: 'itype', header: 'Investor Type', size: 140, meta: { filterParam: 'investor_type' } },
+    // RM / Analyst never had columns here even though the tracker stores both —
+    // shown with the deal-team fallback, same rule as lending and syndication.
+    { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' },
+      Cell: ({ row }) => row.original.rm || row.original.dealRm || '' },
+    { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' },
+      Cell: ({ row }) => row.original.an || row.original.dealAn || '' },
     {
       accessorKey: 'status', header: 'Status', size: 160, meta: { filterParam: 'status' },
       // Offers only the register's legal moves (forward one step, back one step,

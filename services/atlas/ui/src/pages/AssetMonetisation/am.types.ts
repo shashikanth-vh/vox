@@ -1,5 +1,5 @@
 export interface AmRow {
-  rm?: string; an?: string;
+  rm?: string; an?: string; dealRm?: string; dealAn?: string;
   id: string; code: string; state: string; val: number; mw: number; nature: string;
   dtype: string; inv: string; itype: string; status: string; teaser: string | null;
   createdAt: string; notes: string; _name?: string;
