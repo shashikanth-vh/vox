@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover, useMediaQuery } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import PersonFilter, { personHit, personText } from './PersonFilter';
 import {
   syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LENDER_ALL, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
@@ -20,7 +21,7 @@ const MOBILE_QUERY = '(max-width:760px)';
 type Scope = 'Live' | 'Closed' | 'All';
 interface MF { states: number[]; dwell: number | ''; preset: string; noout: boolean; }
 
-export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: string) => void }) {
+export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpenCompany: (code: string) => void; person: string; onPerson: (v: string) => void }) {
   const { search } = useSearch();
   const { user } = useAuth();
   const ro = !can(user.roles, 'advanceMatrix');
@@ -99,8 +100,12 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
     return mf.states.length > 0 || mf.dwell !== '';
   };
 
-  // mandate list
-  let rows = (db().syn as any[]).filter((r) => match(clientsService.get(r.code).name, r.code));
+  // mandate list — free text matches company, code AND the people on the mandate;
+  // the RM / Analyst pick narrows to that person's book exactly.
+  const q1 = search.trim().toLowerCase(); const q2 = q.trim().toLowerCase();
+  let rows = (db().syn as any[]).filter((r) =>
+    (match(clientsService.get(r.code).name, r.code) || personText(r, q1) || personText(r, q2))
+    && personHit(r, person));
   if (scope === 'Live') rows = rows.filter(live);
   if (scope === 'Closed') rows = rows.filter(closed);
 
@@ -218,8 +223,9 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
             variant={scope === f ? 'contained' : 'outlined'} sx={{ borderRadius: 999, minWidth: 0, px: 1.5, py: 0.2 }}>{f}</Button>
         ))}
         <TextField size="small" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Find company or code…"
+          placeholder="Find company, code or person…"
           sx={{ width: 195, '& .MuiInputBase-input': { py: 0.55, fontSize: 12.4 } }} />
+        <PersonFilter person={person} onPerson={onPerson} />
         <Button onClick={() => setInPlayOnly((v) => !v)} size="small"
           variant={inPlayOnly ? 'contained' : 'outlined'}
           title={inPlayOnly ? 'Showing only the lenders engaged on these mandates — click for the full lender master'
@@ -297,7 +303,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
         })}
         {!rows.length && <Typography sx={{ p: 3, color: tokens.muted, fontSize: 12.6 }}>No mandates match this view.</Typography>}
         <Typography sx={{ fontSize: 11.5, color: tokens.muted, p: '4px 4px 8px' }}>
-          {rows.length} mandates{mf.noout ? ' live with zero lender outreach' : ''}
+          {rows.length} mandates{person ? ` · RM / Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
         </Typography>
       </Box>
       ) : (
@@ -326,6 +332,11 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
                     <b style={{ cursor: 'pointer' }} onClick={() => onOpenCompany(r.code)}>{cl.name}</b>
                     <div style={{ fontSize: 10.8, color: tokens.muted }}>
                       {subOf(r)}
+                      {(r.rm || r.an) && (
+                        <div style={{ fontSize: 10.2, color: '#8A979D' }}>
+                          {r.rm ? `RM ${r.rm}` : ''}{r.rm && r.an ? ' · ' : ''}{r.an ? `An ${r.an}` : ''}
+                        </div>
+                      )}
                       {admin && (
                         <span onClick={(e) => { e.stopPropagation(); setDel(r); }}
                           title={`Delete mandate ${r.id}`}
@@ -353,7 +364,7 @@ export default function MatrixView({ onOpenCompany }: { onOpenCompany: (code: st
           </tbody>
         </table>
         <Typography sx={{ fontSize: 11.5, color: tokens.muted, p: '7px 11px' }}>
-          {rows.length} mandates{mf.noout ? ' live with zero lender outreach' : ''}
+          {rows.length} mandates{person ? ` · RM / Analyst ${person}` : ''}{mf.noout ? ' · live with zero lender outreach' : ''}
         </Typography>
       </Box>
       )}

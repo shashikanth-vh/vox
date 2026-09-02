@@ -24,6 +24,9 @@ export default function SyndicationPage() {
   const [addProd, setAddProd] = useState<string | null>(null);
   const [bank, setBank] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('chase');
+  // The RM / Analyst filter is SHARED: pick a person in either view, switch
+  // views, and the same book stays on screen.
+  const [person, setPerson] = useState('');
   const [, force] = useState(0);
   const refresh = () => qc.invalidateQueries();
 
@@ -56,9 +59,9 @@ export default function SyndicationPage() {
       <Typography sx={{ fontSize: 11.6, color: tokens.muted, mb: 1 }}>{hint}</Typography>
 
       {mode === 'chase' ? (
-        <ChaseView onOpenCompany={(c) => setOpen(c)} />
+        <ChaseView onOpenCompany={(c) => setOpen(c)} person={person} onPerson={setPerson} />
       ) : mode === 'matrix' ? (
-        <MatrixView onOpenCompany={(c) => setOpen(c)} />
+        <MatrixView onOpenCompany={(c) => setOpen(c)} person={person} onPerson={setPerson} />
       ) : (
         <SynRegisterView onOpenBank={(n) => setBank(n)} />
       )}

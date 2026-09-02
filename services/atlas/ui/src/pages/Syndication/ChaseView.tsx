@@ -10,6 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import PersonFilter, { personHit, personText } from './PersonFilter';
 import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
@@ -70,7 +71,7 @@ const MiniBtn = ({ onClick, children }: { onClick: () => void; children: React.R
   </Box>
 );
 
-export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: string) => void }) {
+export default function ChaseView({ onOpenCompany, person, onPerson }: { onOpenCompany: (code: string) => void; person: string; onPerson: (v: string) => void }) {
   const { search } = useSearch();
   const { user } = useAuth();
   // Chase-list actions (add lender, log chase/reply, advance lender status) are Syn Head
@@ -102,7 +103,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
   const files = db().syn
     .filter((r: any) => !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status))
     .map((r: any) => ({ r, co: clientsService.get(r.code).name, live: (r.lenders || []).filter((l: Lender) => !l.ex && l.st).length }))
-    .filter((x: any) => match(x.co, x.r.code))
+    .filter((x: any) => (match(x.co, x.r.code) || personText(x.r, q)) && personHit(x.r, person))
     .sort((a: any, b: any) => b.live - a.live);
 
   // Attention: silent lenders (IM out > threshold), unanswered queries, stale chases.
@@ -158,7 +159,17 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
     saveCsv(toCsv(['Company', 'Group Code', 'Mandate', 'Deal', 'Ask Cr', 'Lender', 'Status', 'Inbound days', 'Chased days'], rows), 'atlas_chase');
   };
 
-  if (!files.length) return <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>No live Platform Deals files.</Box>;
+  // An empty result must never hide the filter that emptied it.
+  if (!files.length) return (
+    <Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+        <PersonFilter person={person} onPerson={onPerson} />
+      </Box>
+      <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>
+        {person ? `No live mandates for ${person}.` : 'No live Platform Deals files.'}
+      </Box>
+    </Box>
+  );
 
   // v12 `.chco > .chline` banner: indented, left-bordered, alternating backgrounds.
   const CHLINE = {
@@ -170,7 +181,11 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}><ExportBar onCsv={exportCsv} /></Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+        <PersonFilter person={person} onPerson={onPerson} />
+        <Box sx={{ flex: 1 }} />
+        <ExportBar onCsv={exportCsv} />
+      </Box>
       {/* Attention strip */}
       {attention.length > 0 && (
         <Box component="details" open sx={{ bgcolor: '#fff7ed', border: '1px solid #fed7aa', borderLeft: '4px solid #f97316', borderRadius: '8px', mb: 1.6, p: '8px 12px' }}>
@@ -223,7 +238,7 @@ export default function ChaseView({ onOpenCompany }: { onOpenCompany: (code: str
               <ExpandMoreIcon sx={{ fontSize: 18, color: tokens.muted }} />
               <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenCompany(r.code); }}>{co}</Box>
-              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''}{r.dealNo ? ` · deal ${r.dealNo}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr</Typography>
+              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''}{r.dealNo ? ` · deal ${r.dealNo}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr{r.rm ? ` · RM ${r.rm}` : ''}{r.an ? ` · An ${r.an}` : ''}</Typography>
               {/* density strip */}
               <Box sx={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }}>
                 {outreach.length ? outreach.map((l, i) => {
