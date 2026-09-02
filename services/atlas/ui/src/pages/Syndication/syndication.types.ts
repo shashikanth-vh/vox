@@ -4,7 +4,7 @@
 // the lender reaches Sanctioned; null until then.
 export interface SynLender { apiId?: string; name: string; ex: boolean; st: string; since: string; resp: string; chased: string | null; note: string; chaseNote?: string; replyNote?: string; amt?: number | null; h?: any[]; heldFrom?: string; }
 export interface SynRow {
-  dealNo?: string;
+  dealNo?: string; dealRm?: string; dealAn?: string;
   apiId?: string; entityId?: string; dealId?: string;
   id: string; code: string; toi: string; rm: string; an: string; lc: string; pri: string;
   status: string; amt: number; synType: string; mstat3: string; fac: string; tenor: string;

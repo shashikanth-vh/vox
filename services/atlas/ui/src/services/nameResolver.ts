@@ -9,7 +9,7 @@ import { listAll, USE_REAL_API } from '../api/http';
  * outage leaves the joined columns blank, it never fails the grid that asked.
  */
 
-type DealRef = { code: string; entityId: string | null };
+type DealRef = { code: string; entityId: string | null; rm: string; an: string };
 type EntityRef = { name: string; code: string; lens: string };
 
 let entities = new Map<string, EntityRef>();
@@ -38,6 +38,7 @@ async function load(): Promise<void> {
     if (r?.id) d.set(String(r.id), {
       code: r.deal_no || r.code || '',
       entityId: r.entity_id ? String(r.entity_id) : null,
+      rm: r.rm || '', an: r.analyst || '',
     });
   });
   entities = e;
@@ -93,7 +94,7 @@ export async function fillCompanyFromEntity<T extends { _name?: string; code?: s
  * Mutates in place, and still fails soft: an unresolvable row keeps its blanks rather
  * than failing the grid.
  */
-export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string; entityId?: string; dealNo?: string }>(rows: T[]): Promise<T[]> {
+export async function fillFromDeal<T extends { _name?: string; code?: string; dealId?: string; entityId?: string; dealNo?: string; dealRm?: string; dealAn?: string }>(rows: T[]): Promise<T[]> {
   if (rows.some((r) => (r.dealId || r.entityId) && (!r._name || !r.code || (r.dealId && !r.dealNo)))) {
     await ensure();
     rows.forEach((r) => {
@@ -107,6 +108,10 @@ export async function fillFromDeal<T extends { _name?: string; code?: string; de
       // user backtracks a mandate to its row on the Deals sheet (a second facility is
       // "<code>-2" there, so the number tells sibling deals apart where the code can't).
       if (!r.dealNo && ref?.code) r.dealNo = ref.code;
+      // The deal's team, for rows whose own rm/analyst columns are empty — most
+      // imported mandates carry their people on the DEAL, not the tracker.
+      if (!r.dealRm && ref?.rm) r.dealRm = ref.rm;
+      if (!r.dealAn && ref?.an) r.dealAn = ref.an;
     });
   }
   return rows;

@@ -6,11 +6,14 @@ import { tokens } from '../../theme';
 // SyndicationPage, so switching views keeps the same book on screen). The list is
 // every analyst found on the mandates; free text still reaches RMs and LCs.
 
+// A mandate's EFFECTIVE people: its own columns first, its linked deal's team as
+// the fallback — most imported mandates carry their people on the deal.
+export const anOf = (r: any): string => String(r.an || r.dealAn || '').trim();
+export const rmOf = (r: any): string => String(r.rm || r.dealRm || '').trim();
+
 export const personNames = (): string[] => {
   const names = new Set<string>();
-  (db().syn || []).forEach((r: any) => {
-    const v = String(r.an || '').trim(); if (v) names.add(v);
-  });
+  (db().syn || []).forEach((r: any) => { const v = anOf(r); if (v) names.add(v); });
   return [...names].sort((a, b) => a.localeCompare(b));
 };
 
@@ -18,12 +21,12 @@ export const personNames = (): string[] => {
  *  ANALYST-only — RMs are still findable through the free-text search.) */
 export const personHit = (r: any, person: string): boolean => {
   if (!person) return true;
-  return String(r.an || '').trim().toLowerCase() === person.toLowerCase();
+  return anOf(r).toLowerCase() === person.toLowerCase();
 };
 
 /** Free-text also matches the people on the mandate ("vijaya" finds her book). */
 export const personText = (r: any, needle: string): boolean =>
-  !!needle && [r.rm, r.an, r.lc].some((x: any) => String(x || '').toLowerCase().includes(needle));
+  !!needle && [rmOf(r), anOf(r), r.lc].some((x: any) => String(x || '').toLowerCase().includes(needle));
 
 export default function PersonFilter({ person, onPerson }: { person: string; onPerson: (v: string) => void }) {
   const names = personNames();

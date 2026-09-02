@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { Box, Button, MenuItem, Select, TextField, Typography, Tooltip, Snackbar, Alert, Popover, useMediaQuery } from '@mui/material';
 import ExportBar from '../../components/common/ExportBar';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
-import PersonFilter, { personHit, personText } from './PersonFilter';
+import PersonFilter, { personHit, personText, rmOf, anOf } from './PersonFilter';
 import {
   syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LENDER_ALL, lenderLabel,
   MATRIX_LABELS, MATRIX_COLORS, MATRIX_PRESETS, ST2DOT,
@@ -332,9 +332,9 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
                     <b style={{ cursor: 'pointer' }} onClick={() => onOpenCompany(r.code)}>{cl.name}</b>
                     <div style={{ fontSize: 10.8, color: tokens.muted }}>
                       {subOf(r)}
-                      {(r.rm || r.an) && (
+                      {(rmOf(r) || anOf(r)) && (
                         <div style={{ fontSize: 10.2, color: '#8A979D' }}>
-                          {r.rm ? `RM ${r.rm}` : ''}{r.rm && r.an ? ' · ' : ''}{r.an ? `An ${r.an}` : ''}
+                          {rmOf(r) ? `RM ${rmOf(r)}` : ''}{rmOf(r) && anOf(r) ? ' · ' : ''}{anOf(r) ? `An ${anOf(r)}` : ''}
                         </div>
                       )}
                       {admin && (

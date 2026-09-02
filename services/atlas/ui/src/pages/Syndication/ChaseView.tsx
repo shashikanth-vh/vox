@@ -10,7 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
-import PersonFilter, { personHit, personText } from './PersonFilter';
+import PersonFilter, { personHit, personText, rmOf, anOf } from './PersonFilter';
 import { tokens } from '../../theme';
 
 // Port of v12 vSynChase(): the attention strip + per-company chase cards with a
@@ -238,7 +238,7 @@ export default function ChaseView({ onOpenCompany, person, onPerson }: { onOpenC
               <ExpandMoreIcon sx={{ fontSize: 18, color: tokens.muted }} />
               <Box component="b" sx={{ color: tokens.navy, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenCompany(r.code); }}>{co}</Box>
-              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''}{r.dealNo ? ` · deal ${r.dealNo}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr{r.rm ? ` · RM ${r.rm}` : ''}{r.an ? ` · An ${r.an}` : ''}</Typography>
+              <Typography component="span" sx={{ fontSize: 11.5, color: tokens.muted }}>{r.code}{r.id && r.id !== r.code ? ` · ${r.id}` : ''}{r.dealNo ? ` · deal ${r.dealNo}` : ''} · ₹{fmt(Number(r.amt), 1)} Cr{rmOf(r) ? ` · RM ${rmOf(r)}` : ''}{anOf(r) ? ` · An ${anOf(r)}` : ''}</Typography>
               {/* density strip */}
               <Box sx={{ display: 'inline-flex', gap: '2px', alignItems: 'center' }}>
                 {outreach.length ? outreach.map((l, i) => {
