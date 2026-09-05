@@ -425,6 +425,35 @@ async def authz_check(
 # --------------------------------------------------------------------------- #
 # Lead → deal conversion — ONE transaction (deal + product lines + lead Converted)
 # --------------------------------------------------------------------------- #
+async def _ensure_entity_code(ctx: RequestContext, entity_id) -> None:
+    """Give a code-less entity its group code — seed convention, idempotent."""
+    import re as _re
+
+    from app.models import Entity
+
+    ent = (await ctx.session.execute(
+        select(Entity).where(Entity.id == entity_id, Entity.tenant_id == ctx.tenant_id)
+    )).scalar_one_or_none()
+    if ent is None or (ent.code or "").strip():
+        return
+    stop = {"private", "pvt", "limited", "ltd", "llp", "india", "the", "and", "co", "company"}
+    words = [w for w in _re.sub(r"[^a-z0-9 ]", " ", (ent.legal_name or "").lower()).split()
+             if w not in stop]
+    base = "".join(words).upper()[:12] or "ENTITY"
+    code, i = base, 1
+    while (await ctx.session.execute(
+            select(Entity.id).where(Entity.tenant_id == ctx.tenant_id,
+                                    Entity.code == code, Entity.id != ent.id))).first():
+        i += 1
+        code = f"{base[:10]}{i}"
+    ent.code = code
+    ent.updated_by = ctx.actor
+    # The deal's auto-number reads the stem via RAW SQL in this same transaction —
+    # the new code must be flushed or the allocator still sees the blank.
+    await ctx.session.flush()
+
+
+
 @router.post("/v1/leads/{lead_id}/convert", response_model=s.LeadConvertResult,
              tags=["Users & RBAC"],
              summary="Convert a lead to a deal atomically (deal + lines + lead marked "
@@ -607,6 +636,14 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
                                                Entity.tenant_id == ctx.tenant_id))
     ).one_or_none()
     ent_state, ent_toi = (ent[0], ent[1]) if ent else (None, None)
+
+    # THE COMPANY'S GROUP CODE IS ITS IDENTITY — the drawer opens on it, the deal's
+    # number stems from it, every grid joins through it. A lead-born entity that
+    # reaches conversion without one splits into two on-screen companies (the deal
+    # under its number, the mandate under its S-number), so the code is guaranteed
+    # HERE, with the seeder's own slug convention (stop-words out, upper, 12 chars,
+    # numeric suffix on a clash).
+    await _ensure_entity_code(ctx, entity_id)
 
     deal = await _Repo(Deal).create(ctx.session, ctx.tenant_id, ctx.actor, {
         "entity_id": str(entity_id),

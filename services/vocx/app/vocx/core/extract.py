@@ -481,7 +481,7 @@ def _stub_contact(t: str) -> str | None:
 
 
 def _stub_time(low: str) -> str | None:
-    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?!\w)", low)
+    m = re.search(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?!\w)", low)
     if m:
         h = int(m.group(1)) % 12
         if m.group(3).startswith("p"):
@@ -493,7 +493,7 @@ def _stub_time(low: str) -> str | None:
         if 1 <= h <= 7:               # business context: "4 o'clock" means 16:00
             h += 12
         return f"{h % 24:02d}:00"
-    m = re.search(r"\bat ([01]?\d|2[0-3]):([0-5]\d)\b", low)
+    m = re.search(r"\bat ([01]?\d|2[0-3])[:.]([0-5]\d)\b", low)
     if m:
         return f"{int(m.group(1)):02d}:{m.group(2)}"
     return None
@@ -543,9 +543,54 @@ def _stub_next_date(low: str, capture_ts: str) -> tuple:
     if m:
         days = 14 if ("fortnight" in m.group(0) or "two" in m.group(0)) else 7
         return (base + _dt.timedelta(days=days)).date().isoformat(), 0.6
-    m = re.search(r"\bon the (\d{1,2})(?:st|nd|rd|th)?\b", low)
+    # "14th September [at 11.30]", "September 14th", "14th of September 2026" —
+    # a stated month without a year resolves to its NEXT occurrence, never a past one.
+    _MN = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+           "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+    day = mon = yr = None
+    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?"
+                  r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+                  r"(?:\s*,?\s*(\d{4}))?\b", low)
     if m:
-        day = int(m.group(1))
+        day, mon, yr = int(m.group(1)), _MN[m.group(2)], m.group(3)
+    else:
+        m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?"
+                      r"\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b", low)
+        if m:
+            day, mon, yr = int(m.group(2)), _MN[m.group(1)], m.group(3)
+    if day and mon:
+        try:
+            d = _dt.date(int(yr) if yr else base.year, mon, day)
+        except ValueError:
+            d = None
+        if d is not None and not yr and d < base.date():
+            try:
+                d = _dt.date(base.year + 1, mon, day)
+            except ValueError:
+                d = None
+        if d is not None:
+            return d.isoformat(), 0.85
+    # "this month 14th" / "on the 14th of this month" — a bare day anchored to the
+    # month in hand, rolling to next month only when it has already passed.
+    m = re.search(r"\bthis month(?:\s+on)?(?:\s+the)?\s+(\d{1,2})(?:st|nd|rd|th)?\b"
+                  r"|\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?this month\b", low)
+    if m:
+        day2 = int(m.group(1) or m.group(2))
+        year, month = base.year, base.month
+        if day2 < base.day:
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+        try:
+            return _dt.date(year, month, day2).isoformat(), 0.8
+        except ValueError:
+            return None, 0.0
+    # "on the 14th" — and "on 14th", where the ordinal suffix is what separates a
+    # date from a bare count ("on 3 projects" must not become a date).
+    m = re.search(r"\bon (?:the )?(\d{1,2})(?:st|nd|rd|th)\b"
+                  r"|\bon the (\d{1,2})\b", low)
+    if m:
+        day = int(m.group(1) or m.group(2))
         year, month = base.year, base.month
         if day <= base.day:           # already past this month -> next month
             month += 1

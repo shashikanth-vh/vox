@@ -102,8 +102,8 @@ _NUM_RE = _re.compile(
     r"(cr|crore|crores|lakh|lakhs|lac|lacs|l)?\.?$", _re.IGNORECASE)
 _DMY_RE = _re.compile(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$")
 _TEXTDATE_RE = _re.compile(
-    r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)|([A-Za-z]+)\s+(\d{1,2})"
-    r"(?:st|nd|rd|th)?)[,\s]+(\d{4})$")
+    r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([A-Za-z]+)|([A-Za-z]+)\s+(\d{1,2})"
+    r"(?:st|nd|rd|th)?)(?:[,\s]+(\d{4}))?$")
 
 
 def _canon(t: str) -> str:
@@ -172,7 +172,19 @@ def _date_from(text: str) -> str | None:
         hits = [i for mth, i in _MONTHS.items() if len(name) >= 3 and mth.startswith(name)]
         if len(hits) != 1:
             return None
-        mo, y = hits[0], int(m.group(5))
+        # A spoken date often omits the year ("14th September") — it means the
+        # NEXT such date, never a past one.
+        mo = hits[0]
+        if m.group(5):
+            y = int(m.group(5))
+        else:
+            today = _date.today()
+            y = today.year
+            try:
+                if _date(y, mo, d) < today:
+                    y += 1
+            except ValueError:
+                return None
     try:
         return _date(y, mo, d).isoformat()
     except ValueError:

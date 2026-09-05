@@ -230,6 +230,12 @@ def build_interaction(
     if not next_action:
         commits = extraction.get("commitments") or []
         next_action = (commits[0].get("what") if commits else None)
+    # A follow-up MEETING was scheduled but nobody phrased an action item: the
+    # meeting IS the next action. Without this the Leads grid's Next action sat
+    # empty while a calendar event existed for the very thing it should say.
+    if not next_action and nm.get("date"):
+        t = f" {nm['time']}" if nm.get("time") else ""
+        next_action = f"Follow-up {nm.get('mode') or 'meeting'} on {nm['date']}{t}"
     # follow-up date: the meeting to schedule, else the earliest dated next step
     next_date = nm.get("date") or _first_next_step_date(rep)
 

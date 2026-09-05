@@ -831,10 +831,23 @@ async def test_stub_relative_date_and_time_resolvers():
     assert _stub_next_date("review on the 29th", ts)[0] == "2026-08-29"
     assert _stub_next_date("review on the 1st", ts)[0] == "2026-09-01"   # past -> next month
     assert _stub_next_date("no date here at all", ts) == (None, 0.0)
+    # The desk's own phrasings (field report): month names with or without a year,
+    # ordinal-first and month-first, "this month", and "on 14th" without "the".
+    assert _stub_next_date("meet on 14th of september at 11.40 am", ts)[0] == "2026-09-14"
+    assert _stub_next_date("meeting on september 14th 11.30", ts)[0] == "2026-09-14"
+    assert _stub_next_date("follow up 14th september", ts)[0] == "2026-09-14"
+    assert _stub_next_date("meet again on 5th january", ts)[0] == "2027-01-05"  # past -> next year
+    assert _stub_next_date("meeting on 20 aug 2027", ts)[0] == "2027-08-20"
+    assert _stub_next_date("meet this month 14th at 11.30", ts)[0] == "2026-08-14"
+    assert _stub_next_date("call on the 3rd of this month", ts)[0] == "2026-08-03"  # still ahead
+    assert _stub_next_date("meet on 29th", ts)[0] == "2026-08-29"
+    assert _stub_next_date("agreed on 3 projects", ts) == (None, 0.0)  # a count, not a date
     assert _stub_time("meet at 11am") == "11:00"
     assert _stub_time("around 3:30 p.m.") == "15:30"
     assert _stub_time("meet at 4 o'clock") == "16:00"
     assert _stub_time("meet at 14:30") == "14:30"
+    assert _stub_time("at 11.30 am sharp") == "11:30"
+    assert _stub_time("meet at 11.40") == "11:40"
     assert _stub_time("no time stated") is None
 
 

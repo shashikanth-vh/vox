@@ -122,9 +122,12 @@ function toSynRow(r: any): SynRow {
     entityId: r?.entity_id,
     dealId: r?.deal_id,
     id: r?.tracker_no || r?.id || '',
-    // The "Group Code" column: the deal's human number (joined below), else the
-    // tracker's own number — never a UUID.
-    code: r?.tracker_no || '',
+    // The "Group Code" — the COMPANY'S identity, joined below from the entity or
+    // the linked deal, falling back to the tracker's own number only when neither
+    // resolves. Pre-filling with the tracker number here split one company into
+    // two drawer identities (S052 vs GREENPILLREN-2): an About typed on one side
+    // never showed on the other, and its write carried no entityId to land with.
+    code: '',
     _name: '',
     toi: r?.toi || '',
     rm: r?.rm || '',
@@ -167,7 +170,12 @@ async function loadReal(): Promise<void> {
     // Name-lookup seed ONLY (drill rows resolve display names through the client
     // store). _shadow marks it a lookup entry, NOT a registry row — the dashboard's
     // "clients on register" must not count these (it read 416 with 340 real).
-    if (r.code && r._name && !db().clients[r.code]) db().clients[r.code] = { name: r._name, _shadow: true } as any;
+    if (r.code && r._name && !db().clients[r.code]) db().clients[r.code] = { name: r._name, _shadow: true, entityId: r.entityId } as any;
+    // An entry seeded before entityId rode along (or by another grid) gets it now —
+    // without it, a profile edit made under this code has no entity to PATCH and
+    // silently stays in the browser.
+    else if (r.code && r.entityId && db().clients[r.code] && !(db().clients[r.code] as any).entityId)
+      (db().clients[r.code] as any).entityId = r.entityId;
     // Column order: append lender names the default order doesn't know yet.
     (r.lenders || []).forEach((l: any) => {
       if (l.name && !db().lenderOrder.includes(l.name)) db().lenderOrder.push(l.name);

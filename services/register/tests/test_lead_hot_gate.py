@@ -70,3 +70,25 @@ async def test_warming_a_lead_up_lets_it_through(client: AsyncClient):
     assert (await client.patch(f"/v1/leads/{lid}",
                                json={"temperature": "Hot"})).status_code == 200
     assert (await client.post(f"/v1/leads/{lid}/convert", json=BODY)).status_code == 200
+
+
+async def test_conversion_gives_a_codeless_entity_its_group_code(client: AsyncClient):
+    """The company's group code is its identity — the drawer opens on it, the deal's
+    number stems from it. A lead-born entity that converts without one used to split
+    into two on-screen companies (the deal under its number, the mandate under an
+    S-number); conversion now mints the code with the seeder's slug convention, so
+    the deal's auto-number gets a real stem in the same breath."""
+    ent = (await client.post("/v1/entities", json={
+        "code": "", "legal_name": "Nimbus Green Power Private Limited"})).json()
+    r = await client.post("/v1/leads", json={
+        "company": "Nimbus Green Power Private Limited", "entity_id": ent["id"],
+        "status": "Active", "temperature": "Hot"})
+    assert r.status_code == 201, r.text
+    lid = r.json()["id"]
+    r = await client.post(f"/v1/leads/{lid}/convert", json=BODY)
+    assert r.status_code == 200, r.text
+    got = (await client.get(f"/v1/entities/{ent['id']}")).json()
+    assert got["code"] == "NIMBUSGREENP"          # stop-words out, upper, 12 chars
+    deal_id = r.json()["deal_id"]
+    deal = (await client.get(f"/v1/deals/{deal_id}")).json()
+    assert deal["deal_no"] == "NIMBUSGREENP"      # the auto-number found its stem
