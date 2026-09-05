@@ -62,7 +62,7 @@ export default function ActivityPage() {
     { accessorKey: 'by', header: 'Who', size: 140, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'area', header: 'Area', size: 130, Cell: ({ cell }) => <AreaPill area={cell.getValue<string>()} /> },
     { accessorKey: 'text', header: 'Activity', size: 420, meta: { localFilter: true, textFilter: true } },
-    { accessorKey: 'company', header: 'Company', size: 200, meta: { localFilter: true },
+    { accessorKey: 'company', header: 'Description', size: 200, meta: { localFilter: true },
       Cell: ({ row }) => {
         const { code, company } = row.original;
         if (!code) return '—';
