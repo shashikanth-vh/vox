@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Autocomplete, Box, Typography, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
+import { Autocomplete, Box, Typography, Select, MenuItem, TextField, InputAdornment, IconButton, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
 import { syndicationService, SYN_TERM, SYN_CLOSED, lenderNext, LENDER_ALL, LSTATE_COLOR, lenderLabel } from '../../services/syndicationService';
 import { clientsService } from '../../services/clientsService';
 import { db } from '../../api/atlasStore';
@@ -100,10 +102,28 @@ export default function ChaseView({ onOpenCompany, person, onPerson }: { onOpenC
   const q = search.trim().toLowerCase();
   const match = (name: string, code: string) => !q || name.toLowerCase().includes(q) || code.toLowerCase().includes(q);
 
+  // This view's OWN text filter, separate from the navbar search: the chase list is
+  // the one screen a desk lives in all day, and narrowing it to "Tata" or "queries"
+  // should not disturb what every other page is showing. It reads every field the
+  // cards render — company, code, mandate and deal number, the people, and each
+  // lender's name, status and conversation notes — matched per field so a needle
+  // cannot straddle two of them. Both sections narrow together: the attention strip
+  // is derived from this same list.
+  const [text, setText] = useState('');
+  const t = text.trim().toLowerCase();
+  const textHit = (r: any, co: string) => {
+    if (!t) return true;
+    const bits: any[] = [co, r.code, r.id, r.dealNo, r.status, rmOf(r), anOf(r), r.lc];
+    (r.lenders || []).forEach((l: Lender) =>
+      bits.push(l.name, l.st, l.note, l.chaseNote, l.replyNote));
+    return bits.some((b) => String(b ?? '').toLowerCase().includes(t));
+  };
+
   const files = db().syn
     .filter((r: any) => !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status))
     .map((r: any) => ({ r, co: clientsService.get(r.code).name, live: (r.lenders || []).filter((l: Lender) => !l.ex && l.st).length }))
-    .filter((x: any) => (match(x.co, x.r.code) || personText(x.r, q)) && personHit(x.r, person))
+    .filter((x: any) => (match(x.co, x.r.code) || personText(x.r, q)) && personHit(x.r, person)
+      && textHit(x.r, x.co))
     .sort((a: any, b: any) => b.live - a.live);
 
   // Attention: silent lenders (IM out > threshold), unanswered queries, stale chases.
@@ -159,14 +179,44 @@ export default function ChaseView({ onOpenCompany, person, onPerson }: { onOpenC
     saveCsv(toCsv(['Company', 'Group Code', 'Mandate', 'Deal', 'Ask Cr', 'Lender', 'Status', 'Inbound days', 'Chased days'], rows), 'atlas_chase');
   };
 
-  // An empty result must never hide the filter that emptied it.
+  // Every control that can empty this view, in one place — the empty branch renders
+  // the same ones, because an empty result must never hide the filter that emptied it.
+  const filterBar = (
+    <>
+      <PersonFilter person={person} onPerson={onPerson} />
+      <TextField
+        size="small"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Filter this list…"
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon sx={{ fontSize: 17, color: tokens.muted }} />
+            </InputAdornment>
+          ),
+          endAdornment: t ? (
+            <InputAdornment position="end">
+              <IconButton size="small" aria-label="Clear filter" onClick={() => setText('')}>
+                <CloseIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+            </InputAdornment>
+          ) : undefined,
+        }}
+        sx={{ width: 250, '& .MuiInputBase-root': { fontSize: 12.2, borderRadius: 999, py: 0.1 } }}
+      />
+    </>
+  );
+
   if (!files.length) return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-        <PersonFilter person={person} onPerson={onPerson} />
+        {filterBar}
       </Box>
       <Box sx={{ p: 3, textAlign: 'center', color: tokens.muted }}>
-        {person ? `No live mandates for ${person}.` : 'No live Platform Deals files.'}
+        {t ? `No mandates match “${text.trim()}”${person ? ` for ${person}` : ''}.`
+          : person ? `No live mandates for ${person}.`
+            : 'No live Platform Deals files.'}
       </Box>
     </Box>
   );
@@ -182,7 +232,7 @@ export default function ChaseView({ onOpenCompany, person, onPerson }: { onOpenC
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-        <PersonFilter person={person} onPerson={onPerson} />
+        {filterBar}
         <Box sx={{ flex: 1 }} />
         <ExportBar onCsv={exportCsv} />
       </Box>

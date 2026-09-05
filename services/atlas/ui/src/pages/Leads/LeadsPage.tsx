@@ -41,8 +41,8 @@ export default function LeadsPage() {
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
     { accessorKey: 'temp', header: 'Temp', size: 90, meta: { filterParam: 'temperature' }, Cell: ({ cell }) => <TempPill temp={cell.getValue<string>()} /> },
     { accessorKey: 'status', header: 'Status', size: 100, meta: { filterParam: 'status' } },
-    { accessorKey: 'last', header: 'Last touch', size: 110 },
-    { accessorKey: 'next', header: 'Next action', size: 220 },
+    { accessorKey: 'last', header: 'Last touch', size: 110, meta: { filterParam: 'last_interaction_date', dateFilter: true } },
+    { accessorKey: 'next', header: 'Next action', size: 220, meta: { textFilter: true } },
   ], []);
 
   return (

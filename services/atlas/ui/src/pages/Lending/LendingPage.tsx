@@ -54,7 +54,7 @@ export default function LendingPage() {
   const columns = useMemo<MRT_ColumnDef<LendingRow>[]>(() => [
     { accessorKey: 'code', header: 'Group Code', size: 120, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
     { accessorKey: '_name', header: 'Company', size: 220,
-      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
+      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId, clientSort: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'amt', header: '₹ Cr', size: 90, meta: { sortParam: 'amount_cr' }, Cell: ({ cell }) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(cell.getValue())}</span> },
     // Effective people: the line's own columns first, the linked deal's team as
     // fallback — same rule as the syndication views.
@@ -75,7 +75,7 @@ export default function LendingPage() {
       ),
     },
     { accessorKey: 'updated', header: 'Stage updated', size: 120, meta: { sortParam: 'stage_updated_at', filterParam: 'stage_updated_at', dateFilter: true } },
-    { accessorKey: 'remarks', header: 'Remarks', size: 220 },
+    { accessorKey: 'remarks', header: 'Remarks', size: 220, meta: { textFilter: true } },
   ], [ro]);
 
   return (

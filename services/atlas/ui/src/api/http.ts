@@ -208,9 +208,15 @@ export function apiErr(e: any, what: string): string {
 
 // Writes: dispatch to the backend when enabled (fire-and-forget so the optimistic
 // local-store mutation keeps the UI responsive). No-op in mock mode.
-export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any): void {
-  if (!USE_REAL_API) return;
-  api[method](url, data).catch((e) => console.warn('[api] write failed:', method, url, e));
+// Returns the in-flight request so a caller that needs the write to have LANDED — an
+// explicit Save, before it refetches — can await it. Callers that do not care still
+// ignore it and keep the old fire-and-forget behaviour; the rejection is swallowed
+// either way, so awaiting can never turn a failed write into an unhandled rejection.
+export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any): Promise<void> {
+  if (!USE_REAL_API) return Promise.resolve();
+  return api[method](url, data)
+    .then(() => undefined)
+    .catch((e) => { console.warn('[api] write failed:', method, url, e); });
 }
 
 // FIELD edits fire on every keystroke — and a remote() per keystroke turned one typed
@@ -219,18 +225,38 @@ export function remote(method: 'post' | 'patch' | 'del', url: string, data?: any
 // (typing stays live); the REGISTER gets one write with the settled value once the
 // typing pauses. Keyed per url+field so two fields edited quickly never clobber each
 // other. Best-effort flush on pagehide covers the type-and-close-the-tab tail.
-const _debounced = new Map<string, { t: ReturnType<typeof setTimeout>; fire: () => void }>();
+const _debounced = new Map<string, { t: ReturnType<typeof setTimeout>; fire: () => Promise<void> }>();
 export function remoteDebounced(method: 'post' | 'patch' | 'del', url: string,
                                 data?: any, ms = 700): void {
   if (!USE_REAL_API) return;
   const key = `${method} ${url} ${Object.keys(data || {}).sort().join(',')}`;
   const prev = _debounced.get(key);
   if (prev) clearTimeout(prev.t);
-  const fire = () => { _debounced.delete(key); remote(method, url, data); };
+  const fire = () => { _debounced.delete(key); return remote(method, url, data); };
   _debounced.set(key, { t: setTimeout(fire, ms), fire });
 }
+/**
+  * Send every pending debounced write NOW, and resolve once they have all come back.
+  *
+  * remoteDebounced exists to collapse a burst of keystroke-driven PATCHes, which is the
+  * right trade while the user is still typing. It is the WRONG one behind an explicit
+  * Save: the drawer invalidates its grids the moment it saves, that refetch returns the
+  * pre-save row, and hydrate lays it back over the local change — the edit visibly
+  * reverts while a PATCH for it is still sitting in a timer.
+  *
+  * Awaiting the returned promise closes that race properly: the refetch is not issued
+  * until the register has actually taken the writes, so what comes back IS the saved
+  * row. A write the register refuses still resolves (remote swallows it) — and the
+  * refetch then shows the register's real answer instead of a local value nothing
+  * upstream ever accepted, which is the honest outcome.
+  */
+export function flushWrites(): Promise<void> {
+  const inflight: Promise<void>[] = [];
+  _debounced.forEach(({ t, fire }) => { clearTimeout(t); inflight.push(fire()); });
+  return Promise.all(inflight).then(() => undefined);
+}
+
 if (typeof window !== 'undefined') {
-  window.addEventListener('pagehide', () => {
-    _debounced.forEach(({ t, fire }) => { clearTimeout(t); fire(); });
-  });
+  // The tab is going away — send them, but there is nobody left to await them.
+  window.addEventListener('pagehide', () => { void flushWrites(); });
 }

@@ -38,14 +38,14 @@ export default function AssetMonPage() {
   // investor · investor type · status · date teaser shared · notes.
   const columns = useMemo<MRT_ColumnDef<AmRow>[]>(() => [
     { accessorKey: '_name', header: 'Company', size: 220,
-      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
+      meta: { filterParam: 'entity_id', filterRowValue: (r: any) => r.entityId, clientSort: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b>,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 170, maxWidth: 330 } } },
     { accessorKey: 'state', header: 'State', size: 120, meta: { filterParam: 'state' } },
     { accessorKey: 'val', meta: { sortParam: 'indicative_value_cr' }, header: 'Indicative Value (₹ Cr)', size: 160, ...numCell, Cell: ({ cell }) => fmt(cell.getValue()) },
     { accessorKey: 'mw', meta: { sortParam: 'size_mw' }, header: 'Size (MW)', size: 100, ...numCell, Cell: ({ cell }) => (cell.getValue() ? fmt(cell.getValue(), 1) : '') },
     { accessorKey: 'nature', header: 'Nature', size: 110, meta: { filterParam: 'nature' } },
     { accessorKey: 'dtype', header: 'Deal Type', size: 140, meta: { filterParam: 'deal_type' } },
-    { accessorKey: 'inv', header: 'Investor', size: 180, ...truncCell(55) },
+    { accessorKey: 'inv', header: 'Investor', size: 180, meta: { filterParam: 'investor' }, ...truncCell(55) },
     { accessorKey: 'itype', header: 'Investor Type', size: 140, meta: { filterParam: 'investor_type' } },
     // RM / Analyst never had columns here even though the tracker stores both —
     // shown with the deal-team fallback, same rule as lending and syndication.
@@ -71,8 +71,9 @@ export default function AssetMonPage() {
         );
       },
     },
-    { accessorKey: 'teaser', header: 'Date Teaser Shared', size: 150, Cell: ({ cell }) => cell.getValue<string>() || '' },
-    { accessorKey: 'notes', header: 'Notes', size: 200, ...truncCell(55) },
+    { accessorKey: 'teaser', header: 'Date Teaser Shared', size: 150, meta: { textFilter: true },
+      Cell: ({ cell }) => cell.getValue<string>() || '' },
+    { accessorKey: 'notes', header: 'Notes', size: 200, meta: { textFilter: true }, ...truncCell(55) },
   ], [ro]);
 
   return (

@@ -25,7 +25,7 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
   const canInteract = can(user.roles, 'logInteraction');
   const ref = referenceService;
 
-  // `row` is the saved lead; `edits` are the pending changes. Nothing is sent until Done,
+  // `row` is the saved lead; `edits` are the pending changes. Nothing is sent until Save,
   // so the drawer holds one PATCH's worth of edits rather than firing per keystroke.
   const [row, setRow] = useState<Lead | null>(lead);
   const [edits, setEdits] = useState<Partial<Lead>>({});
@@ -76,29 +76,28 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
     onChanged();
   };
 
-  // Done is the save: it PATCHes whatever changed, then closes. With nothing changed it
-  // is just a close, so a read-only visit costs no request.
-  const done = async () => {
-    if (!dirty) { onClose(); return; }
+  // Save PATCHes whatever changed and STAYS open, so a run of edits, a logged
+  // interaction and another edit are one visit rather than three. Returns whether the
+  // write landed, which is what Push to Deals needs before it walks away.
+  //
+  // The saved values are folded back into `row`: the fields read `edits` first and
+  // `row` second, so clearing `edits` without this would snap every field back to its
+  // pre-edit value the instant the save succeeded.
+  const save = async (): Promise<boolean> => {
+    if (!dirty) return true;
     setSaving(true);
     const r = await leadsService.patch(row, edits, user.full);
     setSaving(false);
-    if (!r.ok) { setErr(r.error || 'Could not save the lead.'); return; }
+    if (!r.ok) { setErr(r.error || 'Could not save the lead.'); return false; }
+    setRow((prev) => (prev ? { ...prev, ...edits } : prev));
     setEdits({});
     onChanged();
-    onClose();
+    return true;
   };
 
   // Pushing to Deals would leave unsaved edits behind, so they go up first.
   const push = async () => {
-    if (dirty) {
-      setSaving(true);
-      const r = await leadsService.patch(row, edits, user.full);
-      setSaving(false);
-      if (!r.ok) { setErr(r.error || 'Could not save the lead.'); return; }
-      setEdits({});
-      onChanged();
-    }
+    if (!(await save())) return;
     onClose();
     onPush(row);
   };
@@ -174,8 +173,12 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
         )}
         <Box sx={{ flex: 1 }} />
         {dirty && <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>Unsaved changes</Typography>}
-        <Button variant={dirty ? 'contained' : 'outlined'} onClick={done} disabled={saving}>
-          {saving ? 'Saving…' : dirty ? 'Save & close' : 'Done'}
+        {/* Close is the header's × in words — it discards pending edits exactly as that
+            already does. Save is the only thing that writes, and has nothing to do
+            until something changed. */}
+        <Button variant="outlined" onClick={onClose} disabled={saving}>Close</Button>
+        <Button variant="contained" onClick={save} disabled={saving || !dirty}>
+          {saving ? 'Saving…' : 'Save'}
         </Button>
       </Box>
       <LogInteractionDialog code={row.id} refType="Lead" lead={row} open={logOpen}

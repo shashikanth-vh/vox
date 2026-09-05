@@ -107,9 +107,15 @@ export const clientsService = {
   // same defect Add-employee had, in its next hiding place.
   update(code: string, patch: Partial<Client>, by: string) {
     const row: any = db().clients[code] || {};
+    // The wire names are the ENTITY's, and two of these are not the UI's. `about` is
+    // the entity's `notes` — toClientRow reads it back from there and buildEntityPayload
+    // creates it there, so patching 'about' wrote a column /v1/entities does not have and
+    // the next hydrate put the old text straight back. `toi` and `lifecycle` have no
+    // entity column at all (toClientRow hardcodes toi:'' and derives lifecycle from
+    // register_status), so they are left off rather than sent somewhere they are ignored.
     const wire: Record<string, string> = {
       name: 'legal_name', sector: 'sector', lens: 'lens', state: 'state',
-      toi: 'toi', about: 'about', lifecycle: 'lifecycle',
+      about: 'notes',
     };
     const body: Record<string, any> = {};
     Object.entries(patch).forEach(([k, v]) => { if (wire[k]) body[wire[k]] = v; });

@@ -32,6 +32,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "../../context/SearchContext";
 import { tokens } from "../../theme";
 import { USE_REAL_API } from "../../api/http";
+import { applyQuery } from "../../api/queryEngine";
 import type { Paged, TableQuery } from "../../services/types";
 
 // v12 `th` background (ATLAS_EVAM_v12.html line 97).
@@ -398,6 +399,63 @@ function DateFilterBody({
   );
 }
 
+/**
+ * A PROSE column's popover: one box, no option list.
+ *
+ * A checkbox facet only works where the column has a handful of repeated values. On a
+ * sentence column (Activity's "Logged an interaction with …") every row is its own
+ * value, so the list would be one unpickable option per row. This asks for the text
+ * instead and matches it as a CONTAINS — the same contract as the other two bodies:
+ * Done commits, Clear removes the filter, closing without Done discards.
+ */
+function TextFilterBody({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: string[] | undefined;
+  onChange: (v: string[] | undefined) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState<string>(value?.[0] ?? "");
+  const commit = () => {
+    const t = text.trim();
+    onChange(t ? [t] : undefined);
+    onClose();
+  };
+  return (
+    <Box sx={{ width: 230, fontSize: "12.3px", p: "11px" }}
+      onClick={(e) => e.stopPropagation()}>
+      <Box
+        component="input"
+        type="text"
+        placeholder="Contains…"
+        value={text}
+        autoFocus
+        onChange={(e: any) => setText(e.target.value)}
+        // Enter commits: typing then hitting return is what a lone search box promises.
+        onKeyDown={(e: any) => { if (e.key === "Enter") commit(); }}
+        sx={{
+          width: "100%",
+          border: "1px solid #E2E7EA",
+          borderRadius: "6px",
+          p: "6px 8px",
+          fontSize: "12.3px",
+          boxSizing: "border-box",
+          "&:focus": { outline: "none", borderColor: "#12917E" },
+        }}
+      />
+      <Box sx={{ display: "flex", gap: "7px", justifyContent: "flex-end", mt: "11px" }}>
+        <button style={SEC_BTN}
+          onClick={() => { setText(""); onChange(undefined); onClose(); }}>
+          Clear
+        </button>
+        <button style={PRI_BTN} onClick={commit}>Done</button>
+      </Box>
+    </Box>
+  );
+}
+
 // v12 header: the label plus a funnel that opens the filter popover. Sorting is
 // left to MRT's native sort icon (we only add the funnel here). The funnel turns
 // teal when the column is filtered.
@@ -407,6 +465,7 @@ function FilterHeader({
   options,
   canFilter,
   dateMode = false,
+  textMode = false,
   align = "left",
 }: {
   colId: string;
@@ -414,6 +473,7 @@ function FilterHeader({
   options: string[];
   canFilter: boolean;
   dateMode?: boolean;
+  textMode?: boolean;
   align?: "left" | "right";
 }) {
   const ctx = useContext(FilterContext);
@@ -469,6 +529,12 @@ function FilterHeader({
           >
             {dateMode ? (
               <DateFilterBody
+                value={value}
+                onChange={(v) => ctx.set(colId, v)}
+                onClose={() => setAnchor(null)}
+              />
+            ) : textMode ? (
+              <TextFilterBody
                 value={value}
                 onChange={(v) => ctx.set(colId, v)}
                 onClose={() => setAnchor(null)}
@@ -588,9 +654,37 @@ export default function CommonTable<T extends Record<string, any>>(
           if ((col?.meta as any)?.dateFilter) {
             return { id, value: { from: value[0] || "", to: value[1] || "" } };
           }
+          // A PROSE filter is one typed string matched as a substring; the query
+          // engine's {q} form is exactly that. Sent as a bare array it would be
+          // compared for EQUALITY against the whole cell and never match a sentence.
+          if ((col?.meta as any)?.textFilter) {
+            return { id, value: { q: value[0] || "" } };
+          }
           return { id, value };
         }) as MRT_ColumnFiltersState,
     [colFilters, columns],
+  );
+
+  // A CONTAINS has no wire form (see serverFilters), so a prose filter is matched here
+  // over the walked book instead. These two lists keep the halves apart: what the
+  // request carries, and what this grid applies afterwards.
+  const localFilterIds = useMemo(
+    () => Object.keys(colFilters).filter((id) => {
+      const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
+      return !!(col?.meta as any)?.textFilter;
+    }),
+    [colFilters, columns],
+  );
+  const localColumnFilters = useMemo(
+    () => columnFilters.filter((cf) => localFilterIds.includes(String(cf.id))),
+    [columnFilters, localFilterIds],
+  );
+  // The walk is keyed on the SERVER half only: typing in a prose filter narrows the
+  // book the walk already returned, so it must not invalidate it on every keystroke.
+  const walkFilterKey = useMemo(
+    () => Object.fromEntries(
+      Object.entries(colFilters).filter(([id]) => !localFilterIds.includes(id))),
+    [colFilters, localFilterIds],
   );
 
   // Which register query param carries this column's facet. Declared per column
@@ -679,15 +773,6 @@ export default function CommonTable<T extends Record<string, any>>(
     placeholderData: (prev) => prev,
   });
 
-  const rows = query.data?.rows ?? [];
-  const total = query.data?.total ?? 0;
-
-  // A source that returns nextCursor is cursor-paged; one that doesn't (the mock store)
-  // keeps the ordinary jump-to-any-page controls.
-  // Sorted mode pages by offset, so the CLASSIC pager (page numbers against the
-  // exact total) takes over even on a cursor-paged source.
-  const cursorMode = !serverSort && query.data?.nextCursor !== undefined;
-
   // Whether this grid's source is server-paged at all — observed from the response
   // shape (a local full-dataset service never returns a nextCursor key). Drives the
   // sort-arrow honesty gate below.
@@ -695,6 +780,84 @@ export default function CommonTable<T extends Record<string, any>>(
   useEffect(() => {
     if (query.data && query.data.nextCursor !== undefined) setServerPaged(true);
   }, [query.data]);
+
+  // CLIENT-SORTED COLUMNS. Company is joined in the browser (a deal/tracker row carries
+  // only entity_id — see services/nameResolver), so there is no register column for
+  // `order_by` to name and the honesty gate below hid the arrow. A page opts such a
+  // column in with meta.clientSort, and the sort is served by pulling the whole FILTERED
+  // book once — the same bounded cursor walk the facets already do — then ordering and
+  // paging it here. Search and facets still run on the server, so these are exactly the
+  // rows the grid would otherwise show; only their order and page boundaries are local.
+  const localSort = useMemo(() => {
+    if (!USE_REAL_API || !sorting.length) return undefined;
+    const s = sorting[0];
+    const col = columns.find((c) => String(c.id ?? c.accessorKey) === s.id);
+    if (!col || sortParamOf(col)) return undefined; // the register can order this one
+    return (col.meta as any)?.clientSort ? s : undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorting, columns]);
+
+  // A prose filter on a SERVER-PAGED grid needs the same book: matching `contains`
+  // against the ten rows in hand would filter the page, not the table. (A grid that
+  // already holds everything — Activity, Audit — pages locally and never gets here;
+  // serverPaged stays false and its own applyQuery does the matching.)
+  const localMode = !!localSort
+    || (serverPaged && USE_REAL_API && localColumnFilters.length > 0);
+
+  // Only fetched once a client-sorted or prose-filtered column is actually used, and
+  // cached for a minute — a plain grid pays nothing for this. serverFilters is read
+  // inside the queryFn (it is declared further down); walkFilterKey stands in for it.
+  const walkQuery = useQuery({
+    queryKey: ["sortwalk", ...queryKey, effectiveSearch, walkFilterKey],
+    enabled: localMode,
+    staleTime: 60 * 1000,
+    // Keeps the book across a key change, so the grid narrows rather than emptying.
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const all: T[] = [];
+      let c: string | undefined;
+      // Same 25-page ceiling as the facet walk: 200 rows a page, so 5,000 rows.
+      for (let i = 0; i < 25; i++) {
+        const page = await fetcher({
+          pageIndex: 0, pageSize: 100000, globalFilter: effectiveSearch,
+          sorting: [], columnFilters, serverFilters, searchFields, cursor: c,
+        });
+        all.push(...page.rows);
+        if (!page.nextCursor) break;
+        c = page.nextCursor;
+      }
+      return all;
+    },
+  });
+
+  // The page the grid renders while the local path is engaged. The register's own
+  // facets are NOT re-applied here — the walk came back carrying them — so applyQuery
+  // does only what the wire could not: the prose match, the order, and the slice.
+  const localPage = useMemo(() => {
+    if (!localMode || !walkQuery.data) return undefined;
+    return applyQuery(walkQuery.data as any, {
+      pageIndex: pagination.pageIndex,
+      pageSize: pagination.pageSize,
+      sorting: localSort ? [localSort] : [],
+      columnFilters: localColumnFilters,
+    }) as Paged<T>;
+  }, [localMode, localSort, localColumnFilters, walkQuery.data,
+      pagination.pageIndex, pagination.pageSize]);
+
+  // Until the walk lands the server's own page stays on screen rather than an empty
+  // grid — the same stand-in placeholderData gives an in-flight refetch.
+  const rows = localPage ? localPage.rows : (query.data?.rows ?? []);
+  const total = localPage ? localPage.total : (query.data?.total ?? 0);
+  const fetching = query.isFetching || walkQuery.isFetching;
+
+  // A source that returns nextCursor is cursor-paged; one that doesn't (the mock store)
+  // keeps the ordinary jump-to-any-page controls.
+  // Sorted mode pages by offset, so the CLASSIC pager (page numbers against the
+  // exact total) takes over even on a cursor-paged source.
+  // A grid paging by slicing the walked book takes the classic numbered pager too — a
+  // cursor cannot resume an order, or a count, the register never produced.
+  const cursorMode = !serverSort && !localMode && query.data?.nextCursor !== undefined;
+
   const nextCursor = query.data?.nextCursor ?? null;
 
   // Remember the cursor that opens the following page, so Next can ask for it.
@@ -708,12 +871,16 @@ export default function CommonTable<T extends Record<string, any>>(
   // rows on screen while the next is in flight, so filing that would duplicate it —
   // hence the isPlaceholderData guard.
   useEffect(() => {
-    if (!query.data || query.isPlaceholderData) return;
-    const page = query.data.rows;
+    // Under a client sort the sorted slice IS the page — filing the server's unsorted
+    // one would put the card feed in a different order from the grid.
+    const page = localPage
+      ? localPage.rows
+      : (!query.data || query.isPlaceholderData ? undefined : query.data.rows);
+    if (!page) return;
     setFeedPages((p) => (p[pagination.pageIndex] === page
       ? p
       : { ...p, [pagination.pageIndex]: page }));
-  }, [query.data, query.isPlaceholderData, pagination.pageIndex]);
+  }, [localPage, query.data, query.isPlaceholderData, pagination.pageIndex]);
 
   const feedRows = useMemo(
     () => Object.keys(feedPages)
@@ -736,7 +903,7 @@ export default function CommonTable<T extends Record<string, any>>(
   useEffect(() => {
     if (!isMobile) return;
     const el = sentinel.current;
-    if (!el || !hasMore || query.isFetching) return;
+    if (!el || !hasMore || fetching) return;
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) {
         setPagination((p) => ({ ...p, pageIndex: p.pageIndex + 1 }));
@@ -744,7 +911,7 @@ export default function CommonTable<T extends Record<string, any>>(
     }, { rootMargin: "300px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [isMobile, hasMore, query.isFetching]);
+  }, [isMobile, hasMore, fetching]);
 
   // Column filters are multi-select checkboxes. The option list must cover the WHOLE
   // dataset, not just the current page, so fetch the full set once (unfiltered) and
@@ -791,7 +958,11 @@ export default function CommonTable<T extends Record<string, any>>(
     // the WHOLE book and page it client-side, so a client-side filter is complete and
     // honest there — meta.localFilter says so, the funnel shows, and the filter rides
     // columnFilters through applyQuery instead of the wire.
-    if (USE_REAL_API && !filterParamOf(c) && !(c.meta as any)?.localFilter) return false;
+    // meta.textFilter is the other way in: the register has no CONTAINS to offer, but
+    // the grid matches it over the whole walked book (see localMode), so the funnel is
+    // as honest as a wire facet.
+    if (USE_REAL_API && !filterParamOf(c)
+      && !(c.meta as any)?.localFilter && !(c.meta as any)?.textFilter) return false;
     const sample = facetRows
       .map((r) => columnValue(r, c))
       .find((v) => v !== undefined && v !== null);
@@ -805,6 +976,10 @@ export default function CommonTable<T extends Record<string, any>>(
           const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
           const param = col ? filterParamOf(col) : undefined;
           if (!col || !param) return null;
+          // A CONTAINS has no IN-list form: sending the typed text as `param=<text>`
+          // would ask the register for rows whose column EQUALS the phrase. Prose
+          // columns filter locally (meta.localFilter) and stay off the request.
+          if ((col.meta as any)?.textFilter) return null;
           // A DATE range rides as the register's __gte/__lte forms of the same param.
           if ((col.meta as any)?.dateFilter) {
             const out: { param: string; values: string[] }[] = [];
@@ -866,7 +1041,10 @@ export default function CommonTable<T extends Record<string, any>>(
           id: String(c.id ?? c.accessorKey),
           label: String(c.header ?? ""),
           date: !!(c.meta as any)?.dateFilter,
-          options: (c.meta as any)?.dateFilter ? [] : distinctValues(c),
+          text: !!(c.meta as any)?.textFilter,
+          // Neither a date nor a prose column has an option list to build.
+          options: (c.meta as any)?.dateFilter || (c.meta as any)?.textFilter
+            ? [] : distinctValues(c),
         }))
       : []),
     [isMobile, columns, facetRows],
@@ -968,13 +1146,18 @@ export default function CommonTable<T extends Record<string, any>>(
         const last = i === columns.length - 1;
         const canFilter = isFilterable(c);
         const dateMode = !!(c.meta as any)?.dateFilter;
-        const options = canFilter && !dateMode ? distinctValues(c) : [];
+        // A prose column asks for text rather than offering values, so there is no
+        // option list to walk the facet rows for.
+        const textMode = !!(c.meta as any)?.textFilter;
+        const options = canFilter && !dateMode && !textMode ? distinctValues(c) : [];
         // On a server-paged grid, only a column the register can ORDER BY gets sort
         // arrows — an arrow that reorders nothing teaches the user not to trust the
         // grid. Local grids sort every column through applyQuery, as always.
+        // meta.clientSort is the third way in: no register column to ORDER BY, but the
+        // grid can serve the order itself from the walked book (see localSort above).
         const canSort = c.enableSorting === false
           ? false
-          : (!serverPaged || !!sortParamOf(c));
+          : (!serverPaged || !!sortParamOf(c) || !!(c.meta as any)?.clientSort);
         // A column that right-aligns its cells (numbers) declares it via
         // muiTableHeadCellProps; the custom header must honour it or the label
         // floats left over right-aligned values.
@@ -1007,6 +1190,7 @@ export default function CommonTable<T extends Record<string, any>>(
               options={options}
               canFilter={canFilter}
               dateMode={dateMode}
+              textMode={textMode}
               align={align}
             />
           ),
@@ -1506,7 +1690,7 @@ export default function CommonTable<T extends Record<string, any>>(
           {/* Tripwire for the next page, plus whatever the list is doing right now. */}
           <Box ref={sentinel} sx={{ height: 1 }} />
           <Box sx={{ py: 1.5, textAlign: "center", fontSize: 12.4, color: tokens.muted }}>
-            {query.isFetching
+            {fetching
               ? "Loading…"
               : feedRows.length === 0
                 ? "No records"
@@ -1527,6 +1711,12 @@ export default function CommonTable<T extends Record<string, any>>(
                 </Box>
                 {sheetColDef.date ? (
                   <DateFilterBody
+                    value={colFilters[sheetColDef.id]}
+                    onClose={() => setSheetCol(null)}
+                    onChange={(v) => filterCtx.set(sheetColDef.id, v)}
+                  />
+                ) : sheetColDef.text ? (
+                  <TextFilterBody
                     value={colFilters[sheetColDef.id]}
                     onClose={() => setSheetCol(null)}
                     onChange={(v) => filterCtx.set(sheetColDef.id, v)}
