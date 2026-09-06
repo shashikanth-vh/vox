@@ -524,10 +524,23 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       putLoc('syndication', (srep as any)?.syndication?.project_location);
       putLoc('asset_monetisation', (srep as any)?.asset_monetisation?.asset_location);
       const venue = String((c.location as any)?.value ?? '').trim();
+      // The approved follow-up drives the LEAD's "Next action" column: the
+      // register rolls next_action(_date) from a Lead-subject interaction onto
+      // the lead row. Without these fields the grid sat blank even when the
+      // report showed Next steps and a resolved Follow-up date.
+      const fuDate = String((c.follow_up_date as any)?.value ?? '').trim();
+      const fuTime = String((c.follow_up_time as any)?.value ?? '').trim();
+      const acts = ((c.action_items?.value as any[]) || [])
+        .map((a) => String(a?.action ?? '').trim()).filter(Boolean);
+      const nextAction = (String((c.next_steps as any)?.value ?? '').trim()
+        || acts[0]
+        || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
       const tp = await vocxClient.post('/v1/touchpoints', {
         ...subject, interaction_type: 'VOX conversation',
         summary: ((c.meeting_summary?.value as string) || kdp[0] || 'VOX conversation').slice(0, 300),
         location: (venue || Object.values(locs).join(' · ') || undefined)?.slice(0, 200),
+        ...(nextAction ? { next_action: nextAction } : {}),
+        ...(fuDate ? { next_action_date: fuDate, next_meeting_date: fuDate } : {}),
         key_intel: (kdp.length || lanes.length || Object.keys(locs).length)
           ? { ...(kdp.length ? { points: kdp } : {}),
               ...(lanes.length ? { use_cases: lanes } : {}),

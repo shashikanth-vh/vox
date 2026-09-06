@@ -225,12 +225,24 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
       if (subject) {
         try {
           const kdp = ((report?.common?.key_discussion_points?.value as string[]) || []);
+          // Same follow-up mapping as the live review screen: the register rolls
+          // next_action(_date) from a Lead-subject interaction onto the lead row.
+          const cc = (report?.common || {}) as Record<string, any>;
+          const fuDate = String((cc.follow_up_date as any)?.value ?? '').trim();
+          const fuTime = String((cc.follow_up_time as any)?.value ?? '').trim();
+          const acts = ((cc.action_items?.value as any[]) || [])
+            .map((a) => String(a?.action ?? '').trim()).filter(Boolean);
+          const nextAction = (String((cc.next_steps as any)?.value ?? '').trim()
+            || acts[0]
+            || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
           const tp = await vocxClient.post('/v1/touchpoints', {
             ...subject,
             interaction_type: 'VOX conversation',
             summary: kdp[0] || 'VOX conversation',
             key_intel: kdp.length ? { points: kdp } : undefined,
             transcript: row?.raw_transcript || undefined,
+            ...(nextAction ? { next_action: nextAction } : {}),
+            ...(fuDate ? { next_action_date: fuDate, next_meeting_date: fuDate } : {}),
             performed_by: user.full, capture_id: `vox-conv:${conversationId}`,
           });
           const iid = tp.data?.interaction_id || tp.data?.id;
