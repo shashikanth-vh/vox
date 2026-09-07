@@ -7,7 +7,6 @@ from fastapi import APIRouter
 from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
-from app.api.deal_rules import deal_pre_write
 from app.api.people_rules import person_pre_write
 from app.models import (
     AssetMonetisation,
@@ -87,7 +86,6 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.DealCreate, update_schema=s.DealUpdate, read_schema=s.DealRead,
         filterable=["product_type", "stage", "temperature", "is_lending", "is_syndication",
                     "is_asset_mon", "entity_id", "rm", "code", "analyst", "lens"],
-        pre_write=deal_pre_write,
         subject_type="Deal", view_name="deals",
     ),
     ResourceSpec(
