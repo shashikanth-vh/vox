@@ -378,6 +378,9 @@ _CLIENT_MASTER_HDR = ["Group Code", "Company Legal Name", "Sector (default)",
 _PEOPLE_HDR = ["Role", "Initials", "Full Name", "Email", "Notes"]
 _MANDATE_HDR = ["Company", "RM", "Mandate Sent/Not Sent", "Signed/Pending",
                 "Syndication", "Partnership"]
+_DOCS_HDR = ["Client ID", "Company (auto)", "Register", "Reference", "Section",
+             "Document", "Status", "File Name", "Size (KB)", "Uploaded By",
+             "Uploaded On", "Expires On", "Notes"]
 
 # Which milestone column a lender row's 'since' date belongs in, by current status.
 _SINCE_COLUMN = {"Sanctioned": "Date Sanctioned", "IP Received": "Date In-Principle",
@@ -622,5 +625,21 @@ def build_ledger_workbook(data: dict):
         sent, signed, syn_flag, part_flag = split_mandate(t.get("mandate_status"))
         ws.append([ename.get(t.get("entity_id")), t.get("rm"), sent, signed,
                    syn_flag, part_flag])
+
+    # --- Documents (export-only) ---------------------------------------------
+    # The data register alongside the rows it evidences: one line per document on
+    # file, named by its subject's own reference (lead number, deal number, tracker
+    # number, group code). The importer reads sheets by name and does not know this
+    # one, so the round-trip contract is untouched — documents ride OUT, never in.
+    ws = _sheet_with("Documents",
+                     "DOCUMENTS  —  the data register: every document on file, by subject",
+                     _DOCS_HDR)
+    for d in data.get("documents") or []:
+        ws.append([cid.get(d.get("entity_id")),
+                   ename.get(d.get("entity_id")) or d.get("company"),
+                   d.get("register"), d.get("reference"), d.get("section"),
+                   d.get("title"), d.get("status"), d.get("original_filename"),
+                   d.get("size_kb"), d.get("uploaded_by"), d.get("uploaded_at"),
+                   d.get("expires_on"), d.get("notes")])
 
     return wb

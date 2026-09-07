@@ -286,3 +286,41 @@ async def test_prism_only_vocabulary_survives_the_trip(client: AsyncClient):
     rows2 = (await client.get(f"/v1/syndication/{mand2['id']}/lenders")).json()
     hdfc = next(x for x in rows2 if x["lender_name"] == "HDFC Bank")
     assert hdfc["status"] == "Identified"
+
+
+async def test_export_lists_the_data_register_documents(client: AsyncClient):
+    """The workbook carries a Documents sheet — every document on file, named by
+    its subject's own reference (lead number / tracker number / group code) — and
+    the sheet is export-only: re-importing the file neither loses substance nor
+    tries to import documents."""
+    from openpyxl import load_workbook
+
+    await _import(client, _dashboard_ledger(), "replace")
+    lead = (await client.post("/v1/leads", json={"company": "DocCo"})).json()
+    r = await client.post(f"/v1/leads/{lead['id']}/documents", json={
+        "slot_key": "coi", "section": "KYC & Constitutional",
+        "title": "Certificate of Incorporation",
+        "original_filename": "coi.pdf", "content_type": "application/pdf"})
+    assert r.status_code == 201, r.text
+    lend_id = (await client.get("/v1/lending")).json()["items"][0]["id"]
+    r = await client.post(f"/v1/lending/{lend_id}/documents", json={
+        "section": "Financials", "title": "FY26 provisional financials",
+        "original_filename": "fy26.xlsx"})
+    assert r.status_code == 201, r.text
+    lend_no = (await client.get(f"/v1/lending/{lend_id}")).json()["tracker_no"]
+
+    exported = (await client.get("/v1/export/ledger-xlsx")).content
+    wb = load_workbook(io.BytesIO(exported))
+    assert "Documents" in wb.sheetnames
+    rows = list(wb["Documents"].iter_rows(values_only=True))
+    docs = [dict(zip(rows[1], r)) for r in rows[2:]]   # rows[0] = banner
+
+    coi = next(d for d in docs if d["Document"] == "Certificate of Incorporation")
+    assert coi["Register"] == "Leads" and coi["Reference"] == lead["lead_no"]
+    assert coi["File Name"] == "coi.pdf"
+    fin = next(d for d in docs if d["Document"] == "FY26 provisional financials")
+    assert fin["Register"] == "Lending" and fin["Reference"] == lend_no
+
+    # The extra sheet must not disturb the round trip.
+    out = await _import(client, exported, "replace")
+    assert out["report"]["quarantined_count"] == 0, out["report"]["quarantined"]

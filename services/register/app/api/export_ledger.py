@@ -79,6 +79,46 @@ async def export_ledger_xlsx(
     counterparties = await _all(Counterparty, Counterparty.name)
     people = await _all(Person, Person.full_name)
 
+    # The data register, as references only (never the bytes — inline_content stays
+    # out of the query). Superseded rows are history behind their replacement and
+    # would double-count the slot, so only the CURRENT document of each upload rides.
+    from app.models import Document
+
+    doc_rows = (await ctx.session.execute(
+        select(Document.subject_type, Document.subject_id, Document.entity_id,
+               Document.section, Document.title, Document.status,
+               Document.original_filename, Document.size_bytes, Document.uploaded_by,
+               Document.uploaded_at, Document.expires_on, Document.notes)
+        .where(Document.tenant_id == ctx.tenant_id, Document.deleted_at.is_(None),
+               Document.superseded_by.is_(None))
+        .order_by(Document.subject_type, Document.uploaded_at))).all()
+
+    # Each subject named by ITS OWN reference — the number a person would quote.
+    _reg_label = {"Lead": "Leads", "Deal": "Deals", "Entity": "Client Master",
+                  "Lending": "Lending", "Syndication": "Syndication",
+                  "AssetMonetisation": "Asset Monetisation",
+                  "Counterparty": "Lender Master"}
+    _refs: dict[str, dict[str, str]] = {
+        "Lead": {str(x.id): (x.lead_no or x.company or "") for x in leads},
+        "Deal": {str(x.id): (x.deal_no or x.code or "") for x in deals},
+        "Entity": {str(x.id): (x.code or "") for x in entities},
+        "Lending": {str(x.id): (x.tracker_no or "") for x in lending},
+        "Syndication": {str(x.id): (x.tracker_no or "") for x in syn_trackers},
+        "AssetMonetisation": {str(x.id): (x.tracker_no or "") for x in am},
+        "Counterparty": {str(x.id): (x.name or "") for x in counterparties},
+    }
+    documents = [{
+        "entity_id": d.entity_id,
+        "register": _reg_label.get(d.subject_type, d.subject_type),
+        "reference": _refs.get(d.subject_type, {}).get(str(d.subject_id), ""),
+        "section": d.section, "title": d.title, "status": d.status,
+        "original_filename": d.original_filename,
+        "size_kb": round(d.size_bytes / 1024, 1) if d.size_bytes else None,
+        "uploaded_by": d.uploaded_by,
+        "uploaded_at": d.uploaded_at.strftime("%Y-%m-%d %H:%M") if d.uploaded_at else None,
+        "expires_on": d.expires_on, "notes": d.notes,
+    } for d in doc_rows]
+
     generated_at = datetime.now(UTC)
     wb = build_ledger_workbook({
         "generated_at": generated_at.strftime("%Y-%m-%d %H:%M UTC"),
@@ -116,6 +156,7 @@ async def export_ledger_xlsx(
                                     "is_active", "sectors", "notes"))
                            for x in counterparties],
         "people": [_row(x, ("role", "name", "full_name", "email", "notes")) for x in people],
+        "documents": documents,
     })
 
     actor = ctx.user.email if ctx.user is not None else ctx.actor
@@ -126,7 +167,8 @@ async def export_ledger_xlsx(
         changes={"entities": len(entities), "leads": len(leads), "deals": len(deals),
                  "lending": len(lending), "syn_trackers": len(syn_trackers),
                  "syn_lenders": len(syn_lenders), "asset_mon": len(am),
-                 "counterparties": len(counterparties), "people": len(people)}))
+                 "counterparties": len(counterparties), "people": len(people),
+                 "documents": len(documents)}))
 
     buf = io.BytesIO()
     wb.save(buf)
