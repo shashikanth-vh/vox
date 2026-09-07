@@ -322,8 +322,12 @@ services:
       # MinIO port (swap localhost for the VM's IP when testing from another machine).
       VOCX_S3_PUBLIC_ENDPOINT_URL: "${VOCX_S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}"
       VOCX_S3_BUCKET: "prism-vocx-captures"
-      VOCX_S3_ACCESS_KEY_ID: "prism"
-      VOCX_S3_SECRET_ACCESS_KEY: "prism-secret"
+      # Same credentials MinIO itself runs with (see the minio service) — hardcoded
+      # defaults here made every VocX S3 call fail with SignatureDoesNotMatch on any
+      # box whose .env overrides the MinIO password, silently demoting recordings
+      # and reports to the container volume.
+      VOCX_S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-prism}"
+      VOCX_S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-prism-secret}"
       VOCX_AUDIO_RETENTION_DAYS: "${VOCX_AUDIO_RETENTION_DAYS:-0}"
       # Intelligence features (Batch 1) — each independently switchable; defaults ON.
       VOCX_STT_PRIMING: "${VOCX_STT_PRIMING:-true}"
