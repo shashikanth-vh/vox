@@ -29,7 +29,12 @@ export default function DealsPage() {
     { accessorKey: 'lens', header: 'Lens', size: 80, meta: { filterParam: 'lens' }, Cell: ({ row }) => <LensPill lens={(row.original as any).lens} /> },
     { accessorKey: 'rm', header: 'RM', size: 100, meta: { filterParam: 'rm' } },
     { accessorKey: 'an', header: 'Analyst', size: 110, meta: { filterParam: 'analyst' } },
-    { accessorKey: 'products', header: 'Products', size: 120, enableSorting: false, Cell: ({ row }) => <ProductFlags lend={row.original.lend} syn={row.original.syn} am={row.original.am} /> },
+    // Products facet: the cell keeps its chips; the underlying value is the flags as
+    // words ("Lending, Syndication"), so the funnel offers the three product lines and
+    // a multi-select means OR — matched over the walked book (meta.localFacet), since
+    // the three register booleans have no single wire param an OR could ride.
+    { accessorKey: 'products', header: 'Products', size: 120, enableSorting: false, meta: { localFacet: true },
+      Cell: ({ row }) => <ProductFlags lend={row.original.lend} syn={row.original.syn} am={row.original.am} /> },
     { accessorKey: 'remarks', header: 'Remarks', size: 220, meta: { textFilter: true } },
   ], []);
 

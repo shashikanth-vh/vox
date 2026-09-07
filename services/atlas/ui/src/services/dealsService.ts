@@ -26,6 +26,10 @@ export function toDealRow(r: any): DealRow {
     lend: !!r?.is_lending,
     syn: !!r?.is_syndication,
     am: !!r?.is_asset_mon,
+    // The flags as words: the Products facet matches these tokens, and the CSV
+    // export prints them — the grid cell itself still renders the chips.
+    products: [r?.is_lending && 'Lending', r?.is_syndication && 'Syndication',
+               r?.is_asset_mon && 'Asset Monetisation'].filter(Boolean).join(', '),
     temp: r?.temperature || '',
     lens: r?.lens || '',
     source: r?.source || '',
@@ -72,7 +76,11 @@ export const dealsService = {
       },
       async () => {
         await delay();
-        const rows = db().deals.map((d: Deal) => ({ ...d, _name: clientsService.get(d.code).name })).filter((d: any) => inScope(scope ?? null, d));
+        const rows = db().deals.map((d: Deal) => ({
+          ...d, _name: clientsService.get(d.code).name,
+          products: [d.lend && 'Lending', d.syn && 'Syndication',
+                     d.am && 'Asset Monetisation'].filter(Boolean).join(', '),
+        })).filter((d: any) => inScope(scope ?? null, d));
         return applyQuery(rows, { ...q, searchFields: ['code', '_name'] });
       },
     );

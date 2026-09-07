@@ -71,7 +71,8 @@ export default function AssetMonPage() {
         );
       },
     },
-    { accessorKey: 'teaser', header: 'Date Teaser Shared', size: 150, meta: { textFilter: true },
+    { accessorKey: 'teaser', header: 'Date Teaser Shared', size: 150,
+      meta: { sortParam: 'teaser_date', filterParam: 'teaser_date', dateFilter: true },
       Cell: ({ cell }) => cell.getValue<string>() || '' },
     { accessorKey: 'notes', header: 'Notes', size: 200, meta: { textFilter: true }, ...truncCell(55) },
   ], [ro]);

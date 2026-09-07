@@ -671,7 +671,11 @@ export default function CommonTable<T extends Record<string, any>>(
   const localFilterIds = useMemo(
     () => Object.keys(colFilters).filter((id) => {
       const col = columns.find((c) => String(c.id ?? c.accessorKey) === id);
-      return !!(col?.meta as any)?.textFilter;
+      // meta.localFacet: a CHECKBOX facet whose column spans several register
+      // columns (Deals' Products = three booleans), so no single wire param can
+      // carry an OR across the options — it matches over the walked book instead,
+      // exactly like the prose filters.
+      return !!((col?.meta as any)?.textFilter || (col?.meta as any)?.localFacet);
     }),
     [colFilters, columns],
   );
@@ -962,7 +966,8 @@ export default function CommonTable<T extends Record<string, any>>(
     // the grid matches it over the whole walked book (see localMode), so the funnel is
     // as honest as a wire facet.
     if (USE_REAL_API && !filterParamOf(c)
-      && !(c.meta as any)?.localFilter && !(c.meta as any)?.textFilter) return false;
+      && !(c.meta as any)?.localFilter && !(c.meta as any)?.textFilter
+      && !(c.meta as any)?.localFacet) return false;
     const sample = facetRows
       .map((r) => columnValue(r, c))
       .find((v) => v !== undefined && v !== null);
@@ -980,6 +985,9 @@ export default function CommonTable<T extends Record<string, any>>(
           // would ask the register for rows whose column EQUALS the phrase. Prose
           // columns filter locally (meta.localFilter) and stay off the request.
           if ((col.meta as any)?.textFilter) return null;
+          // A multi-column facet (localFacet) has no wire form either — the walked
+          // book applies it (see localFilterIds).
+          if ((col.meta as any)?.localFacet) return null;
           // A DATE range rides as the register's __gte/__lte forms of the same param.
           if ((col.meta as any)?.dateFilter) {
             const out: { param: string; values: string[] }[] = [];

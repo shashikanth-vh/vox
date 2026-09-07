@@ -19,4 +19,9 @@ export interface Deal {
   productType?: string;
   amountCr?: number;
 }
-export interface DealRow extends Deal { _name?: string; lens?: string; }
+export interface DealRow extends Deal {
+  _name?: string; lens?: string;
+  /** The L/S/AM flags as words ("Lending, Syndication") — what the Products facet
+   *  and the CSV export read; the grid cell still renders the chips. */
+  products?: string;
+}

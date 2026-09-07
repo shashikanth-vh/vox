@@ -73,7 +73,9 @@ export function toAmRow(r: any): AmRow {
     rm: r?.rm || '',
     an: r?.analyst || '',
     status: r?.status || '',
-    teaser: r?.teaser ?? null,
+    // The register's read field is teaser_date; reading `teaser` (a UI-only name)
+    // left this column blank on every live row.
+    teaser: r?.teaser_date ?? r?.teaser ?? null,
     createdAt: localDay(r?.created_at || ''),
     notes: r?.notes || '',
   };

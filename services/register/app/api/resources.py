@@ -128,10 +128,10 @@ _SPECS: list[ResourceSpec] = [
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],
         repo=CRUDRepository(AssetMonetisation, searchable=["investor", "notes"],
                             filterable=["status", "nature", "entity_id", "deal_id", "state",
-                                        "investor_type", "deal_type"]),
+                                        "investor_type", "deal_type", "teaser_date"]),
         create_schema=s.AssetMonCreate, update_schema=s.AssetMonUpdate, read_schema=s.AssetMonRead,
         filterable=["status", "nature", "entity_id", "deal_id", "state", "investor_type",
-                    "deal_type"],
+                    "deal_type", "teaser_date"],
         subject_type="AssetMonetisation", view_name="asset_monetisation",
     ),
     ResourceSpec(

@@ -282,3 +282,22 @@ async def test_conversion_carries_the_leads_origin_not_a_uuid(client: AsyncClien
     deal2 = (await client.get(f"/v1/deals/{r2.json()['deal_id']}")).json()
     assert deal2["source"] == "RM"                       # the fallback, unchanged
     assert not deal2["source_detail"]                    # empty stays fillable
+
+
+async def test_date_range_filters_bound_the_grid_columns(client: AsyncClient):
+    """The grids' From/To pickers ride as <col>__gte/__lte — inclusive on both
+    ends — on lending's stage_updated_at and asset-mon's teaser_date."""
+    eid = (await client.post("/v1/entities",
+                             json={"code": "RANGE", "legal_name": "RANGE"})).json()["id"]
+    for day in ("2026-08-28", "2026-09-01", "2026-09-04", "2026-09-06"):
+        am = (await client.post("/v1/asset-monetisation",
+                                json={"entity_id": eid, "status": "Teaser Shared"})).json()
+        r = await client.patch(f"/v1/asset-monetisation/{am['id']}",
+                               json={"teaser_date": day})
+        assert r.status_code == 200, r.text
+    r = await client.get("/v1/asset-monetisation",
+                         params={"teaser_date__gte": "2026-09-01",
+                                 "teaser_date__lte": "2026-09-04", "with_total": True})
+    assert r.status_code == 200, r.text
+    days = sorted(x["teaser_date"] for x in r.json()["items"])
+    assert days == ["2026-09-01", "2026-09-04"] and r.json()["total"] == 2
