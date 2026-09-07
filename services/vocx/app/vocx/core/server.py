@@ -583,6 +583,13 @@ class VocxApp:
                         return client.messages.create(temperature=0.0, **kwargs, **extra)
                     except TypeError:
                         return client.messages.create(**kwargs, **extra)
+                    except anthropic.BadRequestError as e:
+                        # Claude 5 family models reject the keyword API-side
+                        # ("`temperature` is deprecated for this model") — the
+                        # determinism nicety must never fail the take.
+                        if "temperature" in str(e).lower():
+                            return client.messages.create(**kwargs, **extra)
+                        raise
 
                 if schema is not None:
                     # The outer wall (same pattern as the legacy extraction path):
