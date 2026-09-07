@@ -8,6 +8,7 @@ from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
+from app.api.tracker_rules import lending_pre_write
 from app.models import (
     AssetMonetisation,
     ContractAsset,
@@ -68,11 +69,11 @@ _SPECS: list[ResourceSpec] = [
         name="lead", prefix="/v1/leads", tags=["Leads"],
         repo=CRUDRepository(Lead, searchable=["company", "contact", "rm", "notes"],
                             filterable=["status", "temperature", "sector", "rm", "source", "lens",
-                                        "company", "lead_no",
+                                        "company", "lead_no", "last_interaction_date",
                                         "entity_id", "converted_deal_id"]),
         create_schema=s.LeadCreate, update_schema=s.LeadUpdate, read_schema=s.LeadRead,
         filterable=["status", "temperature", "sector", "rm", "source", "lens", "company",
-                    "lead_no", "entity_id",
+                    "lead_no", "last_interaction_date", "entity_id",
                     "converted_deal_id"],
         subject_type="Lead", view_name="leads",
         # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.
@@ -96,6 +97,7 @@ _SPECS: list[ResourceSpec] = [
         create_schema=s.LendingCreate, update_schema=s.LendingUpdate, read_schema=s.LendingRead,
         filterable=["stage", "pending_with", "entity_id", "deal_id", "rm", "analyst",
                     "stage_updated_at"],
+        pre_write=lending_pre_write,
         subject_type="Lending", view_name="lending",
     ),
     ResourceSpec(
@@ -128,10 +130,11 @@ _SPECS: list[ResourceSpec] = [
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],
         repo=CRUDRepository(AssetMonetisation, searchable=["investor", "notes"],
                             filterable=["status", "nature", "entity_id", "deal_id", "state",
-                                        "investor_type", "deal_type", "teaser_date"]),
+                                        "investor_type", "deal_type", "teaser_date",
+                                        "rm", "analyst", "investor"]),
         create_schema=s.AssetMonCreate, update_schema=s.AssetMonUpdate, read_schema=s.AssetMonRead,
         filterable=["status", "nature", "entity_id", "deal_id", "state", "investor_type",
-                    "deal_type", "teaser_date"],
+                    "deal_type", "teaser_date", "rm", "analyst", "investor"],
         subject_type="AssetMonetisation", view_name="asset_monetisation",
     ),
     ResourceSpec(

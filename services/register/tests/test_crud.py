@@ -301,3 +301,62 @@ async def test_date_range_filters_bound_the_grid_columns(client: AsyncClient):
     assert r.status_code == 200, r.text
     days = sorted(x["teaser_date"] for x in r.json()["items"])
     assert days == ["2026-09-01", "2026-09-04"] and r.json()["total"] == 2
+
+
+async def test_stage_edits_stamp_the_stage_date(client: AsyncClient):
+    """The Lending page's promise, made true at the register: a write that CHANGES
+    the stage stamps stage_updated_at with today; a same-stage write keeps the
+    standing date; an explicit date in the payload (imports, corrections) wins."""
+    from datetime import UTC, datetime
+
+    today = datetime.now(UTC).date().isoformat()
+    eid = (await client.post("/v1/entities",
+                             json={"code": "STAMP", "legal_name": "STAMP"})).json()["id"]
+
+    born = (await client.post("/v1/lending",
+                              json={"entity_id": eid, "amount_cr": 2,
+                                    "stage": "Data Awaited"})).json()
+    assert born["stage_updated_at"] == today          # stamped at birth
+
+    # An explicit date (the ledger import's case) is never overridden.
+    r = await client.patch(f"/v1/lending/{born['id']}",
+                           json={"stage": "Diligence", "stage_updated_at": "2026-08-01"})
+    assert r.status_code == 200 and r.json()["stage_updated_at"] == "2026-08-01"
+
+    # A same-stage write (remark edit, amount fix) keeps the standing date …
+    r = await client.patch(f"/v1/lending/{born['id']}",
+                           json={"stage": "Diligence", "amount_cr": 3})
+    assert r.status_code == 200 and r.json()["stage_updated_at"] == "2026-08-01"
+
+    # … and a real stage MOVE stamps today, which is what the date filter reads.
+    r = await client.patch(f"/v1/lending/{born['id']}", json={"stage": "Note Circulated"})
+    assert r.status_code == 200 and r.json()["stage_updated_at"] == today
+    hits = (await client.get("/v1/lending", params={
+        "stage_updated_at__gte": today, "stage_updated_at__lte": today})).json()["items"]
+    assert any(x["id"] == born["id"] for x in hits)
+
+
+async def test_every_grid_facet_param_is_register_filterable(client: AsyncClient):
+    """The funnels the grids OFFER must be params the register ACCEPTS — a
+    whitelist miss turns a facet into a 422 and an empty page (the staging
+    'No records to display' bug). Pins the leads date range and the AM
+    rm/analyst/investor facets that were missing."""
+    r = await client.get("/v1/leads", params={
+        "last_interaction_date__gte": "2026-09-01",
+        "last_interaction_date__lte": "2026-09-04"})
+    assert r.status_code == 200, r.text
+    for param in ("rm", "analyst", "investor"):
+        r = await client.get("/v1/asset-monetisation", params={param: "Someone"})
+        assert r.status_code == 200, (param, r.text)
+
+    # And the filter actually FILTERS: a lead touched inside the range is found,
+    # one outside is not.
+    a = (await client.post("/v1/leads", json={
+        "company": "InRange", "last_interaction_date": "2026-09-02"})).json()
+    await client.post("/v1/leads", json={
+        "company": "OutOfRange", "last_interaction_date": "2026-08-20"})
+    hits = (await client.get("/v1/leads", params={
+        "last_interaction_date__gte": "2026-09-01",
+        "last_interaction_date__lte": "2026-09-04"})).json()
+    names = [x["company"] for x in (hits if isinstance(hits, list) else hits["items"])]
+    assert "InRange" in names and "OutOfRange" not in names
