@@ -136,6 +136,7 @@ _synlender_repo = CRUDRepository(
 )
 _intel_repo = CRUDRepository(ExternalIntelligence)
 _document_repo = CRUDRepository(Document)
+_interaction_repo = CRUDRepository(Interaction)
 
 # Built-in defaults for per-tenant settings (ATLAS alert thresholds, in days). A tenant's
 # stored settings are merged over these on read, so a fresh tenant already has sane values.
@@ -485,6 +486,60 @@ async def log_interaction(
         ))
     response.headers["ETag"] = f'"{obj.version}"'
     return result
+
+
+@router.delete("/v1/interactions/{interaction_id}", status_code=204,
+               tags=["Interactions"],
+               summary="Remove a mislogged interaction (Admin)")
+async def remove_interaction(
+    interaction_id: uuid.UUID,
+    ctx: RequestContext = Depends(get_context),
+) -> Response:
+    """The timeline is append-only in daily use — a conversation that happened
+    stays on the record. This endpoint is for the OTHER case: an entry logged
+    against the WRONG company (or a plain duplicate) that never belonged on this
+    timeline. Admin-only (the delete_row gate, online-revalidated), soft-delete
+    — the audit log keeps what was removed and by whom. If the entry had rolled
+    onto its lead's summary fields, those are recomputed from the interactions
+    that remain, so the lead stops quoting a deleted row."""
+    from app.authz import enforce_operation
+    from app.authz.revalidate import revalidate_sensitive
+
+    enforce_operation(ctx.user, "delete_row")
+    await revalidate_sensitive(ctx, "delete_row")
+    obj = await _interaction_repo.get(ctx.session, ctx.tenant_id, interaction_id)
+    await _ensure_company_read(ctx, obj.entity_id)
+    subject_type, subject_id = obj.subject_type, obj.subject_id
+    gone_next = (obj.next_action or "").strip()
+    await _interaction_repo.soft_delete(ctx.session, ctx.tenant_id,
+                                        interaction_id, ctx.actor)
+
+    if subject_type == "Lead":
+        from sqlalchemy import update as sa_update
+
+        from app.models.deals import Lead
+
+        remaining = (await ctx.session.execute(
+            select(Interaction)
+            .where(Interaction.tenant_id == ctx.tenant_id,
+                   Interaction.subject_type == "Lead",
+                   Interaction.subject_id == subject_id,
+                   Interaction.deleted_at.is_(None))
+            .order_by(Interaction.occurred_at.desc())
+        )).scalars().all()
+        vals: dict[str, Any] = {"last_interaction_date":
+                                remaining[0].occurred_at.date() if remaining else None}
+        # Next action is only rolled back when the DELETED row is what stamped it —
+        # a hand-typed next action on the lead is not this endpoint's to touch.
+        lead = await load_subject(ctx.session, ctx.tenant_id, "Lead", subject_id)
+        if lead is not None and gone_next and (lead.next_action or "").strip() == gone_next:
+            prev = next((r for r in remaining if (r.next_action or "").strip()), None)
+            vals["next_action"] = prev.next_action if prev else None
+            vals["next_action_date"] = prev.next_action_date if prev else None
+        await ctx.session.execute(
+            sa_update(Lead).where(Lead.id == subject_id, Lead.tenant_id == ctx.tenant_id)
+            .values(**vals))
+    return Response(status_code=204)
 
 
 def _timeline_routes(path_prefix: str, subject_type: str) -> None:

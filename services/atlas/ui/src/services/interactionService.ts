@@ -234,4 +234,30 @@ export const interactionService = {
     this.log({ ...rec, refId: ref.id, refType: 'Lead' }, by);
     return { ok: true };
   },
+
+  /**
+   * DELETE {{baseUrl}}/v1/interactions/{id} — the Admin correction lane for an entry
+   * logged against the WRONG company. Server-gated (delete_row = Admin only, soft
+   * delete, audited; the lead's LAST / Next action recompute from what remains), so
+   * this is awaited and honest: a refusal reports itself instead of hiding the row
+   * locally while the register still shows it.
+   */
+  async remove(interactionId: string, by: string): Promise<{ ok: boolean; error?: string }> {
+    const isApiRow = /^[0-9a-f-]{36}$/i.test(interactionId);
+    if (USE_REAL_API && isApiRow) {
+      try {
+        await api.del<any>(`/interactions/${interactionId}`);
+      } catch (e: any) {
+        const detail = errText(e?.response?.data);
+        if (e?.response) console.warn('[interactions] DELETE /interactions/%s failed (%s):', interactionId, e.response.status, e.response.data);
+        return { ok: false, error: detail || 'Could not remove the interaction.' };
+      }
+    }
+    const all = db().interactions || [];
+    const gone = all.find((i: any) => i.interactionId === interactionId);
+    db().interactions = all.filter((i: any) => i.interactionId !== interactionId);
+    writeAudit(by, 'Interaction removed', gone?.refId || '',
+      (gone?.interactionType || '') + (gone?.notes ? ' — ' + String(gone.notes).slice(0, 60) : ''));
+    return { ok: true };
+  },
 };

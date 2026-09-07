@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Box, Typography } from '@mui/material';
-import type { Interaction } from '../../services/interactionService';
+import { Box, Tooltip, Typography } from '@mui/material';
+import { interactionService, type Interaction } from '../../services/interactionService';
+import { useAuth } from '../../auth/AuthContext';
+import { can } from '../../auth/rbac';
 import { tokens } from '../../theme';
 
 /**
@@ -96,6 +98,26 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function InteractionRow({ i, leadBadge = true }: { i: Interaction; leadBadge?: boolean }) {
   const [open, setOpen] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  // Admin correction lane: an entry logged on the WRONG company can be removed.
+  // Server-gated too (delete_row) — this only shows the door to those who hold it.
+  const admin = can(user.roles, 'deleteRow');
+
+  const removeRow = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (busy || !window.confirm(
+      'Remove this interaction from the timeline?\n\nAdmin correction for an entry '
+      + 'logged against the wrong company. The audit log keeps what was removed.')) return;
+    setBusy(true);
+    const r = await interactionService.remove(i.interactionId, user.name);
+    setBusy(false);
+    if (r.ok) setRemoved(true);
+    else window.alert(r.error || 'Could not remove the interaction.');
+  };
+
+  if (removed) return null;
   const intel = intelLines(i.keyIntel);
   const lanes = laneChips(i.keyIntel);
   const laneLocs = locationLine(i.keyIntel);
@@ -128,6 +150,16 @@ export default function InteractionRow({ i, leadBadge = true }: { i: Interaction
           <Box component="span" sx={{ ml: 'auto', color: tokens.navy, fontSize: 10.5, fontWeight: 700 }}>
             {open ? '▴ less' : '▾ more'}
           </Box>
+        )}
+        {admin && (
+          <Tooltip title="Remove — logged on the wrong company (Admin)">
+            <Box component="span" onClick={removeRow}
+              sx={{ ml: hasDepth ? 0.5 : 'auto', px: 0.5, cursor: 'pointer',
+                color: busy ? tokens.muted : '#B4232C', fontWeight: 700, fontSize: 11.5,
+                '&:hover': { bgcolor: '#FDECEC', borderRadius: 1 } }}>
+              ✕
+            </Box>
+          </Tooltip>
         )}
       </Typography>
       <Typography sx={{ fontSize: 12.5, whiteSpace: 'pre-wrap', mt: 0.3 }}>{i.notes}</Typography>

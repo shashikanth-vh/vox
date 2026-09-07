@@ -132,6 +132,54 @@ async def test_interaction_is_append_only(client: AsyncClient):
     assert r.json()["total"] == 1
     assert (await client.get(f"/v1/interactions/{iid}")).status_code == 200
 
-    # Edit / delete are not exposed — the routes don't exist (405).
+    # Edit is not exposed — the route doesn't exist (405). Delete EXISTS, but only
+    # as the Admin correction lane (mislogged company) — a desk role is refused.
     assert (await client.patch(f"/v1/interactions/{iid}", json={"outcome": "x"})).status_code == 405
-    assert (await client.delete(f"/v1/interactions/{iid}")).status_code == 405
+    r = await client.delete(f"/v1/interactions/{iid}",
+                            headers={"X-User-Email": "bd@evamfinance.com",
+                                     "X-User-Roles": "BDRM"})
+    assert r.status_code == 403, r.text
+
+
+ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+
+
+async def test_admin_removes_a_mislogged_interaction_and_the_lead_heals(client: AsyncClient):
+    """An interaction logged against the WRONG company: Admin removes it, the
+    timeline forgets it, and the lead's rolled-up summary (last-interaction date,
+    next action) recomputes from the entries that remain."""
+    lead_id = (await client.post("/v1/leads", json={"company": "Wrong Co"})).json()["id"]
+    ok = (await client.post(f"/v1/leads/{lead_id}/interactions", json={
+        "interaction_type": "Phone Call", "occurred_at": "2026-08-01T10:00:00Z",
+        "summary": "genuine touch", "next_action": "Send NDA",
+        "next_action_date": "2026-08-05"})).json()
+    bad = (await client.post(f"/v1/leads/{lead_id}/interactions", json={
+        "interaction_type": "In-Person Meeting", "occurred_at": "2026-09-01T10:00:00Z",
+        "summary": "logged on the wrong company",
+        "next_action": "Follow-up call on 2026-09-08",
+        "next_action_date": "2026-09-08"})).json()
+    lead = (await client.get(f"/v1/leads/{lead_id}")).json()
+    assert lead["last_interaction_date"] == "2026-09-01"
+    assert lead["next_action"] == "Follow-up call on 2026-09-08"
+
+    r = await client.delete(f"/v1/interactions/{bad['id']}", headers=ADMIN)
+    assert r.status_code == 204, r.text
+
+    # Gone from the timeline; the summary rolls back to the surviving entry.
+    items = (await client.get(f"/v1/leads/{lead_id}/interactions")).json()
+    assert [i["id"] for i in items] == [ok["id"]]
+    lead = (await client.get(f"/v1/leads/{lead_id}")).json()
+    assert lead["last_interaction_date"] == "2026-08-01"
+    assert lead["next_action"] == "Send NDA"
+    assert lead["next_action_date"] == "2026-08-05"
+
+    # A hand-set next action is NOT this lane's to touch: deleting an entry whose
+    # next_action does not match the lead's leaves the lead's text alone.
+    manual = (await client.patch(f"/v1/leads/{lead_id}",
+                                 json={"next_action": "Board intro via Rakesh"}))
+    assert manual.status_code == 200, manual.text
+    r = await client.delete(f"/v1/interactions/{ok['id']}", headers=ADMIN)
+    assert r.status_code == 204, r.text
+    lead = (await client.get(f"/v1/leads/{lead_id}")).json()
+    assert lead["last_interaction_date"] is None
+    assert lead["next_action"] == "Board intro via Rakesh"
