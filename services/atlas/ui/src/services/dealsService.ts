@@ -14,6 +14,26 @@ import { localDay } from '../api/time';
  * API's own names (is_lending, analyst, note), none of which match the grid's accessor
  * keys — unmapped, every column but the raw id renders blank.
  */
+/** A converted deal's remarks carry the conversion record as a LOCKED first line
+ *  ("Converted from lead LD-307 (…). (approved by …)") with the desk's own freely
+ *  revisable remark below it. This splits the two for display and editing; the
+ *  register refuses any save that drops or alters the lineage line (Admin exempt). */
+export function splitRemarks(remarks?: string | null): { origin: string; note: string } {
+  const text = remarks || '';
+  const [first, ...rest] = text.split('\n');
+  if ((first || '').trim().startsWith('Converted from lead ')) {
+    return { origin: first.trim(), note: rest.join('\n').trim() };
+  }
+  return { origin: '', note: text.trim() };
+}
+
+/** The wire value a remarks save must carry: the lineage line (when there is one)
+ *  followed by the desk's remark. */
+export function joinRemarks(origin: string, note: string): string {
+  const n = (note || '').trim();
+  return origin ? (n ? `${origin}\n${n}` : origin) : n;
+}
+
 export function toDealRow(r: any): DealRow {
   return {
     // The grid's "Group Code" column: the human deal number, never the UUID.

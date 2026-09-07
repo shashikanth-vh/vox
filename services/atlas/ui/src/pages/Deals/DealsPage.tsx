@@ -7,7 +7,7 @@ import { LensPill, TempPill, CodeText, ProductFlags } from '../../components/com
 import CompanyDrawer from './CompanyDrawer';
 import AddProductDialog from './AddProductDialog';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
-import { dealsService } from '../../services/dealsService';
+import { dealsService, splitRemarks } from '../../services/dealsService';
 import { useAuth } from '../../auth/AuthContext';
 import { scopeFor, can, whoCan } from '../../auth/rbac';
 import type { DealRow } from './deal.types';
@@ -35,7 +35,19 @@ export default function DealsPage() {
     // the three register booleans have no single wire param an OR could ride.
     { accessorKey: 'products', header: 'Products', size: 120, enableSorting: false, meta: { localFacet: true },
       Cell: ({ row }) => <ProductFlags lend={row.original.lend} syn={row.original.syn} am={row.original.am} /> },
-    { accessorKey: 'remarks', header: 'Remarks', size: 220, meta: { textFilter: true } },
+    // Lineage whispers, the live note speaks: the conversion record renders as a grey
+    // italic first line, the desk's own (editable-in-drawer) remark below it. The
+    // filter still matches the full text — the cell only changes how it reads.
+    { accessorKey: 'remarks', header: 'Remarks', size: 220, meta: { textFilter: true },
+      Cell: ({ cell }) => {
+        const { origin, note } = splitRemarks(cell.getValue<string>());
+        return (
+          <span>
+            {origin && <span style={{ color: '#8A979D', fontStyle: 'italic', fontSize: '11.5px', display: 'block' }}>{origin}</span>}
+            {note && <span>{note}</span>}
+          </span>
+        );
+      } },
   ], []);
 
   return (
