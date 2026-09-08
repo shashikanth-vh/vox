@@ -34,6 +34,8 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
   const [adv, setAdv] = useState(false);
   // Which schedule the form is editing — null means the form creates a new one.
   const [editId, setEditId] = useState<string | null>(null);
+  // Which schedule row is expanded to show its full details and run history.
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const resetForm = useCallback(() => {
     setQ(''); setTo(''); setCad('daily'); setDow('Tue'); setHour('8'); setWin('7');
@@ -80,8 +82,10 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     if (!q.trim() && !all) { setBanner('Add at least one search term'); return; }
     if (!to.trim()) { setBanner('Add at least one recipient'); return; }
     const payload = {
+      // Not `Number(hour) || 8` — midnight is hour 0, and 0 is falsy.
       q: q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
-      hour: Number(hour) || 8, window_days: Number(win) || 7, adverse_only: adv,
+      hour: Number.isFinite(Number(hour)) ? Number(hour) : 8,
+      window_days: Number(win) || 7, adverse_only: adv,
       scope: all ? 'all-firms' : 'terms', subject: subj,
     } as const;
     const r = editId
@@ -90,6 +94,14 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     if (r.ok) { resetForm(); setBannerOk(true); setBanner(editId ? 'Schedule updated.' : ''); load(); }
     else setBanner(r.error || 'Could not save the schedule');
   };
+
+  // The alert at the top of the dialog scrolls out of sight behind a long term list —
+  // an edit that failed there looked exactly like one that saved. The same message
+  // renders beside whichever Save the user actually pressed.
+  const feedback = banner ? (
+    <Typography sx={{ fontSize: 11.5, alignSelf: 'center',
+                      color: bannerOk ? tokens.muted : tokens.bad }}>{banner}</Typography>
+  ) : null;
 
   const act = async (fn: Promise<{ ok: boolean; error?: string; data?: any }>,
                      okMessage?: string) => {
@@ -150,6 +162,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
             {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
+            {feedback}
           </Box>
         </Box>
 
@@ -157,37 +170,74 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           Existing schedules
         </Typography>
         {rows.length ? rows.map((s) => (
-          <Paper key={s.id} variant="outlined" sx={{ borderColor: tokens.line, p: 1.2, mb: 0.8, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography sx={{ fontSize: 12.8, fontWeight: 600 }}>
-                {s.scope === 'all-firms' ? '🏢 All firms' : s.q.slice(0, 60) + (s.q.length > 60 ? '…' : '')}
-              </Typography>
-              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
-                {s.cadence === 'weekly' ? `Weekly · ${DOW[s.weekday] || '—'}` : 'Daily'} at {s.hour}:00 ·
-                {' '}{s.window_days}d window · {s.recipients}
-                {s.adverse_only && <b style={{ color: tokens.bad }}> · ADVERSE ONLY</b>}
-              </Typography>
-              {(() => {
-                const last = s.history?.[s.history.length - 1];
-                if (!last) return null;
-                return (
-                  <Typography sx={{ fontSize: 11, color: last.ok ? tokens.muted : tokens.bad }}>
-                    Last run {new Date(last.at * 1000).toLocaleString()} — {last.ok
-                      ? `sent ${last.items ?? 0} item(s) for ${last.firms ?? 0} firm(s)`
-                      : `FAILED: ${last.note}`}
-                  </Typography>
-                );
-              })()}
+          <Paper key={s.id} variant="outlined" sx={{ borderColor: tokens.line, p: 1.2, mb: 0.8 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {/* The summary is the door: click anywhere on it to see the whole
+                  schedule without entering edit mode. */}
+              <Box sx={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                onClick={() => setOpenId(openId === s.id ? null : s.id)}>
+                <Typography sx={{ fontSize: 12.8, fontWeight: 600 }}>
+                  {s.scope === 'all-firms' ? '🏢 All firms' : s.q.slice(0, 60) + (s.q.length > 60 ? '…' : '')}
+                  <span style={{ color: tokens.muted, fontWeight: 400 }}>{openId === s.id ? ' ▾' : ' ▸'}</span>
+                </Typography>
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                  {s.cadence === 'weekly' ? `Weekly · ${DOW[s.weekday] || '—'}` : 'Daily'} at {s.hour}:00 ·
+                  {' '}{s.window_days}d window · {s.recipients}
+                  {s.adverse_only && <b style={{ color: tokens.bad }}> · ADVERSE ONLY</b>}
+                </Typography>
+                {(() => {
+                  const last = s.history?.[s.history.length - 1];
+                  if (!last) return null;
+                  return (
+                    <Typography sx={{ fontSize: 11, color: last.ok ? tokens.muted : tokens.bad }}>
+                      Last run {new Date(last.at * 1000).toLocaleString()} — {last.ok
+                        ? `sent ${last.items ?? 0} item(s) for ${last.firms ?? 0} firm(s)`
+                        : `FAILED: ${last.note}`}
+                    </Typography>
+                  );
+                })()}
+              </Box>
+              <Button onClick={() => startEdit(s)}>Edit</Button>
+              <Button onClick={() => act(pulseService.runSchedule(s.id))}>Run now</Button>
+              <Button color="error" onClick={() => act(pulseService.deleteSchedule(s.id))}>Delete</Button>
             </Box>
-            <Button onClick={() => startEdit(s)}>Edit</Button>
-            <Button onClick={() => act(pulseService.runSchedule(s.id))}>Run now</Button>
-            <Button color="error" onClick={() => act(pulseService.deleteSchedule(s.id))}>Delete</Button>
+            {openId === s.id && (
+              <Box sx={{ mt: 1, pt: 1, borderTop: `1px dashed ${tokens.line}`, fontSize: 11.6 }}>
+                <Typography sx={{ fontSize: 11.6 }}><b>Subject:</b> {s.subject || 'ATLAS news digest'}</Typography>
+                <Typography sx={{ fontSize: 11.6 }}><b>Recipients:</b> {s.recipients}</Typography>
+                <Typography sx={{ fontSize: 11.6 }}>
+                  <b>Next run:</b> {s.next_run ? new Date(s.next_run * 1000).toLocaleString() : '—'}
+                </Typography>
+                <Typography sx={{ fontSize: 11.6 }}>
+                  <b>Covers:</b> {s.scope === 'all-firms'
+                    ? 'every firm on the register at send time, plus the terms below'
+                    : 'the terms below'}
+                </Typography>
+                <Typography sx={{ fontSize: 11.2, color: tokens.muted, wordBreak: 'break-word' }}>
+                  {s.q ? s.q.slice(0, 300) + (s.q.length > 300 ? ` … (${s.q.split(',').length} terms)` : '') : '—'}
+                </Typography>
+                {!!s.history?.length && (
+                  <Box sx={{ mt: 0.8 }}>
+                    <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700 }}>
+                      Recent runs
+                    </Typography>
+                    {[...s.history].reverse().map((h, i) => (
+                      <Typography key={i} sx={{ fontSize: 11.2, color: h.ok ? tokens.muted : tokens.bad }}>
+                        {new Date(h.at * 1000).toLocaleString()} — {h.ok
+                          ? `sent ${h.items ?? 0} item(s) for ${h.firms ?? 0} firm(s)` : h.note}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )}
           </Paper>
         )) : <Typography sx={{ fontSize: 12.4, color: tokens.muted }}>No schedules yet.</Typography>}
       </DialogContent>
       <DialogActions>
         {/* The form's own button scrolls away behind the schedule list — the footer
             carries the same action so Save is always in reach, next to Close. */}
+        {feedback}
         <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
         {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
         <Button onClick={onClose} variant="outlined">Close</Button>

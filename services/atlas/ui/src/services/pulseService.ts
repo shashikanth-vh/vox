@@ -28,7 +28,7 @@ export interface ScheduleRun {
 export interface Schedule {
   id: string; q: string; recipients: string; cadence: 'daily' | 'weekly'; weekday: number;
   hour: number; window_days: number; adverse_only: boolean; scope: 'all-firms' | 'terms'; subject: string;
-  history?: ScheduleRun[];
+  history?: ScheduleRun[]; next_run?: number; last_run?: number;
 }
 export interface DigestGroup { term: string; articles: any[] }
 export interface PulseConfig { email: boolean; from: string; gdelt: boolean; scheduler: boolean }

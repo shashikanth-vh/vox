@@ -78,7 +78,7 @@ _RAW: list[tuple[str, str, str]] = [
     # matrix already grants for exactly this feature.
     ("GET",    r"^/pulse/v1/news/(search|config|schedules)$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/news/(email|email-digest|email-test)$", "run_news_scan"),
-    ("POST",   r"^/pulse/v1/news/schedules(/(delete|run))?$", "run_news_scan"),
+    ("POST",   r"^/pulse/v1/news/schedules(/(delete|run|update))?$", "run_news_scan"),
     # Orchestrator — starting/deciding workflows maps to the same operation the applied
     # change requires, so an unauthorized user is stopped before a durable workflow starts.
     ("POST",   r"^/orchestrator/v1/workflows/vox-touchpoints$", "log_interaction"),

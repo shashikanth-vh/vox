@@ -58,6 +58,10 @@ def test_capability_routes_map_to_operations():
     assert operation_for("POST", "/vocx/v1/touchpoints") == "log_interaction"
     assert operation_for("POST", "/pulse/v1/scan") == "run_news_scan"
     assert operation_for("POST", "/pulse/v1/items") == "run_news_scan"
+    # Every schedule mutation is the same gated capability — the update lane arrived
+    # later and forwarded UNGATED until it was pinned here.
+    for tail in ("", "/delete", "/run", "/update"):
+        assert operation_for("POST", f"/pulse/v1/news/schedules{tail}") == "run_news_scan"
     assert operation_for("POST", "/orchestrator/v1/workflows/lead-conversions") == \
         "push_lead_to_deals"
     assert operation_for("POST", "/orchestrator/v1/workflows/abc123/approve") == \
