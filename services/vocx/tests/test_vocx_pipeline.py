@@ -299,6 +299,28 @@ def test_s3_failure_degrades_to_the_volume_never_discards(tmp_path):
         assert fh.read() == b"RIFFdata"
 
 
+def test_finished_streams_archive_to_the_bucket(tmp_path):
+    """A streamed take's chunks live on the volume (streaming needs an appendable
+    file); on FINISH the whole take is archived as streams/<capture_id>.webm —
+    deterministic key, concatenated in segment order, and an S3 outage merely
+    skips the archive (the capture must never fail on it)."""
+    fake = _FakeS3()
+    store = _s3_store(tmp_path, fake)
+    seg1 = tmp_path / "seg001.webm"; seg1.write_bytes(b"\x1aE\xdf\xa3one")
+    seg2 = tmp_path / "seg002.webm"; seg2.write_bytes(b"two")
+    ref = store.archive_stream("vox-abc123", [str(seg1), str(seg2)])
+    assert ref == "s3://caps/streams/vox-abc123.webm"
+    assert fake.objects["streams/vox-abc123.webm"] == b"\x1aE\xdf\xa3one" + b"two"
+
+    # Replayed finish: same key, same bytes — an overwrite, never a duplicate.
+    assert store.archive_stream("vox-abc123", [str(seg1), str(seg2)]) == ref
+    assert len([k for k in fake.objects if k.startswith("streams/")]) == 1
+
+    # An outage skips the archive and reports None — nothing raises.
+    down = _s3_store(tmp_path, _FakeS3(fail_puts=True))
+    assert down.archive_stream("vox-abc123", [str(seg1)]) is None
+
+
 async def test_committed_interaction_carries_the_recording_reference(stub_register, monkeypatch):
     """capture(audio_b64, stub STT) stores the audio and the COMMIT's interaction row
     carries it as a first-class ATTACHMENT — the register row points back at what

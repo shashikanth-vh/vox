@@ -277,6 +277,32 @@ class S3AudioStore:
                 return self.fallback.save(payload, capture_ts, rm, content_type)
             return None
 
+    def archive_stream(self, capture_id: str, segment_paths: list[str]) -> str | None:
+        """A finished STREAMED take, concatenated into one durable object.
+
+        Streaming writes its chunks to the volume by design (an S3 object cannot
+        be appended to) — which left the raw audio of streamed recordings outside
+        the backed-up store. The moment a take finishes it is whole, so it is
+        archived here as streams/<capture_id>.webm: deterministic key (a replayed
+        finish overwrites with identical bytes, never duplicates), best-effort by
+        contract — an archive failure logs and returns None, and must never fail
+        the capture, whose segments remain playable from the volume.
+        """
+        key = f"streams/{capture_id}.webm"
+        try:
+            payload = b"".join(open(p, "rb").read() for p in segment_paths)
+            if not payload:
+                return None
+            self._s3().put_object(Bucket=self.bucket, Key=key, Body=payload,
+                                  ContentType=sniff_audio_type(payload))
+            log.info("vocx audio: archived stream %s (%d bytes) to s3://%s/%s",
+                     capture_id, len(payload), self.bucket, key)
+            return f"s3://{self.bucket}/{key}"
+        except Exception as e:  # noqa: BLE001 — archival is an add-on, never a gate
+            log.warning("vocx audio: stream archive failed for %s (%s) — "
+                        "the take stays playable from its segments", capture_id, e)
+            return None
+
 
 def build_audio_store(settings: Any) -> S3AudioStore | LocalAudioStore | None:
     """S3 when configured, else the volume directory, else off. Never raises."""

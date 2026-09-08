@@ -7,10 +7,11 @@
 #   ./prism-deploy.sh rollback                       # back to the previous release
 #   ./prism-deploy.sh rollback --with-db             # …and the database with it
 #   ./prism-deploy.sh status                         # what is live, what can be rolled back to
-#   ./prism-deploy.sh backup                         # dump + document store + secrets, nothing else
+#   ./prism-deploy.sh backup                         # dump + documents + VOX recordings + secrets
 #   ./prism-deploy.sh verify                         # health-check the running stack
 #   ./prism-deploy.sh restore-db <file.sql.gz>       # a specific dump, on purpose
 #   ./prism-deploy.sh restore-files <minio-*.tar.gz> # the document store (restore WITH its dump)
+#   ./prism-deploy.sh restore-vocx <vocx-*.tar.gz>   # VOX recordings + state volume
 #   ./prism-deploy.sh restore-secrets <secrets-*.tar.gz> # .env + VocX secrets + TLS certs
 #   ./prism-deploy.sh restore-plan                   # what protects this system, what exists,
 #                                                    # and exactly which files to restore from
@@ -268,6 +269,26 @@ backup_files() {
   echo "$tarball"
 }
 
+# The VOX state volume: streamed voice recordings (vox-seg segment sets), the
+# local-fallback era's audio and reports, per-RM Google tokens, alias map. Streaming
+# writes land here BY DESIGN (an S3 object cannot be appended to), so without this
+# tarball the raw audio of streamed takes lived outside every backup — transcripts
+# and reports were safe in the dump, the recordings themselves were not.
+backup_vocx() {
+  local tarball="$BACKUPS/vocx-$STAMP.tar.gz"
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_vocx_state" || true)"
+  if [[ -z "$vol" ]]; then
+    warn "no ${PROJECT}_vocx_state volume — VOX recordings not captured"
+    return 0
+  fi
+  step "Backing up the VOX recordings ($vol) → $tarball"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$tarball")" -C /data . 2>>"$LOG" || die "VOX-state backup failed"
+  gzip -t "$tarball" 2>>"$LOG" || die "the VOX archive is corrupt (gzip -t failed): $tarball"
+  say "  $(du -h "$tarball" | cut -f1) written and verified"
+  echo "$tarball"
+}
+
 # Tag the CURRENT images so a rollback never has to rebuild. A tagged image is not
 # dangling, so `docker image prune` leaves it alone — which is the whole point: the
 # rollback path must not depend on an untagged layer nobody promised to keep.
@@ -379,6 +400,7 @@ prune_old() {
   fi
   ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
   ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
+  ls -1t "$BACKUPS"/vocx-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
 
   # DOCKER IMAGES accumulate the same way the release trees did: every upgrade tags
   # ~18 prism-rollback/<service>:<stamp> images and each rebuild orphans the previous
@@ -416,6 +438,7 @@ cmd_upgrade() {
   local db_backup files_backup secrets_backup image_map
   db_backup="$(backup_db)"
   files_backup="$(backup_files)"
+  backup_vocx >/dev/null
   secrets_backup="$(backup_secrets)"
   image_map="$(snapshot_images)"
 
@@ -652,6 +675,39 @@ cmd_restore_files() {
   say "  objects reference each other and must come from the same moment."
 }
 
+cmd_restore_vocx() {
+  local tarball="${1:-}"
+  [[ -f "$tarball" ]] || die "usage: $0 restore-vocx <vocx-*.tar.gz>"
+  gzip -t "$tarball" || die "that archive is corrupt"
+  preflight
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_vocx_state" || true)"
+  [[ -n "$vol" ]] || die "no ${PROJECT}_vocx_state volume — is the stack initialised?"
+
+  # Same contract as restore-files: the restore is itself reversible.
+  local now="$BACKUPS/vocx-before-restore-$STAMP.tar.gz"
+  step "Snapshotting the CURRENT VOX state first → $now"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$now")" -C /data . 2>>"$LOG" ||
+    die "could not take a safety snapshot — refusing to restore over the volume"
+
+  step "Stopping VocX while its volume is replaced"
+  run dc "$LIVE" stop vocx || true
+
+  step "Restoring $tarball"
+  local abs; abs="$(readlink -f "$tarball")"
+  if ! docker run --rm -v "$vol":/data -v "$abs":/restore.tar.gz:ro alpine \
+      sh -c 'find /data -mindepth 1 -delete && tar -xzf /restore.tar.gz -C /data' 2>>"$LOG"; then
+    warn "the restore reported errors — see $LOG"
+    warn "the pre-restore state is at $now"
+  fi
+
+  step "Starting VocX again"
+  run dc "$LIVE" start vocx || dc "$LIVE" up -d
+  wait_healthy || warn "not healthy after the restore — check the log"
+  run dc "$LIVE" restart nginx || true
+  say "  safety snapshot: $now"
+}
+
 cmd_restore_secrets() {
   local tarball="${1:-}"
   [[ -f "$tarball" ]] || die "usage: $0 restore-secrets <secrets-*.tar.gz>"
@@ -833,9 +889,11 @@ case "${1:-}" in
   rollback)   shift; preflight; do_rollback "${1:-}" ;;
   restore-db) shift; cmd_restore_db "$@" ;;
   restore-files) shift; cmd_restore_files "$@" ;;
+  restore-vocx) shift; cmd_restore_vocx "$@" ;;
   restore-secrets) shift; cmd_restore_secrets "$@" ;;
   restore-plan)  cmd_restore_plan ;;
   backup)     preflight; backup_db >/dev/null; backup_files >/dev/null
+              backup_vocx >/dev/null
               backup_secrets >/dev/null; snapshot_images >/dev/null
               say "${c_grn}backup complete${c_off} → $BACKUPS" ;;
   status)     cmd_status ;;

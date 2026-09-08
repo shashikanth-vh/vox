@@ -806,6 +806,17 @@ class VocxApp:
         except SegmentStoreError as e:
             return 400, "application/json", _j({"ok": False, "error": str(e)})
         rm = _one(query, "rm") or "unknown"
+        # A finished take is whole, so a DURABLE copy goes to the captures bucket
+        # (streams/<capture_id>.webm) — the volume was only ever the appendable
+        # scratch space streaming needs. Best-effort: playback, transcription and
+        # the register write all keep working from the segments if S3 is down.
+        store = self.audio_store()
+        if hasattr(store, "archive_stream"):
+            try:
+                paths = self.segment_store().segment_paths(cap_id)
+                store.archive_stream(cap_id, paths)
+            except Exception:  # noqa: BLE001 — archival must never fail the capture
+                self.log.warning("stream archive skipped for %s", cap_id, exc_info=True)
         return self._vox_register_and_kick(query, mode, rm, f"vox-seg:{cap_id}", cap_id)
 
     def _vox_stream_discard(self, query):
