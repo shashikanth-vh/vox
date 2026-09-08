@@ -208,14 +208,53 @@ class ScheduleStore:
         return moved
 
 
+# The name the press actually prints — "Acme Solar India Pvt. Ltd." searches as
+# "Acme Solar India". Mirrors the UI's tradingName() so an all-firms digest built
+# server-side covers the same names the dialog would have snapshotted.
+_CORP_SUFFIX = re.compile(
+    r"\s*[,.]?\s*\b(private limited|pvt\.?\s?ltd\.?|pvt\.?\s?limited|public limited"
+    r"|limited|ltd\.?|llp|inc\.?|incorporated|corporation|corp\.?|plc|pte\.?\s?ltd\.?"
+    r"|gmbh|s\.?a\.?|b\.?v\.?|&\s?co\.?|company)\b\.?\s*$", re.IGNORECASE)
+
+
+def trading_name(name: str) -> str:
+    original = (name or "").strip()
+    s = original
+    for _ in range(2):
+        if not _CORP_SUFFIX.search(s):
+            break
+        s = _CORP_SUFFIX.sub("", s).strip()
+    s = s.rstrip(", \t").strip()
+    return s if len(s) >= 3 else original
+
+
 async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Callable,
-                       digest: Callable) -> tuple[bool, str, int, int]:
+                       digest: Callable,
+                       firm_terms: Callable | None = None) -> tuple[bool, str, int, int]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
-    report are LEFT OUT rather than listed as empty — a digest of silence is noise."""
+    report are LEFT OUT rather than listed as empty — a digest of silence is noise.
+
+    An all-firms schedule covers the register AS OF SEND TIME: ``firm_terms`` (an async
+    callable answering the current firm names) is merged with the terms stored on the
+    schedule — the stored snapshot keeps the desk's typed watch terms and stands alone
+    as the fallback when the register cannot be reached, so a register outage costs
+    freshness, never the digest itself."""
     dto = datetime.now(desk_tz()).strftime("%Y-%m-%d")
     window = int(schedule.get("window_days", 7))
     dfrom = (datetime.now(desk_tz()) - timedelta(days=window)).strftime("%Y-%m-%d")
     terms = [t.strip() for t in re.split(r"[,\n]", schedule.get("q", "")) if t.strip()]
+    if schedule.get("scope") == "all-firms" and firm_terms is not None:
+        try:
+            fresh = [trading_name(t) for t in await firm_terms()]
+            seen = {t.casefold() for t in terms}
+            added = [t for t in fresh if t and t.casefold() not in seen]
+            terms = terms + added
+            log.info("pulse_schedule_firms_refreshed",
+                     extra={"id": schedule.get("id"), "stored": len(seen),
+                            "added": len(added)})
+        except Exception as exc:  # noqa: BLE001 — freshness lost, digest kept
+            log.warning("pulse_schedule_firms_refresh_failed",
+                        extra={"id": schedule.get("id"), "error": str(exc)})
     adverse_only = bool(schedule.get("adverse_only"))
 
     log.info("pulse_schedule_running", extra={"id": schedule.get("id"),

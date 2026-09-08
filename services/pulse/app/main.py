@@ -321,6 +321,21 @@ def create_app() -> FastAPI:
             return [r.strip() for r in re.split(r"[,\n;]", value) if r.strip()]
         return [str(r).strip() for r in (value or []) if str(r).strip()]
 
+    def _firm_terms_for(schedule: dict):
+        """An all-firms digest covers the register AS OF SEND TIME, not as of the day
+        the schedule was created: answer the tenant's current firm names. run_schedule
+        merges these with the stored snapshot (which keeps the desk's typed watch
+        terms) and falls back to the snapshot alone if this raises."""
+        async def _fetch() -> list[str]:
+            client = _tenant_client(app, str(schedule.get("tenant") or ""))
+            names: list[str] = []
+            async for row in client.iterate("entities", page_size=200):
+                names.append(row.get("display_name") or row.get("legal_name") or "")
+                if len(names) >= settings.watchlist_max_entities:
+                    break
+            return [n for n in names if n.strip()]
+        return _fetch
+
     async def _run_one_schedule(schedule: dict) -> tuple[bool, str, int, int]:
         """The scheduler's callback — searches, then emails. Bound here so it closes over
         this app's engine and settings rather than reaching for a global."""
@@ -328,7 +343,8 @@ def create_app() -> FastAPI:
             schedule,
             search=lambda term, dfrom, dto: app.state.search.search(term, dfrom, dto),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
-            digest=digest_html)
+            digest=digest_html,
+            firm_terms=_firm_terms_for(schedule))
 
     @app.get("/v1/news/search", tags=["News Radar"],
              summary="Search the news for a term (Google News + GDELT + Bing, merged)")
@@ -561,7 +577,10 @@ def create_app() -> FastAPI:
             return denied
         recipients = _recipients(payload.get("recipients"))
         term = (payload.get("q") or "").strip()
-        if not term or not recipients:
+        all_firms = (payload.get("scope") or "").strip() == "all-firms"
+        # All-firms schedules read the register at send time, so typed terms are
+        # optional there; a plain term schedule with no terms would search nothing.
+        if (not term and not all_firms) or not recipients:
             return ORJSONResponse(status_code=400, content={
                 "ok": False,
                 "message": "Need a search term and at least one recipient."})
@@ -601,7 +620,8 @@ def create_app() -> FastAPI:
                                   content={"ok": False, "message": "No such schedule."})
         recipients = _recipients(payload.get("recipients"))
         term = (payload.get("q") or "").strip()
-        if not term or not recipients:
+        all_firms = (payload.get("scope") or "").strip() == "all-firms"
+        if (not term and not all_firms) or not recipients:
             return ORJSONResponse(status_code=400, content={
                 "ok": False,
                 "message": "Need a search term and at least one recipient."})
@@ -662,7 +682,8 @@ def create_app() -> FastAPI:
             schedule,
             search=lambda term, dfrom, dto: request.app.state.search.search(term, dfrom, dto),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
-            digest=digest_html)
+            digest=digest_html,
+            firm_terms=_firm_terms_for(schedule))
         request.app.state.schedules.record_run(schedule["id"], ok=ok,
                                                note=f"run now: {msg}",
                                                firms=firms, items=items)

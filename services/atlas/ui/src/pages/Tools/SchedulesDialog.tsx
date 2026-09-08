@@ -76,7 +76,8 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
   };
 
   const save = async () => {
-    if (!q.trim()) { setBanner('Add at least one search term'); return; }
+    // An all-firms schedule reads the register at send time — typed terms optional.
+    if (!q.trim() && !all) { setBanner('Add at least one search term'); return; }
     if (!to.trim()) { setBanner('Add at least one recipient'); return; }
     const payload = {
       q: q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
@@ -127,6 +128,12 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           </Typography>
           <FormControlLabel control={<Checkbox size="small" checked={all} onChange={(e) => applyAllFirms(e.target.checked)} />}
             label={<Typography sx={{ fontSize: 12.2 }}>Cover all firms on the register ({firms} firms + their watch terms)</Typography>} />
+          {all && (
+            <Typography sx={{ fontSize: 11.3, color: tokens.muted, ml: 3.5, mt: -0.5 }}>
+              The firm list refreshes from the register at send time — firms added later
+              are covered automatically.
+            </Typography>
+          )}
           <Box sx={{ mt: 1 }}><TextFld label="Search terms (comma separated)" value={q} onChange={setQ} disabled={all} multiline /></Box>
           <Box sx={{ mt: 1.4 }}><TextFld label="Recipients (comma separated)" value={to} onChange={setTo} /></Box>
           <Box sx={{ mt: 1.4 }}>
@@ -178,7 +185,13 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           </Paper>
         )) : <Typography sx={{ fontSize: 12.4, color: tokens.muted }}>No schedules yet.</Typography>}
       </DialogContent>
-      <DialogActions><Button onClick={onClose} variant="outlined">Close</Button></DialogActions>
+      <DialogActions>
+        {/* The form's own button scrolls away behind the schedule list — the footer
+            carries the same action so Save is always in reach, next to Close. */}
+        <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
+        {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
+        <Button onClick={onClose} variant="outlined">Close</Button>
+      </DialogActions>
     </Dialog>
   );
 }

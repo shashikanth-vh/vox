@@ -486,6 +486,85 @@ def test_the_store_probe_tells_the_truth_both_ways(tmp_path):
     assert ok is False and "writable" in why
 
 
+def _digest_runner_parts():
+    """A run_schedule harness: fake search/send/digest that record what was covered."""
+    searched, sent = [], {}
+
+    async def search(term, dfrom, dto):
+        searched.append(term)
+        return [{"title": f"{term} wins order", "url": "https://x/1", "severity": "GOOD"}]
+
+    def send(recipients, subject, body):
+        sent.update({"recipients": recipients, "subject": subject, "body": body})
+        return True, "Sent to 1 recipient(s)"
+
+    def digest(term, arts, dfrom, dto):
+        return f"<b>{term}</b>"
+
+    return searched, sent, search, send, digest
+
+
+@pytest.mark.asyncio
+async def test_an_all_firms_digest_covers_the_register_as_of_send_time():
+    """"any newly added it wont consider is it?" — it does now: the firm list is read
+    fresh at send time and MERGED with the stored snapshot, so a firm added after the
+    schedule was created is in the next digest with no one re-saving anything, and the
+    snapshot's typed watch terms are kept."""
+    searched, _, search, send, digest = _digest_runner_parts()
+
+    async def firm_terms():
+        return ["Acme Solar India Pvt. Ltd.", "Beta Wind", "Newly Added Energy Ltd"]
+
+    ok, _, firms, _ = await sched.run_schedule(
+        {"id": "S1", "scope": "all-firms", "q": "acme solar india, OldCo watch term",
+         "recipients": ["a@b.com"], "window_days": 7},
+        search=search, send=send, digest=digest, firm_terms=firm_terms)
+    assert ok is True
+    assert searched == ["acme solar india", "OldCo watch term",
+                        "Beta Wind", "Newly Added Energy"], \
+        "snapshot kept (watch term included), fresh firms appended, dupes and corporate " \
+        "suffixes folded"
+    assert firms == 4
+
+
+@pytest.mark.asyncio
+async def test_a_register_outage_costs_freshness_never_the_digest():
+    searched, sent, search, send, digest = _digest_runner_parts()
+
+    async def firm_terms():
+        raise RuntimeError("register unreachable")
+
+    ok, _, _, _ = await sched.run_schedule(
+        {"id": "S1", "scope": "all-firms", "q": "Acme Solar",
+         "recipients": ["a@b.com"], "window_days": 7},
+        search=search, send=send, digest=digest, firm_terms=firm_terms)
+    assert ok is True and searched == ["Acme Solar"] and sent, \
+        "the stored snapshot alone still went out"
+
+
+@pytest.mark.asyncio
+async def test_a_plain_term_schedule_never_touches_the_register():
+    searched, _, search, send, digest = _digest_runner_parts()
+    called = []
+
+    async def firm_terms():
+        called.append(1)
+        return ["Should Not Appear"]
+
+    await sched.run_schedule(
+        {"id": "S1", "scope": "terms", "q": "Acme Solar",
+         "recipients": ["a@b.com"], "window_days": 7},
+        search=search, send=send, digest=digest, firm_terms=firm_terms)
+    assert not called and searched == ["Acme Solar"]
+
+
+def test_trading_name_sheds_the_suffixes_the_press_never_prints():
+    assert sched.trading_name("Acme Solar India Pvt. Ltd.") == "Acme Solar India"
+    assert sched.trading_name("Beta Wind Limited") == "Beta Wind"
+    assert sched.trading_name("Reliance Ltd") == "Reliance"
+    assert sched.trading_name("SA") == "SA", "never stripped down to nothing"
+
+
 # --------------------------------------------------------------------------- #
 # The routes
 # --------------------------------------------------------------------------- #
@@ -599,6 +678,19 @@ def test_the_desk_edits_a_schedule_in_place(client):
 def test_the_dialog_is_told_whether_the_store_can_save(client):
     body = client.get("/v1/news/schedules").json()
     assert body["store_ok"] is True and body["store_error"] == ""
+
+
+def test_an_all_firms_schedule_needs_no_typed_terms(client):
+    """The dialog once showed "(0 firms)" with an empty local book — creating an
+    all-firms schedule then failed for want of terms it no longer needs, since the
+    register answers at send time."""
+    r = client.post("/v1/news/schedules", json={
+        "q": "", "recipients": "desk@evamfinance.com", "scope": "all-firms",
+        "cadence": "daily", "hour": 7})
+    assert r.status_code == 200, r.text
+    r = client.post("/v1/news/schedules", json={
+        "q": "", "recipients": "desk@evamfinance.com", "scope": "terms"})
+    assert r.status_code == 400, "a plain term schedule still needs terms"
 
 
 # --------------------------------------------------------------------------- #
