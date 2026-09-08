@@ -25,6 +25,12 @@ from evam_backend_core.logging import get_logger
 
 log = get_logger("pulse.schedules")
 
+# A failed send is retried a few times, spaced out, then conceded until the next
+# regular slot — never a tight loop against the recipients' inboxes.
+MAX_RETRIES = 3
+RETRY_DELAY_S = 600
+MAX_HISTORY = 10          # run outcomes kept per schedule, newest last
+
 
 def desk_tz():
     """The timezone schedule hours are SPOKEN in. The desk says "7 AM" meaning its own
@@ -155,6 +161,33 @@ class ScheduleStore:
                     return dict(s)
         return None
 
+    def record_run(self, sid: str, *, ok: bool, note: str,
+                   firms: int = 0, items: int = 0) -> None:
+        """Append one run outcome to the schedule's history — the desk's answer to
+        "did Monday's digest actually go out?". Best-effort persist: a history write
+        must never kill the loop."""
+        with self._lock:
+            for s in self._items:
+                if s.get("id") == sid:
+                    hist = s.setdefault("history", [])
+                    hist.append({"at": time.time(), "ok": bool(ok),
+                                 "note": str(note)[:300], "firms": firms, "items": items})
+                    del hist[:-MAX_HISTORY]
+                    self.save(strict=False)
+                    return
+
+    def probe(self) -> tuple[bool, str]:
+        """Can the store reach disk RIGHT NOW? Rewrites the file through the same
+        save() every mutation uses, so the answer is the truth, not a guess. The
+        permissions failure this exists for announced itself as data loss weeks
+        after the fact; now it announces itself on boot and in the dialog."""
+        try:
+            with self._lock:
+                self.save()
+            return True, ""
+        except ScheduleStoreError as exc:
+            return False, str(exc)
+
     def rearm_stale(self) -> int:
         """Re-anchor every past-due schedule to its next FUTURE slot. Called once at
         startup so a restart never fires a catch-up digest."""
@@ -176,7 +209,7 @@ class ScheduleStore:
 
 
 async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Callable,
-                       digest: Callable) -> tuple[bool, str]:
+                       digest: Callable) -> tuple[bool, str, int, int]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
     report are LEFT OUT rather than listed as empty — a digest of silence is noise."""
     dto = datetime.now(desk_tz()).strftime("%Y-%m-%d")
@@ -214,7 +247,7 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                                            "seconds": round(time.time() - t0, 1),
                                            "firms": len(groups), "items": total,
                                            "result": msg})
-    return ok, msg
+    return ok, msg, len(groups), total
 
 
 async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
@@ -245,10 +278,30 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                                                        int(s.get("weekday", 0))),
                             last_run=now)
                 try:
-                    await runner(s)
+                    res = await runner(s)
+                    ok, msg, firms, items = (res if isinstance(res, tuple) and len(res) == 4
+                                             else (True, "", 0, 0))
                 except Exception as exc:  # noqa: BLE001 - one bad schedule keeps the loop
+                    ok, msg, firms, items = False, f"run crashed: {exc}", 0, 0
                     log.error("pulse_schedule_failed", extra={"id": s.get("id"),
                                                               "error": str(exc)})
+                attempt = int(s.get("retry") or 0)
+                if ok:
+                    if attempt:
+                        store.touch(s["id"], retry=0)
+                    store.record_run(s["id"], ok=True, note=msg, firms=firms, items=items)
+                elif attempt < MAX_RETRIES:
+                    # The day's digest is not lost to one SMTP hiccup: come back soon,
+                    # a bounded number of times, then concede until the next slot.
+                    store.touch(s["id"], next_run=time.time() + RETRY_DELAY_S,
+                                retry=attempt + 1)
+                    store.record_run(s["id"], ok=False, firms=firms, items=items,
+                                     note=f"{msg} — retry {attempt + 1} of {MAX_RETRIES} "
+                                          f"in {RETRY_DELAY_S // 60} min")
+                else:
+                    store.touch(s["id"], retry=0)
+                    store.record_run(s["id"], ok=False, firms=firms, items=items,
+                                     note=f"{msg} — giving up until the next slot")
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - the loop itself must never die

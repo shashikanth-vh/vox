@@ -175,6 +175,12 @@ def create_app() -> FastAPI:
             cache_ttl_s=settings.search_cache_ttl_s, cache_max=settings.search_cache_max,
             upstream_concurrency=settings.upstream_concurrency)
         app.state.schedules = sched.ScheduleStore(settings.schedule_file)
+        # The permissions failure class announces itself on boot, not weeks later as
+        # "my schedules vanished".
+        writable, why = app.state.schedules.probe()
+        if not writable:
+            log.error("pulse_schedule_store_unwritable",
+                      extra={"path": settings.schedule_file, "error": why})
         app.state.scheduler_task = None
         if settings.scheduler_enabled:
             app.state.scheduler_task = asyncio.create_task(
@@ -184,7 +190,7 @@ def create_app() -> FastAPI:
             "register": settings.register_base_url,
             "sources": [s.get("name") for s in settings.source_list()],
             "email": settings.smtp().ready, "gdelt": not settings.disable_gdelt,
-            "schedules": len(app.state.schedules.all())})
+            "schedules": len(app.state.schedules.all()), "store_writable": writable})
         yield
         task = app.state.scheduler_task
         if task is not None:
@@ -315,10 +321,10 @@ def create_app() -> FastAPI:
             return [r.strip() for r in re.split(r"[,\n;]", value) if r.strip()]
         return [str(r).strip() for r in (value or []) if str(r).strip()]
 
-    async def _run_one_schedule(schedule: dict) -> None:
+    async def _run_one_schedule(schedule: dict) -> tuple[bool, str, int, int]:
         """The scheduler's callback — searches, then emails. Bound here so it closes over
         this app's engine and settings rather than reaching for a global."""
-        await sched.run_schedule(
+        return await sched.run_schedule(
             schedule,
             search=lambda term, dfrom, dto: app.state.search.search(term, dfrom, dto),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
@@ -540,8 +546,10 @@ def create_app() -> FastAPI:
                                                             alias="X-API-Key")) -> Any:
         if (denied := _require_api_key(settings, x_api_key)) is not None:
             return denied
+        writable, why = request.app.state.schedules.probe()
         return {"schedules": request.app.state.schedules.all(tenant),
-                "smtp": settings.smtp().ready}
+                "smtp": settings.smtp().ready,
+                "store_ok": writable, "store_error": why}
 
     @app.post("/v1/news/schedules", tags=["News Radar"],
               summary="Create a recurring digest (daily or weekly)")
@@ -650,13 +658,17 @@ def create_app() -> FastAPI:
         if schedule is None:
             return ORJSONResponse(status_code=404,
                                   content={"ok": False, "message": "No such schedule."})
-        ok, msg = await sched.run_schedule(
+        ok, msg, firms, items = await sched.run_schedule(
             schedule,
             search=lambda term, dfrom, dto: request.app.state.search.search(term, dfrom, dto),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
             digest=digest_html)
+        request.app.state.schedules.record_run(schedule["id"], ok=ok,
+                                               note=f"run now: {msg}",
+                                               firms=firms, items=items)
         return ORJSONResponse(status_code=200 if ok else 400,
-                              content={"ok": ok, "message": msg})
+                              content={"ok": ok, "message": msg,
+                                       "firms": firms, "items": items})
 
     return app
 

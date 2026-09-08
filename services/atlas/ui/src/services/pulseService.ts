@@ -22,9 +22,13 @@ pulse.interceptors.request.use((c) => {
   return c;
 });
 
+export interface ScheduleRun {
+  at: number; ok: boolean; note: string; firms?: number; items?: number;
+}
 export interface Schedule {
   id: string; q: string; recipients: string; cadence: 'daily' | 'weekly'; weekday: number;
   hour: number; window_days: number; adverse_only: boolean; scope: 'all-firms' | 'terms'; subject: string;
+  history?: ScheduleRun[];
 }
 export interface DigestGroup { term: string; articles: any[] }
 export interface PulseConfig { email: boolean; from: string; gdelt: boolean; scheduler: boolean }
@@ -70,8 +74,10 @@ export const pulseService = {
     return r;
   },
 
-  async listSchedules(): Result<{ schedules: Schedule[]; smtp: boolean }> {
-    const r = await call<{ schedules: Schedule[]; smtp: boolean }>(() => pulse.get('/schedules'));
+  async listSchedules(): Result<{ schedules: Schedule[]; smtp: boolean;
+                                  store_ok?: boolean; store_error?: string }> {
+    const r = await call<{ schedules: Schedule[]; smtp: boolean;
+                           store_ok?: boolean; store_error?: string }>(() => pulse.get('/schedules'));
     // The dialog renders `data` even on failure, so it must always have the shape.
     return r.ok ? r : { ...r, data: { schedules: [], smtp: false } };
   },

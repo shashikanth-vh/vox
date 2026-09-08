@@ -18,6 +18,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
 
   const [rows, setRows] = useState<Schedule[]>([]);
   const [smtp, setSmtp] = useState(false);
+  const [storeErr, setStoreErr] = useState('');
   const [banner, setBanner] = useState('');
   // A failure shown in calm blue reads as information. Every banner here was a failure
   // and every one of them said 'info'; a test email that WORKED said nothing at all.
@@ -49,6 +50,9 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     const r = await pulseService.listSchedules();
     setRows(r.data?.schedules ?? []);
     setSmtp(!!r.data?.smtp);
+    // store_ok is absent on an older server — only an explicit false is a failure.
+    setStoreErr(r.data?.store_ok === false
+      ? (r.data?.store_error || 'The schedule store is not writable.') : '');
     setBannerOk(false);
     setBanner(r.ok ? '' : (r.error || ''));
   }, []);
@@ -106,6 +110,12 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           {smtp ? 'Email is configured on the server.' : 'Email is not configured.'}
           {smtp && <Button sx={{ ml: 1 }} onClick={() => act(pulseService.sendTestEmail(to.trim()), 'Test email sent.')}>Send test email</Button>}
         </Alert>
+        {storeErr && (
+          <Alert severity="error" sx={{ py: 0, fontSize: 12, mb: 1.2 }}>
+            Schedules cannot be saved right now: {storeErr} Anything created here will be
+            lost when the service restarts — ask an admin to fix the volume first.
+          </Alert>
+        )}
         {banner && (
           <Alert severity={bannerOk ? 'success' : 'error'} onClose={() => setBanner('')}
             sx={{ py: 0, fontSize: 12, mb: 1.2 }}>{banner}</Alert>
@@ -150,6 +160,17 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
                 {' '}{s.window_days}d window · {s.recipients}
                 {s.adverse_only && <b style={{ color: tokens.bad }}> · ADVERSE ONLY</b>}
               </Typography>
+              {(() => {
+                const last = s.history?.[s.history.length - 1];
+                if (!last) return null;
+                return (
+                  <Typography sx={{ fontSize: 11, color: last.ok ? tokens.muted : tokens.bad }}>
+                    Last run {new Date(last.at * 1000).toLocaleString()} — {last.ok
+                      ? `sent ${last.items ?? 0} item(s) for ${last.firms ?? 0} firm(s)`
+                      : `FAILED: ${last.note}`}
+                  </Typography>
+                );
+              })()}
             </Box>
             <Button onClick={() => startEdit(s)}>Edit</Button>
             <Button onClick={() => act(pulseService.runSchedule(s.id))}>Run now</Button>

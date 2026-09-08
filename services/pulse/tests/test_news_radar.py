@@ -421,6 +421,71 @@ def test_the_hour_is_the_desks_hour_not_the_containers(monkeypatch):
     assert sched.next_run("daily", 7, 0) > time_mod.time()
 
 
+@pytest.mark.asyncio
+async def test_a_failed_send_is_retried_soon_not_lost_until_tomorrow(tmp_path):
+    """One SMTP hiccup at 7:00 must not silently cost the desk the whole day's digest:
+    the loop re-arms the schedule minutes out, a bounded number of times, and writes
+    every outcome into the schedule's history."""
+    store = sched.ScheduleStore(str(tmp_path / "s.json"))
+    calls = []
+
+    async def runner(s):
+        calls.append(s["id"])
+        if len(calls) < 2:
+            return False, "Send failed: smtp timeout", 0, 0
+        return True, "Sent to 1 recipient(s)", 2, 7
+
+    task = asyncio.create_task(sched.scheduler_loop(store, runner, tick_seconds=0))
+    await asyncio.sleep(0.02)          # let the startup rearm pass run first — it must
+    store.add({"id": "S1", "tenant": "EVAM", "q": "Acme", "recipients": ["a@b.com"],
+               "cadence": "daily", "hour": 8, "weekday": 0,
+               "next_run": time_mod.time() - 5, "active": True})
+    try:
+        while len(calls) < 1:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        s1 = store.get("S1")
+        assert s1["retry"] == 1, "the failure armed a retry"
+        assert s1["next_run"] <= time_mod.time() + sched.RETRY_DELAY_S + 1
+        assert s1["next_run"] > time_mod.time() + 60, "spaced out, not a tight loop"
+        assert s1["history"][-1]["ok"] is False
+        assert "retry 1 of" in s1["history"][-1]["note"]
+
+        store.touch("S1", next_run=time_mod.time() - 1)   # bring the retry slot forward
+        while len(calls) < 2:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    s1 = store.get("S1")
+    assert s1["retry"] == 0, "success cleared the retry counter"
+    last = s1["history"][-1]
+    assert last["ok"] is True and last["firms"] == 2 and last["items"] == 7
+    assert s1["next_run"] > time_mod.time(), "back on the regular cadence"
+
+
+def test_history_is_capped_so_the_file_never_grows_without_bound(tmp_path):
+    store = sched.ScheduleStore(str(tmp_path / "s.json"))
+    store.add({"id": "S1", "tenant": "EVAM", "q": "x", "recipients": ["a@b.com"]})
+    for i in range(sched.MAX_HISTORY + 5):
+        store.record_run("S1", ok=True, note=f"run {i}")
+    hist = store.get("S1")["history"]
+    assert len(hist) == sched.MAX_HISTORY
+    assert hist[-1]["note"] == f"run {sched.MAX_HISTORY + 4}", "newest kept, oldest dropped"
+
+
+def test_the_store_probe_tells_the_truth_both_ways(tmp_path):
+    good = sched.ScheduleStore(str(tmp_path / "s.json"))
+    ok, why = good.probe()
+    assert ok is True and why == ""
+    (tmp_path / "blocker").write_text("a file where the store needs a directory")
+    bad = sched.ScheduleStore(str(tmp_path / "blocker" / "s.json"))
+    ok, why = bad.probe()
+    assert ok is False and "writable" in why
+
+
 # --------------------------------------------------------------------------- #
 # The routes
 # --------------------------------------------------------------------------- #
@@ -529,6 +594,11 @@ def test_the_desk_edits_a_schedule_in_place(client):
     r = client.post("/v1/news/schedules/update",
                     json={"id": made["id"], "q": "", "recipients": ""})
     assert r.status_code == 400
+
+
+def test_the_dialog_is_told_whether_the_store_can_save(client):
+    body = client.get("/v1/news/schedules").json()
+    assert body["store_ok"] is True and body["store_error"] == ""
 
 
 # --------------------------------------------------------------------------- #
