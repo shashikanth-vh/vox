@@ -3,7 +3,6 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typogra
 import CloseIcon from '@mui/icons-material/Close';
 import { FieldGrid, TextFld, SelectFld } from '../../components/common/Field';
 import { pulseService, type Schedule } from '../../services/pulseService';
-import { newsService } from '../../services/newsService';
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
@@ -42,10 +41,12 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     setSubj('ATLAS news digest'); setAll(false); setAdv(false); setEditId(null);
   }, []);
 
-  // v12's scAllFirms(): fill the query with every firm term, lock it, force adverse-only.
+  // "All firms" MEANS all firms: the server reads the register at send time, so no
+  // term list is snapshotted into the schedule any more (v12 froze one here — the
+  // wall of names that made every all-firms schedule unreadable and instantly stale).
   const applyAllFirms = useCallback((on: boolean) => {
     setAll(on);
-    if (on) { setQ(newsService.allFirmTerms().join(', ')); setAdv(true); }
+    if (on) { setQ(''); setAdv(true); }
   }, []);
 
   const load = useCallback(async () => {
@@ -83,7 +84,8 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     if (!to.trim()) { setBanner('Add at least one recipient'); return; }
     const payload = {
       // Not `Number(hour) || 8` — midnight is hour 0, and 0 is falsy.
-      q: q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
+      // All-firms saves clear any stored term list: the register is the list now.
+      q: all ? '' : q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
       hour: Number.isFinite(Number(hour)) ? Number(hour) : 8,
       window_days: Number(win) || 7, adverse_only: adv,
       scope: all ? 'all-firms' : 'terms', subject: subj,
@@ -142,11 +144,14 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
             label={<Typography sx={{ fontSize: 12.2 }}>Cover all firms on the register ({firms} firms + their watch terms)</Typography>} />
           {all && (
             <Typography sx={{ fontSize: 11.3, color: tokens.muted, ml: 3.5, mt: -0.5 }}>
-              The firm list refreshes from the register at send time — firms added later
-              are covered automatically.
+              Covers every firm on the register at send time — firms added later are
+              included automatically, no term list is stored. Want only a few firms?
+              Untick this and type them below.
             </Typography>
           )}
-          <Box sx={{ mt: 1 }}><TextFld label="Search terms (comma separated)" value={q} onChange={setQ} disabled={all} multiline /></Box>
+          {!all && (
+            <Box sx={{ mt: 1 }}><TextFld label="Search terms (comma separated)" value={q} onChange={setQ} multiline /></Box>
+          )}
           <Box sx={{ mt: 1.4 }}><TextFld label="Recipients (comma separated)" value={to} onChange={setTo} /></Box>
           <Box sx={{ mt: 1.4 }}>
             <FieldGrid cols={4}>
@@ -210,12 +215,14 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
                 </Typography>
                 <Typography sx={{ fontSize: 11.6 }}>
                   <b>Covers:</b> {s.scope === 'all-firms'
-                    ? 'every firm on the register at send time, plus the terms below'
+                    ? `every firm on the register at send time${s.q ? ', plus the stored terms below' : ''}`
                     : 'the terms below'}
                 </Typography>
-                <Typography sx={{ fontSize: 11.2, color: tokens.muted, wordBreak: 'break-word' }}>
-                  {s.q ? s.q.slice(0, 300) + (s.q.length > 300 ? ` … (${s.q.split(',').length} terms)` : '') : '—'}
-                </Typography>
+                {!!s.q && (
+                  <Typography sx={{ fontSize: 11.2, color: tokens.muted, wordBreak: 'break-word' }}>
+                    {s.q.slice(0, 300) + (s.q.length > 300 ? ` … (${s.q.split(',').length} terms)` : '')}
+                  </Typography>
+                )}
                 {!!s.history?.length && (
                   <Box sx={{ mt: 0.8 }}>
                     <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700 }}>

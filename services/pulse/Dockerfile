@@ -34,5 +34,10 @@ USER pulse
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"
+# ONE worker, on purpose. The schedule store is process-memory backed by a JSON file,
+# and the scheduler loop runs inside the process: with two workers an edit landed in
+# one worker's memory while the other kept answering reads from its stale boot-time
+# copy (edits "didn't save"), and BOTH loops fired every digest (duplicate emails).
+# Pulse's work is async I/O fan-out — one worker carries it fine.
 CMD ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--workers", "2", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+     "--workers", "1", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
