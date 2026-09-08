@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "python-json-logger==3.2.1",
     "orjson==3.10.12",
+    # zoneinfo's fallback database: slim images may lack system tzdata, and the
+    # digest scheduler speaks the DESK's timezone (PULSE_DIGEST_TZ), not UTC.
+    "tzdata==2024.2",
 ]
 
 [project.optional-dependencies]

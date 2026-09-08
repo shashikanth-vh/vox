@@ -26,7 +26,7 @@ RUN pip install --no-deps --no-build-isolation .
 
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
-RUN groupadd -r pulse && useradd -r -g pulse pulse && mkdir -p /app && chown pulse:pulse /app
+RUN groupadd -r pulse && useradd -r -g pulse pulse && mkdir -p /app /data/pulse && chown pulse:pulse /app /data/pulse
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=pulse:pulse services/pulse/app ./app

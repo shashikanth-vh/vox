@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time as time_mod
 from datetime import datetime, timedelta
 
 import httpx
@@ -381,6 +382,45 @@ def test_a_schedule_belongs_to_its_tenant(tmp_path):
     assert store.remove("A", "EVAM") is True
 
 
+def test_editing_a_schedule_keeps_its_identity_and_history(tmp_path):
+    store = sched.ScheduleStore(str(tmp_path / "s.json"))
+    store.add({"id": "S1", "tenant": "EVAM", "q": "Acme", "recipients": ["a@b.com"],
+               "cadence": "daily", "hour": 8, "weekday": 0, "last_run": 12345})
+    assert store.update("S1", "OTHER", {"hour": 7}) is None, \
+        "one tenant cannot edit another's schedule"
+    edited = store.update("S1", "EVAM",
+                          {"hour": 7, "recipients": ["a@b.com", "c@d.com"]})
+    assert edited["hour"] == 7 and edited["recipients"] == ["a@b.com", "c@d.com"]
+    assert edited["id"] == "S1" and edited["last_run"] == 12345
+    fresh = sched.ScheduleStore(str(tmp_path / "s.json"))   # the edit reached disk
+    assert fresh.get("S1")["hour"] == 7
+
+
+def test_a_schedule_that_cannot_reach_disk_fails_loudly(tmp_path):
+    """The failure mode that erased the desk's digests: the volume was not writable,
+    save() swallowed the error, and every schedule lived only in memory until the next
+    restart wiped it. An API mutation that cannot persist must now FAIL the request."""
+    (tmp_path / "blocker").write_text("a file where the store needs a directory")
+    store = sched.ScheduleStore(str(tmp_path / "blocker" / "s.json"))
+    with pytest.raises(sched.ScheduleStoreError) as err:
+        store.add({"id": "S1", "tenant": "EVAM", "q": "x", "recipients": ["a@b.com"]})
+    assert "writable" in str(err.value)
+    # The scheduler loop's run-stamps stay best-effort: a broken disk must not kill it.
+    store.touch("S1", last_run=1.0)
+
+
+def test_the_hour_is_the_desks_hour_not_the_containers(monkeypatch):
+    """"if i schedule to send mail it 7 am it should sent at 7 am only" — the container
+    runs UTC, so a naive next_run() fired IST 7s at 12:30 in the afternoon."""
+    from zoneinfo import ZoneInfo
+    monkeypatch.setenv("PULSE_DIGEST_TZ", "Asia/Kolkata")
+    when = datetime.fromtimestamp(sched.next_run("daily", 7, 0),
+                                  tz=ZoneInfo("Asia/Kolkata"))
+    assert (when.hour, when.minute) == (7, 0)
+    monkeypatch.setenv("PULSE_DIGEST_TZ", "not/a-zone")     # bad zone: server time, not a crash
+    assert sched.next_run("daily", 7, 0) > time_mod.time()
+
+
 # --------------------------------------------------------------------------- #
 # The routes
 # --------------------------------------------------------------------------- #
@@ -462,6 +502,33 @@ def test_a_schedule_needs_a_term_and_a_recipient(client):
 def test_running_an_unknown_schedule_says_so(client):
     r = client.post("/v1/news/schedules/run", json={"id": "nope"})
     assert r.status_code == 404
+
+
+def test_the_desk_edits_a_schedule_in_place(client):
+    made = client.post("/v1/news/schedules", json={
+        "q": "Acme Solar", "recipients": "desk@evamfinance.com",
+        "cadence": "daily", "hour": 7}).json()["schedule"]
+
+    r = client.post("/v1/news/schedules/update", json={
+        "id": made["id"], "q": "Acme Solar",
+        "recipients": "desk@evamfinance.com, risk@evamfinance.com",
+        "cadence": "weekly", "hour": 9, "weekday": 2, "window_days": 14})
+    assert r.status_code == 200, r.text
+    edited = r.json()["schedule"]
+    assert edited["id"] == made["id"]
+    assert edited["recipients"] == ["desk@evamfinance.com", "risk@evamfinance.com"]
+    assert edited["cadence"] == "weekly" and edited["hour"] == 9
+    assert edited["next_run"] != made["next_run"], "the slot moves with the new clock"
+
+    listed = client.get("/v1/news/schedules").json()["schedules"]
+    assert listed == [edited], "the list answers the edited schedule, same identity"
+
+    r = client.post("/v1/news/schedules/update",
+                    json={"id": "nope", "q": "x", "recipients": "a@b.com"})
+    assert r.status_code == 404
+    r = client.post("/v1/news/schedules/update",
+                    json={"id": made["id"], "q": "", "recipients": ""})
+    assert r.status_code == 400
 
 
 # --------------------------------------------------------------------------- #

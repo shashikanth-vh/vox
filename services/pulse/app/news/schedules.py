@@ -26,9 +26,31 @@ from evam_backend_core.logging import get_logger
 log = get_logger("pulse.schedules")
 
 
+def desk_tz():
+    """The timezone schedule hours are SPOKEN in. The desk says "7 AM" meaning its own
+    clock; the container runs UTC, so without this a 7 o'clock digest lands at 12:30 in
+    the afternoon. PULSE_DIGEST_TZ overrides; an unknown zone falls back to server time
+    (and says so once) rather than refusing to schedule anything."""
+    name = os.environ.get("PULSE_DIGEST_TZ", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 — bad zone name / missing tzdata
+        log.warning("pulse_digest_tz_unavailable", extra={"tz": name})
+        return None
+
+
+class ScheduleStoreError(RuntimeError):
+    """The schedule could not be PERSISTED. Raised to the API caller so a schedule
+    that exists only in memory — gone on the next restart — is never reported as
+    created. (The silent-swallow version of this is exactly how the desk's digests
+    vanished after an upgrade.)"""
+
+
 def next_run(cadence: str, hour: int, weekday: int, base: datetime | None = None) -> float:
-    """The next slot as a POSIX timestamp. weekday: 0=Mon … 6=Sun (weekly only)."""
-    now = base or datetime.now()
+    """The next slot as a POSIX timestamp, computed on the DESK's clock (see desk_tz).
+    weekday: 0=Mon … 6=Sun (weekly only)."""
+    now = base or datetime.now(desk_tz())
     run = now.replace(hour=int(hour), minute=0, second=0, microsecond=0)
     if cadence == "weekly":
         days = (int(weekday) - run.weekday()) % 7
@@ -58,7 +80,11 @@ class ScheduleStore:
         except (OSError, ValueError):
             self._items = []          # no file yet, or an unreadable one: start empty
 
-    def save(self) -> None:
+    def save(self, strict: bool = True) -> None:
+        """Persist, atomically. strict (the default, used by every API mutation) RAISES
+        on failure — a schedule that cannot reach disk must fail the request, not
+        survive as a phantom until the next restart. The scheduler loop's run-stamps
+        pass strict=False: a full disk must not kill the loop."""
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = self.path + ".tmp"
@@ -67,6 +93,10 @@ class ScheduleStore:
             os.replace(tmp, self.path)     # atomic: a crash mid-write cannot truncate it
         except OSError as exc:
             log.error("pulse_schedule_save_failed", extra={"error": str(exc)})
+            if strict:
+                raise ScheduleStoreError(
+                    f"could not persist the schedule file ({exc}) — check that the "
+                    "pulse data volume is writable by the service user") from exc
 
     @staticmethod
     def _key(tenant: str | None) -> str:
@@ -111,8 +141,19 @@ class ScheduleStore:
             for s in self._items:
                 if s.get("id") == sid:
                     s.update(fields)
-                    self.save()
+                    self.save(strict=False)   # a run-stamp must never kill the loop
                     return
+
+    def update(self, sid: str, tenant: str | None, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """Edit a schedule in place, keeping its identity (id, tenant, run history)."""
+        with self._lock:
+            for s in self._items:
+                if s.get("id") == sid and (tenant is None
+                                           or self._key(s.get("tenant")) == self._key(tenant)):
+                    s.update(fields)
+                    self.save()
+                    return dict(s)
+        return None
 
     def rearm_stale(self) -> int:
         """Re-anchor every past-due schedule to its next FUTURE slot. Called once at
@@ -138,9 +179,9 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                        digest: Callable) -> tuple[bool, str]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
     report are LEFT OUT rather than listed as empty — a digest of silence is noise."""
-    dto = datetime.now().strftime("%Y-%m-%d")
+    dto = datetime.now(desk_tz()).strftime("%Y-%m-%d")
     window = int(schedule.get("window_days", 7))
-    dfrom = (datetime.now() - timedelta(days=window)).strftime("%Y-%m-%d")
+    dfrom = (datetime.now(desk_tz()) - timedelta(days=window)).strftime("%Y-%m-%d")
     terms = [t.strip() for t in re.split(r"[,\n]", schedule.get("q", "")) if t.strip()]
     adverse_only = bool(schedule.get("adverse_only"))
 

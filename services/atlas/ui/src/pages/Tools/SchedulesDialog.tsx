@@ -31,6 +31,13 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
   const [subj, setSubj] = useState('ATLAS news digest');
   const [all, setAll] = useState(false);
   const [adv, setAdv] = useState(false);
+  // Which schedule the form is editing — null means the form creates a new one.
+  const [editId, setEditId] = useState<string | null>(null);
+
+  const resetForm = useCallback(() => {
+    setQ(''); setTo(''); setCad('daily'); setDow('Tue'); setHour('8'); setWin('7');
+    setSubj('ATLAS news digest'); setAll(false); setAdv(false); setEditId(null);
+  }, []);
 
   // v12's scAllFirms(): fill the query with every firm term, lock it, force adverse-only.
   const applyAllFirms = useCallback((on: boolean) => {
@@ -48,21 +55,35 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
 
   useEffect(() => {
     if (!open) return;
-    setQ(''); setTo(''); setCad('daily'); setDow('Tue'); setHour('8'); setWin('7');
-    setSubj('ATLAS news digest'); setAll(false); setAdv(false);
+    resetForm();
     load();
     if (prefillAll) applyAllFirms(true);
-  }, [open, prefillAll, load, applyAllFirms]);
+  }, [open, prefillAll, load, applyAllFirms, resetForm]);
 
-  const create = async () => {
+  const startEdit = (s: Schedule) => {
+    setEditId(s.id);
+    setQ(s.q); setTo(s.recipients);
+    setCad(s.cadence === 'weekly' ? 'weekly' : 'daily');
+    setDow(DOW[s.weekday] || 'Tue');
+    setHour(String(s.hour)); setWin(String(s.window_days));
+    setSubj(s.subject || 'ATLAS news digest');
+    setAll(s.scope === 'all-firms'); setAdv(!!s.adverse_only);
+    setBanner('');
+  };
+
+  const save = async () => {
     if (!q.trim()) { setBanner('Add at least one search term'); return; }
     if (!to.trim()) { setBanner('Add at least one recipient'); return; }
-    const r = await pulseService.createSchedule({
+    const payload = {
       q: q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
       hour: Number(hour) || 8, window_days: Number(win) || 7, adverse_only: adv,
       scope: all ? 'all-firms' : 'terms', subject: subj,
-    }, user.full);
-    if (r.ok) load(); else setBanner(r.error || 'Could not create the schedule');
+    } as const;
+    const r = editId
+      ? await pulseService.updateSchedule(editId, payload, user.full)
+      : await pulseService.createSchedule(payload, user.full);
+    if (r.ok) { resetForm(); setBannerOk(true); setBanner(editId ? 'Schedule updated.' : ''); load(); }
+    else setBanner(r.error || 'Could not save the schedule');
   };
 
   const act = async (fn: Promise<{ ok: boolean; error?: string; data?: any }>,
@@ -92,7 +113,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
 
         <Box sx={{ border: `1px solid ${tokens.line}`, borderRadius: 2, p: 1.5, mb: 1.4 }}>
           <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700, mb: 1 }}>
-            New schedule
+            {editId ? 'Edit schedule' : 'New schedule'}
           </Typography>
           <FormControlLabel control={<Checkbox size="small" checked={all} onChange={(e) => applyAllFirms(e.target.checked)} />}
             label={<Typography sx={{ fontSize: 12.2 }}>Cover all firms on the register ({firms} firms + their watch terms)</Typography>} />
@@ -109,7 +130,10 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           <Box sx={{ mt: 1.4 }}><TextFld label="Subject" value={subj} onChange={setSubj} /></Box>
           <FormControlLabel control={<Checkbox size="small" checked={adv} onChange={(e) => setAdv(e.target.checked)} />}
             label={<Typography sx={{ fontSize: 12.2 }}>Adverse items only</Typography>} />
-          <Box><Button variant="contained" onClick={create}>Create schedule</Button></Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
+            {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
+          </Box>
         </Box>
 
         <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700, mb: 1 }}>
@@ -127,6 +151,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
                 {s.adverse_only && <b style={{ color: tokens.bad }}> · ADVERSE ONLY</b>}
               </Typography>
             </Box>
+            <Button onClick={() => startEdit(s)}>Edit</Button>
             <Button onClick={() => act(pulseService.runSchedule(s.id))}>Run now</Button>
             <Button color="error" onClick={() => act(pulseService.deleteSchedule(s.id))}>Delete</Button>
           </Paper>

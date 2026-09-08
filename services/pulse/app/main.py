@@ -568,11 +568,59 @@ def create_app() -> FastAPI:
             "adverse_only": bool(payload.get("adverse_only")),
             "scope": (payload.get("scope") or "").strip(), "active": True, "last_run": 0,
             "next_run": sched.next_run(cadence, hour, weekday)}
-        request.app.state.schedules.add(schedule)
+        try:
+            request.app.state.schedules.add(schedule)
+        except sched.ScheduleStoreError as exc:
+            return ORJSONResponse(status_code=500,
+                                  content={"ok": False, "message": str(exc)})
         log.info("pulse_schedule_created", extra={"id": schedule["id"], "tenant": tenant,
                                                   "cadence": cadence, "hour": hour,
                                                   "recipients": len(recipients)})
         return {"ok": True, "schedule": schedule}
+
+    @app.post("/v1/news/schedules/update", tags=["News Radar"],
+              summary="Edit a recurring digest in place (recipients, cadence, hour, …)")
+    async def update_schedule(payload: dict, request: Request,
+                              tenant: str = Depends(tenant_of),
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        sid = str(payload.get("id") or "")
+        current = request.app.state.schedules.get(sid, tenant)
+        if current is None:
+            return ORJSONResponse(status_code=404,
+                                  content={"ok": False, "message": "No such schedule."})
+        recipients = _recipients(payload.get("recipients"))
+        term = (payload.get("q") or "").strip()
+        if not term or not recipients:
+            return ORJSONResponse(status_code=400, content={
+                "ok": False,
+                "message": "Need a search term and at least one recipient."})
+        cadence = "weekly" if payload.get("cadence") == "weekly" else "daily"
+        hour = max(0, min(23, int(payload.get("hour", 8) or 0)))
+        weekday = max(0, min(6, int(payload.get("weekday", 0) or 0)))
+        fields = {
+            "q": term, "recipients": recipients, "cadence": cadence,
+            "weekday": weekday, "hour": hour,
+            "window_days": max(1, min(90, int(payload.get("window_days", 7) or 7))),
+            "subject": (payload.get("subject") or "").strip(),
+            "adverse_only": bool(payload.get("adverse_only")),
+            "scope": (payload.get("scope") or "").strip(),
+        }
+        # The slot moves with the edit; identity and run history stay put.
+        if (cadence, hour, weekday) != (current.get("cadence"), current.get("hour"),
+                                        current.get("weekday")):
+            fields["next_run"] = sched.next_run(cadence, hour, weekday)
+        try:
+            updated = request.app.state.schedules.update(sid, tenant, fields)
+        except sched.ScheduleStoreError as exc:
+            return ORJSONResponse(status_code=500,
+                                  content={"ok": False, "message": str(exc)})
+        log.info("pulse_schedule_updated", extra={"id": sid, "tenant": tenant,
+                                                  "cadence": cadence, "hour": hour,
+                                                  "recipients": len(recipients)})
+        return {"ok": True, "schedule": updated}
 
     @app.post("/v1/news/schedules/delete", tags=["News Radar"],
               summary="Delete a recurring digest")
@@ -582,7 +630,12 @@ def create_app() -> FastAPI:
                                                              alias="X-API-Key")) -> Any:
         if (denied := _require_api_key(settings, x_api_key)) is not None:
             return denied
-        removed = request.app.state.schedules.remove(str(payload.get("id") or ""), tenant)
+        try:
+            removed = request.app.state.schedules.remove(str(payload.get("id") or ""),
+                                                         tenant)
+        except sched.ScheduleStoreError as exc:
+            return ORJSONResponse(status_code=500,
+                                  content={"ok": False, "message": str(exc)})
         return {"ok": removed}
 
     @app.post("/v1/news/schedules/run", tags=["News Radar"],

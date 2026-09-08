@@ -83,6 +83,13 @@ export const pulseService = {
     return r;
   },
 
+  async updateSchedule(id: string, p: Omit<Schedule, 'id'>, by: string): Result<void> {
+    const r = await call<void>(() => pulse.post('/schedules/update', { id, ...p }));
+    if (r.ok) writeAudit(by, 'News schedule edited', '',
+                         p.scope === 'all-firms' ? 'all firms' : p.q.slice(0, 60));
+    return r;
+  },
+
   async deleteSchedule(id: string): Result<void> {
     return call<void>(() => pulse.post('/schedules/delete', { id }));
   },

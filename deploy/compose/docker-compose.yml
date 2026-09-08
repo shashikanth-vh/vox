@@ -386,6 +386,9 @@ services:
       PULSE_DISABLE_GDELT: "${PULSE_DISABLE_GDELT:-0}"
       # Recurring digests live on a volume so they survive a container replacement.
       PULSE_SCHEDULE_FILE: "/data/pulse/schedules.json"
+      # The clock schedule hours are SPOKEN in: "7 AM" means the desk's 7 AM, not the
+      # container's UTC. Override for a desk in another zone.
+      PULSE_DIGEST_TZ: "${PULSE_DIGEST_TZ:-Asia/Kolkata}"
       PULSE_SCHEDULER_ENABLED: "${PULSE_SCHEDULER_ENABLED:-true}"
     volumes:
       - pulsedata:/data/pulse
