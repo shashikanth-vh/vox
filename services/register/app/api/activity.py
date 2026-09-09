@@ -631,12 +631,13 @@ async def read_activity(
             "area": AREA_OF.get(r.resource_type or "", "Other"),
             "company": company,
             # A sign-in's label is the signer's email — the Who column already says
-            # that, so session rows carry no code at all.
+            # that, so session rows carry no code and no ref at all.
             "code": code or ("" if r.resource_type == "session"
                              else ((r.changes or {}).get("label") or "")),
             # The record's own number (LD-283, a deal code …) — shown BESIDE the
             # company, not instead of it.
-            "ref": (r.changes or {}).get("label") or "",
+            "ref": ("" if r.resource_type == "session"
+                    else ((r.changes or {}).get("label") or "")),
             "summary": _sentence(r.action, r.resource_type, r.changes, company, detail),
         })
     return {"items": items, "total": len(items)}

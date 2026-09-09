@@ -247,8 +247,8 @@ async def test_the_company_column_is_an_anchor_not_an_echo(client):
 
     session_rows = [x for x in items if x["resource_type"] == "session"]
     if session_rows:   # sign-ins land on the trail via the session lane
-        assert session_rows[0]["code"] == "", \
-            "a sign-in's code column must not echo the email the Who column shows"
+        assert session_rows[0]["code"] == "" and session_rows[0]["ref"] == "", \
+            "a sign-in must not echo the email the Who column shows — in code OR ref"
 
 
 async def test_a_sign_in_is_on_the_trail(client):
@@ -259,6 +259,8 @@ async def test_a_sign_in_is_on_the_trail(client):
     signins = [x for x in r.json()["items"] if x["area"] == "Session"]
     assert signins, "sign-ins are the row that says who was even here"
     assert signins[0]["summary"] == "Signed in to ATLAS"
+    assert signins[0]["code"] == "" and signins[0]["ref"] == "", \
+        "the Who column already names the signer — no email echo in the anchor column"
 
 
 async def test_the_activity_log_is_admin_only(client):
