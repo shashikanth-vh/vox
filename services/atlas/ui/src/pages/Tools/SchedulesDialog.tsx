@@ -69,7 +69,10 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
 
   const startEdit = (s: Schedule) => {
     setEditId(s.id);
-    setQ(s.q); setTo(s.recipients);
+    setQ(s.q);
+    // recipients is normalised to a string in the service; String() keeps this safe
+    // even against an older cached bundle handing over the raw list.
+    setTo(Array.isArray(s.recipients as unknown) ? (s.recipients as unknown as string[]).join(', ') : String(s.recipients ?? ''));
     setCad(s.cadence === 'weekly' ? 'weekly' : 'daily');
     setDow(DOW[s.weekday] || 'Tue');
     setHour(String(s.hour)); setWin(String(s.window_days));
@@ -79,22 +82,31 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
   };
 
   const save = async () => {
-    // An all-firms schedule reads the register at send time — typed terms optional.
-    if (!q.trim() && !all) { setBanner('Add at least one search term'); return; }
-    if (!to.trim()) { setBanner('Add at least one recipient'); return; }
-    const payload = {
-      // Not `Number(hour) || 8` — midnight is hour 0, and 0 is falsy.
-      // All-firms saves clear any stored term list: the register is the list now.
-      q: all ? '' : q.trim(), recipients: to.trim(), cadence: cad, weekday: DOW.indexOf(dow),
-      hour: Number.isFinite(Number(hour)) ? Number(hour) : 8,
-      window_days: Number(win) || 7, adverse_only: adv,
-      scope: all ? 'all-firms' : 'terms', subject: subj,
-    } as const;
-    const r = editId
-      ? await pulseService.updateSchedule(editId, payload, user.full)
-      : await pulseService.createSchedule(payload, user.full);
-    if (r.ok) { resetForm(); setBannerOk(true); setBanner(editId ? 'Schedule updated.' : ''); load(); }
-    else setBanner(r.error || 'Could not save the schedule');
+    // String() first: whatever shape state ends up in, a save must never die on a
+    // thrown .trim() — silently doing NOTHING is the one unacceptable outcome.
+    try {
+      const qs = String(q ?? '').trim();
+      const tos = String(to ?? '').trim();
+      // An all-firms schedule reads the register at send time — typed terms optional.
+      if (!qs && !all) { setBannerOk(false); setBanner('Add at least one search term'); return; }
+      if (!tos) { setBannerOk(false); setBanner('Add at least one recipient'); return; }
+      const payload = {
+        // Not `Number(hour) || 8` — midnight is hour 0, and 0 is falsy.
+        // All-firms saves clear any stored term list: the register is the list now.
+        q: all ? '' : qs, recipients: tos, cadence: cad, weekday: DOW.indexOf(dow),
+        hour: Number.isFinite(Number(hour)) ? Number(hour) : 8,
+        window_days: Number(win) || 7, adverse_only: adv,
+        scope: all ? 'all-firms' : 'terms', subject: subj,
+      } as const;
+      const r = editId
+        ? await pulseService.updateSchedule(editId, payload, user.full)
+        : await pulseService.createSchedule(payload, user.full);
+      if (r.ok) { resetForm(); setBannerOk(true); setBanner(editId ? 'Schedule updated.' : ''); load(); }
+      else { setBannerOk(false); setBanner(r.error || 'Could not save the schedule'); }
+    } catch (e: any) {
+      setBannerOk(false);
+      setBanner(`Could not save the schedule: ${e?.message || e}`);
+    }
   };
 
   // The alert at the top of the dialog scrolls out of sight behind a long term list —
@@ -123,7 +135,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
       <DialogContent dividers>
         <Alert severity={smtp ? 'success' : 'warning'} sx={{ py: 0, fontSize: 12, mb: 1.2 }}>
           {smtp ? 'Email is configured on the server.' : 'Email is not configured.'}
-          {smtp && <Button sx={{ ml: 1 }} onClick={() => act(pulseService.sendTestEmail(to.trim()), 'Test email sent.')}>Send test email</Button>}
+          {smtp && <Button sx={{ ml: 1 }} onClick={() => act(pulseService.sendTestEmail(String(to ?? '').trim()), 'Test email sent.')}>Send test email</Button>}
         </Alert>
         {storeErr && (
           <Alert severity="error" sx={{ py: 0, fontSize: 12, mb: 1.2 }}>

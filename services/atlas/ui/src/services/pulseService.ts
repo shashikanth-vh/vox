@@ -80,6 +80,16 @@ export const pulseService = {
                                   store_ok?: boolean; store_error?: string }> {
     const r = await call<{ schedules: Schedule[]; smtp: boolean;
                            store_ok?: boolean; store_error?: string }>(() => pulse.get('/schedules'));
+    // The server stores recipients as a LIST; the dialog speaks comma-separated
+    // strings. Left un-normalised, the array rendered as addresses glued together —
+    // and editing a schedule put the array into the form, where .trim() threw and
+    // killed the save silently (the "hour sticks at 8" bug).
+    if (r.ok && r.data?.schedules) {
+      r.data.schedules = r.data.schedules.map((s: any) => ({
+        ...s,
+        recipients: Array.isArray(s.recipients) ? s.recipients.join(', ') : s.recipients,
+      }));
+    }
     // The dialog renders `data` even on failure, so it must always have the shape.
     return r.ok ? r : { ...r, data: { schedules: [], smtp: false } };
   },
