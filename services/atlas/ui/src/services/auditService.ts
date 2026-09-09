@@ -10,6 +10,9 @@ import type { TableQuery } from './types';
 export interface AuditRow {
   t: string; by: string; role?: string; act: string; code: string; detail: string;
   changes?: Record<string, any>; resourceId?: string; requestId?: string;
+  /** The company the row concerns + the same plain-English sentence the Activity
+   *  log shows — resolved server-side so the two screens can never disagree. */
+  company?: string;
 }
 
 export function writeAudit(by: string, act: string, code: string, detail: string) {
@@ -34,8 +37,12 @@ export function toAuditRow(r: any): AuditRow {
   // `detail` may arrive as a structured `changes` object rather than a sentence. The
   // grid gets the one-line summary; the raw object rides along so the row dialog can
   // show every field, labelled, without a second fetch.
-  const raw = r?.detail ?? r?.summary ?? r?.message ?? r?.changes;
-  const detail = raw == null ? '' : typeof raw === 'string' ? raw : summary(raw, act);
+  // The server's plain-English sentence (same renderer as the Activity log) wins as
+  // the grid's Detail; the raw changes object still rides along for the dialog.
+  const sentence = typeof r?.summary === 'string' ? r.summary : '';
+  const raw = r?.detail ?? r?.message ?? r?.changes;
+  const detail = sentence
+    || (raw == null ? '' : typeof raw === 'string' ? raw : summary(raw, act));
   return {
     t,
     by: r?.actor_name || r?.actor || r?.actor_email || r?.user || '',
@@ -45,7 +52,9 @@ export function toAuditRow(r: any): AuditRow {
     // resort rather than the first choice.
     code: r?.resource_no || r?.code || r?.resource_type || '',
     detail,
-    changes: raw && typeof raw === 'object' ? raw : undefined,
+    company: typeof r?.company === 'string' ? r.company : '',
+    changes: (r?.changes && typeof r.changes === 'object' ? r.changes : undefined)
+      ?? (raw && typeof raw === 'object' ? raw : undefined),
     resourceId: r?.resource_id || undefined,
     requestId: r?.request_id || undefined,
   };

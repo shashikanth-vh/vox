@@ -63,7 +63,7 @@ NOUN_OF: dict[str, str] = {
 # what lets one query per type name the company on a whole page of trail.
 _ENTITY_LINKED: frozenset[str] = frozenset(
     {"deals", "leads", "lending_tracker", "syndication_tracker", "asset_monetisation",
-     "interactions", "vox_conversations"})
+     "interactions", "vox_conversations", "documents"})
 
 
 def _fields_phrase(changes: dict[str, Any] | None) -> str:
@@ -73,9 +73,18 @@ def _fields_phrase(changes: dict[str, Any] | None) -> str:
     if not isinstance(values, dict):
         return ""
     parts: list[str] = []
-    for field, pair in list(values.items())[:2]:
+    shown = 0
+    for field, pair in values.items():
+        if shown >= 4:
+            break
+        # Raw identifiers read as noise ("entity id set to 5b127d72-…"); the linked
+        # company is already named on the row and the raw value stays on the audit
+        # record itself.
+        if field == "id" or field.endswith("_id"):
+            continue
         if not isinstance(pair, dict):
             continue
+        shown += 1
         before, after = pair.get("from"), pair.get("to")
         pretty = field.replace("_", " ")
         if before in (None, "", []) and after not in (None, "", []):
@@ -84,7 +93,9 @@ def _fields_phrase(changes: dict[str, Any] | None) -> str:
             parts.append(f"{pretty} cleared")
         else:
             parts.append(f"{pretty} {before} → {after}")
-    extra = len(values) - len(parts)
+    readable = sum(1 for f, pr in values.items()
+                   if isinstance(pr, dict) and f != "id" and not f.endswith("_id"))
+    extra = readable - len(parts)
     phrase = "; ".join(parts)
     if extra > 0:
         phrase += f" (+{extra} more)"
@@ -202,12 +213,13 @@ def _sentence(action: str, resource_type: str | None, changes: dict[str, Any] | 
     if action == "create":
         return f"Added a new {named}{on_company}" + (f" — {detail}" if detail else "")
     if action == "delete":
-        return f"Deleted {named}{on_company}"
+        return f"Deleted {named}{on_company}" + (f" — it held: {detail}" if detail else "")
     if action == "restore":
-        return f"Restored {named}{on_company}"
+        return f"Restored {named}{on_company}" + (f" — {detail}" if detail else "")
     if action == "update":
         phrase = _fields_phrase(changes)
-        return f"Updated {named}{on_company}" + (f" — {phrase}" if phrase else "")
+        return (f"Updated {named}{on_company}"
+                + (f" — {phrase}" if phrase else (f" — {detail}" if detail else "")))
     # NAMED operations (vox.approve, lms.disburse, …): the verb map speaks the desk's
     # language; anything unmapped keeps its own humanised name — never invented.
     verb = VERB_OF.get(action)
@@ -226,6 +238,7 @@ async def _companies_for(session, tenant_id: uuid.UUID,
     never a lookup per row.
     """
     from app.models.deals import Deal, Lead
+    from app.models.documents import Document
     from app.models.interactions import Interaction
     from app.models.registry import Entity
     from app.models.trackers import AssetMonetisation, LendingTracker, SyndicationTracker
@@ -253,7 +266,8 @@ async def _companies_for(session, tenant_id: uuid.UUID,
     model_for = {"deals": Deal, "leads": Lead, "lending_tracker": LendingTracker,
                  "syndication_tracker": SyndicationTracker,
                  "asset_monetisation": AssetMonetisation,
-                 "interactions": Interaction, "vox_conversations": VoxConversation}
+                 "interactions": Interaction, "vox_conversations": VoxConversation,
+                 "documents": Document}
     row_entity: dict[str, uuid.UUID] = {}
 
     for rtype, ids in by_type.items():
@@ -359,6 +373,7 @@ async def read_activity(
         company, code = companies.get(r.resource_id or "", ("", ""))
         detail = (interaction_bits.get(r.resource_id or "", "")
                   if r.resource_type == "interactions" else "")
+        # (create, delete, restore and bare updates all render it — see _sentence)
         items.append({
             "id": r.id,
             "at": r.at.isoformat(),

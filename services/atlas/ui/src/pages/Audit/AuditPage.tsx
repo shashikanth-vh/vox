@@ -29,6 +29,9 @@ export default function AuditPage() {
     { accessorKey: 'act', header: 'Action', size: 160, meta: { localFilter: true },
       Cell: ({ cell }) => <b>{humanKey(String(cell.getValue<string>() || '').replace(/\./g, ' '))}</b> },
     { accessorKey: 'code', header: 'Code', size: 120, meta: { localFilter: true }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
+    // Whose record the row concerns — resolved server-side, same as the Activity log.
+    { id: 'company', header: 'Company', size: 170, meta: { localFilter: true },
+      accessorFn: (r) => r.company || '', Cell: ({ cell }) => cell.getValue<string>() || '—' },
     // v12 marks this column `wrap` — long detail strings run to multiple lines.
     { accessorKey: 'detail', header: 'Detail', size: 360,
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', wordBreak: 'break-word' } } },
@@ -54,6 +57,8 @@ export default function AuditPage() {
               {detailRow('Who', <b>{view.by || view.role || ''}</b>)}
               {detailRow('Action', humanKey(view.act.replace(/\./g, ' ')))}
               {detailRow('Code', view.code ? <CodeText code={view.code} /> : '—')}
+              {detailRow('Company', view.company || '—')}
+              {detailRow('What happened', view.detail || '—')}
               {/* The grid shows the summary; here every recorded field is spelled out —
                   identifiers included, because a trail you cannot drill into is not one. */}
               {view.changes

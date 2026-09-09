@@ -101,6 +101,28 @@ async def test_a_logged_interaction_reads_as_what_was_said_and_with_whom(client)
     assert "Call" in top["summary"]
     assert "Discussed sanction timeline" in top["summary"]
 
+    # Deleting it must tell management WHAT was removed, not just that something was —
+    # and the forensic Audit endpoint now carries the same company and sentence.
+    iid = made.json()["id"]
+    gone = await client.delete(f"/v1/interactions/{iid}",
+                               headers=_as("admin@evamfinance.com", "Admin"))
+    assert gone.status_code in (200, 204), gone.text
+
+    r = await client.get("/v1/activity", headers=_as("admin@evamfinance.com", "Admin"))
+    dels = [x for x in r.json()["items"]
+            if x["resource_type"] == "interactions" and x["action"] == "delete"]
+    assert dels, "the removal must appear on the trail"
+    assert dels[0]["company"] == "Vayu Grid Private Limited"
+    assert "it held:" in dels[0]["summary"] and "Call" in dels[0]["summary"]
+    assert "Discussed sanction timeline" in dels[0]["summary"]
+
+    a = await client.get("/v1/audit", params={"resource_type": "interactions"},
+                         headers=_as("admin@evamfinance.com", "Admin"))
+    assert a.status_code == 200, a.text
+    audit_rows = a.json()
+    assert audit_rows and audit_rows[0]["company"] == "Vayu Grid Private Limited"
+    assert "Call" in audit_rows[0]["summary"], "audit rows speak the same sentences"
+
 
 async def test_named_operations_read_as_sentences_not_action_codes(client):
     """vox.approve / evidence.attach rendered as bare title-cased codes with no company.
@@ -123,6 +145,20 @@ async def test_named_operations_read_as_sentences_not_action_codes(client):
         == "Attached evidence on Blue Planet — board_resolution · BR-2026-04 on the lending"
     # Unmapped named actions keep the honest humanised fallback.
     assert _sentence("reconciliation.resolve", None, {}, None) == "Reconciliation resolve"
+
+
+def test_raw_identifiers_never_reach_a_readable_sentence():
+    """"entity id set to 5b127d72-…" is noise to a reader — the company is already
+    named on the row, and the raw value stays on the audit record itself."""
+    from app.api.activity import _sentence
+
+    out = _sentence("update", "leads", {"values": {
+        "entity_id": {"from": None, "to": "5b127d72-600c-434e-bf2c-306f169d6860"},
+        "status": {"from": "Active", "to": "Converted"},
+    }, "label": "LD-307"}, "WOG")
+    assert "5b127d72" not in out
+    assert "status Active → Converted" in out
+    assert "more" not in out, "a skipped id must not be counted as '+1 more'"
 
 
 async def test_a_sign_in_is_on_the_trail(client):

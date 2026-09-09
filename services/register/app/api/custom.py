@@ -742,11 +742,24 @@ async def read_audit(
             select(AuditLog).where(*conds).order_by(AuditLog.at.desc()).limit(limit)
         )
     ).scalars().all()
+    # The forensic view keeps its raw fields, but each row also carries the SAME
+    # resolved company and plain-English sentence the Activity log renders — so an
+    # auditor reading "delete · interactions · <uuid>" is also told whose interaction
+    # it was and what it held. One shared renderer; the two screens can never disagree.
+    from app.api.activity import _companies_for, _interaction_bits, _sentence
+    companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
+    interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
     return [
         {
             "id": r.id, "at": r.at.isoformat(), "actor": r.actor, "action": r.action,
             "resource_type": r.resource_type, "resource_id": r.resource_id,
             "request_id": r.request_id, "changes": r.changes,
+            "company": companies.get(r.resource_id or "", ("", ""))[0],
+            "summary": _sentence(
+                r.action, r.resource_type, r.changes,
+                companies.get(r.resource_id or "", ("", ""))[0],
+                (interaction_bits.get(r.resource_id or "", "")
+                 if r.resource_type == "interactions" else "")),
         }
         for r in rows
     ]
