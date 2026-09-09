@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { authHeaders } from '../auth/session';
+import { attach401Recovery } from '../auth/refresh';
 
 // Requirement 22: backend URL is configured through .env
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -96,10 +97,9 @@ axiosClient.interceptors.request.use((cfg) => {
   return withTransferTimeout(withBodyContentType(cfg));
 });
 
-axiosClient.interceptors.response.use(
-  (res) => res,
-  (err) => Promise.reject(err),
-);
+// An expired id_token 401s here first: recover it silently and retry, or sign out
+// honestly — never let it fall through to the mock fallback as "no data".
+attach401Recovery(axiosClient);
 
 // A second client rooted at the ORIGIN (PRISM_BASE_URL, '' = same origin) rather than
 // the /v1 register base — for gateway prefixes like /atlas/v1/* that must not inherit
@@ -113,5 +113,6 @@ gwClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
   return withTransferTimeout(withBodyContentType(cfg));
 });
+attach401Recovery(gwClient);
 
 export default axiosClient;

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { authHeaders } from '../auth/session';
 import { PRISM_BASE_URL } from './axiosClient';
+import { attach401Recovery } from '../auth/refresh';
 
 /**
  * The VocX transport.
@@ -35,6 +36,7 @@ vocxClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
   return cfg;
 });
+attach401Recovery(vocxClient);
 
 /** VocX answers `{ok: false, error}` with a 200 as often as it uses a status code. */
 export function vocxError(e: any, step: string): string {

@@ -2,6 +2,7 @@ import { useEffect, createContext, useContext, useMemo, useState, type ReactNode
 import { ROLES, primaryRole, type Role } from './rbac';
 import { db } from '../api/atlasStore';
 import { GOOGLE_SSO_CLIENT_ID } from '../api/axiosClient';
+import { onForcedSignOut } from './refresh';
 import { authService } from '../services/authService';
 import { getSession, type PrismSession } from './session';
 import { api, USE_REAL_API } from '../api/http';
@@ -85,29 +86,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Google id_tokens live ~1 hour. Five minutes before expiry, quietly re-mint one
   // (Google auto-selects the signed-in account — no interaction) so a working
-  // afternoon never sees a surprise sign-out. If the silent path fails, the next
-  // 401 routes to the login screen as before — this only removes the common case.
+  // afternoon never sees a surprise sign-out. One attempt used to be all it got —
+  // a laptop asleep at that moment, or one network blip, and the tab ran on an
+  // expired token for good. Now it retries a couple of times a minute apart; if
+  // Google still will not renew, the 401 lane (auth/refresh.ts) recovers on the
+  // next call or signs out honestly.
   useEffect(() => {
     if (!session?.idToken || !GOOGLE_SSO_CLIENT_ID) return;
     let alive = true;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const later = (fn: () => void, ms: number) => { timers.push(setTimeout(fn, ms)); };
     void (async () => {
       const g = await import('./googleIdentity');
       if (!alive || !g.isGoogleToken(session.idToken)) return;
       const left = g.tokenSecondsLeft(session.idToken);
       if (left == null) return;
-      const timer = setTimeout(async () => {
+      const attempt = async (triesLeft: number) => {
+        if (!alive) return;
         const fresh = await g.silentReauth(GOOGLE_SSO_CLIENT_ID, session.email);
-        if (!alive || !fresh) return;
-        try {
-          const s = await authService.signInWithGoogleCredential(fresh);
-          if (alive) { setSession(s); setUser(userFromSession(s)); }
-        } catch { /* the next 401 falls back to the login screen */ }
-      }, Math.max(5, left - 300) * 1000);
-      const drop = () => clearTimeout(timer);
-      if (!alive) drop();
+        if (!alive) return;
+        if (fresh) {
+          try {
+            const s = await authService.signInWithGoogleCredential(fresh);
+            if (alive) { setSession(s); setUser(userFromSession(s)); }
+            return;   // success re-arms via the [session.idToken] dependency
+          } catch { /* fall through to a retry */ }
+        }
+        if (triesLeft > 0) later(() => void attempt(triesLeft - 1), 60_000);
+      };
+      later(() => void attempt(2), Math.max(5, left - 300) * 1000);
     })();
-    return () => { alive = false; };
+    return () => { alive = false; timers.forEach(clearTimeout); };
   }, [session?.idToken]);
+
+  // The 401 lane clears the stored session when Google will not renew silently;
+  // this flips the React state so the login screen actually appears.
+  useEffect(() => onForcedSignOut(() => { setSession(null); setAuthed(false); }), []);
 
   const value = useMemo<AuthCtx>(() => ({
     user,

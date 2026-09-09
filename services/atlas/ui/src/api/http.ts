@@ -104,6 +104,11 @@ const MOCK_ON_ERROR = import.meta.env.VITE_MOCK_FALLBACK !== 'false';
 export async function withFallback<T>(real: () => Promise<T>, mock: () => T | Promise<T>): Promise<T> {
   if (!USE_REAL_API) return mock();
   try { return await real(); } catch (e) {
+    // Auth failures are NEVER "server down, use the local book": an expired session
+    // rendering stale grids that look normal is how a desk reads wrong numbers.
+    // The 401 lane has already tried a silent recovery by the time this throws.
+    const status = (e as any)?.response?.status;
+    if (status === 401 || status === 403) throw e;
     if (!MOCK_ON_ERROR) throw e;
     console.warn('[api] falling back to mock:', e);
     return mock();

@@ -8,6 +8,7 @@
 import axios from 'axios';
 import { authHeaders } from '../auth/session';
 import { ORCHESTRATOR_URL } from './axiosClient';
+import { attach401Recovery } from '../auth/refresh';
 
 const orchestratorClient = axios.create({
   baseURL: ORCHESTRATOR_URL,
@@ -20,6 +21,7 @@ orchestratorClient.interceptors.request.use((cfg) => {
   Object.entries(authHeaders()).forEach(([k, v]) => cfg.headers.set(k, v));
   return cfg;
 });
+attach401Recovery(orchestratorClient);
 
 export const orchestrator = {
   post: <T>(url: string, data?: any, opts?: { timeoutMs?: number }) =>

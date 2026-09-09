@@ -3,6 +3,7 @@ import { PULSE_URL, TENANT } from '../api/axiosClient';
 import { authHeaders } from '../auth/session';
 import { errText } from '../api/http';
 import { writeAudit } from './auditService';
+import { attach401Recovery } from '../auth/refresh';
 
 /* The News Radar's server side — email digests and recurring schedules.
    ----------------------------------------------------------------------------
@@ -21,6 +22,7 @@ pulse.interceptors.request.use((c) => {
   c.headers = { ...(c.headers || {}), 'X-Tenant': TENANT, ...authHeaders() } as any;
   return c;
 });
+attach401Recovery(pulse);
 
 export interface ScheduleRun {
   at: number; ok: boolean; note: string; firms?: number; items?: number;
