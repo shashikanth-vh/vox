@@ -176,11 +176,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
           <Box sx={{ mt: 1.4 }}><TextFld label="Subject" value={subj} onChange={setSubj} /></Box>
           <FormControlLabel control={<Checkbox size="small" checked={adv} onChange={(e) => setAdv(e.target.checked)} />}
             label={<Typography sx={{ fontSize: 12.2 }}>Adverse items only</Typography>} />
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
-            {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
-            {feedback}
-          </Box>
+
         </Box>
 
         <Typography sx={{ fontSize: 10.6, textTransform: 'uppercase', letterSpacing: '.8px', color: tokens.muted, fontWeight: 700, mb: 1 }}>
@@ -254,11 +250,11 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
         )) : <Typography sx={{ fontSize: 12.4, color: tokens.muted }}>No schedules yet.</Typography>}
       </DialogContent>
       <DialogActions>
-        {/* The form's own button scrolls away behind the schedule list — the footer
-            carries the same action so Save is always in reach, next to Close. */}
+        {/* THE one button row — the footer never scrolls away, so Save is always in
+            reach and there is no second copy inside the form to hunt for. */}
         {feedback}
-        <Button variant="contained" onClick={save}>{editId ? 'Save changes' : 'Create schedule'}</Button>
-        {editId && <Button variant="outlined" onClick={resetForm}>Cancel edit</Button>}
+        <Button variant="contained" onClick={save}>{editId ? 'Save' : 'Create'}</Button>
+        {editId && <Button variant="outlined" onClick={resetForm}>Cancel</Button>}
         <Button onClick={onClose} variant="outlined">Close</Button>
       </DialogActions>
     </Dialog>
