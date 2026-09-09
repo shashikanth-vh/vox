@@ -69,15 +69,20 @@ export default function ActivityPage() {
         <Box sx={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
                    overflow: 'hidden' }}>{cell.getValue<string>()}</Box>
       ) },
-    { accessorKey: 'company', header: 'Description', size: 200, meta: { localFilter: true },
+    // The sentence IS the description — this column is the record's anchor: the
+    // company, its group code, and the record's own number, stacked cleanly.
+    { accessorKey: 'company', header: 'Company / Record', size: 210, meta: { localFilter: true },
       Cell: ({ row }) => {
-        const { code, company } = row.original;
-        if (!code) return '—';
+        const { code, company, ref } = row.original;
+        if (!code && !company && !ref) return '—';
         return (
-          <>
-            {company && company !== code && <b>{company}</b>}{' '}
-            <CodeText code={code} />
-          </>
+          <Box>
+            {company && company !== code && <Typography component="div" sx={{ fontSize: 12.6, fontWeight: 700, lineHeight: 1.25 }}>{company}</Typography>}
+            <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap', mt: company ? 0.3 : 0 }}>
+              {code && <CodeText code={code} />}
+              {ref && ref !== code && <CodeText code={ref} />}
+            </Box>
+          </Box>
         );
       } },
   ], []);
@@ -129,8 +134,10 @@ export default function ActivityPage() {
               {detailRow('Area', <AreaPill area={view.area} />)}
               {detailRow('Action', view.act)}
               {detailRow('Activity', view.text)}
-              {detailRow('Company', view.code
-                ? <>{view.company && view.company !== view.code && <b>{view.company}</b>}{' '}<CodeText code={view.code} /></>
+              {detailRow('Company', (view.code || view.company)
+                ? <>{view.company && view.company !== view.code && <b>{view.company}</b>}{' '}
+                    {view.code && <CodeText code={view.code} />}{' '}
+                    {view.ref && view.ref !== view.code && <CodeText code={view.ref} />}</>
                 : '—')}
             </Box>
           )}

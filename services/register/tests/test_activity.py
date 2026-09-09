@@ -225,6 +225,32 @@ def test_raw_identifiers_never_reach_a_readable_sentence():
     assert "more" not in out, "a skipped id must not be counted as '+1 more'"
 
 
+async def test_the_company_column_is_an_anchor_not_an_echo(client):
+    """Session rows repeated the signer's email beside the Who column; a lead with no
+    entity record showed only its number. The column now carries the company (typed
+    name when that is all the lead has) plus the record's own ref — and nothing
+    redundant."""
+    lead = await client.post("/v1/leads", json={
+        "company": "Bhairav Textiles", "sector": "Textiles", "rm": "SD",
+        "source": "RM", "status": "Active"},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert lead.status_code == 201, lead.text
+
+    r = await client.get("/v1/activity", headers=_as("admin@evamfinance.com", "Admin"))
+    items = r.json()["items"]
+    lead_rows = [x for x in items if x["resource_type"] == "leads"
+                 and x["action"] == "create"]
+    assert lead_rows, "the lead write must appear"
+    assert lead_rows[0]["company"] == "Bhairav Textiles", \
+        "a typed company name beats a bare lead number"
+    assert lead_rows[0]["ref"] == lead.json()["lead_no"], "the record ref travels too"
+
+    session_rows = [x for x in items if x["resource_type"] == "session"]
+    if session_rows:   # sign-ins land on the trail via the session lane
+        assert session_rows[0]["code"] == "", \
+            "a sign-in's code column must not echo the email the Who column shows"
+
+
 async def test_a_sign_in_is_on_the_trail(client):
     ok = await client.post("/v1/session-events", json={"event": "signin"},
                            headers=_as("admin@evamfinance.com", "Admin"))

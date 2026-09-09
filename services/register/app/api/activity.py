@@ -303,6 +303,24 @@ async def _companies_for(session, tenant_id: uuid.UUID,
             out[rid] = ent_name[eid]
     for eid, pair in ent_name.items():
         out.setdefault(str(eid), pair)
+    # A lead qualified before its entity record exists still knows the company by
+    # NAME — better than a bare lead number in the company column.
+    lead_ids = {r.resource_id for r in rows
+                if r.resource_type == "leads" and r.resource_id
+                and r.resource_id not in out}
+    if lead_ids:
+        got = []
+        for i in lead_ids:
+            try:
+                got.append(uuid.UUID(i))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        for rid, co in (await session.execute(
+            select(Lead.id, Lead.company).where(
+                Lead.tenant_id == tenant_id, Lead.id.in_(got))
+        )).all():
+            if co:
+                out[str(rid)] = (co, "")
     await _second_hop(session, tenant_id, rows, out)
     return out
 
@@ -612,7 +630,13 @@ async def read_activity(
             "resource_id": r.resource_id,
             "area": AREA_OF.get(r.resource_type or "", "Other"),
             "company": company,
-            "code": code or ((r.changes or {}).get("label") or ""),
+            # A sign-in's label is the signer's email — the Who column already says
+            # that, so session rows carry no code at all.
+            "code": code or ("" if r.resource_type == "session"
+                             else ((r.changes or {}).get("label") or "")),
+            # The record's own number (LD-283, a deal code …) — shown BESIDE the
+            # company, not instead of it.
+            "ref": (r.changes or {}).get("label") or "",
             "summary": _sentence(r.action, r.resource_type, r.changes, company, detail),
         })
     return {"items": items, "total": len(items)}

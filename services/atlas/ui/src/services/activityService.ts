@@ -6,6 +6,8 @@ import type { TableQuery, Paged } from './types';
 
 export interface ActivityRow {
   t: string; by: string; area: string; text: string; code: string; company: string; act: string;
+  /** The record's own number (LD-283, a deal code …) — shown beside the company. */
+  ref?: string;
 }
 
 // Which area of the business an action belongs to (drives the coloured pill + chips).
@@ -119,6 +121,7 @@ export function fromActivityWire(r: any): ActivityRow {
     code: r?.code || '',
     company: r?.company || '',
     act: r?.action || '',
+    ref: r?.ref || '',
   };
 }
 
