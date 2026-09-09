@@ -187,7 +187,8 @@ def _named_extra(action: str, changes: dict[str, Any] | None) -> str:
     if action in ("vox.erase", "vox.regenerate"):
         return f"recorded by {ch['recorder']}" if ch.get("recorder") else ""
     if action in ("evidence.attach", "evidence.revoke"):
-        core = " · ".join(str(x) for x in (ch.get("evidence_kind"), ch.get("reference")) if x)
+        kind = str(ch.get("evidence_kind") or "").replace("_", " ")
+        core = " · ".join(str(x) for x in (kind, ch.get("reference")) if x)
         subject = ch.get("subject_type")
         return core + (f" on the {subject}" if subject and core else "")
     if action == "evidence.break_glass":
@@ -307,12 +308,19 @@ async def _companies_for(session, tenant_id: uuid.UUID,
 
 async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
                       out: dict[str, tuple[str, str]]) -> None:
-    """Rows one hop FURTHER from the company than the trackers: a syndication lender
-    hangs off its mandate, and a VOX conversation not yet pinned to an entity is often
-    pinned to a lead. Resolve both so their trail lines still name the firm."""
-    from app.models.deals import Lead
+    """Rows further from the company than one hop still name the firm:
+
+    * a syndication lender reaches it through its mandate;
+    * a VOX conversation not pinned to an entity reaches it through its lead (or the
+      lead its approval created, or its filed interaction) — and when even the lead
+      knows only a typed company NAME, that name is shown rather than nothing;
+    * governance evidence reaches it through the subject it attaches to.
+    """
+    from app.models.deals import Deal, Lead
+    from app.models.interactions import Interaction
     from app.models.registry import Entity
-    from app.models.trackers import SyndicationLender, SyndicationTracker
+    from app.models.trackers import (AssetMonetisation, LendingTracker,
+                                     SyndicationLender, SyndicationTracker)
     from app.models.vox import VoxConversation
 
     def _uuids(ids: set[str]) -> list[uuid.UUID]:
@@ -324,14 +332,13 @@ async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
                 continue
         return got
 
+    pending: dict[str, uuid.UUID] = {}          # resource_id -> entity_id
+    text_name: dict[str, str] = {}              # resource_id -> typed company name
+
+    # -- syndication lenders: lender -> mandate -> entity ----------------------
     lender_ids = {r.resource_id for r in rows
                   if r.resource_type == "syndication_lenders" and r.resource_id
                   and r.resource_id not in out}
-    vox_ids = {r.resource_id for r in rows
-               if r.resource_type == "vox_conversations" and r.resource_id
-               and r.resource_id not in out}
-
-    pending: dict[str, uuid.UUID] = {}          # resource_id -> entity_id
     if lender_ids:
         for rid, eid in (await session.execute(
             select(SyndicationLender.id, SyndicationTracker.entity_id)
@@ -342,9 +349,14 @@ async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
         )).all():
             if eid:
                 pending[str(rid)] = eid
+
+    # -- VOX conversations: lead, filed interaction, or the lead approve created
+    vox_ids = {r.resource_id for r in rows
+               if r.resource_type == "vox_conversations" and r.resource_id
+               and r.resource_id not in out}
     if vox_ids:
-        for rid, eid in (await session.execute(
-            select(VoxConversation.id, Lead.entity_id)
+        for rid, eid, lead_co in (await session.execute(
+            select(VoxConversation.id, Lead.entity_id, Lead.company)
             .join(Lead, Lead.id == VoxConversation.lead_id)
             .where(VoxConversation.tenant_id == tenant_id,
                    VoxConversation.entity_id.is_(None),
@@ -352,6 +364,73 @@ async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
         )).all():
             if eid:
                 pending[str(rid)] = eid
+            elif lead_co:
+                text_name[str(rid)] = lead_co
+        still = vox_ids - set(pending) - set(text_name)
+        if still:
+            for rid, eid in (await session.execute(
+                select(VoxConversation.id, Interaction.entity_id)
+                .join(Interaction, Interaction.id == VoxConversation.interaction_id)
+                .where(VoxConversation.tenant_id == tenant_id,
+                       VoxConversation.id.in_(_uuids(still)))
+            )).all():
+                if eid:
+                    pending[str(rid)] = eid
+        # The approval's own audit row names the lead it created.
+        still = vox_ids - set(pending) - set(text_name)
+        made_lead = {r.resource_id: str((r.changes or {}).get("created_lead_id") or "")
+                     for r in rows if r.resource_id in still and r.changes}
+        made_ids = _uuids({v for v in made_lead.values() if v})
+        if made_ids:
+            lead_info = {str(lid): (eid, co) for lid, eid, co in (await session.execute(
+                select(Lead.id, Lead.entity_id, Lead.company).where(
+                    Lead.tenant_id == tenant_id, Lead.id.in_(made_ids))
+            )).all()}
+            for rid, lid in made_lead.items():
+                eid, co = lead_info.get(lid, (None, None))
+                if eid:
+                    pending[rid] = eid
+                elif co:
+                    text_name[rid] = co
+
+    # -- governance evidence: through the subject it attaches to ---------------
+    ev_rows = [r for r in rows
+               if r.resource_type == "governance_evidence" and r.resource_id
+               and r.resource_id not in out and r.changes]
+    subject_model = {"Lead": Lead, "Deal": Deal, "Entity": Entity,
+                     "Lending": LendingTracker, "Syndication": SyndicationTracker,
+                     "AssetMonetisation": AssetMonetisation}
+    by_subject: dict[str, dict[str, str]] = {}   # subject_type -> {subject_id: rid}
+    for r in ev_rows:
+        stype = str((r.changes or {}).get("subject_type") or "")
+        sid = str((r.changes or {}).get("subject_id") or "")
+        if stype in subject_model and sid:
+            by_subject.setdefault(stype, {})[sid] = r.resource_id or ""
+    for stype, sid_map in by_subject.items():
+        model = subject_model[stype]
+        if model is Entity:
+            for rid_key, rid in sid_map.items():
+                try:
+                    pending[rid] = uuid.UUID(rid_key)
+                except (ValueError, TypeError):
+                    continue
+            continue
+        cols = [model.id, model.entity_id]
+        has_company_text = stype == "Lead"
+        if has_company_text:
+            cols.append(Lead.company)
+        for got in (await session.execute(
+            select(*cols).where(model.tenant_id == tenant_id,
+                                model.id.in_(_uuids(set(sid_map))))
+        )).all():
+            sid, eid = got[0], got[1]
+            rid = sid_map.get(str(sid), "")
+            if not rid:
+                continue
+            if eid:
+                pending[rid] = eid
+            elif has_company_text and got[2]:
+                text_name[rid] = got[2]
 
     if pending:
         names = {eid: (display or legal or "", code or "")
@@ -363,6 +442,8 @@ async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
         for rid, eid in pending.items():
             if eid in names:
                 out[rid] = names[eid]
+    for rid, name in text_name.items():
+        out.setdefault(rid, (name, ""))
 
 
 async def _lender_bits(session, tenant_id: uuid.UUID,

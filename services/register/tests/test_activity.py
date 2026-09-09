@@ -154,6 +154,33 @@ async def test_a_new_lender_names_the_lender_and_the_company(client):
     assert "Circulated" in rows[0]["summary"]
 
 
+async def test_evidence_reaches_its_company_through_the_subject(client):
+    """"Attached evidence … on the Lead" with Company "—" made management guess whose
+    lead. The evidence row knows its subject; the subject knows its company."""
+    ent = await client.post("/v1/entities", json={
+        "legal_name": "Surya Grid Private Limited", "code": "SURYAGRID",
+        "sector": "Solar"}, headers=_as("admin@evamfinance.com", "Admin"))
+    assert ent.status_code == 201, ent.text
+    lead = await client.post("/v1/leads", json={
+        "company": "Surya Grid Private Limited", "entity_id": ent.json()["id"],
+        "sector": "Solar", "rm": "SD", "source": "RM", "status": "Active"},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert lead.status_code == 201, lead.text
+    ev = await client.post("/v1/evidence", json={
+        "subject_type": "Lead", "subject_id": lead.json()["id"],
+        "evidence_kind": "lead_qualification", "reference": "QUAL/SG/000123"},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert ev.status_code == 201, ev.text
+
+    r = await client.get("/v1/activity", headers=_as("admin@evamfinance.com", "Admin"))
+    rows = [x for x in r.json()["items"]
+            if x["resource_type"] == "governance_evidence"]
+    assert rows, "the evidence write must appear on the trail"
+    assert rows[0]["company"] == "Surya Grid Private Limited", rows[0]
+    assert "lead qualification" in rows[0]["summary"], "kind reads as words"
+    assert "QUAL/SG/000123" in rows[0]["summary"]
+
+
 async def test_named_operations_read_as_sentences_not_action_codes(client):
     """vox.approve / evidence.attach rendered as bare title-cased codes with no company.
     The verb map speaks the desk's language and the payload details surface."""
@@ -172,7 +199,7 @@ async def test_named_operations_read_as_sentences_not_action_codes(client):
                      {"subject_type": "lending", "subject_id": "x",
                       "evidence_kind": "board_resolution", "reference": "BR-2026-04"},
                      "Blue Planet") \
-        == "Attached evidence on Blue Planet — board_resolution · BR-2026-04 on the lending"
+        == "Attached evidence on Blue Planet — board resolution · BR-2026-04 on the lending"
     # Unmapped named actions keep the honest humanised fallback.
     assert _sentence("reconciliation.resolve", None, {}, None) == "Reconciliation resolve"
 
