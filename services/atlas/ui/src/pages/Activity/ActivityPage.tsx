@@ -12,7 +12,7 @@ import type { ActivityRow } from '../../services/activityService';
 const AREA_COLOR: Record<string, string> = {
   Leads: tokens.tealHi, Deals: tokens.navy2, Lending: tokens.lend, 'Platform Deals': tokens.synd,
   'Asset Mon': tokens.am, Clients: tokens.ok, FI: '#2D6FC4', Team: tokens.warn, Documents: tokens.teal,
-  Session: tokens.muted, System: tokens.muted, Other: tokens.muted,
+  VOX: '#7B5EA7', Session: tokens.muted, System: tokens.muted, Other: tokens.muted,
 };
 
 function AreaPill({ area }: { area: string }) {

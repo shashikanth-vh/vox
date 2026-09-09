@@ -44,6 +44,7 @@ AREA_OF: dict[str, str] = {
     "counterparties": "FI", "people": "Team",
     "documents": "Documents", "session": "Session",
     "import": "System", "tenants": "System",
+    "vox_conversations": "VOX", "governance_evidence": "Documents",
 }
 
 # How the desk NAMES each kind of row in a sentence.
@@ -54,13 +55,15 @@ NOUN_OF: dict[str, str] = {
     "asset_monetisation": "asset-monetisation mandate",
     "counterparties": "lender", "people": "team member",
     "interactions": "interaction", "documents": "document", "notes": "note",
+    "vox_conversations": "VOX conversation", "governance_evidence": "evidence",
 }
 
 # Resource types whose rows hang off a company. Every one of these carries entity_id
 # directly (deal_id is nullable on the trackers, so the deal is the wrong hop), which is
 # what lets one query per type name the company on a whole page of trail.
 _ENTITY_LINKED: frozenset[str] = frozenset(
-    {"deals", "leads", "lending_tracker", "syndication_tracker", "asset_monetisation"})
+    {"deals", "leads", "lending_tracker", "syndication_tracker", "asset_monetisation",
+     "interactions", "vox_conversations"})
 
 
 def _fields_phrase(changes: dict[str, Any] | None) -> str:
@@ -108,8 +111,85 @@ def _import_phrase(changes: dict[str, Any] | None) -> str:
     return head + tail + why + skipped
 
 
+# Named operations, in the desk's own words. Anything not listed keeps the honest
+# humanised fallback below — a verb is only ever written here, never invented.
+VERB_OF: dict[str, str] = {
+    "vox.approve": "Approved a VOX conversation",
+    "vox.erase": "Erased a VOX conversation (content removed for everyone)",
+    "vox.regenerate": "Regenerated a VOX conversation's report",
+    "evidence.attach": "Attached evidence",
+    "evidence.revoke": "Revoked evidence",
+    "evidence.break_glass": "Used break-glass past an evidence gate",
+    "lms.open": "Opened a loan account",
+    "lms.terms": "Set loan terms",
+    "lms.disburse": "Recorded a disbursement",
+    "lms.accrue": "Ran interest accrual",
+    "lms.classify": "Reclassified a loan account",
+    "lms.entry": "Posted a ledger entry",
+    "lms.condition.add": "Added a CP/CS condition",
+    "lms.condition.receive": "Marked a CP/CS condition received",
+    "cpcs.prepare": "Prepared the CP/CS checklist",
+    "cpcs.approve": "Approved the CP/CS checklist",
+    "cpcs.reject": "Rejected the CP/CS checklist",
+    "cpcs.return": "Returned the CP/CS checklist for rework",
+    "sanction.terms": "Recorded sanction terms",
+    "deal.close": "Closed a deal",
+    "calendar.update": "Updated a calendar item",
+    "calendar.complete": "Completed a calendar item",
+    "calendar.cancel": "Cancelled a calendar item",
+    "covenant.update": "Updated a covenant",
+    "covenant.result": "Recorded a covenant test result",
+    "covenant.waive": "Waived a covenant",
+    "covenant.waiver_expired": "A covenant waiver expired",
+    "advaya.handover.submit": "Submitted an Advaya handover",
+    "advaya.handover.approve": "Approved an Advaya handover",
+    "advaya.handover.reject": "Rejected an Advaya handover",
+    "advaya.handover.return": "Returned an Advaya handover",
+    "advaya.handoff": "Handed a deal off to Advaya",
+    "ledger.export": "Exported the Excel ledger",
+    "people.handover": "Handed over a book to another RM",
+    "people.sync_access": "Synced team access",
+    "document.validate": "Validated a document",
+    "document.reject": "Rejected a document",
+    "document.replace": "Replaced a document",
+    "document.expire": "Marked a document expired",
+    "cam.open": "Opened a CAM",
+    "cam.submit": "Submitted a CAM",
+    "cam.decide": "Decided a CAM",
+    "cam.reset": "Reset a CAM",
+    "disbursement.tranche": "Recorded a disbursement tranche",
+    "disbursement.tranche.recorded": "Recorded a disbursement tranche",
+}
+
+
+def _named_extra(action: str, changes: dict[str, Any] | None) -> str:
+    """The one detail that makes a named operation readable, pulled from the audit
+    row's own payload — never invented, dropped when absent."""
+    ch = changes or {}
+    if action == "vox.approve":
+        bits = []
+        if ch.get("recorder"):
+            bits.append(f"recorded by {ch['recorder']}")
+        if ch.get("created_lead_id"):
+            bits.append("filed a new lead")
+        return ", ".join(bits)
+    if action in ("vox.erase", "vox.regenerate"):
+        return f"recorded by {ch['recorder']}" if ch.get("recorder") else ""
+    if action in ("evidence.attach", "evidence.revoke"):
+        core = " · ".join(str(x) for x in (ch.get("evidence_kind"), ch.get("reference")) if x)
+        subject = ch.get("subject_type")
+        return core + (f" on the {subject}" if subject and core else "")
+    if action == "evidence.break_glass":
+        why = ch.get("justification") or ch.get("reason")
+        return f"reason: {why}" if why else ""
+    if action == "deal.close":
+        why = ch.get("reason")
+        return str(why) if why else ""
+    return ""
+
+
 def _sentence(action: str, resource_type: str | None, changes: dict[str, Any] | None,
-              company: str | None) -> str:
+              company: str | None, detail: str = "") -> str:
     label = (changes or {}).get("label") or ""
     noun = NOUN_OF.get(resource_type or "", (resource_type or "row").rstrip("s"))
     named = f"{noun} {label}".strip() if label else noun
@@ -120,7 +200,7 @@ def _sentence(action: str, resource_type: str | None, changes: dict[str, Any] | 
     if action == "mis.import":
         return _import_phrase(changes)
     if action == "create":
-        return f"Added a new {named}{on_company}"
+        return f"Added a new {named}{on_company}" + (f" — {detail}" if detail else "")
     if action == "delete":
         return f"Deleted {named}{on_company}"
     if action == "restore":
@@ -128,8 +208,12 @@ def _sentence(action: str, resource_type: str | None, changes: dict[str, Any] | 
     if action == "update":
         phrase = _fields_phrase(changes)
         return f"Updated {named}{on_company}" + (f" — {phrase}" if phrase else "")
-    # Anything else is a NAMED operation (evidence.break_glass, lms.disburse, …). Its own
-    # name is the most honest thing to show — humanised, never invented.
+    # NAMED operations (vox.approve, lms.disburse, …): the verb map speaks the desk's
+    # language; anything unmapped keeps its own humanised name — never invented.
+    verb = VERB_OF.get(action)
+    if verb:
+        extra = _named_extra(action, changes)
+        return verb + on_company + (f" — {extra}" if extra else "")
     pretty = action.replace(".", " ").replace("_", " ")
     return f"{pretty[:1].upper()}{pretty[1:]}" + (f" — {named}" if label else "") + on_company
 
@@ -142,8 +226,10 @@ async def _companies_for(session, tenant_id: uuid.UUID,
     never a lookup per row.
     """
     from app.models.deals import Deal, Lead
+    from app.models.interactions import Interaction
     from app.models.registry import Entity
     from app.models.trackers import AssetMonetisation, LendingTracker, SyndicationTracker
+    from app.models.vox import VoxConversation
 
     by_type: dict[str, set[str]] = {}
     for r in rows:
@@ -166,7 +252,8 @@ async def _companies_for(session, tenant_id: uuid.UUID,
     all_entity_ids: set[uuid.UUID] = set()
     model_for = {"deals": Deal, "leads": Lead, "lending_tracker": LendingTracker,
                  "syndication_tracker": SyndicationTracker,
-                 "asset_monetisation": AssetMonetisation}
+                 "asset_monetisation": AssetMonetisation,
+                 "interactions": Interaction, "vox_conversations": VoxConversation}
     row_entity: dict[str, uuid.UUID] = {}
 
     for rtype, ids in by_type.items():
@@ -203,6 +290,38 @@ async def _companies_for(session, tenant_id: uuid.UUID,
     return out
 
 
+async def _interaction_bits(session, tenant_id: uuid.UUID,
+                            rows: list[AuditLog]) -> dict[str, str]:
+    """resource_id → the phrase that makes "Added a new interaction" mean something:
+    the interaction's type and a short slice of what was said. One bounded query for
+    the page; soft-deleted rows still answer, so old trail lines stay readable."""
+    from app.models.interactions import Interaction
+
+    ids = [r.resource_id for r in rows
+           if r.resource_type == "interactions" and r.resource_id]
+    if not ids:
+        return {}
+    uuids = []
+    for i in set(ids):
+        try:
+            uuids.append(uuid.UUID(i))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    out: dict[str, str] = {}
+    for rid, itype, summary, notes, lender in (await session.execute(
+        select(Interaction.id, Interaction.interaction_type, Interaction.summary,
+               Interaction.notes, Interaction.lender_name).where(
+            Interaction.tenant_id == tenant_id, Interaction.id.in_(uuids))
+    )).all():
+        text = (summary or notes or "").strip().replace("\n", " ")
+        snippet = f'"{text[:120]}{"…" if len(text) > 120 else ""}"' if text else ""
+        bits = " — ".join(x for x in (itype, snippet) if x)
+        if lender:
+            bits = f"{bits} (with {lender})" if bits else f"with {lender}"
+        out[str(rid)] = bits
+    return out
+
+
 @router.get("/v1/activity", summary="The Activity Log — who did what, in plain English")
 async def read_activity(
     ctx: RequestContext = Depends(get_context),
@@ -233,10 +352,13 @@ async def read_activity(
     )).scalars().all()
 
     companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
+    interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
 
     items = []
     for r in rows:
         company, code = companies.get(r.resource_id or "", ("", ""))
+        detail = (interaction_bits.get(r.resource_id or "", "")
+                  if r.resource_type == "interactions" else "")
         items.append({
             "id": r.id,
             "at": r.at.isoformat(),
@@ -247,6 +369,6 @@ async def read_activity(
             "area": AREA_OF.get(r.resource_type or "", "Other"),
             "company": company,
             "code": code or ((r.changes or {}).get("label") or ""),
-            "summary": _sentence(r.action, r.resource_type, r.changes, company),
+            "summary": _sentence(r.action, r.resource_type, r.changes, company, detail),
         })
     return {"items": items, "total": len(items)}
