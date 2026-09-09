@@ -226,7 +226,8 @@ def _sentence(action: str, resource_type: str | None, changes: dict[str, Any] | 
     verb = VERB_OF.get(action)
     if verb:
         extra = _named_extra(action, changes)
-        return verb + on_company + (f" — {extra}" if extra else "")
+        return (verb + on_company + (f" — {extra}" if extra else "")
+                + (f" — {detail}" if detail else ""))
     pretty = action.replace(".", " ").replace("_", " ")
     return f"{pretty[:1].upper()}{pretty[1:]}" + (f" — {named}" if label else "") + on_company
 
@@ -477,6 +478,49 @@ async def _lender_bits(session, tenant_id: uuid.UUID,
     return out
 
 
+async def _vox_bits(session, tenant_id: uuid.UUID,
+                    rows: list[AuditLog]) -> dict[str, str]:
+    """resource_id → what the VOX conversation SAID: the report's meeting summary
+    (or its first key discussion point) and the take's length. An erased conversation
+    has no content left by design, so its rows honestly carry nothing."""
+    from app.models.vox import VoxConversation
+
+    ids = {r.resource_id for r in rows
+           if r.resource_type == "vox_conversations" and r.resource_id}
+    if not ids:
+        return {}
+    uuids = []
+    for i in ids:
+        try:
+            uuids.append(uuid.UUID(i))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    out: dict[str, str] = {}
+    for rid, report, seconds in (await session.execute(
+        select(VoxConversation.id, VoxConversation.structured_report,
+               VoxConversation.duration_seconds).where(
+            VoxConversation.tenant_id == tenant_id, VoxConversation.id.in_(uuids))
+    )).all():
+        common = (report or {}).get("common") or {}
+
+        def _cv(key: str) -> Any:
+            cell = common.get(key)
+            return cell.get("value") if isinstance(cell, dict) else None
+
+        text = str(_cv("meeting_summary") or "").strip()
+        if not text:
+            points = [x for x in (_cv("key_discussion_points") or [])
+                      if isinstance(x, str) and x.strip()]
+            text = points[0].strip() if points else ""
+        bits = f'"{text[:160]}{"…" if len(text) > 160 else ""}"' if text else ""
+        if seconds:
+            mins = f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
+            bits = f"{bits} ({mins})" if bits else f"({mins})"
+        if bits:
+            out[str(rid)] = bits
+    return out
+
+
 async def _interaction_bits(session, tenant_id: uuid.UUID,
                             rows: list[AuditLog]) -> dict[str, str]:
     """resource_id → the phrase that makes "Added a new interaction" mean something:
@@ -510,11 +554,13 @@ async def _interaction_bits(session, tenant_id: uuid.UUID,
 
 
 def _row_detail(r: AuditLog, interaction_bits: dict[str, str],
-                lender_bits: dict[str, str]) -> str:
+                lender_bits: dict[str, str], vox_bits: dict[str, str]) -> str:
     if r.resource_type == "interactions":
         return interaction_bits.get(r.resource_id or "", "")
     if r.resource_type == "syndication_lenders":
         return lender_bits.get(r.resource_id or "", "")
+    if r.resource_type == "vox_conversations":
+        return vox_bits.get(r.resource_id or "", "")
     return ""
 
 
@@ -550,11 +596,12 @@ async def read_activity(
     companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
     interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
     lender_bits = await _lender_bits(ctx.session, ctx.tenant_id, list(rows))
+    vox_bits = await _vox_bits(ctx.session, ctx.tenant_id, list(rows))
 
     items = []
     for r in rows:
         company, code = companies.get(r.resource_id or "", ("", ""))
-        detail = _row_detail(r, interaction_bits, lender_bits)
+        detail = _row_detail(r, interaction_bits, lender_bits, vox_bits)
         # (create, delete, restore and bare updates all render it — see _sentence)
         items.append({
             "id": r.id,

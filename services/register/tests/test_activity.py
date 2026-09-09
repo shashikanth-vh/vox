@@ -191,6 +191,13 @@ async def test_named_operations_read_as_sentences_not_action_codes(client):
                       "created_lead_id": "abc"}, "Vayu Grid") \
         == ("Approved a VOX conversation on Vayu Grid — "
             "recorded by prashant@evamfinance.com, filed a new lead")
+    # The conversation's own words travel on the sentence when the report still
+    # holds them (an erased conversation has none, by design).
+    assert _sentence("vox.approve", "vox_conversations",
+                     {"recorder": "pallavi@evamfinance.com"}, "Tri Electric",
+                     '"Discussed BESS sizing and offtake" (12m30s)') \
+        == ('Approved a VOX conversation on Tri Electric — recorded by '
+            'pallavi@evamfinance.com — "Discussed BESS sizing and offtake" (12m30s)')
     assert _sentence("vox.erase", "vox_conversations",
                      {"recorder": "archana@evamfinance.com", "had_audio": True}, None) \
         == ("Erased a VOX conversation (content removed for everyone) — "
