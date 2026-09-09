@@ -124,6 +124,36 @@ async def test_a_logged_interaction_reads_as_what_was_said_and_with_whom(client)
     assert "Call" in audit_rows[0]["summary"], "audit rows speak the same sentences"
 
 
+async def test_a_new_lender_names_the_lender_and_the_company(client):
+    """"Added a new lender — —" told management neither which lender nor on whose
+    mandate. The lender row is two hops from the company (lender → mandate → entity);
+    the renderer walks both."""
+    ent = await client.post("/v1/entities", json={
+        "legal_name": "Tejas Hydro Private Limited", "code": "TEJASHYD",
+        "sector": "Hydro"}, headers=_as("admin@evamfinance.com", "Admin"))
+    assert ent.status_code == 201, ent.text
+    deal = await client.post("/v1/deals", json={
+        "entity_id": ent.json()["id"], "rm": "SD", "is_syndication": True},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert deal.status_code == 201, deal.text
+    tracker = await client.post("/v1/syndication", json={
+        "entity_id": ent.json()["id"], "deal_id": deal.json()["id"]},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert tracker.status_code == 201, tracker.text
+    lender = await client.post(f"/v1/syndication/{tracker.json()['id']}/lenders", json={
+        "lender_name": "Kotak Mahindra Bank", "status": "Circulated", "amount_cr": 40},
+        headers=_as("admin@evamfinance.com", "Admin"))
+    assert lender.status_code == 201, lender.text
+
+    r = await client.get("/v1/activity", headers=_as("admin@evamfinance.com", "Admin"))
+    rows = [x for x in r.json()["items"]
+            if x["resource_type"] == "syndication_lenders" and x["action"] == "create"]
+    assert rows, "the lender write must appear on the trail"
+    assert rows[0]["company"] == "Tejas Hydro Private Limited", rows[0]
+    assert "Kotak Mahindra Bank" in rows[0]["summary"]
+    assert "Circulated" in rows[0]["summary"]
+
+
 async def test_named_operations_read_as_sentences_not_action_codes(client):
     """vox.approve / evidence.attach rendered as bare title-cased codes with no company.
     The verb map speaks the desk's language and the payload details surface."""

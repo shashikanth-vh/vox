@@ -55,7 +55,7 @@ _HISTORY_FIELDS = (("stage", "stage_history"), ("status", "status_history"))
 # the audit row's human ``label`` so an activity screen can say "PIONEER" instead of a
 # UUID without a join per row.
 _LABEL_FIELDS = ("code", "tracker_no", "lead_no", "deal_no", "company", "legal_name",
-                 "name", "full_name", "title", "email")
+                 "lender_name", "name", "full_name", "title", "email")
 
 
 def _json_safe(value: Any, cap: int = 300) -> Any:

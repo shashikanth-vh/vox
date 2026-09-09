@@ -746,9 +746,11 @@ async def read_audit(
     # resolved company and plain-English sentence the Activity log renders — so an
     # auditor reading "delete · interactions · <uuid>" is also told whose interaction
     # it was and what it held. One shared renderer; the two screens can never disagree.
-    from app.api.activity import _companies_for, _interaction_bits, _sentence
+    from app.api.activity import (_companies_for, _interaction_bits, _lender_bits,
+                                  _row_detail, _sentence)
     companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
     interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
+    lender_bits = await _lender_bits(ctx.session, ctx.tenant_id, list(rows))
     return [
         {
             "id": r.id, "at": r.at.isoformat(), "actor": r.actor, "action": r.action,
@@ -758,8 +760,7 @@ async def read_audit(
             "summary": _sentence(
                 r.action, r.resource_type, r.changes,
                 companies.get(r.resource_id or "", ("", ""))[0],
-                (interaction_bits.get(r.resource_id or "", "")
-                 if r.resource_type == "interactions" else "")),
+                _row_detail(r, interaction_bits, lender_bits)),
         }
         for r in rows
     ]

@@ -301,6 +301,98 @@ async def _companies_for(session, tenant_id: uuid.UUID,
             out[rid] = ent_name[eid]
     for eid, pair in ent_name.items():
         out.setdefault(str(eid), pair)
+    await _second_hop(session, tenant_id, rows, out)
+    return out
+
+
+async def _second_hop(session, tenant_id: uuid.UUID, rows: list[AuditLog],
+                      out: dict[str, tuple[str, str]]) -> None:
+    """Rows one hop FURTHER from the company than the trackers: a syndication lender
+    hangs off its mandate, and a VOX conversation not yet pinned to an entity is often
+    pinned to a lead. Resolve both so their trail lines still name the firm."""
+    from app.models.deals import Lead
+    from app.models.registry import Entity
+    from app.models.trackers import SyndicationLender, SyndicationTracker
+    from app.models.vox import VoxConversation
+
+    def _uuids(ids: set[str]) -> list[uuid.UUID]:
+        got = []
+        for i in ids:
+            try:
+                got.append(uuid.UUID(i))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        return got
+
+    lender_ids = {r.resource_id for r in rows
+                  if r.resource_type == "syndication_lenders" and r.resource_id
+                  and r.resource_id not in out}
+    vox_ids = {r.resource_id for r in rows
+               if r.resource_type == "vox_conversations" and r.resource_id
+               and r.resource_id not in out}
+
+    pending: dict[str, uuid.UUID] = {}          # resource_id -> entity_id
+    if lender_ids:
+        for rid, eid in (await session.execute(
+            select(SyndicationLender.id, SyndicationTracker.entity_id)
+            .join(SyndicationTracker,
+                  SyndicationTracker.id == SyndicationLender.syndication_id)
+            .where(SyndicationLender.tenant_id == tenant_id,
+                   SyndicationLender.id.in_(_uuids(lender_ids)))
+        )).all():
+            if eid:
+                pending[str(rid)] = eid
+    if vox_ids:
+        for rid, eid in (await session.execute(
+            select(VoxConversation.id, Lead.entity_id)
+            .join(Lead, Lead.id == VoxConversation.lead_id)
+            .where(VoxConversation.tenant_id == tenant_id,
+                   VoxConversation.entity_id.is_(None),
+                   VoxConversation.id.in_(_uuids(vox_ids)))
+        )).all():
+            if eid:
+                pending[str(rid)] = eid
+
+    if pending:
+        names = {eid: (display or legal or "", code or "")
+                 for eid, display, legal, code in (await session.execute(
+                     select(Entity.id, Entity.display_name, Entity.legal_name,
+                            Entity.code).where(Entity.tenant_id == tenant_id,
+                                               Entity.id.in_(set(pending.values())))
+                 )).all()}
+        for rid, eid in pending.items():
+            if eid in names:
+                out[rid] = names[eid]
+
+
+async def _lender_bits(session, tenant_id: uuid.UUID,
+                       rows: list[AuditLog]) -> dict[str, str]:
+    """resource_id → the lender's name (and its slice, when set) — "Added a new
+    lender" says WHICH lender, on whose mandate."""
+    from app.models.trackers import SyndicationLender
+
+    ids = {r.resource_id for r in rows
+           if r.resource_type == "syndication_lenders" and r.resource_id}
+    if not ids:
+        return {}
+    uuids = []
+    for i in ids:
+        try:
+            uuids.append(uuid.UUID(i))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    out: dict[str, str] = {}
+    for rid, name, status, amount in (await session.execute(
+        select(SyndicationLender.id, SyndicationLender.lender_name,
+               SyndicationLender.status, SyndicationLender.amount_cr).where(
+            SyndicationLender.tenant_id == tenant_id, SyndicationLender.id.in_(uuids))
+    )).all():
+        bits = name or ""
+        if amount:
+            bits += f" · {amount} cr"
+        if status:
+            bits += f" · {status}"
+        out[str(rid)] = bits
     return out
 
 
@@ -336,6 +428,15 @@ async def _interaction_bits(session, tenant_id: uuid.UUID,
     return out
 
 
+def _row_detail(r: AuditLog, interaction_bits: dict[str, str],
+                lender_bits: dict[str, str]) -> str:
+    if r.resource_type == "interactions":
+        return interaction_bits.get(r.resource_id or "", "")
+    if r.resource_type == "syndication_lenders":
+        return lender_bits.get(r.resource_id or "", "")
+    return ""
+
+
 @router.get("/v1/activity", summary="The Activity Log — who did what, in plain English")
 async def read_activity(
     ctx: RequestContext = Depends(get_context),
@@ -367,12 +468,12 @@ async def read_activity(
 
     companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
     interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
+    lender_bits = await _lender_bits(ctx.session, ctx.tenant_id, list(rows))
 
     items = []
     for r in rows:
         company, code = companies.get(r.resource_id or "", ("", ""))
-        detail = (interaction_bits.get(r.resource_id or "", "")
-                  if r.resource_type == "interactions" else "")
+        detail = _row_detail(r, interaction_bits, lender_bits)
         # (create, delete, restore and bare updates all render it — see _sentence)
         items.append({
             "id": r.id,
