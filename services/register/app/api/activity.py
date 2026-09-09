@@ -512,7 +512,7 @@ async def _vox_bits(session, tenant_id: uuid.UUID,
             points = [x for x in (_cv("key_discussion_points") or [])
                       if isinstance(x, str) and x.strip()]
             text = points[0].strip() if points else ""
-        bits = f'"{text[:160]}{"…" if len(text) > 160 else ""}"' if text else ""
+        bits = f'"{text[:600]}{"…" if len(text) > 600 else ""}"' if text else ""
         if seconds:
             mins = f"{int(seconds) // 60}m{int(seconds) % 60:02d}s"
             bits = f"{bits} ({mins})" if bits else f"({mins})"
@@ -545,7 +545,7 @@ async def _interaction_bits(session, tenant_id: uuid.UUID,
             Interaction.tenant_id == tenant_id, Interaction.id.in_(uuids))
     )).all():
         text = (summary or notes or "").strip().replace("\n", " ")
-        snippet = f'"{text[:120]}{"…" if len(text) > 120 else ""}"' if text else ""
+        snippet = f'"{text[:600]}{"…" if len(text) > 600 else ""}"' if text else ""
         bits = " — ".join(x for x in (itype, snippet) if x)
         if lender:
             bits = f"{bits} (with {lender})" if bits else f"with {lender}"

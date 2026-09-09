@@ -61,7 +61,14 @@ export default function ActivityPage() {
       muiTableBodyCellProps: { sx: { whiteSpace: 'nowrap', color: tokens.muted } } },
     { accessorKey: 'by', header: 'Who', size: 140, meta: { localFilter: true }, Cell: ({ cell }) => <b>{cell.getValue<string>()}</b> },
     { accessorKey: 'area', header: 'Area', size: 130, Cell: ({ cell }) => <AreaPill area={cell.getValue<string>()} /> },
-    { accessorKey: 'text', header: 'Activity', size: 420, meta: { localFilter: true, textFilter: true } },
+    // The grid stays scannable: long sentences clamp to three lines; clicking the row
+    // opens the detail dialog with the COMPLETE text (a tooltip cannot scroll and
+    // does not exist on touch screens — expand beats hover).
+    { accessorKey: 'text', header: 'Activity', size: 420, meta: { localFilter: true, textFilter: true },
+      Cell: ({ cell }) => (
+        <Box sx={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                   overflow: 'hidden' }}>{cell.getValue<string>()}</Box>
+      ) },
     { accessorKey: 'company', header: 'Description', size: 200, meta: { localFilter: true },
       Cell: ({ row }) => {
         const { code, company } = row.original;

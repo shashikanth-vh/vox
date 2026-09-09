@@ -32,9 +32,14 @@ export default function AuditPage() {
     // Whose record the row concerns — resolved server-side, same as the Activity log.
     { id: 'company', header: 'Company', size: 170, meta: { localFilter: true },
       accessorFn: (r) => r.company || '', Cell: ({ cell }) => cell.getValue<string>() || '—' },
-    // v12 marks this column `wrap` — long detail strings run to multiple lines.
+    // Long detail clamps to three lines in the grid; the row dialog carries the full
+    // text (expand beats hover — tooltips cannot scroll and do not exist on touch).
     { accessorKey: 'detail', header: 'Detail', size: 360,
-      muiTableBodyCellProps: { sx: { whiteSpace: 'normal', wordBreak: 'break-word' } } },
+      muiTableBodyCellProps: { sx: { whiteSpace: 'normal', wordBreak: 'break-word' } },
+      Cell: ({ cell }) => (
+        <Box sx={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                   overflow: 'hidden' }}>{cell.getValue<string>()}</Box>
+      ) },
   ], []);
 
   return (
