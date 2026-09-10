@@ -247,6 +247,73 @@ async def _sync_lane_remarks(ctx: RequestContext, row: VoxConversation) -> None:
                                         "to": text[:300]}}}))
 
 
+async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> None:
+    """VOX → the chase board. The reviewed ``syndication.lender_updates`` entries
+    file as the SAME interactions the Log-chase / Log-reply buttons write — lender
+    id + direction — so the existing roll-up stamps chased/response dates and the
+    chase/reply note snapshots with no second mechanism.
+
+    Rules, mirroring the desk's own: a chase is Outbound, a reply Inbound; the
+    lender must match a mandate lender by name; the conversation's deal pins the
+    mandate, else the named lender must sit on exactly ONE of the company's
+    mandates — never a guess. Runs at APPROVE only (interactions are append-only;
+    an edit replay must not double-file a chase)."""
+    if not row.entity_id:
+        return
+    report = row.structured_report or {}
+    cell = (report.get("syndication") or {}).get("lender_updates")
+    entries = cell.get("value") if isinstance(cell, dict) else None
+    if not isinstance(entries, list) or not entries:
+        return
+    from app.models.trackers import SyndicationLender, SyndicationTracker
+    from app.repositories.interactions import create_interaction
+
+    conds = [SyndicationTracker.tenant_id == ctx.tenant_id,
+             SyndicationTracker.entity_id == row.entity_id,
+             SyndicationTracker.deleted_at.is_(None)]
+    if row.deal_id:
+        conds.append(SyndicationTracker.deal_id == row.deal_id)
+    mandates = (await ctx.session.execute(
+        select(SyndicationTracker).where(*conds))).scalars().all()
+    if not mandates:
+        return
+    lenders = (await ctx.session.execute(
+        select(SyndicationLender).where(
+            SyndicationLender.tenant_id == ctx.tenant_id,
+            SyndicationLender.syndication_id.in_([m.id for m in mandates]),
+            SyndicationLender.deleted_at.is_(None))
+    )).scalars().all()
+
+    def _fold(name: str) -> str:
+        return " ".join(str(name or "").casefold().split())
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        spoken = _fold(entry.get("lender") or "")
+        kind = str(entry.get("kind") or "").strip().lower()
+        note = str(entry.get("note") or "").strip()
+        if not spoken or kind not in ("chase", "reply"):
+            continue
+        hits = [ln for ln in lenders
+                if spoken == _fold(ln.lender_name)
+                or spoken in _fold(ln.lender_name) or _fold(ln.lender_name) in spoken]
+        if len(hits) != 1:
+            continue                     # unknown or ambiguous name — never a guess
+        lender = hits[0]
+        verb = "Chased" if kind == "chase" else "Reply from"
+        await create_interaction(ctx.session, ctx.tenant_id, ctx.actor, {
+            "subject_type": "Syndication", "subject_id": str(lender.syndication_id),
+            "syndication_lender_id": lender.id,
+            "interaction_type": "VOX conversation",
+            "direction": "Outbound" if kind == "chase" else "Inbound",
+            "summary": (note or f"{verb} {lender.lender_name}")[:300],
+            "notes": note or None,
+            "performed_by": row.recorder_name or row.recorder_email,
+            "source": "VOX",
+        })
+
+
 async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:
     """Mirror an APPROVED conversation's current report onto its filed timeline
     entry. The public interaction surface is append-only by design; this service
@@ -802,6 +869,8 @@ async def approve_conversation(conversation_id: str,
     # The reviewed lane remarks become the product lines' current status (lending
     # remarks / syndication latest remarks / asset-mon notes) — audited, replace.
     await _sync_lane_remarks(ctx, row)
+    # And the reviewed lender chases/replies land on the chase board — approve only.
+    await _sync_lender_updates(ctx, row)
     ctx.session.add(AuditLog(tenant_id=ctx.tenant_id, actor=ctx.actor, action="vox.approve",
                              resource_type="vox_conversations", resource_id=str(row.id),
                              request_id=request_id_ctx.get(),

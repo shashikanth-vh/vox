@@ -999,6 +999,34 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         </div>
       );
     }
+    if (def.control === 'lender_updates') {
+      // One row per lender event: who, chase-or-reply, and the words. Names are
+      // editable here because filing matches lenders BY NAME on the linked deal's
+      // mandate — a mis-heard bank is one fix away from landing correctly.
+      const items: any[] = Array.isArray(cell?.value) ? cell!.value : [];
+      return (
+        <div>
+          {items.map((it, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+              <select className="input-field" style={{ flex: '0 1 110px' }} disabled={readOnly}
+                value={it.kind === 'reply' ? 'reply' : 'chase'}
+                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
+                <option value="chase">Chase</option>
+                <option value="reply">Reply</option>
+              </select>
+              <input className="input-field" style={{ flex: '1 1 160px' }} disabled={readOnly}
+                placeholder="Lender" value={it.lender || ''}
+                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, lender: e.target.value } : x)))} />
+              <textarea className="input-field" style={{ flex: '1 1 100%' }} rows={1} ref={grow} disabled={readOnly}
+                placeholder="What was said" value={it.note || ''}
+                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} />
+              {!readOnly && <button className="intel-x" onClick={() => set(items.filter((_, j) => j !== i))}>✕</button>}
+            </div>
+          ))}
+          {!readOnly && <button className="btn-add" onClick={() => set([...items, { lender: '', kind: 'chase', note: '' }])}>+ Add lender update</button>}
+        </div>
+      );
+    }
     if (def.control === 'list') {
       const items: string[] = Array.isArray(cell?.value) ? cell!.value : [];
       return (

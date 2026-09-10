@@ -295,6 +295,57 @@ async def test_lane_remarks_land_on_the_product_line_at_approval(client: AsyncCl
     assert hits and "Documents received partially" in hits[0]["summary"]
 
 
+async def test_spoken_chases_and_replies_land_on_the_chase_board(client: AsyncClient):
+    """"I chased Godrej, no response — Axis reverted with queries": at approval each
+    reviewed lender update files as the SAME interaction the Log-chase / Log-reply
+    buttons write, so the existing roll-up stamps the dates and note snapshots the
+    chase board shows. An unknown lender name files nothing."""
+    ent = await client.post("/v1/entities", json={
+        "code": "CHASECO", "legal_name": "Chase Co Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    eid = ent.json()["id"]
+    deal = (await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_syndication": True}, headers=MGMT)).json()
+    tracker = (await client.post("/v1/syndication", json={
+        "entity_id": eid, "deal_id": deal["id"]}, headers=MGMT)).json()
+    godrej = (await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
+        "lender_name": "Godrej Capital", "status": "IM Circulated"},
+        headers=MGMT)).json()
+    axis = (await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
+        "lender_name": "Axis Finance", "status": "IM Circulated"},
+        headers=MGMT)).json()
+
+    report = _report()
+    report["detected_use_cases"] = ["syndication"]
+    report["syndication"] = {
+        "facility_nature": {"value": "term_loan", "confidence": "medium"},
+        "lender_updates": {"value": [
+            {"lender": "Godrej", "kind": "chase",
+             "note": "Chased for the IM response; no reply yet, following up Friday."},
+            {"lender": "Axis Finance", "kind": "reply",
+             "note": "Credit raised queries on the security structure."},
+            {"lender": "HDFC", "kind": "chase", "note": "not on this mandate"},
+        ], "confidence": "high"}}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"], report=report)
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                      json={"entity_id": eid, "deal_id": deal["id"]}, headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    lenders = (await client.get(f"/v1/syndication/{tracker['id']}/lenders",
+                                headers=MGMT)).json()
+    by_name = {ln["lender_name"]: ln for ln in lenders}
+    g = by_name["Godrej Capital"]
+    assert g["chased_date"], "the chase stamped the board"
+    assert "no reply yet" in (g["last_chase_note"] or "")
+    a = by_name["Axis Finance"]
+    assert a["response_date"], "the reply stamped the board"
+    assert "queries on the security" in (a["last_reply_note"] or "")
+    assert not by_name["Godrej Capital"]["response_date"], \
+        "a chase never fakes a reply"
+
+
 async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):
     ent = await client.post("/v1/entities", json={
         "code": "TWOLINESCO", "legal_name": "Two Lines Co Private Limited",

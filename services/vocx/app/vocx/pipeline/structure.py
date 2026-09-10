@@ -230,6 +230,26 @@ def _coerce_cell_value(fdef: dict, cell: dict) -> None:
         if isinstance(v, str) and v.strip():
             v = cell["value"] = [v]
         if fdef.get("item_shape") and isinstance(v, list):
+            if fdef.get("key") == "lender_updates":
+                # {lender, kind, note}: fold the model's spoken variants onto the
+                # contract's tokens — "chased"/"outbound" are a chase, "replied"/
+                # "responded"/"inbound" a reply; bank/name → lender, remark → note.
+                cell["value"] = v = [item for item in v if isinstance(item, dict)]
+                for item in v:
+                    for alias in ("bank", "name", "lender_name"):
+                        if "lender" not in item and isinstance(item.get(alias), str):
+                            item["lender"] = item.pop(alias)
+                    for alias in ("remark", "remarks", "comment", "detail", "update"):
+                        if "note" not in item and isinstance(item.get(alias), str):
+                            item["note"] = item.pop(alias)
+                    kind = _canon(str(item.get("kind") or ""))
+                    if kind in ("chase", "chased", "outbound", "follow_up", "followed_up",
+                                "followup", "ping", "pinged"):
+                        item["kind"] = "chase"
+                    elif kind in ("reply", "replied", "response", "responded", "inbound",
+                                  "revert", "reverted", "querie", "query"):
+                        item["kind"] = "reply"
+                return
             cell["value"] = v = [({"action": item} if isinstance(item, str) else item)
                                  for item in v]
             for item in v:
