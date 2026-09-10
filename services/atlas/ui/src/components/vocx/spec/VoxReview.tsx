@@ -235,10 +235,13 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
           const nextAction = (String((cc.next_steps as any)?.value ?? '').trim()
             || acts[0]
             || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
+          const fullSummary = ((cc.meeting_summary as any)?.value as string)
+            || kdp[0] || 'VOX conversation';
           const tp = await vocxClient.post('/v1/touchpoints', {
             ...subject,
             interaction_type: 'VOX conversation',
-            summary: kdp[0] || 'VOX conversation',
+            summary: fullSummary.length > 300 ? fullSummary.slice(0, 299) + '…' : fullSummary,
+            ...(fullSummary.length > 300 ? { notes: fullSummary } : {}),
             key_intel: kdp.length ? { points: kdp } : undefined,
             transcript: row?.raw_transcript || undefined,
             ...(nextAction ? { next_action: nextAction } : {}),

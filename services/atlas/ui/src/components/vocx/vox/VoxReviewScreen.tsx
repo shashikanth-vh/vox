@@ -535,9 +535,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       const nextAction = (String((c.next_steps as any)?.value ?? '').trim()
         || acts[0]
         || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
+      // summary is the 300-char headline; a meeting summary that outgrows it goes
+      // WHOLE into notes — the drawer's "more" expansion shows it in full instead
+      // of ending mid-sentence at the column cap.
+      const fullSummary = (c.meeting_summary?.value as string) || kdp[0] || 'VOX conversation';
       const tp = await vocxClient.post('/v1/touchpoints', {
         ...subject, interaction_type: 'VOX conversation',
-        summary: ((c.meeting_summary?.value as string) || kdp[0] || 'VOX conversation').slice(0, 300),
+        summary: fullSummary.length > 300 ? fullSummary.slice(0, 299) + '…' : fullSummary,
+        ...(fullSummary.length > 300 ? { notes: fullSummary } : {}),
         location: (venue || Object.values(locs).join(' · ') || undefined)?.slice(0, 200),
         ...(nextAction ? { next_action: nextAction } : {}),
         ...(fuDate ? { next_action_date: fuDate, next_meeting_date: fuDate } : {}),

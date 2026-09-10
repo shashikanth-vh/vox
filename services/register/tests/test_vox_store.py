@@ -203,6 +203,54 @@ async def test_edits_keep_the_denormalised_columns_honest(client: AsyncClient):
 
 # ------------------------------------------------------------------ approve / list
 
+async def test_a_long_meeting_summary_syncs_whole_after_approval(client: AsyncClient):
+    """The 300-char headline column used to be ALL the interaction kept — the desk
+    read "…plus provide" and never learned the 40 Cr that followed. The edit-sync
+    now keeps summary a headline and lands the WHOLE text in notes, which the
+    interaction row expands."""
+    long_summary = ("Prashant met the promoter of Arcedo Systems Private Limited at "
+                    "their office in Hyderabad. The meeting was attended by SBI as "
+                    "lender. Discussion covered the company's funding requirement, "
+                    "collateral position currently held by ICICI, and a proposal for "
+                    "SBI to take over the ICICI facility plus provide an additional "
+                    "1.5 Cr FD. SBI agreed in principle to fund up to 40 Cr against "
+                    "25 percent collateral coverage. SBI team to review internally "
+                    "and confirm next steps.")
+    assert len(long_summary) > 300
+    ent = await client.post("/v1/entities", json={
+        "code": "ARCEDOTEST", "legal_name": "Arcedo Systems Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    assert ent.status_code == 201, ent.text
+    eid = ent.json()["id"]
+    itx = await client.post("/v1/interactions", json={
+        "subject_type": "Entity", "subject_id": eid,
+        "interaction_type": "VOX conversation", "summary": "seed"}, headers=MGMT)
+    assert itx.status_code == 201, itx.text
+    iid = itx.json()["id"]
+
+    report = _report()
+    report["common"]["meeting_summary"] = {"value": long_summary, "confidence": "high"}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"], report=report)
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"entity_id": eid, "interaction_id": iid},
+                          headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    # Any post-approval content edit re-syncs the interaction from the report.
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "common.subsector",
+                   "new_value": {"value": "Wind", "confidence": "high"}}]},
+        headers=RECORDER)
+    assert r.status_code == 200, r.text
+
+    got = (await client.get(f"/v1/interactions/{iid}", headers=MGMT)).json()
+    assert got["summary"].endswith("…") and len(got["summary"]) <= 300
+    assert got["notes"] == long_summary, "the whole summary must survive filing"
+
+
 async def test_approve_needs_ready_and_is_idempotent(client: AsyncClient):
     row = await _make(client)
     r = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)

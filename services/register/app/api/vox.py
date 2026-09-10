@@ -220,8 +220,15 @@ async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) ->
         ("syndication", _block_val("syndication", "project_location")),
         ("asset_monetisation", _block_val("asset_monetisation", "asset_location")),
     ) if v}
-    itx.summary = (str(_cv("meeting_summary") or (kdp[0] if kdp else "")
-                       or "VOX conversation"))[:300]
+    # summary is the 300-char HEADLINE; a meeting summary that outgrows it lands
+    # WHOLE in notes (unlimited, shown by the row's "more" expansion) — the desk
+    # read "…a proposal for SBI to take over the ICICI facility plus provide" and
+    # never learned the ₹40 Cr that followed.
+    full_summary = str(_cv("meeting_summary") or (kdp[0] if kdp else "")
+                       or "VOX conversation")
+    itx.summary = full_summary if len(full_summary) <= 300 else full_summary[:299] + "…"
+    if len(full_summary) > 300 and not itx.notes:
+        itx.notes = full_summary
     if kdp or lanes or locs:
         itx.key_intel = {**({"points": kdp} if kdp else {}),
                          **({"use_cases": lanes} if lanes else {}),
