@@ -186,6 +186,67 @@ def _uuid_or_422(value: str | None, name: str) -> uuid.UUID | None:
         raise ValidationAppError(f"{name} is not a valid id.") from exc
 
 
+async def _sync_lane_remarks(ctx: RequestContext, row: VoxConversation) -> None:
+    """VOX → the product lines' STATUS fields. Each lane block carries a reviewed
+    ``remarks`` cell; on approval (and on post-approval edits) it REPLACES the
+    matching tracker's status field — lending remarks, syndication latest remarks,
+    asset-monetisation notes — the way the desk uses them: one current line, with
+    the old→new history on the audit trail and the full story on the interaction.
+
+    Rules the desk relies on:
+    * only for lanes the conversation DETECTED, and only when the reviewed cell is
+      non-empty — an empty cell never blanks a hand-written status;
+    * the target must be unambiguous: the conversation's deal pins it, else the
+      company must have exactly ONE active line in that lane — never a guess
+      between credit lines;
+    * same-value replays write nothing (approve is idempotent).
+    """
+    if row.status != "submitted" or not row.entity_id:
+        return
+    from app.models.trackers import (AssetMonetisation, LendingTracker,
+                                     SyndicationTracker)
+    targets = {"lending": (LendingTracker, "remarks"),
+               "syndication": (SyndicationTracker, "remarks"),
+               "asset_monetisation": (AssetMonetisation, "notes")}
+    report = row.structured_report or {}
+    lanes = [u for u in (report.get("detected_use_cases") or []) if u in targets]
+    for lane in lanes:
+        cell = (report.get(lane) or {}).get("remarks")
+        value = cell.get("value") if isinstance(cell, dict) else None
+        text = str(value).strip() if value else ""
+        if not text:
+            continue
+        model, field = targets[lane]
+        candidates = (await ctx.session.execute(
+            select(model).where(model.tenant_id == ctx.tenant_id,
+                                model.entity_id == row.entity_id,
+                                model.deleted_at.is_(None))
+        )).scalars().all()
+        if row.deal_id:
+            pinned = [c for c in candidates
+                      if getattr(c, "deal_id", None) == row.deal_id]
+            if pinned:
+                candidates = pinned
+        if len(candidates) != 1:
+            continue
+        obj = candidates[0]
+        old_text = (getattr(obj, field) or "").strip()
+        if old_text == text:
+            continue
+        setattr(obj, field, text[:4000])
+        obj.updated_by = ctx.actor
+        if getattr(obj, "version", None) is not None:
+            obj.version = obj.version + 1
+        ctx.session.add(AuditLog(
+            tenant_id=ctx.tenant_id, actor=ctx.actor, action="update",
+            resource_type=model.__tablename__, resource_id=str(obj.id),
+            request_id=request_id_ctx.get(),
+            changes={"label": getattr(obj, "tracker_no", None) or "",
+                     "source": "vox.approve",
+                     "values": {field: {"from": old_text[:300] or None,
+                                        "to": text[:300]}}}))
+
+
 async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:
     """Mirror an APPROVED conversation's current report onto its filed timeline
     entry. The public interaction surface is append-only by design; this service
@@ -505,6 +566,7 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         row.status = "submitted"
         row.resume_status = None
         await _sync_linked_interaction(ctx, row)
+        await _sync_lane_remarks(ctx, row)
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)
@@ -638,6 +700,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     if changed and (payload.edits or payload.use_cases is not None
                     or payload.corrected_transcript is not None):
         await _sync_linked_interaction(ctx, row)
+        await _sync_lane_remarks(ctx, row)
 
     row.updated_by = ctx.actor
     await ctx.session.flush()
@@ -736,6 +799,9 @@ async def approve_conversation(conversation_id: str,
 
     row.status = "submitted"
     row.updated_by = ctx.actor
+    # The reviewed lane remarks become the product lines' current status (lending
+    # remarks / syndication latest remarks / asset-mon notes) — audited, replace.
+    await _sync_lane_remarks(ctx, row)
     ctx.session.add(AuditLog(tenant_id=ctx.tenant_id, actor=ctx.actor, action="vox.approve",
                              resource_type="vox_conversations", resource_id=str(row.id),
                              request_id=request_id_ctx.get(),

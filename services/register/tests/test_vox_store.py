@@ -251,6 +251,92 @@ async def test_a_long_meeting_summary_syncs_whole_after_approval(client: AsyncCl
     assert got["notes"] == long_summary, "the whole summary must survive filing"
 
 
+async def test_lane_remarks_land_on_the_product_line_at_approval(client: AsyncClient):
+    """The team's ask: "when loan is disbursed and as and when the repayment is done
+    ... the user wants to update it in remarks" — the reviewed lending remarks cell
+    REPLACES the line's status field at approval, audited, without anyone typing it
+    twice. An empty cell never blanks a hand-written status, and a company with two
+    lines in a lane is never guessed at."""
+    ent = await client.post("/v1/entities", json={
+        "code": "REMARKSCO", "legal_name": "Remarks Co Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    assert ent.status_code == 201, ent.text
+    eid = ent.json()["id"]
+    deal = await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_lending": True}, headers=MGMT)
+    assert deal.status_code == 201, deal.text
+    line = await client.post("/v1/lending", json={
+        "entity_id": eid, "deal_id": deal.json()["id"], "stage": "Data Awaited",
+        "amount_cr": 12, "remarks": "Documents received partially"}, headers=MGMT)
+    assert line.status_code == 201, line.text
+
+    report = _report()
+    report["lending"]["remarks"] = {
+        "value": "Disbursement of 2 Cr completed; first repayment due October.",
+        "confidence": "high"}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"], report=report)
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"entity_id": eid}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    got = (await client.get(f"/v1/lending/{line.json()['id']}", headers=MGMT)).json()
+    assert got["remarks"] == \
+        "Disbursement of 2 Cr completed; first repayment due October.", \
+        "the reviewed lane remarks replace the line's status"
+
+    # The change is on the trail, old → new, attributed.
+    trail = (await client.get("/v1/activity",
+                              headers=_as("admin@evamfinance.com", "Admin"))).json()
+    hits = [x for x in trail["items"] if x["resource_type"] == "lending_tracker"
+            and "Disbursement of 2 Cr" in x["summary"]]
+    assert hits and "Documents received partially" in hits[0]["summary"]
+
+
+async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):
+    ent = await client.post("/v1/entities", json={
+        "code": "TWOLINESCO", "legal_name": "Two Lines Co Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    eid = ent.json()["id"]
+    d1 = (await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_lending": True}, headers=MGMT)).json()
+    l1 = (await client.post("/v1/lending", json={
+        "entity_id": eid, "deal_id": d1["id"], "stage": "Data Awaited",
+        "amount_cr": 5, "remarks": "keep me"}, headers=MGMT)).json()
+    d2 = (await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_lending": True}, headers=MGMT)).json()
+    l2 = (await client.post("/v1/lending", json={
+        "entity_id": eid, "deal_id": d2["id"], "stage": "Diligence",
+        "amount_cr": 8, "remarks": "keep me too"}, headers=MGMT)).json()
+
+    # TWO lines, no deal pin → the sync must not guess.
+    report = _report()
+    report["lending"]["remarks"] = {"value": "New status", "confidence": "high"}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"], report=report)
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                      json={"entity_id": eid}, headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+    for lid, expect in ((l1["id"], "keep me"), (l2["id"], "keep me too")):
+        got = (await client.get(f"/v1/lending/{lid}", headers=MGMT)).json()
+        assert got["remarks"] == expect, "ambiguity must never write a credit line"
+
+    # A deal pin resolves it; an EMPTY cell never blanks a hand-written status.
+    report2 = _report()
+    report2["lending"]["remarks"] = {"value": None, "confidence": "n/a"}
+    row2 = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row2["id"], report=report2)
+    await client.post(f"/v1/vox/conversations/{row2['id']}/edits",
+                      json={"entity_id": eid, "deal_id": d1["id"]}, headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{row2['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+    got = (await client.get(f"/v1/lending/{l1['id']}", headers=MGMT)).json()
+    assert got["remarks"] == "keep me", "an empty reviewed cell writes nothing"
+
+
 async def test_approve_needs_ready_and_is_idempotent(client: AsyncClient):
     row = await _make(client)
     r = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
