@@ -342,7 +342,7 @@
       "kind": "chase|reply",
       "note": "string"
      },
-     "notes": "One entry PER LENDER the speaker chased or who responded on this deal's syndication. kind='chase' when WE reached out (chased, pinged, followed up, wrote to); kind='reply' when the LENDER came back (reverted, responded, raised queries, sanctioned, declined). 'lender' is the bank's name exactly as spoken; 'note' is the substance in one or two sentences. Several lenders in one breath become several entries, each with its own note. Never invent a lender that was not mentioned; omit the field entirely when no lender-level chase or reply was spoken."
+     "notes": "One entry PER LENDER the speaker chased or who responded on this deal's syndication. KEYS ARE EXACTLY lender, kind, note — never owner/action/deadline (those belong to action_items). kind='chase' when WE reached out (chased, pinged, followed up, wrote to); kind='reply' when the LENDER came back (reverted, responded, raised queries, committed to respond, sanctioned, declined). 'lender' is the bank's name exactly as spoken; 'note' is the substance in one or two sentences, including any date they promised. Always fill all three keys — mark the field's confidence low rather than leaving lender or note empty, and never move lender events into remarks instead. Example: [{\"lender\": \"Godrej Capital\", \"kind\": \"chase\", \"note\": \"Chased for the IM response; no reply yet, following up Friday.\"}, {\"lender\": \"Axis Finance\", \"kind\": \"reply\", \"note\": \"Credit raised queries on the security structure.\"}]. Omit the field entirely when no lender-level chase or reply was spoken."
     }
    ]
   },

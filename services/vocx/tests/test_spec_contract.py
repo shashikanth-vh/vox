@@ -281,6 +281,34 @@ def test_dict_entries_in_detected_use_cases_are_named_not_crashed():
     _expect_error(r, "entries must be plain use-case strings")
 
 
+def test_normalize_folds_borrowed_action_items_shape_onto_lender_updates():
+    """Seen live on the first field run: the model borrowed action_items'
+    {owner, action, deadline} for lender_updates and omitted kind entirely —
+    the review screen showed three empty rows while the substance sat in
+    remarks. The normalizer folds owner→lender, action→note (deadline into the
+    note), and reads the DIRECTION from the note's verbs."""
+    from app.vocx.pipeline.structure import _normalize
+
+    r = _valid_report()
+    r["detected_use_cases"] = ["lending", "asset_monetisation", "syndication"]
+    r["syndication"] = {"lender_updates": _cell([
+        {"owner": "Axis Finance", "deadline": None,
+         "action": "Axis Finance raised credit queries on security structure"},
+        {"owner": "Godrej Capital", "deadline": "2026-09-15",
+         "action": "Godrej Capital committed to respond"},
+        {"lender": "Canara Bank", "kind": "chased",
+         "note": "Followed up on the IM; no response yet."},
+    ])}
+    out = _normalize(r)
+    got = out["syndication"]["lender_updates"]["value"]
+    assert got[0] == {"lender": "Axis Finance", "kind": "reply",
+                      "note": "Axis Finance raised credit queries on security structure"}
+    assert got[1]["lender"] == "Godrej Capital" and got[1]["kind"] == "reply"
+    assert got[1]["note"].endswith("(by 2026-09-15)")
+    assert got[2] == {"lender": "Canara Bank", "kind": "chase",
+                      "note": "Followed up on the IM; no response yet."}
+
+
 def test_normalize_coerces_spoken_enum_forms():
     """The transcript says "Seller" and "Under Construction"; the contract says
     "owner" and "under_construction". The model echoes the speech — and the strict

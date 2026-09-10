@@ -290,9 +290,17 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        spoken = _fold(entry.get("lender") or "")
+        # Tolerate the model's borrowed action_items shape (owner/action) so a
+        # report structured before the normalizer learned it still files.
+        spoken = _fold(entry.get("lender") or entry.get("owner") or "")
         kind = str(entry.get("kind") or "").strip().lower()
-        note = str(entry.get("note") or "").strip()
+        note = str(entry.get("note") or entry.get("action") or "").strip()
+        if not kind:
+            low = note.casefold()
+            kind = ("reply" if any(w in low for w in (
+                "raised", "reverted", "responded", "replied", "came back", "quer",
+                "declined", "sanctioned", "committed", "confirmed", "agreed"))
+                else "chase")
         if not spoken or kind not in ("chase", "reply"):
             continue
         hits = [ln for ln in lenders

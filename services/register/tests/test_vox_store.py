@@ -308,12 +308,10 @@ async def test_spoken_chases_and_replies_land_on_the_chase_board(client: AsyncCl
         "entity_id": eid, "rm": "SD", "is_syndication": True}, headers=MGMT)).json()
     tracker = (await client.post("/v1/syndication", json={
         "entity_id": eid, "deal_id": deal["id"]}, headers=MGMT)).json()
-    godrej = (await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
-        "lender_name": "Godrej Capital", "status": "IM Circulated"},
-        headers=MGMT)).json()
-    axis = (await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
-        "lender_name": "Axis Finance", "status": "IM Circulated"},
-        headers=MGMT)).json()
+    for name in ("Godrej Capital", "Axis Finance", "Canara Bank"):
+        made = await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
+            "lender_name": name, "status": "IM Circulated"}, headers=MGMT)
+        assert made.status_code == 201, made.text
 
     report = _report()
     report["detected_use_cases"] = ["syndication"]
@@ -325,6 +323,10 @@ async def test_spoken_chases_and_replies_land_on_the_chase_board(client: AsyncCl
             {"lender": "Axis Finance", "kind": "reply",
              "note": "Credit raised queries on the security structure."},
             {"lender": "HDFC", "kind": "chase", "note": "not on this mandate"},
+            # The model's borrowed action_items shape, no kind — must still file
+            # (owner→lender, action→note, direction read from the verbs).
+            {"owner": "Canara Bank", "deadline": "2026-09-15",
+             "action": "Committed to revert with sanction terms"},
         ], "confidence": "high"}}
     row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
     await _to_ready(client, row["id"], report=report)
@@ -344,6 +346,9 @@ async def test_spoken_chases_and_replies_land_on_the_chase_board(client: AsyncCl
     assert "queries on the security" in (a["last_reply_note"] or "")
     assert not by_name["Godrej Capital"]["response_date"], \
         "a chase never fakes a reply"
+    c = by_name["Canara Bank"]
+    assert c["response_date"], "the borrowed owner/action shape still files"
+    assert "revert with sanction terms" in (c["last_reply_note"] or "")
 
 
 async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):

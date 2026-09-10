@@ -232,16 +232,24 @@ def _coerce_cell_value(fdef: dict, cell: dict) -> None:
         if fdef.get("item_shape") and isinstance(v, list):
             if fdef.get("key") == "lender_updates":
                 # {lender, kind, note}: fold the model's spoken variants onto the
-                # contract's tokens — "chased"/"outbound" are a chase, "replied"/
-                # "responded"/"inbound" a reply; bank/name → lender, remark → note.
+                # contract's tokens. Seen live: the model borrowing action_items'
+                # {owner, action, deadline} — owner is the lender, action the note,
+                # a deadline folds into the note, and the DIRECTION is read from
+                # the note's verbs when no kind was given.
                 cell["value"] = v = [item for item in v if isinstance(item, dict)]
                 for item in v:
-                    for alias in ("bank", "name", "lender_name"):
-                        if "lender" not in item and isinstance(item.get(alias), str):
+                    for alias in ("bank", "name", "lender_name", "owner"):
+                        if not item.get("lender") and isinstance(item.get(alias), str):
                             item["lender"] = item.pop(alias)
-                    for alias in ("remark", "remarks", "comment", "detail", "update"):
-                        if "note" not in item and isinstance(item.get(alias), str):
+                    for alias in ("remark", "remarks", "comment", "detail", "update",
+                                  "action", "message", "text", "said", "details"):
+                        if not item.get("note") and isinstance(item.get(alias), str):
                             item["note"] = item.pop(alias)
+                    if isinstance(item.get("deadline"), str) and item["deadline"]:
+                        item["note"] = (f"{item.get('note') or ''} "
+                                        f"(by {item.pop('deadline')})").strip()
+                    else:
+                        item.pop("deadline", None)
                     kind = _canon(str(item.get("kind") or ""))
                     if kind in ("chase", "chased", "outbound", "follow_up", "followed_up",
                                 "followup", "ping", "pinged"):
@@ -249,6 +257,15 @@ def _coerce_cell_value(fdef: dict, cell: dict) -> None:
                     elif kind in ("reply", "replied", "response", "responded", "inbound",
                                   "revert", "reverted", "querie", "query"):
                         item["kind"] = "reply"
+                    elif not item.get("kind"):
+                        note_c = _canon(str(item.get("note") or ""))
+                        if any(w in note_c for w in (
+                                "raised", "reverted", "responded", "replied", "came_back",
+                                "querie", "query", "declined", "sanctioned", "committed",
+                                "confirmed", "agreed")):
+                            item["kind"] = "reply"
+                        else:
+                            item["kind"] = "chase"
                 return
             cell["value"] = v = [({"action": item} if isinstance(item, str) else item)
                                  for item in v]

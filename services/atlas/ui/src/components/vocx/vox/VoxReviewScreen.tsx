@@ -1004,6 +1004,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       // editable here because filing matches lenders BY NAME on the linked deal's
       // mandate — a mis-heard bank is one fix away from landing correctly.
       const items: any[] = Array.isArray(cell?.value) ? cell!.value : [];
+      // Reports structured before the normalizer learned the model's borrowed
+      // {owner, action} shape still render — and edits write the canonical keys.
+      const lenderOf = (it: any) => it.lender || it.owner || '';
+      const noteOf = (it: any) => it.note || it.action || '';
       return (
         <div>
           {items.map((it, i) => (
@@ -1015,10 +1019,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 <option value="reply">Reply</option>
               </select>
               <input className="input-field" style={{ flex: '1 1 160px' }} disabled={readOnly}
-                placeholder="Lender" value={it.lender || ''}
+                placeholder="Lender" value={lenderOf(it)}
                 onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, lender: e.target.value } : x)))} />
               <textarea className="input-field" style={{ flex: '1 1 100%' }} rows={1} ref={grow} disabled={readOnly}
-                placeholder="What was said" value={it.note || ''}
+                placeholder="What was said" value={noteOf(it)}
                 onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} />
               {!readOnly && <button className="intel-x" onClick={() => set(items.filter((_, j) => j !== i))}>✕</button>}
             </div>
