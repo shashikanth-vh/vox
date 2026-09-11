@@ -85,12 +85,30 @@ def _check_value(fdef: dict, value: Any, errors: list[str], where: str) -> None:
     elif ftype == "list":
         if not isinstance(value, list):
             errors.append(f"{where}: expected a list, got {type(value).__name__}")
-        elif fdef.get("item_shape"):  # action_items
+        elif fdef.get("item_shape"):
+            # The registry declares each item's shape ("string", "date|null",
+            # "chase|reply") — validate against THAT, never a hardcoded one:
+            # checking lender_updates items for an 'action' key refused every
+            # correctly-shaped entry the prompt asked for.
+            shape = fdef["item_shape"]
             for i, item in enumerate(value):
-                if not isinstance(item, dict) or "action" not in item:
-                    errors.append(f"{where}[{i}]: each item needs at least an 'action'")
-                elif item.get("deadline") is not None and not _is_date(item["deadline"]):
-                    errors.append(f"{where}[{i}].deadline: expected YYYY-MM-DD or null")
+                if not isinstance(item, dict):
+                    errors.append(f"{where}[{i}]: each item is an object with {sorted(shape)}")
+                    continue
+                for k, spec in shape.items():
+                    parts = spec.split("|")
+                    v = item.get(k)
+                    if v is None:
+                        if "null" not in parts:
+                            errors.append(f"{where}[{i}]: each item needs at least a {k!r}")
+                    elif "date" in parts:
+                        if not _is_date(v):
+                            errors.append(f"{where}[{i}].{k}: expected YYYY-MM-DD or null")
+                    elif "string" in parts:
+                        if not isinstance(v, str):
+                            errors.append(f"{where}[{i}].{k}: expected a string")
+                    elif v not in parts:
+                        errors.append(f"{where}[{i}].{k}: {v!r} is not one of {parts}")
         else:
             for i, item in enumerate(value):
                 if not isinstance(item, str):
@@ -298,12 +316,26 @@ def build_tool_schema(registry_version: str | None = None) -> dict:
             return sch
         if ftype == "list":
             if fdef.get("item_shape"):
+                # Built from the registry's declared shape. The old hardcoded
+                # action_items schema was the true cause of the lender_updates
+                # failures: the forced tool call REQUIRED an 'action' key on
+                # every item, so the model either borrowed that shape or,
+                # told firmly not to, returned null. The wall must describe
+                # the field it guards.
+                props: dict = {}
+                required: list[str] = []
+                for k, spec in fdef["item_shape"].items():
+                    parts = spec.split("|")
+                    if "null" in parts:
+                        props[k] = {"type": ["string", "null"]}
+                    elif "string" in parts or "date" in parts:
+                        props[k] = {"type": "string"}
+                        required.append(k)
+                    else:
+                        props[k] = {"enum": parts}
+                        required.append(k)
                 return {"type": ["array", "null"], "items": {
-                    "type": "object",
-                    "properties": {"action": {"type": "string"},
-                                   "owner": {"type": ["string", "null"]},
-                                   "deadline": {"type": ["string", "null"]}},
-                    "required": ["action"]}}
+                    "type": "object", "properties": props, "required": required}}
             return {"type": ["array", "null"], "items": {"type": "string"}}
         return {"type": ["string", "null"]}
 

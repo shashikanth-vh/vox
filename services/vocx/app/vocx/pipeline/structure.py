@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy as _copy
 import json
+import logging
 import re as _re
 from datetime import date as _date
 from typing import Any, Callable
@@ -30,6 +31,8 @@ from ..spec import (
 # Model routing per the spec's cost/quality split.
 MODEL_NOTE = "claude-haiku-4-5-20251001"
 MODEL_LIVE = "claude-sonnet-5"
+
+log = logging.getLogger("vox.pipeline")
 
 
 class StructuringError(RuntimeError):
@@ -660,6 +663,74 @@ def _parse_strict(raw: str) -> dict:
     return obj
 
 
+# --------------------------------------------------------------------------
+# Focused second pass for lender chases & replies. Proven live, twice: inside
+# the full-contract call the main prompt's (correct) anti-hallucination
+# pressure wins, and the note-taking model hedges spoken lender events into
+# remarks while leaving lender_updates null — even when the prompt says not
+# to. A call that asks for exactly one thing carries no such conflict. The
+# pass still only extracts what was spoken, its output goes through the same
+# folding as the main pass and the full contract validator, and any failure
+# leaves the report exactly as it stood.
+
+_LENDER_VERB_RE = _re.compile(
+    r"chas(?:e|ed|ing)|follow(?:ed|ing)?[\s-]?up|revert|repli|respond|"
+    r"reached out|wrote to|ping(?:ed)?|remind|quer(?:y|ies|ied)|sanction|"
+    r"declin|came back|commit", _re.IGNORECASE)
+
+_LENDER_PASS_SYSTEM = (
+    'You extract lender chase/reply events from a syndication desk voice note. '
+    'A "chase" is the desk reaching out to a lender/bank (chased, followed up, '
+    'pinged, wrote to, reminded). A "reply" is a lender responding (reverted, '
+    'came back, raised queries, committed to respond, sanctioned, declined). '
+    'Return ONLY a JSON array — no prose, no code fences — with one object per '
+    'spoken event: {"lender": the bank\'s name as spoken, "kind": "chase" or '
+    '"reply", "note": the substance in one or two sentences including any '
+    'promised date}. Record only events actually spoken in the transcript; '
+    'return [] when none were.')
+
+
+def _backfill_lender_updates(report: dict, transcript: str,
+                             ask: Callable[[str, str], str],
+                             registry_version: str | None) -> dict | None:
+    """Returns the validated report with lender_updates filled, or None when
+    the pass has nothing to add (the caller keeps the report it has)."""
+    synd = report.get("syndication")
+    if not isinstance(synd, dict):
+        return None                              # no syndication block detected
+    cell = synd.get("lender_updates")
+    if isinstance(cell, dict) and cell.get("value"):
+        return None                              # the main pass delivered
+    if not _LENDER_VERB_RE.search(transcript):
+        return None                              # nothing chase-shaped was spoken
+    raw = ask(_LENDER_PASS_SYSTEM, f"TRANSCRIPT:\n{transcript}").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+    items = json.loads(raw)
+    if not isinstance(items, list) or not items:
+        return None
+    fields = load_registry(registry_version)["blocks"]["syndication"]["fields"]
+    fdef = next((f for f in fields if f.get("key") == "lender_updates"), None)
+    if fdef is None:
+        return None
+    fresh = {"value": items, "confidence": "medium"}
+    _coerce_cell_value(fdef, fresh)              # the same folding as the main pass
+    kept = [it for it in (fresh.get("value") or [])
+            if isinstance(it, dict) and str(it.get("lender") or "").strip()
+            and str(it.get("note") or "").strip()]
+    if not kept:
+        return None
+    previous = synd.get("lender_updates")
+    synd["lender_updates"] = {"value": kept, "confidence": "medium"}
+    try:
+        return validate_report(report, registry_version)
+    except ContractError:
+        synd["lender_updates"] = previous        # a bonus pass never breaks a take
+        return None
+
+
 def structure_transcript(
     transcript: str,
     *,
@@ -744,6 +815,16 @@ def structure_transcript(
         cap_date = str(capture_ts)[:10]
         if len(cap_date) == 10 and cap_date[4] == "-":
             report["common"]["meeting_date"] = {"value": cap_date, "confidence": "medium"}
+
+    # Lender chases & replies: when the main pass left the field empty but the
+    # transcript speaks of chasing/replying, ask once more — for that one field
+    # only (see _backfill_lender_updates).
+    try:
+        report = _backfill_lender_updates(
+            report, transcript, lambda s, u: ask_model(model, s, u),
+            registry_version) or report
+    except Exception as exc:  # noqa: BLE001 — a bonus pass never fails the take
+        log.warning("lender-updates second pass skipped: %s", exc)
 
     # Server-side data-quality nudges merge into the model's own flags (deduplicated,
     # order preserved) — flags never block, they steer the review.

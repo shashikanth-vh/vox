@@ -309,6 +309,106 @@ def test_normalize_folds_borrowed_action_items_shape_onto_lender_updates():
                       "note": "Followed up on the IM; no response yet."}
 
 
+def _hedged_syndication_report():
+    """The exact live failure, twice over: remarks carries both events in full
+    prose while lender_updates sits at null."""
+    r = _valid_report()
+    r["detected_use_cases"] = ["lending", "asset_monetisation", "syndication"]
+    r["syndication"] = {
+        "probable_lenders": _cell("Gurdwaj Capital, Access Finance", "medium"),
+        "remarks": _cell("Gurdwaj Capital chased with no response yet. Access "
+                         "Finance has reverted with security structure queries.",
+                         "high"),
+        "lender_updates": _cell(None, "n/a"),
+    }
+    return r
+
+
+def test_lender_updates_hedged_empty_gets_a_focused_second_pass():
+    """Proven live twice on the box: with the full contract in play, the note
+    model wrote both events into remarks and left lender_updates null — even
+    with the prompt section ordering it not to. The pipeline now asks once
+    more, for that one field only; the focused answer lands through the same
+    folding and the same validator as the main pass."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    focused = [{"lender": "Gurdwaj Capital", "kind": "chase",
+                "note": "Chased for the IM response; nothing back yet."},
+               {"lender": "Access Finance", "kind": "reply",
+                "note": "Reverted with queries on the security structure."}]
+    systems = []
+
+    def ask(model, system, user):
+        systems.append(system)
+        return json.dumps(focused if len(systems) > 1
+                          else _hedged_syndication_report())
+
+    out = structure_transcript(
+        "Chased Gurdwaj Capital, no response yet. Access Finance reverted "
+        "with queries on the security structure.",
+        mode="note", ask_model=ask, capture_ts="2026-09-11T03:00:00Z")
+    assert len(systems) == 2 and "JSON array" in systems[1]
+    got = out["report"]["syndication"]["lender_updates"]
+    assert got["confidence"] == "medium"
+    assert [e["kind"] for e in got["value"]] == ["chase", "reply"]
+    assert got["value"][0]["lender"] == "Gurdwaj Capital"
+    assert got["value"][1]["lender"] == "Access Finance"
+
+
+def test_lender_second_pass_knows_when_not_to_ask():
+    """No second call when the main pass delivered the field, and none when
+    nothing chase-shaped was spoken — the extra round exists for the hedge,
+    not for every take."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    delivered = _hedged_syndication_report()
+    delivered["syndication"]["lender_updates"] = _cell(
+        [{"lender": "SBI", "kind": "chase", "note": "Chased for sanction."}],
+        "high")
+    calls: list[str] = []
+
+    def ask_delivered(model, system, user):
+        calls.append(system)
+        return json.dumps(delivered)
+
+    out = structure_transcript("Chased SBI for the sanction letter today.",
+                               mode="note", ask_model=ask_delivered,
+                               capture_ts="2026-09-11T03:00:00Z")
+    assert len(calls) == 1
+    assert out["report"]["syndication"]["lender_updates"]["value"][0]["lender"] == "SBI"
+
+    calls.clear()
+
+    def ask_quiet(model, system, user):
+        calls.append(system)
+        return json.dumps(_hedged_syndication_report())
+
+    structure_transcript("We discussed the solar project and the site visit.",
+                         mode="note", ask_model=ask_quiet,
+                         capture_ts="2026-09-11T03:00:00Z")
+    assert len(calls) == 1
+
+
+def test_lender_second_pass_failure_never_breaks_the_take():
+    """The focused round answering prose instead of JSON — or anything else
+    going wrong in it — leaves the report exactly as the main pass made it."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    systems: list[str] = []
+
+    def ask(model, system, user):
+        systems.append(system)
+        if len(systems) == 1:
+            return json.dumps(_hedged_syndication_report())
+        return "No lender events to report."
+
+    out = structure_transcript(
+        "Chased Gurdwaj Capital, no response yet.",
+        mode="note", ask_model=ask, capture_ts="2026-09-11T03:00:00Z")
+    assert len(systems) == 2
+    assert out["report"]["syndication"]["lender_updates"]["value"] is None
+
+
 def test_normalize_coerces_spoken_enum_forms():
     """The transcript says "Seller" and "Under Construction"; the contract says
     "owner" and "under_construction". The model echoes the speech — and the strict
@@ -565,6 +665,40 @@ def test_the_tool_schema_locks_the_taxonomy():
         == set(reg["taxonomy"]) | {None}
     subs = {s for lst in reg["taxonomy"].values() for s in lst}
     assert set(common_props["subsector"]["properties"]["value"]["enum"]) == subs | {None}
+
+
+def test_the_tool_schema_describes_each_item_shape_from_the_registry():
+    """The forced tool call is the outer wall the model's answer must pass —
+    and for weeks it described EVERY item_shape list as action_items
+    ({action, owner, deadline}, action required). For lender_updates that
+    contradicted the prompt's {lender, kind, note}: the model either borrowed
+    the action shape or, told firmly not to, returned null. The wall must be
+    built from the registry's own declared shape, per field."""
+    from app.vocx.spec import build_tool_schema
+
+    schema = build_tool_schema()
+    lu = schema["properties"]["syndication"]["properties"]["lender_updates"] \
+        ["properties"]["value"]["items"]
+    assert set(lu["required"]) == {"lender", "kind", "note"}
+    assert lu["properties"]["kind"] == {"enum": ["chase", "reply"]}
+    assert lu["properties"]["lender"] == {"type": "string"}
+    ai = schema["properties"]["common"]["properties"]["action_items"] \
+        ["properties"]["value"]["items"]
+    assert ai["required"] == ["action"]
+    assert ai["properties"]["owner"] == {"type": ["string", "null"]}
+
+    # The validator enforces the same declared shape.
+    good = _valid_report()
+    good["detected_use_cases"] = ["lending", "asset_monetisation", "syndication"]
+    good["syndication"] = {"lender_updates": _cell(
+        [{"lender": "SBI", "kind": "chase", "note": "Chased for sanction."}],
+        "high")}
+    from app.vocx.pipeline.structure import _normalize
+    assert validate_report(_normalize(good)) is not None
+    bad = copy.deepcopy(good)
+    bad["syndication"]["lender_updates"]["value"][0]["kind"] = "shouted"
+    with pytest.raises(ContractError):
+        validate_report(bad)
 
 
 def test_the_synonym_tables_point_at_real_taxonomy_names():
