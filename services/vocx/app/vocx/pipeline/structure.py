@@ -54,7 +54,11 @@ def build_prompt(registry_version: str | None = None) -> str:
           "shape; omit the block when subsector is null. Its keys are the canonical "
           "field KEYS themselves, never the subsector name — e.g. "
           "{\"subsector_details\": {\"operating_uc_capacity_mw\": "
-          "{\"value\": \"40 MW\", \"confidence\": \"high\"}}}."
+          "{\"value\": \"40 MW\", \"confidence\": \"high\"}}}. "
+          "In the syndication block, lender_updates.value is a LIST of "
+          "{\"lender\", \"kind\": \"chase\"|\"reply\", \"note\"} objects — "
+          "one per lender chased or responding; required whenever such an event "
+          "was spoken, empty only when none was."
     )
 
 
