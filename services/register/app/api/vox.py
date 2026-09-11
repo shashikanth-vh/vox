@@ -247,6 +247,51 @@ async def _sync_lane_remarks(ctx: RequestContext, row: VoxConversation) -> None:
                                         "to": text[:300]}}}))
 
 
+def _merge_lender_updates(preserved: dict, fresh: Any) -> dict:
+    """Regeneration keeps both sides of this list: the reviewer's corrected rows
+    stay AS CONFIRMED, and newly spoken events the fresh extraction found (a
+    reply added to the corrected transcript) append after them. Coverage is by
+    lender name (folded, containment either way — a corrected spelling must not
+    resurrect its mangled twin) plus kind, so a lender's reply still appends
+    when only its chase was confirmed. The result stays user-override so the
+    NEXT regeneration merges again instead of discarding."""
+    from difflib import SequenceMatcher
+
+    def _f(n: Any) -> str:
+        return " ".join(str(n or "").casefold().split())
+
+    def _same_lender(a: str, b: str) -> bool:
+        if a == b or a in b or b in a:
+            return True
+        # The extraction may re-emit the STT mangling of a name the reviewer
+        # already corrected ("Gurdwaj" beside "Godrej Capital") — the same
+        # closeness bar the filing tier uses keeps the twin out.
+        ab, bb = a.split(" - ")[0].strip(), b.split(" - ")[0].strip()
+        return max(SequenceMatcher(None, a, b).ratio(),
+                   SequenceMatcher(None, ab, bb).ratio()) >= 0.72
+
+    kept = [e for e in (preserved.get("value") or []) if isinstance(e, dict)]
+    fresh_rows = (fresh or {}).get("value") if isinstance(fresh, dict) else None
+    out = list(kept)
+    for e in fresh_rows or []:
+        if not isinstance(e, dict):
+            continue
+        name = _f(e.get("lender") or e.get("owner"))
+        kind = str(e.get("kind") or "").strip().lower()
+        if not name:
+            continue
+        covered = any(
+            str(k.get("kind") or "").strip().lower() == kind
+            and (kn := _f(k.get("lender") or k.get("owner")))
+            and _same_lender(kn, name)
+            for k in kept)
+        if not covered:
+            out.append(e)
+    return {"value": out,
+            "confidence": preserved.get("confidence") or "medium",
+            "user_override": True}
+
+
 async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> None:
     """VOX → the chase board. The reviewed ``syndication.lender_updates`` entries
     file as the SAME interactions the Log-chase / Log-reply buttons write — lender
@@ -664,11 +709,18 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         incoming = payload.structured_report
         # A regeneration re-applies the reviewer's overridden cells on top of the
         # fresh AI report — their confirmed values outrank a re-extraction.
+        # lender_updates is the one exception to wholesale replacement: it is a
+        # LIST OF EVENTS, and the commonest reason to re-analyze is a corrected
+        # transcript carrying a NEW event ("also got reply from Canara Bank").
+        # The reviewer's corrected rows stay exactly as confirmed; freshly
+        # extracted events for lenders they don't already cover append after.
         if row.preserved_overrides:
             incoming = dict(incoming)
             for path, cell in row.preserved_overrides.items():
                 block_key, _, field_key = path.partition(".")
                 block = dict(incoming.get(block_key) or {})
+                if field_key == "lender_updates":
+                    cell = _merge_lender_updates(cell, block.get(field_key))
                 block[field_key] = cell
                 incoming[block_key] = block
             row.preserved_overrides = None

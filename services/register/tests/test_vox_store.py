@@ -736,6 +736,92 @@ async def test_reanalysis_of_an_approved_record_returns_it_approved(client: Asyn
     assert synced["transcript"] == "met SURYODAYA EPC: 50 crore, 90 megawatt"
 
 
+async def test_reanalysis_merges_new_lender_events_into_confirmed_rows(client: AsyncClient):
+    """The live miss: the reviewer corrected the lender rows (override), then
+    added "also got reply from Canara Bank" to the transcript and re-analyzed —
+    and the preserved override swallowed the new event. lender_updates now
+    MERGES on regeneration: confirmed rows stay exactly as confirmed, freshly
+    spoken events for lenders they don't cover append and file — and the
+    already-filed rows do not file twice (the DB ledger)."""
+    ent = await client.post("/v1/entities", json={
+        "code": "MERGECO", "legal_name": "Merge Co Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    eid = ent.json()["id"]
+    deal = (await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_syndication": True}, headers=MGMT)).json()
+    tracker = (await client.post("/v1/syndication", json={
+        "entity_id": eid, "deal_id": deal["id"]}, headers=MGMT)).json()
+    for name in ("Godrej Capital", "Axis Finance - Delhi", "Canara Bank - Delhi"):
+        made = await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
+            "lender_name": name, "status": "IM Circulated"}, headers=MGMT)
+        assert made.status_code == 201, made.text
+
+    report = _report()
+    report["detected_use_cases"] = ["syndication"]
+    report["syndication"] = {
+        "facility_nature": {"value": "term_loan", "confidence": "medium"},
+        "lender_updates": {"value": [
+            {"lender": "Godrej Capital", "kind": "chase",
+             "note": "Chased for the IM response; follow up Friday."},
+            {"lender": "Axis Finance - Delhi", "kind": "reply",
+             "note": "Came back with queries on security structures."},
+        ], "confidence": "high", "user_override": True}}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    cid = row["id"]
+    await _to_ready(client, cid, report=report)
+    await client.post(f"/v1/vox/conversations/{cid}/edits",
+                      json={"entity_id": eid, "deal_id": deal["id"]}, headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{cid}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    # Transcript corrected to add the Canara reply; regenerate stashes the
+    # override; the fresh extraction names the corrected spelling's mangled
+    # twin (must NOT resurrect) and the new Canara event (must land).
+    r = await client.post(f"/v1/vox/conversations/{cid}/edits", json={
+        "corrected_transcript": "chased godrej; axis reverted; "
+                                "also got reply from canara bank, can sanction 4 cr"},
+        headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert (await client.post(f"/v1/vox/conversations/{cid}/regenerate",
+                              headers=RECORDER)).status_code == 200
+    fresh = _report()
+    fresh["detected_use_cases"] = ["syndication"]
+    fresh["syndication"] = {
+        "facility_nature": {"value": "term_loan", "confidence": "medium"},
+        "lender_updates": {"value": [
+            {"lender": "Gurdwaj Capital", "kind": "chase",   # the mangled twin
+             "note": "Chased about the IM today."},
+            {"lender": "Axis Finance", "kind": "reply",
+             "note": "Raised queries on security."},
+            {"lender": "Canara Bank", "kind": "reply",
+             "note": "They can sanction 4 Cr."},
+        ], "confidence": "medium"}}
+    done = await client.patch(f"/v1/vox/conversations/{cid}/pipeline", json={
+        "status": "ready", "structured_report": fresh})
+    assert done.status_code == 200, done.text
+    body = done.json()
+    assert body["status"] == "submitted"
+    merged = body["structured_report"]["syndication"]["lender_updates"]
+    assert merged.get("user_override") is True, "the next re-analysis merges again"
+    rows_ = merged["value"]
+    assert [r_["lender"] for r_ in rows_] == \
+        ["Godrej Capital", "Axis Finance - Delhi", "Canara Bank"], \
+        "confirmed rows stay first and exactly as confirmed; only Canara appends"
+    assert rows_[0]["note"] == "Chased for the IM response; follow up Friday."
+
+    lenders = (await client.get(f"/v1/syndication/{tracker['id']}/lenders",
+                                headers=MGMT)).json()
+    by_name = {ln["lender_name"]: ln for ln in lenders}
+    assert by_name["Canara Bank - Delhi"]["response_date"], \
+        "the newly spoken reply reached the board on re-analysis"
+    assert "sanction 4 Cr" in (by_name["Canara Bank - Delhi"]["last_reply_note"] or "")
+    filed = (await client.get("/v1/interactions", params={
+        "subject_type": "Syndication", "subject_id": tracker["id"],
+        "source": "VOX"}, headers=MGMT)).json()
+    assert len(filed["items"]) == 3, \
+        "one interaction per event, across approve AND the re-analysis landing"
+
+
 async def test_list_filters_by_lead_for_the_lead_only_dossier(client: AsyncClient):
     """A company that is still lead-only has no entity — its dossier is keyed by
     the lead, so the list must filter by lead_id."""
