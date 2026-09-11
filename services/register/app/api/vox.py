@@ -25,7 +25,7 @@ from typing import Any
 
 from fastapi import Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 
 from app.core.logging import request_id_ctx
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
@@ -344,16 +344,20 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
         return " ".join(str(name or "").casefold().split())
 
     # What this conversation has already put on the board — one query, then a
-    # set lookup per entry. Replays, edit re-runs and re-analysis resumes all
-    # pass through here; the ledger makes every re-run idempotent.
-    already: set[tuple[Any, str]] = {
-        (r[0], str(r[1] or "").lower()) for r in (await ctx.session.execute(
-            select(Interaction.syndication_lender_id, Interaction.direction).where(
+    # dict lookup per entry. Replays, edit re-runs and re-analysis resumes all
+    # pass through here; the ledger makes every re-run idempotent. The mapped
+    # ROW (not just the pair) lets a hit refresh its note: the review panel
+    # autosaves while the reviewer types, so a fresh row often files before
+    # its note exists — the words must still catch up with the event.
+    already: dict[tuple[Any, str], Interaction] = {
+        (i.syndication_lender_id, str(i.direction or "").lower()): i
+        for i in (await ctx.session.execute(
+            select(Interaction).where(
                 Interaction.tenant_id == ctx.tenant_id,
                 Interaction.source == "VOX",
                 Interaction.deleted_at.is_(None),
                 Interaction.key_intel["vox_conversation_id"].astext == str(row.id))
-        )).all()}
+        )).scalars()}
 
     for entry in entries:
         if not isinstance(entry, dict):
@@ -396,10 +400,23 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
             continue                     # unknown or ambiguous name — never a guess
         lender = hits[0]
         direction = "Outbound" if kind == "chase" else "Inbound"
-        if (lender.id, direction.lower()) in already:
-            continue                     # this conversation already filed this event
         verb = "Chased" if kind == "chase" else "Reply from"
-        await create_interaction(ctx.session, ctx.tenant_id, ctx.actor, {
+        filed = already.get((lender.id, direction.lower()))
+        if filed is not None:
+            # The event is on the board; never a second row. But a note typed
+            # AFTER the row first filed (the panel autosaves mid-typing) still
+            # belongs to it — refresh the filed entry's words and the board's
+            # note snapshot, dates untouched.
+            if note and (filed.notes or "").strip() != note:
+                filed.summary = note[:300]
+                filed.notes = note
+                filed.updated_by = ctx.actor
+                await ctx.session.execute(
+                    update(SyndicationLender).where(SyndicationLender.id == lender.id)
+                    .values(**({"last_reply_note": note} if direction == "Inbound"
+                               else {"last_chase_note": note})))
+            continue
+        itx = await create_interaction(ctx.session, ctx.tenant_id, ctx.actor, {
             "subject_type": "Syndication", "subject_id": str(lender.syndication_id),
             "syndication_lender_id": lender.id,
             "interaction_type": "VOX conversation",
@@ -410,7 +427,7 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
             "source": "VOX",
             "key_intel": {"vox_conversation_id": str(row.id)},
         })
-        already.add((lender.id, direction.lower()))
+        already[(lender.id, direction.lower())] = itx
 
 
 async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:

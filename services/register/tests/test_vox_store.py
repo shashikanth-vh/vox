@@ -423,6 +423,32 @@ async def test_misheard_lender_files_forgivingly_and_a_correction_files_after_ap
         assert "vox_conversation_id" not in (it.get("key_intel") or {}), \
             "the ledger key is plumbing — it must never render as intelligence"
 
+    # The panel autosaves while the reviewer types: a row often files BEFORE
+    # its note exists. Typing the note afterwards must refresh the filed
+    # entry's words and the board snapshot — dates untouched, still no new row.
+    late = [
+        {"lender": "Gurdwaj Capital", "kind": "chase",
+         "note": "Chased for the IM response today; follow up Friday."},
+        {"lender": "Canara Bank - Delhi", "kind": "reply",
+         "note": "Reverted with queries; they can sanction 4 Cr."},
+    ]
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+        "edits": [{"field_path": "syndication.lender_updates",
+                   "new_value": {"value": late, "confidence": "high",
+                                 "user_override": True}}]}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    by_name = {ln["lender_name"]: ln for ln in
+               (await client.get(f"/v1/syndication/{tracker['id']}/lenders",
+                                 headers=MGMT)).json()}
+    assert "sanction 4 Cr" in (by_name["Canara Bank - Delhi"]["last_reply_note"] or ""), \
+        "a note typed after the row filed still reaches the board"
+    filed = (await client.get("/v1/interactions", params={
+        "subject_type": "Syndication", "subject_id": tracker["id"],
+        "source": "VOX"}, headers=MGMT)).json()
+    assert len(filed["items"]) == 2, "the refreshed note never mints a second row"
+    canara = [it for it in filed["items"] if "sanction 4 Cr" in (it.get("notes") or "")]
+    assert canara and canara[0]["direction"] == "Inbound"
+
 
 async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):
     ent = await client.post("/v1/entities", json={
