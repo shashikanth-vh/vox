@@ -351,6 +351,76 @@ async def test_spoken_chases_and_replies_land_on_the_chase_board(client: AsyncCl
     assert "revert with sanction terms" in (c["last_reply_note"] or "")
 
 
+async def test_misheard_lender_files_forgivingly_and_a_correction_files_after_approval(
+        client: AsyncClient):
+    """"Gurdwaj Capital" is what STT makes of "Godrej Capital": the closest
+    mandate lender files when it is clearly ahead of every other one. A name
+    near nothing on the mandate still files nothing — and fixing it in review
+    AFTER approval files it then, exactly once: the filed interactions carry
+    the conversation id, and that DB ledger keeps every re-run idempotent."""
+    ent = await client.post("/v1/entities", json={
+        "code": "FUZZYCO", "legal_name": "Fuzzy Co Private Limited",
+        "entity_type": "Company"}, headers=MGMT)
+    eid = ent.json()["id"]
+    deal = (await client.post("/v1/deals", json={
+        "entity_id": eid, "rm": "SD", "is_syndication": True}, headers=MGMT)).json()
+    tracker = (await client.post("/v1/syndication", json={
+        "entity_id": eid, "deal_id": deal["id"]}, headers=MGMT)).json()
+    for name in ("Godrej Capital", "Axis Finance - Delhi", "Canara Bank - Delhi"):
+        made = await client.post(f"/v1/syndication/{tracker['id']}/lenders", json={
+            "lender_name": name, "status": "IM Circulated"}, headers=MGMT)
+        assert made.status_code == 201, made.text
+
+    report = _report()
+    report["detected_use_cases"] = ["syndication"]
+    report["syndication"] = {
+        "facility_nature": {"value": "term_loan", "confidence": "medium"},
+        "lender_updates": {"value": [
+            {"lender": "Gurdwaj Capital", "kind": "chase",
+             "note": "Chased for the IM response today; follow up Friday."},
+            {"lender": "Sundaram Home", "kind": "reply",
+             "note": "Reverted with queries."},  # nothing on this mandate is close
+        ], "confidence": "medium"}}
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"], report=report)
+    await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                      json={"entity_id": eid, "deal_id": deal["id"]}, headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{row['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+
+    lenders = (await client.get(f"/v1/syndication/{tracker['id']}/lenders",
+                                headers=MGMT)).json()
+    by_name = {ln["lender_name"]: ln for ln in lenders}
+    assert by_name["Godrej Capital"]["chased_date"], \
+        "the STT mangling files to its obvious mandate lender"
+    assert not any(ln["response_date"] for ln in lenders), \
+        "a name near nothing on the mandate files nothing"
+
+    # The reviewer fixes the unknown name AFTER approval — it files then. The
+    # Godrej chase rides along unchanged and must not file twice.
+    def _fixed(conf: str) -> dict:
+        return {"value": [
+            {"lender": "Gurdwaj Capital", "kind": "chase",
+             "note": "Chased for the IM response today; follow up Friday."},
+            {"lender": "Canara Bank - Delhi", "kind": "reply",
+             "note": "Reverted with queries."},
+        ], "confidence": conf, "user_override": True}
+    for conf in ("high", "medium"):     # two saves, both with changes — one filing
+        r = await client.post(f"/v1/vox/conversations/{row['id']}/edits", json={
+            "edits": [{"field_path": "syndication.lender_updates",
+                       "new_value": _fixed(conf)}]}, headers=RECORDER)
+        assert r.status_code == 200, r.text
+    lenders = (await client.get(f"/v1/syndication/{tracker['id']}/lenders",
+                                headers=MGMT)).json()
+    by_name = {ln["lender_name"]: ln for ln in lenders}
+    assert by_name["Canara Bank - Delhi"]["response_date"], \
+        "a post-approval correction still reaches the board"
+    filed = (await client.get("/v1/interactions", params={
+        "subject_type": "Syndication", "subject_id": tracker["id"],
+        "source": "VOX"}, headers=MGMT)).json()
+    assert len(filed["items"]) == 2, "the DB ledger keeps every re-run idempotent"
+
+
 async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):
     ent = await client.post("/v1/entities", json={
         "code": "TWOLINESCO", "legal_name": "Two Lines Co Private Limited",

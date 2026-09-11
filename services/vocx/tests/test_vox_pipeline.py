@@ -466,6 +466,21 @@ def test_glossary_block_dedupes_and_caps_company_names():
     assert f"Co {MAX_COMPANY_NAMES + 20}" not in block
 
 
+def test_glossary_block_leads_with_the_desks_own_fi_master():
+    """"Gurdwaj Capital" happened because the glossary knew SBI and HDFC but not
+    the tenant's own mandate lenders. The FI master's names now lead the block
+    — before the generic national roster — deduplicated and capped."""
+    from app.vocx.pipeline.glossary import build_known_names_block
+    block = build_known_names_block(
+        ["Suryodaya EPC"], ["Godrej Capital", "godrej capital", "", None,
+                            "Access Finance"])
+    assert block.count("Godrej Capital") == 1
+    assert "Access Finance" in block
+    assert block.index("Godrej Capital") < block.index("Lenders commonly discussed")
+    # Without an FI master the block still stands, roster first.
+    assert "Lenders commonly discussed" in build_known_names_block(["Acme"])
+
+
 # ------------------------------------------------------------- phonetic tier
 
 def test_phonetic_tier_surfaces_the_misheard_company_for_approval():

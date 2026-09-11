@@ -44,17 +44,41 @@ LENDER_GLOSSARY: tuple[str, ...] = (
 MAX_COMPANY_NAMES = 400
 
 
-def build_known_names_block(company_names: Iterable[str] | None = None) -> str:
+# The tenant FI master can hold a few hundred names; all of them are plausible
+# mentions (unlike the entity phone book), so the cap is generous.
+MAX_LENDER_NAMES = 300
+
+
+def build_known_names_block(company_names: Iterable[str] | None = None,
+                            lender_names: Iterable[str] | None = None) -> str:
     """Render the KNOWN NAMES context block for the structuring user message.
 
     Always returns a non-empty block: the lender roster and the correction
-    rules apply even when no tenant names could be fetched.
+    rules apply even when no tenant names could be fetched. ``lender_names``
+    is the tenant's OWN FI master — "Godrej Capital", "Access Finance" — the
+    names mandates actually use, which the static national roster cannot
+    know; they lead the block because a mandate lender outranks a generic
+    bank when a mangled name could read as either.
     """
     lenders = " · ".join(LENDER_GLOSSARY)
     lines = [
         "KNOWN NAMES (runtime context — not part of the transcript):",
-        f"Lenders commonly discussed: {lenders}",
     ]
+    seen_l: set[str] = set()
+    fi: list[str] = []
+    for n in lender_names or ():
+        n = str(n or "").strip()
+        key = n.lower()
+        if not n or key in seen_l:
+            continue
+        seen_l.add(key)
+        fi.append(n)
+        if len(fi) >= MAX_LENDER_NAMES:
+            break
+    if fi:
+        lines.append("Lenders on this desk's own book (use THESE spellings): "
+                     + " · ".join(fi))
+    lines.append(f"Lenders commonly discussed: {lenders}")
     seen: set[str] = set()
     companies: list[str] = []
     for n in company_names or ():

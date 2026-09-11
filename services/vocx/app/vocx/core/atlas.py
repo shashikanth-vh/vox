@@ -60,6 +60,11 @@ class AtlasStore:
         self.interactions: list[dict[str, Any]] = self.data.get("interactions", []) or []
         self.interaction_types: list[str] = self.data.get("interactionTypes", []) or []
         self.ref: dict[str, Any] = self.data.get("ref", {}) or {}
+        # The tenant's own FI master — the lender names mandates actually use
+        # ("Godrej Capital", "Access Finance"), which the static glossary of
+        # national banks cannot know. Fed to structuring so STT manglings of
+        # THESE names get repaired too.
+        self.fi_names: list[str] = [str(n) for n in (self.data.get("fi_names") or []) if n]
         self._rm_by_code = self._index_rm_by_code()
 
     # ---- loading -----------------------------------------------------------

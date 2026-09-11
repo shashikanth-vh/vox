@@ -616,7 +616,8 @@ class VocxApp:
                 # open leads), so structuring can repair STT-mangled spellings.
                 from ..pipeline.glossary import build_known_names_block
                 names = [c.name for c in self.store.candidates() if c.name]
-                return build_known_names_block(names)
+                return build_known_names_block(
+                    names, getattr(self.store, "fi_names", None))
 
             self._vox_runner = PipelineRunner(register, transcribe, ask_model,
                                               alert=lambda m: self.log.error("ADMIN ALERT: %s", m),

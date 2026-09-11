@@ -48,6 +48,25 @@ const chipLabel = (v: string) => v.split('_').map((w, i) =>
 
 interface Candidate { name: string; code?: string; entity_id?: string; kind?: string; meta?: string }
 
+// Bigram Dice similarity for lender names — powers the one-tap "did you mean"
+// on lender_updates rows when STT mangled a name ("Gurdwaj" ~ "Godrej"). Close
+// to the server's own forgiving tier, so what it suggests is what filing takes.
+function nameAlike(a: string, b: string): number {
+  const grams = (s: string) => {
+    const t = ` ${s.toLowerCase().replace(/\s+/g, ' ').trim()} `;
+    const out: string[] = [];
+    for (let i = 0; i < t.length - 1; i++) out.push(t.slice(i, i + 2));
+    return out;
+  };
+  const ga = grams(a); const gb = grams(b);
+  if (ga.length === 0 || gb.length === 0) return 0;
+  const counts = new Map<string, number>();
+  ga.forEach((g) => counts.set(g, (counts.get(g) || 0) + 1));
+  let hit = 0;
+  gb.forEach((g) => { const c = counts.get(g) || 0; if (c > 0) { hit += 1; counts.set(g, c - 1); } });
+  return (2 * hit) / (ga.length + gb.length);
+}
+
 // The transcript's two shapes, carried INLINE so no stylesheet delivery can lose
 // them: a clamped preview, and — after "Show all" — a bounded reading window
 // with a visible scrollbar, so a 90-minute transcript never swallows the page.
@@ -227,6 +246,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [lineChoice, setLineChoice] =
     useState<{ entityId: string; name: string; leads: any[]; deals: any[] } | null>(null);
   const [dealRow, setDealRow] = useState<any>(null);
+  const [mandateLenders, setMandateLenders] = useState<string[]>([]);
   // transcript correction: the fix is written here, the original never changes
   const [fixingTranscript, setFixingTranscript] = useState(false);
   const [fixDraft, setFixDraft] = useState('');
@@ -288,6 +308,31 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     if (!row?.deal_id) { setDealRow(null); return; }
     void api.get<any>(`/deals/${row.deal_id}`).then(setDealRow).catch(() => {});
   }, [row?.deal_id]);
+  useEffect(() => {
+    // The linked company's mandate lenders — what the lender_updates rows offer
+    // as a picker. Filing matches BY NAME against exactly these, so a picked
+    // name is a certain match; free text stays for a lender not yet on the
+    // mandate. The pinned deal narrows the list when set.
+    if (!row?.entity_id) { setMandateLenders([]); return; }
+    (async () => {
+      try {
+        const trackers = await api.get<any>('/syndication', { entity_id: row.entity_id, limit: 50 });
+        let ts: any[] = trackers?.items || [];
+        if (row.deal_id) {
+          const pinned = ts.filter((t) => t.deal_id === row.deal_id);
+          if (pinned.length) ts = pinned;
+        }
+        const names: string[] = [];
+        for (const t of ts.slice(0, 10)) {
+          const ls = await api.get<any>(`/syndication/${t.id}/lenders`).catch(() => []);
+          (Array.isArray(ls) ? ls : (ls?.items || [])).forEach((l: any) => {
+            if (l?.lender_name && !names.includes(l.lender_name)) names.push(l.lender_name);
+          });
+        }
+        setMandateLenders(names);
+      } catch { setMandateLenders([]); }
+    })();
+  }, [row?.entity_id, row?.deal_id]);
   useEffect(() => {
     if (!row?.audio_ref || row.audio_deleted_at || row.erased_at) { setAudioSegs(0); return; }
     void voxService.reviewAudioMeta(conversationId).then(setAudioSegs);
@@ -1008,25 +1053,62 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       // {owner, action} shape still render — and edits write the canonical keys.
       const lenderOf = (it: any) => it.lender || it.owner || '';
       const noteOf = (it: any) => it.note || it.action || '';
+      // The clear best mandate-lender match for an off-list name, or null when
+      // nothing is close (or two are) — never an automatic rewrite, always a tap.
+      const suggestFor = (name: string): string | null => {
+        const scored = mandateLenders
+          .map((n) => ({ n, s: Math.max(nameAlike(name, n), nameAlike(name, n.split(' - ')[0])) }))
+          .sort((x, y) => y.s - x.s);
+        if (!scored.length || scored[0].s < 0.5) return null;
+        if (scored.length > 1 && scored[0].s - scored[1].s < 0.08) return null;
+        return scored[0].n;
+      };
       return (
         <div>
-          {items.map((it, i) => (
-            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-              <select className="input-field" style={{ flex: '0 1 110px' }} disabled={readOnly}
-                value={it.kind === 'reply' ? 'reply' : 'chase'}
-                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
-                <option value="chase">Chase</option>
-                <option value="reply">Reply</option>
-              </select>
-              <input className="input-field" style={{ flex: '1 1 160px' }} disabled={readOnly}
-                placeholder="Lender" value={lenderOf(it)}
-                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, lender: e.target.value } : x)))} />
-              <textarea className="input-field" style={{ flex: '1 1 100%' }} rows={1} ref={grow} disabled={readOnly}
-                placeholder="What was said" value={noteOf(it)}
-                onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} />
-              {!readOnly && <button className="intel-x" onClick={() => set(items.filter((_, j) => j !== i))}>✕</button>}
-            </div>
-          ))}
+          {items.map((it, i) => {
+            const cur = lenderOf(it);
+            const onList = mandateLenders.some((n) => n === cur);
+            const hint = !readOnly && cur && !onList ? suggestFor(cur) : null;
+            const setLender = (v: string) => set(items.map((x, j) => (j === i ? { ...x, lender: v } : x)));
+            return (
+              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                <select className="input-field" style={{ flex: '0 1 110px' }} disabled={readOnly}
+                  value={it.kind === 'reply' ? 'reply' : 'chase'}
+                  onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)))}>
+                  <option value="chase">Chase</option>
+                  <option value="reply">Reply</option>
+                </select>
+                {mandateLenders.length > 0 ? (
+                  // The deal's own mandate list: picking makes the board match
+                  // certain. What was heard stays visible (and selected) until
+                  // the reviewer corrects it — nothing is rewritten silently.
+                  <select className="input-field" style={{ flex: '1 1 160px' }} disabled={readOnly}
+                    value={onList ? cur : '__spoken__'}
+                    onChange={(e) => { if (e.target.value !== '__spoken__') setLender(e.target.value); }}>
+                    {!onList && (
+                      <option value="__spoken__">
+                        {cur ? `${cur} (as heard — pick to correct)` : 'Pick a lender…'}
+                      </option>
+                    )}
+                    {mandateLenders.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                ) : (
+                  <input className="input-field" style={{ flex: '1 1 160px' }} disabled={readOnly}
+                    placeholder="Lender" value={cur}
+                    onChange={(e) => setLender(e.target.value)} />
+                )}
+                {hint && (
+                  <button className="btn-add" style={{ flex: '0 0 auto' }}
+                    title="Replace the heard name with this mandate lender"
+                    onClick={() => setLender(hint)}>→ {hint}?</button>
+                )}
+                <textarea className="input-field" style={{ flex: '1 1 100%' }} rows={1} ref={grow} disabled={readOnly}
+                  placeholder="What was said" value={noteOf(it)}
+                  onChange={(e) => set(items.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} />
+                {!readOnly && <button className="intel-x" onClick={() => set(items.filter((_, j) => j !== i))}>✕</button>}
+              </div>
+            );
+          })}
           {!readOnly && <button className="btn-add" onClick={() => set([...items, { lender: '', kind: 'chase', note: '' }])}>+ Add lender update</button>}
         </div>
       );

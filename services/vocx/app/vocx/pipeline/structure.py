@@ -686,13 +686,16 @@ _LENDER_PASS_SYSTEM = (
     'Return ONLY a JSON array — no prose, no code fences — with one object per '
     'spoken event: {"lender": the bank\'s name as spoken, "kind": "chase" or '
     '"reply", "note": the substance in one or two sentences including any '
-    'promised date}. Record only events actually spoken in the transcript; '
+    'promised date}. A KNOWN NAMES block may precede the transcript: when a '
+    'spoken lender name is clearly an STT mangling of a name there, use the '
+    'KNOWN spelling. Record only events actually spoken in the transcript; '
     'return [] when none were.')
 
 
 def _backfill_lender_updates(report: dict, transcript: str,
                              ask: Callable[[str, str], str],
-                             registry_version: str | None) -> dict | None:
+                             registry_version: str | None,
+                             context: str = "") -> dict | None:
     """Returns the validated report with lender_updates filled, or None when
     the pass has nothing to add (the caller keeps the report it has)."""
     synd = report.get("syndication")
@@ -703,7 +706,7 @@ def _backfill_lender_updates(report: dict, transcript: str,
         return None                              # the main pass delivered
     if not _LENDER_VERB_RE.search(transcript):
         return None                              # nothing chase-shaped was spoken
-    raw = ask(_LENDER_PASS_SYSTEM, f"TRANSCRIPT:\n{transcript}").strip()
+    raw = ask(_LENDER_PASS_SYSTEM, f"{context}TRANSCRIPT:\n{transcript}").strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
         if raw.startswith("json"):
@@ -822,7 +825,7 @@ def structure_transcript(
     try:
         report = _backfill_lender_updates(
             report, transcript, lambda s, u: ask_model(model, s, u),
-            registry_version) or report
+            registry_version, context=context) or report
     except Exception as exc:  # noqa: BLE001 — a bonus pass never fails the take
         log.warning("lender-updates second pass skipped: %s", exc)
 

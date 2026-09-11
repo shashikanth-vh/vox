@@ -151,6 +151,16 @@ class RegisterStoreLoader:
                 ref = r.json()
             except (httpx.HTTPError, RuntimeError):
                 pass
+            # The FI master (counterparties with a type) carries the lender
+            # names mandates actually use — structuring needs them in its
+            # glossary to repair STT manglings. Best-effort, never fatal.
+            fi_names: list[str] = []
+            try:
+                fi_names = [c.get("name") for c in
+                            self._list_all(client, "counterparties")
+                            if c.get("name") and c.get("counterparty_type")]
+            except (httpx.HTTPError, RuntimeError):
+                pass
             interactions = (self._interactions(client, leads, deals)
                             if with_interactions else [])
 
@@ -188,7 +198,7 @@ class RegisterStoreLoader:
 
         return {"clients": clients, "leads": blob_leads, "deals": blob_deals,
                 "lending": [], "interactions": interactions,
-                "interactionTypes": itypes, "ref": ref}
+                "interactionTypes": itypes, "ref": ref, "fi_names": fi_names}
 
     def _interactions(self, client: httpx.Client, leads: list[dict[str, Any]],
                       deals: list[dict[str, Any]]) -> list[dict[str, Any]]:

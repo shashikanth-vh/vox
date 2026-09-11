@@ -256,8 +256,16 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
     Rules, mirroring the desk's own: a chase is Outbound, a reply Inbound; the
     lender must match a mandate lender by name; the conversation's deal pins the
     mandate, else the named lender must sit on exactly ONE of the company's
-    mandates — never a guess. Runs at APPROVE only (interactions are append-only;
-    an edit replay must not double-file a chase)."""
+    mandates — never a guess. Name matching forgives what STT does to names
+    ("Gurdwaj" for "Godrej"): after exact/containment, the closest mandate
+    lender files IF it is both close enough and clearly ahead of the runner-up;
+    anything ambiguous still skips.
+
+    Runs at approve, on post-approval edits, and when a re-analyzed approved
+    record lands home — so a lender name corrected at review AFTER approval
+    still reaches the board. Each filed interaction carries this conversation's
+    id in key_intel, and that DB ledger (not a flag someone's edit could drop)
+    is what prevents the same event ever filing twice."""
     if not row.entity_id:
         return
     report = row.structured_report or {}
@@ -265,6 +273,9 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
     entries = cell.get("value") if isinstance(cell, dict) else None
     if not isinstance(entries, list) or not entries:
         return
+    from difflib import SequenceMatcher
+
+    from app.models import Interaction
     from app.models.trackers import SyndicationLender, SyndicationTracker
     from app.repositories.interactions import create_interaction
 
@@ -287,6 +298,18 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
     def _fold(name: str) -> str:
         return " ".join(str(name or "").casefold().split())
 
+    # What this conversation has already put on the board — one query, then a
+    # set lookup per entry. Replays, edit re-runs and re-analysis resumes all
+    # pass through here; the ledger makes every re-run idempotent.
+    already: set[tuple[Any, str]] = {
+        (r[0], str(r[1] or "").lower()) for r in (await ctx.session.execute(
+            select(Interaction.syndication_lender_id, Interaction.direction).where(
+                Interaction.tenant_id == ctx.tenant_id,
+                Interaction.source == "VOX",
+                Interaction.deleted_at.is_(None),
+                Interaction.key_intel["vox_conversation_id"].astext == str(row.id))
+        )).all()}
+
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -306,20 +329,43 @@ async def _sync_lender_updates(ctx: RequestContext, row: VoxConversation) -> Non
         hits = [ln for ln in lenders
                 if spoken == _fold(ln.lender_name)
                 or spoken in _fold(ln.lender_name) or _fold(ln.lender_name) in spoken]
+        if not hits:
+            # The forgiving tier. STT reliably mangles exactly these names —
+            # "Gurdwaj Capital" for "Godrej Capital" — and an unknown-name skip
+            # here is silent. Score every mandate lender (full name AND the
+            # name with its branch suffix dropped, so "Axis Finance - Delhi"
+            # competes as "axis finance"); the best files only when it is close
+            # enough (≥0.72) AND clearly ahead of the runner-up (≥0.08) — a
+            # genuinely unknown or ambiguous name still never guesses.
+            def _score(ln: Any) -> float:
+                whole = _fold(ln.lender_name)
+                base = whole.split(" - ")[0].strip()
+                return max(SequenceMatcher(None, spoken, whole).ratio(),
+                           SequenceMatcher(None, spoken, base).ratio())
+            scored = sorted(((_score(ln), ln) for ln in lenders),
+                            key=lambda t: t[0], reverse=True)
+            if scored and scored[0][0] >= 0.72 and (
+                    len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.08):
+                hits = [scored[0][1]]
         if len(hits) != 1:
             continue                     # unknown or ambiguous name — never a guess
         lender = hits[0]
+        direction = "Outbound" if kind == "chase" else "Inbound"
+        if (lender.id, direction.lower()) in already:
+            continue                     # this conversation already filed this event
         verb = "Chased" if kind == "chase" else "Reply from"
         await create_interaction(ctx.session, ctx.tenant_id, ctx.actor, {
             "subject_type": "Syndication", "subject_id": str(lender.syndication_id),
             "syndication_lender_id": lender.id,
             "interaction_type": "VOX conversation",
-            "direction": "Outbound" if kind == "chase" else "Inbound",
+            "direction": direction,
             "summary": (note or f"{verb} {lender.lender_name}")[:300],
             "notes": note or None,
             "performed_by": row.recorder_name or row.recorder_email,
             "source": "VOX",
+            "key_intel": {"vox_conversation_id": str(row.id)},
         })
+        already.add((lender.id, direction.lower()))
 
 
 async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) -> None:
@@ -642,6 +688,7 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
         row.resume_status = None
         await _sync_linked_interaction(ctx, row)
         await _sync_lane_remarks(ctx, row)
+        await _sync_lender_updates(ctx, row)
     row.updated_by = ctx.actor
     await ctx.session.flush()
     await ctx.session.refresh(row)
@@ -776,6 +823,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                     or payload.corrected_transcript is not None):
         await _sync_linked_interaction(ctx, row)
         await _sync_lane_remarks(ctx, row)
+        await _sync_lender_updates(ctx, row)
 
     row.updated_by = ctx.actor
     await ctx.session.flush()
