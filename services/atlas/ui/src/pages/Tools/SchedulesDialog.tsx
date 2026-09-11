@@ -86,7 +86,8 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
     // thrown .trim() — silently doing NOTHING is the one unacceptable outcome.
     try {
       const qs = String(q ?? '').trim();
-      const tos = String(to ?? '').trim();
+      const tos = String(to ?? '').split(/[\n;,]+/).map((x) => x.trim())
+        .filter(Boolean).join(', ');
       // An all-firms schedule reads the register at send time — typed terms optional.
       if (!qs && !all) { setBannerOk(false); setBanner('Add at least one search term'); return; }
       if (!tos) { setBannerOk(false); setBanner('Add at least one recipient'); return; }
@@ -162,9 +163,9 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
             </Typography>
           )}
           {!all && (
-            <Box sx={{ mt: 1 }}><TextFld label="Search terms (comma separated)" value={q} onChange={setQ} multiline /></Box>
+            <Box sx={{ mt: 1 }}><TextFld label="Search terms (comma separated)" value={q} onChange={setQ} multiline maxRows={6} /></Box>
           )}
-          <Box sx={{ mt: 1.4 }}><TextFld label="Recipients (comma separated)" value={to} onChange={setTo} /></Box>
+          <Box sx={{ mt: 1.4 }}><TextFld label="Recipients (comma separated)" value={to} onChange={setTo} multiline maxRows={4} /></Box>
           <Box sx={{ mt: 1.4 }}>
             <FieldGrid cols={4}>
               <SelectFld label="Cadence" value={cad} onChange={(v) => setCad(v)} options={['daily', 'weekly']} />
@@ -193,7 +194,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
                   {s.scope === 'all-firms' ? '🏢 All firms' : s.q.slice(0, 60) + (s.q.length > 60 ? '…' : '')}
                   <span style={{ color: tokens.muted, fontWeight: 400 }}>{openId === s.id ? ' ▾' : ' ▸'}</span>
                 </Typography>
-                <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                <Typography sx={{ fontSize: 11.5, color: tokens.muted, maxHeight: 52, overflowY: 'auto' }}>
                   {s.cadence === 'weekly' ? `Weekly · ${DOW[s.weekday] || '—'}` : 'Daily'} at {s.hour}:00 ·
                   {' '}{s.window_days}d window · {s.recipients}
                   {s.adverse_only && <b style={{ color: tokens.bad }}> · ADVERSE ONLY</b>}
@@ -217,7 +218,9 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
             {openId === s.id && (
               <Box sx={{ mt: 1, pt: 1, borderTop: `1px dashed ${tokens.line}`, fontSize: 11.6 }}>
                 <Typography sx={{ fontSize: 11.6 }}><b>Subject:</b> {s.subject || 'ATLAS news digest'}</Typography>
-                <Typography sx={{ fontSize: 11.6 }}><b>Recipients:</b> {s.recipients}</Typography>
+                <Typography sx={{ fontSize: 11.6, maxHeight: 96, overflowY: 'auto' }}>
+                  <b>Recipients:</b> {s.recipients}
+                </Typography>
                 <Typography sx={{ fontSize: 11.6 }}>
                   <b>Next run:</b> {s.next_run ? new Date(s.next_run * 1000).toLocaleString() : '—'}
                 </Typography>

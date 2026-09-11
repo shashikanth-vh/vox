@@ -36,7 +36,7 @@ export function FieldShell({ label, required, children }: { label: string; requi
   );
 }
 
-export function TextFld({ label, value, onChange, disabled, required, type = 'text', multiline, placeholder, minRows }: Base & { type?: string; multiline?: boolean; placeholder?: string; minRows?: number }) {
+export function TextFld({ label, value, onChange, disabled, required, type = 'text', multiline, placeholder, minRows, maxRows }: Base & { type?: string; multiline?: boolean; placeholder?: string; minRows?: number; maxRows?: number }) {
   // COMMIT ON LEAVING THE FIELD, not per keystroke. The old per-keystroke onChange
   // reached remoteDebounced, whose trailing 700ms fired at every typing PAUSE — one
   // slowly-typed remark became six PATCHes and six audit rows ("Updated … remarks
@@ -53,7 +53,8 @@ export function TextFld({ label, value, onChange, disabled, required, type = 'te
   return (
     <FieldShell label={label} required={required}>
       <TextField value={draft ?? value ?? ''} disabled={disabled} type={type} multiline={multiline}
-        minRows={multiline ? (minRows ?? 2) : undefined} placeholder={placeholder}
+        minRows={multiline ? (minRows ?? 2) : undefined}
+        maxRows={multiline ? maxRows : undefined} placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={multiline ? undefined : (e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
