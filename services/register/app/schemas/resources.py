@@ -895,6 +895,18 @@ class InteractionRead(ReadModel):
     attachments: list[dict[str, Any]] | None
     meta: dict[str, Any] | None
 
+    @field_validator("key_intel", mode="after")
+    @classmethod
+    def _hide_machine_keys(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        # vox_conversation_id is the chase-board filing LEDGER (it makes every
+        # VOX re-run idempotent) — plumbing, not intelligence. Rendered, it put
+        # a raw UUID under "Key intelligence" in the drawer. It stays in the
+        # database; it never leaves through the API.
+        if not v:
+            return v
+        cleaned = {k: x for k, x in v.items() if k != "vox_conversation_id"}
+        return cleaned or None
+
 
 # --------------------------------------------------------------------------- #
 # Monitoring & reporting

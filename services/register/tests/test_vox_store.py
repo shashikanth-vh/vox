@@ -419,6 +419,9 @@ async def test_misheard_lender_files_forgivingly_and_a_correction_files_after_ap
         "subject_type": "Syndication", "subject_id": tracker["id"],
         "source": "VOX"}, headers=MGMT)).json()
     assert len(filed["items"]) == 2, "the DB ledger keeps every re-run idempotent"
+    for it in filed["items"]:
+        assert "vox_conversation_id" not in (it.get("key_intel") or {}), \
+            "the ledger key is plumbing — it must never render as intelligence"
 
 
 async def test_lane_remarks_never_guess_and_never_blank(client: AsyncClient):
