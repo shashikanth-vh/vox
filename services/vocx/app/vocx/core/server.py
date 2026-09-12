@@ -503,6 +503,15 @@ class VocxApp:
                            "sector": cand.sector or "",
                            "lens": cand.lens or "",
                            "temperature": (cand.raw or {}).get("temp") or "",
+                           # A company can carry several same-named leads; the
+                           # number, status and next action are what tell them
+                           # apart in the picker — without these, two "Greenpill"
+                           # leads render as identical rows and the reviewer can
+                           # only guess.
+                           "lead_no": (cand.raw or {}).get("lead_no") or "",
+                           "status": (cand.raw or {}).get("status") or "",
+                           "next_action": (cand.raw or {}).get("next") or "",
+                           "next_date": (cand.raw or {}).get("nextDate") or "",
                            "score": round(score, 4), "match_type": got["how"]})
         scored.sort(key=lambda x: x["score"], reverse=True)
         matches = scored[:limit]

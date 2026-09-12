@@ -351,8 +351,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         // both are offered — a lead row links straight to that lead.
         setCands(raw.map((c: any) => ({
           name: c.name, code: c.code, entity_id: c.entity_id, kind: c.kind,
-          meta: [c.kind === 'lead' ? 'Lead' : c.code, c.rm && `RM ${c.rm}`,
-                 c.sector, c.temperature, c.lens]
+          // A company can carry several same-named leads — the number, status
+          // and next action are what let the reviewer tell them apart.
+          meta: [c.kind === 'lead' ? `Lead ${c.lead_no || ''}`.trim() : c.code,
+                 c.rm && `RM ${c.rm}`, c.sector, c.temperature,
+                 c.kind === 'lead' ? c.status : c.lens,
+                 c.kind === 'lead' && c.next_action
+                   && `Next: ${c.next_action}${c.next_date ? ` (${c.next_date})` : ''}`]
             .filter(Boolean).join(' · ') })));
       } catch { setCands([]); }
     }, 250);

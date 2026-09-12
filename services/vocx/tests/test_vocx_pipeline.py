@@ -637,12 +637,20 @@ async def test_suggest_typeahead_matches_and_new_company(stub_register):
     app = create_app()
     async with await _client(app) as c:
         hit = await c.get("/v1/suggest?q=EcoSoch&rm=Priya")
+        lead = await c.get("/v1/suggest?q=GH2")
         miss = await c.get("/v1/suggest?q=Totally Unknown Ventures")
         short = await c.get("/v1/suggest?q=E")
     assert hit.status_code == 200, hit.text
     body = hit.json()
     assert body["matches"] and body["matches"][0]["code"] == "ECOSOCH"
     assert body["new_company"] is False
+    # A lead match carries what tells same-named leads apart in the picker:
+    # its number, status and next action — without them, two "Greenpill" leads
+    # render as identical rows and the reviewer can only guess.
+    lm = lead.json()["matches"][0]
+    assert lm["kind"] == "lead" and lm["lead_no"] == "LD-V01"
+    assert lm["status"] == "Active"
+    assert "next_action" in lm and "next_date" in lm
     assert miss.json()["new_company"] is True
     assert short.status_code == 400
 
