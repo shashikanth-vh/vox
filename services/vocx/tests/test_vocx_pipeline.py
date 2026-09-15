@@ -705,6 +705,19 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert "SARVAM_MAX_TOKENS_CEILING" in str(exc2.value)
     assert budgets == [8192, 16384, 24576]
 
+    # An answer parked in reasoning_content (or wrapped in <think> prose) is
+    # SALVAGED, not discarded — the desk's own probe proved sarvam does this.
+    def parked_post(url, headers=None, json=None, timeout=None):
+        return FakeResp(payload={"choices": [{
+            "finish_reason": "stop",
+            "message": {"content": None,
+                        "reasoning_content":
+                            '<think>let me work this out</think>'
+                            'Here is the report: {"ok": 2} hope that helps'}}]})
+
+    monkeypatch.setattr(httpx, "post", parked_post)
+    assert core_server.ask_sarvam("sarvam-m", "SYS", "USR") == '{"ok": 2}'
+
     # …and when a bigger budget is enough, the take survives.
     budgets.clear()
 

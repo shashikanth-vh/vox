@@ -84,6 +84,30 @@ def _logger(config: dict[str, Any]) -> logging.Logger:
 
 
 
+def _sarvam_answer_text(message: dict) -> str:
+    """The answer sarvam actually produced. content first; when the model left
+    it inside reasoning_content instead (seen live, and proven salvageable by
+    the desk's own probe app), strip the <think> blocks and lift the outermost
+    JSON object out of the surrounding prose. Empty string when there is no
+    answer anywhere — the caller decides whether that is a budget wall."""
+    import re
+
+    def _lift(text: str) -> tuple[str, str]:
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        return (m.group(0) if m else "", text.strip())
+
+    content = str(message.get("content") or "")
+    if content.strip():
+        obj, rest = _lift(content)
+        return obj or rest                 # content is the answer, JSON or not
+    # reasoning_content counts ONLY when a JSON object can be lifted from it —
+    # truncated thinking ("we need to parse the…") is not an answer, and must
+    # fall through to the budget-escalation path.
+    obj, _ = _lift(str(message.get("reasoning_content") or ""))
+    return obj
+
+
 def ask_sarvam(model: str, system: str, user: str) -> str:
     """Sarvam through the OpenAI-compatible chat API — the EXCLUSIVE
     alternative to Claude when VOCX_STRUCTURE_PROVIDER=sarvam. Text-only (no
@@ -146,7 +170,7 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
         if r.status_code < 300:
             payload = r.json()
             choice = (payload.get("choices") or [{}])[0]
-            content = (choice.get("message") or {}).get("content")
+            content = _sarvam_answer_text(choice.get("message") or {})
             if not content:
                 if choice.get("finish_reason") == "length":
                     # The model reasoned past the whole budget (seen twice live,
