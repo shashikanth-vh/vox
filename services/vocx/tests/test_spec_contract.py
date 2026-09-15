@@ -402,10 +402,10 @@ def test_the_structure_provider_switch_is_exclusive(monkeypatch):
     assert _structure_model("live") == "claude-sonnet-5"
 
     monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
-    assert _structure_model("post_meeting") == "sarvam-m"
-    assert _structure_model("live") == "sarvam-m"
-    monkeypatch.setenv("SARVAM_MODEL", "sarvam-m-large")
-    assert _structure_model("live") == "sarvam-m-large"
+    assert _structure_model("post_meeting") == "sarvam-105b"
+    assert _structure_model("live") == "sarvam-105b"
+    monkeypatch.setenv("SARVAM_MODEL", "sarvam-105b-conversations")
+    assert _structure_model("live") == "sarvam-105b-conversations"
     monkeypatch.delenv("SARVAM_MODEL", raising=False)
 
     seen: list[str] = []
@@ -416,7 +416,7 @@ def test_the_structure_provider_switch_is_exclusive(monkeypatch):
 
     out = structure_transcript("we met suryodaya", mode="post_meeting",
                                ask_model=ask, capture_ts="2026-09-15T10:00:00Z")
-    assert out["model"] == "sarvam-m" and seen[0] == "sarvam-m"
+    assert out["model"] == "sarvam-105b" and seen[0] == "sarvam-105b"
 
 
 def test_lender_second_pass_failure_never_breaks_the_take():

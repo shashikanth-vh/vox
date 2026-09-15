@@ -43,7 +43,11 @@ def _structure_model(mode: str) -> str:
     model actually structured the take."""
     provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
     if provider == "sarvam":
-        return (_os.environ.get("SARVAM_MODEL") or "").strip() or "sarvam-m"
+        # sarvam-m was deprecated mid-trial ("use sarvam-105b or
+        # sarvam-105b-conversations"); the base instruct model follows the
+        # schema contract better than the conversations tune. SARVAM_MODEL
+        # overrides when their catalogue moves again.
+        return (_os.environ.get("SARVAM_MODEL") or "").strip() or "sarvam-105b"
     return MODEL_LIVE if mode == "live" else MODEL_NOTE
 
 log = logging.getLogger("vox.pipeline")
