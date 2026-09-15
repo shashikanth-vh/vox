@@ -42,8 +42,18 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
   const checkDupes = (name: string) => {
     const q = normName(name);
     if (q.length < 3) { setClientHits([]); setLeadHits([]); return; }
-    const alike = (a: string) => normName(a).includes(q) || q.includes(normName(a))
-      || nameAlike(name, a) >= 0.55;
+    // Fuzzy on the DISTINCTIVE part of the name only: raw bigrams let the
+    // corporate boilerplate dominate — "adani INDUSTRIES" scored a match with
+    // "Veer Raj INDUSTRIES" on the strength of one generic word.
+    const distinct = (a: string) => normName(String(a).replace(
+      /\b(industries|industry|enterprises?|group|holdings?|corporation|corp|company|co|infra|infrastructure|international)\b/gi, ' '));
+    const qd = distinct(name);
+    const alike = (a: string) => {
+      const an = normName(a);
+      if (an.includes(q) || q.includes(an)) return true;   // prefix typing
+      const ad = distinct(a);
+      return !!qd && !!ad && nameAlike(qd, ad) >= 0.62;    // one-letter slips
+    };
     setClientHits(Object.entries(db().clients)
       .filter(([, v]: any) => v?.name && alike(v.name))
       .slice(0, 3)
