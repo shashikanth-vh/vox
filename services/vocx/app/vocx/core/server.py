@@ -88,8 +88,14 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     """Sarvam-M through the OpenAI-compatible chat API — the EXCLUSIVE
     alternative to Claude when VOCX_STRUCTURE_PROVIDER=sarvam. Text-only (no
     forced tool call), so the contract validator + repair round downstream are
-    the wall, exactly as the text fallback always was. Base URL and model are
-    env-overridable; both auth header styles Sarvam has used are sent."""
+    the wall, exactly as the text fallback always was.
+
+    Field lesson baked in: the first live call answered a bare '400 Bad
+    Request' and the error hid Sarvam's own explanation. Every refusal now
+    carries the response BODY; the two auth header styles Sarvam has used are
+    tried one at a time (some gateways 400 on unexpected auth headers); and
+    max_tokens defaults to a cautious 4096 (8000 exceeded a cap), tunable via
+    SARVAM_MAX_TOKENS. Base URL and model are env-overridable."""
     import os
 
     import httpx
@@ -100,18 +106,30 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
             "deploy/compose/.env, or set the provider back to anthropic")
     base = ((os.environ.get("SARVAM_BASE_URL") or "").strip()
             or "https://api.sarvam.ai/v1").rstrip("/")
-    r = httpx.post(
-        f"{base}/chat/completions",
-        headers={"Authorization": f"Bearer {key}", "api-subscription-key": key},
-        json={"model": model, "temperature": 0.0, "max_tokens": 8000,
-              "messages": [{"role": "system", "content": system},
-                           {"role": "user", "content": user}]},
-        timeout=180.0)
-    r.raise_for_status()
-    content = (r.json().get("choices") or [{}])[0].get("message", {}).get("content")
-    if not content:
-        raise RuntimeError("Sarvam answered without content — see the API response")
-    return str(content)
+    try:
+        max_tokens = int(os.environ.get("SARVAM_MAX_TOKENS") or 4096)
+    except ValueError:
+        max_tokens = 4096
+    body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}]}
+    failures: list[str] = []
+    for headers in ({"Authorization": f"Bearer {key}"},
+                    {"api-subscription-key": key}):
+        r = httpx.post(f"{base}/chat/completions", headers=headers, json=body,
+                       timeout=180.0)
+        if r.status_code < 300:
+            content = (r.json().get("choices") or [{}])[0].get(
+                "message", {}).get("content")
+            if not content:
+                raise RuntimeError(
+                    f"Sarvam answered without content: {r.text[:300]}")
+            return str(content)
+        failures.append(f"[{'/'.join(headers)} -> HTTP {r.status_code}] "
+                        f"{r.text[:300]}")
+        if r.status_code not in (400, 401, 403):
+            break                        # 5xx/429: retrying auth style won't help
+    raise RuntimeError("Sarvam refused the request — " + " | ".join(failures))
 
 
 class VocxApp:

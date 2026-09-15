@@ -642,27 +642,48 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     calls: dict = {}
 
     class FakeResp:
-        def raise_for_status(self):
-            return None
+        def __init__(self, status=200, payload=None, text=""):
+            self.status_code = status
+            self._payload = payload or {}
+            self.text = text
 
         def json(self):
-            return {"choices": [{"message": {"content": '{"ok": 1}'}}]}
+            return self._payload
+
+    seen_headers: list[dict] = []
 
     def fake_post(url, headers=None, json=None, timeout=None):
-        calls.update(url=url, headers=headers, body=json)
-        return FakeResp()
+        calls.update(url=url, body=json)
+        seen_headers.append(headers)
+        return FakeResp(payload={"choices": [{"message": {"content": '{"ok": 1}'}}]})
 
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setenv("SARVAM_API_KEY", "k-test")
     got = core_server.ask_sarvam("sarvam-m", "SYS", "USR")
     assert got == '{"ok": 1}'
     assert calls["url"] == "https://api.sarvam.ai/v1/chat/completions"
-    assert calls["headers"]["Authorization"] == "Bearer k-test"
-    assert calls["headers"]["api-subscription-key"] == "k-test"
+    assert seen_headers[0] == {"Authorization": "Bearer k-test"}
     assert calls["body"]["model"] == "sarvam-m"
     assert calls["body"]["temperature"] == 0.0
+    assert calls["body"]["max_tokens"] == 4096
     assert calls["body"]["messages"] == [{"role": "system", "content": "SYS"},
                                          {"role": "user", "content": "USR"}]
+
+    # A 400 on Bearer retries ONCE with the subscription-key header and, when
+    # that fails too, the error carries Sarvam's own explanations — never a
+    # bare '400 Bad Request'.
+    seen_headers.clear()
+
+    def fail_post(url, headers=None, json=None, timeout=None):
+        seen_headers.append(headers)
+        return FakeResp(status=400, text='{"error": "max_tokens too large"}')
+
+    monkeypatch.setattr(httpx, "post", fail_post)
+    with pytest.raises(RuntimeError) as exc:
+        core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+    assert "max_tokens too large" in str(exc.value)
+    assert seen_headers == [{"Authorization": "Bearer k-test"},
+                            {"api-subscription-key": "k-test"}]
 
     monkeypatch.delenv("SARVAM_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
