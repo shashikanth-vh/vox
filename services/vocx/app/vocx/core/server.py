@@ -118,6 +118,10 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
         max_tokens = int(os.environ.get("SARVAM_MAX_TOKENS") or 8192)
     except ValueError:
         max_tokens = 8192
+    try:
+        ceiling = int(os.environ.get("SARVAM_MAX_TOKENS_CEILING") or 24576)
+    except ValueError:
+        ceiling = 24576
     body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
@@ -145,11 +149,21 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
             content = (choice.get("message") or {}).get("content")
             if not content:
                 if choice.get("finish_reason") == "length":
+                    # The model reasoned past the whole budget (seen twice live,
+                    # even at effort=low with 8192): SELF-HEAL by doubling the
+                    # budget and retrying, up to the ceiling — only then fail,
+                    # naming the remedy.
+                    if body["max_tokens"] < ceiling:
+                        body["max_tokens"] = min(body["max_tokens"] * 2, ceiling)
+                        _slog.warning("sarvam reasoned past the budget; retrying "
+                                      "with max_tokens=%s", body["max_tokens"])
+                        continue
                     raise RuntimeError(
                         "Sarvam spent the whole token budget reasoning and never "
-                        "produced the answer (finish_reason=length, content null) — "
-                        "raise SARVAM_MAX_TOKENS and/or keep SARVAM_REASONING_EFFORT "
-                        f"at 'low'. Response head: {r.text[:200]}")
+                        f"produced the answer, even at max_tokens={body['max_tokens']} "
+                        "(finish_reason=length, content null) — raise "
+                        "SARVAM_MAX_TOKENS_CEILING, or try SARVAM_REASONING_EFFORT="
+                        f"off / another SARVAM_MODEL. Response head: {r.text[:200]}")
                 raise RuntimeError(
                     f"Sarvam answered without content: {r.text[:300]}")
             usage = payload.get("usage") or {}

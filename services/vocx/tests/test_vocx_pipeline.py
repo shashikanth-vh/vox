@@ -686,8 +686,13 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert seen_headers == [{"Authorization": "Bearer k-test"},
                             {"api-subscription-key": "k-test"}]
 
-    # Reasoning that eats the whole budget names its remedy, not a bare error.
+    # Reasoning that eats the whole budget SELF-HEALS: the budget doubles and
+    # the call retries up to the ceiling; only a wall at the ceiling fails,
+    # naming its remedy.
+    budgets: list[int] = []
+
     def length_post(url, headers=None, json=None, timeout=None):
+        budgets.append(json["max_tokens"])
         return FakeResp(payload={"choices": [{
             "finish_reason": "length",
             "message": {"content": None, "reasoning_content": "thinking..."}}]},
@@ -697,7 +702,23 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     monkeypatch.setattr(httpx, "post", length_post)
     with pytest.raises(RuntimeError) as exc2:
         core_server.ask_sarvam("sarvam-m", "SYS", "USR")
-    assert "SARVAM_MAX_TOKENS" in str(exc2.value)
+    assert "SARVAM_MAX_TOKENS_CEILING" in str(exc2.value)
+    assert budgets == [8192, 16384, 24576]
+
+    # …and when a bigger budget is enough, the take survives.
+    budgets.clear()
+
+    def heal_post(url, headers=None, json=None, timeout=None):
+        budgets.append(json["max_tokens"])
+        if json["max_tokens"] < 16384:
+            return FakeResp(payload={"choices": [{
+                "finish_reason": "length",
+                "message": {"content": None}}]}, text="len")
+        return FakeResp(payload={"choices": [{"message": {"content": "OK"}}]})
+
+    monkeypatch.setattr(httpx, "post", heal_post)
+    assert core_server.ask_sarvam("sarvam-m", "SYS", "USR") == "OK"
+    assert budgets == [8192, 16384]
 
     # 'off' omits the reasoning field for a model that rejects it.
     monkeypatch.setenv("SARVAM_REASONING_EFFORT", "off")
