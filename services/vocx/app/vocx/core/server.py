@@ -107,21 +107,34 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     base = ((os.environ.get("SARVAM_BASE_URL") or "").strip()
             or "https://api.sarvam.ai/v1").rstrip("/")
     try:
-        max_tokens = int(os.environ.get("SARVAM_MAX_TOKENS") or 4096)
+        max_tokens = int(os.environ.get("SARVAM_MAX_TOKENS") or 8192)
     except ValueError:
-        max_tokens = 4096
+        max_tokens = 8192
     body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
+    # sarvam-105b REASONS by default and, unchecked, spent the whole token
+    # budget on reasoning_content and finished 'length' with content null.
+    # Ask for the minimum; SARVAM_REASONING_EFFORT overrides (low/medium/high),
+    # and 'off' omits the field for a model that rejects it.
+    effort = (os.environ.get("SARVAM_REASONING_EFFORT") or "low").strip().lower()
+    if effort != "off":
+        body["reasoning_effort"] = effort
     failures: list[str] = []
     for headers in ({"Authorization": f"Bearer {key}"},
                     {"api-subscription-key": key}):
         r = httpx.post(f"{base}/chat/completions", headers=headers, json=body,
                        timeout=180.0)
         if r.status_code < 300:
-            content = (r.json().get("choices") or [{}])[0].get(
-                "message", {}).get("content")
+            choice = (r.json().get("choices") or [{}])[0]
+            content = (choice.get("message") or {}).get("content")
             if not content:
+                if choice.get("finish_reason") == "length":
+                    raise RuntimeError(
+                        "Sarvam spent the whole token budget reasoning and never "
+                        "produced the answer (finish_reason=length, content null) — "
+                        "raise SARVAM_MAX_TOKENS and/or keep SARVAM_REASONING_EFFORT "
+                        f"at 'low'. Response head: {r.text[:200]}")
                 raise RuntimeError(
                     f"Sarvam answered without content: {r.text[:300]}")
             return str(content)

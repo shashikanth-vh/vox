@@ -665,7 +665,8 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert seen_headers[0] == {"Authorization": "Bearer k-test"}
     assert calls["body"]["model"] == "sarvam-m"
     assert calls["body"]["temperature"] == 0.0
-    assert calls["body"]["max_tokens"] == 4096
+    assert calls["body"]["max_tokens"] == 8192
+    assert calls["body"]["reasoning_effort"] == "low"
     assert calls["body"]["messages"] == [{"role": "system", "content": "SYS"},
                                          {"role": "user", "content": "USR"}]
 
@@ -684,6 +685,26 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert "max_tokens too large" in str(exc.value)
     assert seen_headers == [{"Authorization": "Bearer k-test"},
                             {"api-subscription-key": "k-test"}]
+
+    # Reasoning that eats the whole budget names its remedy, not a bare error.
+    def length_post(url, headers=None, json=None, timeout=None):
+        return FakeResp(payload={"choices": [{
+            "finish_reason": "length",
+            "message": {"content": None, "reasoning_content": "thinking..."}}]},
+            text='{"choices": [...]}')
+
+    monkeypatch.setenv("SARVAM_API_KEY", "k-test")
+    monkeypatch.setattr(httpx, "post", length_post)
+    with pytest.raises(RuntimeError) as exc2:
+        core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+    assert "SARVAM_MAX_TOKENS" in str(exc2.value)
+
+    # 'off' omits the reasoning field for a model that rejects it.
+    monkeypatch.setenv("SARVAM_REASONING_EFFORT", "off")
+    monkeypatch.setattr(httpx, "post", fake_post)
+    core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+    assert "reasoning_effort" not in calls["body"]
+    monkeypatch.delenv("SARVAM_REASONING_EFFORT", raising=False)
 
     monkeypatch.delenv("SARVAM_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
