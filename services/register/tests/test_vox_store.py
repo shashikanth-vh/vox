@@ -793,6 +793,31 @@ async def test_the_picked_line_owns_the_company_pin(client: AsyncClient):
         "the deal's own parent outranks the sent entity id"
     assert body["deal_id"] == deal2["id"]
 
+    # The filed interaction FOLLOWS a post-approval re-link: link one at e1,
+    # approve, re-pin to e2's deal — the entry must land on e2's timeline
+    # (the live miss: the conversation moved, the drawer's interaction did not).
+    itx = (await client.post("/v1/interactions", json={
+        "subject_type": "Entity", "subject_id": e1["id"],
+        "interaction_type": "VOX conversation", "summary": "greenpill note",
+        "performed_by": "Ananda H"}, headers=MGMT)).json()
+    row3 = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row3["id"])
+    await client.post(f"/v1/vox/conversations/{row3['id']}/edits",
+                      json={"entity_id": e1["id"], "interaction_id": itx["id"]},
+                      headers=RECORDER)
+    assert (await client.post(f"/v1/vox/conversations/{row3['id']}/approve",
+                              headers=RECORDER)).status_code == 200
+    r3 = await client.post(f"/v1/vox/conversations/{row3['id']}/edits",
+                           json={"entity_id": e1["id"], "deal_id": deal2["id"]},
+                           headers=RECORDER)
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["entity_id"] == e2["id"]
+    moved = (await client.get(f"/v1/interactions/{itx['id']}", headers=MGMT)).json()
+    assert moved["entity_id"] == e2["id"], \
+        "the filed interaction follows the re-link to the right company"
+    assert moved["deal_id"] == deal2["id"]
+    assert moved["subject_type"] == "Deal" and moved["subject_id"] == deal2["id"]
+
     # A standalone lead has no parent — the sent entity stands (the heal path).
     lone = (await client.post("/v1/leads", json={
         "company": f"Standalone {uuid.uuid4()}"}, headers=MGMT)).json()

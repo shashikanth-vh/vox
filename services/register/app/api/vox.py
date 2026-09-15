@@ -444,6 +444,21 @@ async def _sync_linked_interaction(ctx: RequestContext, row: VoxConversation) ->
     )).scalar_one_or_none()
     if itx is None:
         return
+    # The interaction FOLLOWS the conversation's pins. Re-linking an approved
+    # record to the right company/line (the two-Greenpill case) updated the
+    # conversation but left the filed entry on the old company's timeline —
+    # the drawer it should appear in kept showing zero. Subject precedence
+    # mirrors the pin precedence: deal, then lead, then the company itself.
+    if row.entity_id and itx.entity_id != row.entity_id:
+        itx.entity_id = row.entity_id
+    if itx.deal_id != row.deal_id:
+        itx.deal_id = row.deal_id
+    target = (("Deal", row.deal_id) if row.deal_id
+              else ("Lead", row.lead_id) if row.lead_id
+              else ("Entity", row.entity_id) if row.entity_id else None)
+    if target and (itx.subject_type, itx.subject_id) != target:
+        itx.subject_type, itx.subject_id = target
+
     report = row.structured_report or {}
     common = report.get("common") or {}
 
@@ -847,6 +862,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
             _audit("use_cases", current, wanted)
             changed += 1
 
+    links_changed = 0
     for link in ("entity_id", "lead_id", "deal_id", "interaction_id"):
         raw = getattr(payload, link)
         if raw is not None:
@@ -856,6 +872,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                 setattr(row, link, new_id)
                 _audit(f"links.{link}", str(old) if old else None, raw or None)
                 changed += 1
+                links_changed += 1
 
     # A pin names ONE line; the company follows FROM the line. The UI sends
     # entity_id alongside lead_id/deal_id, and with two same-named companies on
@@ -884,6 +901,7 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                    str(row.entity_id) if row.entity_id else None, str(parent))
             row.entity_id = parent
             changed += 1
+            links_changed += 1
 
     # The new-lead intent travels the same audited path as the link pins.
     for field in ("proposed_lead_company", "proposed_lead_rm"):
@@ -916,8 +934,11 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     # or lanes change, its linked interaction's summary/key_intel are re-derived
     # here, inside the same transaction — the conversation's audit rows above
     # already record who changed what.
+    # links_changed matters too: a re-link alone (the two-Greenpill fix-up)
+    # must move the filed interaction and re-run the board sync — a links-only
+    # save used to change the conversation and leave every filing where it was.
     if changed and (payload.edits or payload.use_cases is not None
-                    or payload.corrected_transcript is not None):
+                    or payload.corrected_transcript is not None or links_changed):
         await _sync_linked_interaction(ctx, row)
         await _sync_lane_remarks(ctx, row)
         await _sync_lender_updates(ctx, row)
