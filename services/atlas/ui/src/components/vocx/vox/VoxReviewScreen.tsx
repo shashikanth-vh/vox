@@ -824,8 +824,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               </div>
             )}
             {lineChoice.leads.map((l: any) => (
+              // The picked line's OWN parent wins: leads found by company name
+              // can belong to a same-named sibling company, and pinning the
+              // clicked company's id would file everything on the wrong one.
               <div key={l.id} className="atlas-opt" onClick={() => !busy && void pinTo(
-                { lead_id: String(l.id), entity_id: lineChoice.entityId, deal_id: '' })}>
+                { lead_id: String(l.id),
+                  entity_id: String(l.entity_id || lineChoice.entityId), deal_id: '' })}>
                 <div>
                   <div className="ao-name">Lead {l.lead_no || ''}</div>
                   <div className="ao-meta">{[l.rm && `RM ${l.rm}`, l.temperature, l.status]
@@ -836,7 +840,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             ))}
             {lineChoice.deals.map((d: any) => (
               <div key={d.id} className="atlas-opt" onClick={() => !busy && void pinTo(
-                { deal_id: String(d.id), entity_id: lineChoice.entityId, lead_id: '' })}>
+                { deal_id: String(d.id),
+                  entity_id: String(d.entity_id || lineChoice.entityId), lead_id: '' })}>
                 <div>
                   <div className="ao-name">Deal {d.deal_no || d.code || ''}</div>
                   <div className="ao-meta">{[d.product_type, d.stage, d.rm && `RM ${d.rm}`]

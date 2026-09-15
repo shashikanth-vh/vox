@@ -857,6 +857,34 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
                 _audit(f"links.{link}", str(old) if old else None, raw or None)
                 changed += 1
 
+    # A pin names ONE line; the company follows FROM the line. The UI sends
+    # entity_id alongside lead_id/deal_id, and with two same-named companies on
+    # the register the pair can disagree — the reviewer picked GREENPILLREN-2's
+    # deal while the carried entity was GREENPILLREN, and every later filing
+    # (interaction, remarks, chase board) landed on the wrong company. The
+    # picked line's own parent is the truth; a disagreeing entity_id is
+    # corrected here, audited like any other link change. A standalone lead
+    # (no parent yet) keeps the sent entity — that pairing is the data heal.
+    if payload.entity_id is not None or payload.lead_id is not None \
+            or payload.deal_id is not None:
+        from app.models.deals import Deal, Lead
+        parent: uuid.UUID | None = None
+        if row.deal_id:
+            parent = (await ctx.session.execute(
+                select(Deal.entity_id).where(Deal.id == row.deal_id,
+                                             Deal.tenant_id == ctx.tenant_id)
+            )).scalar_one_or_none()
+        elif row.lead_id:
+            parent = (await ctx.session.execute(
+                select(Lead.entity_id).where(Lead.id == row.lead_id,
+                                             Lead.tenant_id == ctx.tenant_id)
+            )).scalar_one_or_none()
+        if parent and row.entity_id != parent:
+            _audit("links.entity_id",
+                   str(row.entity_id) if row.entity_id else None, str(parent))
+            row.entity_id = parent
+            changed += 1
+
     # The new-lead intent travels the same audited path as the link pins.
     for field in ("proposed_lead_company", "proposed_lead_rm"):
         raw = getattr(payload, field)

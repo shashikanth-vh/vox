@@ -765,6 +765,48 @@ async def test_reanalysis_of_an_approved_record_returns_it_approved(client: Asyn
     assert synced["transcript"] == "met SURYODAYA EPC: 50 crore, 90 megawatt"
 
 
+async def test_the_picked_line_owns_the_company_pin(client: AsyncClient):
+    """Seen live with two same-named Greenpill companies: the reviewer picked
+    GREENPILLREN-2's deal while the UI carried GREENPILLREN's entity id, and
+    the conversation — with every later filing — landed on the wrong company.
+    The register now derives the company FROM the picked line: a deal or lead
+    pin whose parent disagrees with the sent entity_id is corrected, audited.
+    A standalone lead (no parent yet) keeps the sent entity — the data heal."""
+    e1 = (await client.post("/v1/entities", json={
+        "code": "GREENPILL1", "legal_name": "Greenpill Renewable Energy Limited",
+        "entity_type": "Company"}, headers=MGMT)).json()
+    e2 = (await client.post("/v1/entities", json={
+        "code": "GREENPILL2", "legal_name": "Greenpill Renewable Energy Limited",
+        "entity_type": "Company"}, headers=MGMT)).json()
+    deal2 = (await client.post("/v1/deals", json={
+        "entity_id": e2["id"], "rm": "CM", "is_lending": True}, headers=MGMT)).json()
+
+    # The wrong pairing the UI could send: e1's company with e2's deal.
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/edits",
+                          json={"entity_id": e1["id"], "deal_id": deal2["id"]},
+                          headers=RECORDER)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["entity_id"] == e2["id"], \
+        "the deal's own parent outranks the sent entity id"
+    assert body["deal_id"] == deal2["id"]
+
+    # A standalone lead has no parent — the sent entity stands (the heal path).
+    lone = (await client.post("/v1/leads", json={
+        "company": f"Standalone {uuid.uuid4()}"}, headers=MGMT)).json()
+    row2 = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row2["id"])
+    r2 = await client.post(f"/v1/vox/conversations/{row2['id']}/edits",
+                           json={"entity_id": e1["id"], "lead_id": lone["id"],
+                                 "deal_id": ""},
+                           headers=RECORDER)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["entity_id"] == e1["id"]
+    assert r2.json()["lead_id"] == lone["id"]
+
+
 async def test_reanalysis_merges_new_lender_events_into_confirmed_rows(client: AsyncClient):
     """The live miss: the reviewer corrected the lender rows (override), then
     added "also got reply from Canara Bank" to the transcript and re-analyzed —
