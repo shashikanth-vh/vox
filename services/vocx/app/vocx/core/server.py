@@ -83,6 +83,37 @@ def _logger(config: dict[str, Any]) -> logging.Logger:
     return logging.getLogger("vocx")
 
 
+
+def ask_sarvam(model: str, system: str, user: str) -> str:
+    """Sarvam-M through the OpenAI-compatible chat API — the EXCLUSIVE
+    alternative to Claude when VOCX_STRUCTURE_PROVIDER=sarvam. Text-only (no
+    forced tool call), so the contract validator + repair round downstream are
+    the wall, exactly as the text fallback always was. Base URL and model are
+    env-overridable; both auth header styles Sarvam has used are sent."""
+    import os
+
+    import httpx
+    key = (os.environ.get("SARVAM_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError(
+            "VOCX_STRUCTURE_PROVIDER=sarvam but SARVAM_API_KEY is empty — set it in "
+            "deploy/compose/.env, or set the provider back to anthropic")
+    base = ((os.environ.get("SARVAM_BASE_URL") or "").strip()
+            or "https://api.sarvam.ai/v1").rstrip("/")
+    r = httpx.post(
+        f"{base}/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "api-subscription-key": key},
+        json={"model": model, "temperature": 0.0, "max_tokens": 8000,
+              "messages": [{"role": "system", "content": system},
+                           {"role": "user", "content": user}]},
+        timeout=180.0)
+    r.raise_for_status()
+    content = (r.json().get("choices") or [{}])[0].get("message", {}).get("content")
+    if not content:
+        raise RuntimeError("Sarvam answered without content — see the API response")
+    return str(content)
+
+
 class VocxApp:
     def __init__(self, store: AtlasStore | None = None, config: dict[str, Any] | None = None,
                  transcriber: Any = None, writer_factory: Any = None):
@@ -578,6 +609,13 @@ class VocxApp:
                 if stub:
                     with open(stub, encoding="utf-8") as fh:
                         return fh.read()
+                # EXCLUSIVE provider switch (VOCX_STRUCTURE_PROVIDER): "sarvam"
+                # routes EVERY structuring call to Sarvam-M; anything else (the
+                # default) is Claude below, untouched. Never both at once — the
+                # model name arriving here was chosen from the same variable, so
+                # the conversation log records what actually ran.
+                if (os.environ.get("VOCX_STRUCTURE_PROVIDER") or "").strip().lower() == "sarvam":
+                    return ask_sarvam(model, system, user)
                 import anthropic  # lazy: offline paths never import the SDK
                 client = anthropic.Anthropic(
                     api_key=os.environ[os.environ.get("VOCX_ANTHROPIC_KEY_ENV",

@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy as _copy
 import json
 import logging
+import os as _os
 import re as _re
 from datetime import date as _date
 from typing import Any, Callable
@@ -31,6 +32,19 @@ from ..spec import (
 # Model routing per the spec's cost/quality split.
 MODEL_NOTE = "claude-haiku-4-5-20251001"
 MODEL_LIVE = "claude-sonnet-5"
+
+
+def _structure_model(mode: str) -> str:
+    """The model this box structures with — an EXCLUSIVE configuration switch.
+    Default (unset / "anthropic"): Claude, Haiku for notes and Sonnet for live,
+    exactly as production runs. "sarvam": Sarvam-M for everything, so a trial
+    box compares like for like. Never both at once; the server's ask_model
+    dispatches on the same variable, and the conversation log records whichever
+    model actually structured the take."""
+    provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+    if provider == "sarvam":
+        return (_os.environ.get("SARVAM_MODEL") or "").strip() or "sarvam-m"
+    return MODEL_LIVE if mode == "live" else MODEL_NOTE
 
 log = logging.getLogger("vox.pipeline")
 
@@ -753,7 +767,7 @@ def structure_transcript(
     prompt_version — stay untouched.
 
     Returns {"report", "prompt_version", "registry_version", "model"}."""
-    model = MODEL_LIVE if mode == "live" else MODEL_NOTE
+    model = _structure_model(mode)
     system = build_prompt(registry_version)
     context = f"{known_names}\n\n" if known_names else ""
     # The narrator has a name: summaries should read "Ananda H met R. Sharma",

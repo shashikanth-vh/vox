@@ -292,6 +292,13 @@ services:
       # --- The voice pipeline (/vocx/api/vocx/*) ----------------------------------------
       # Claude extraction; empty = the offline stub (typed transcripts still work).
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Structuring provider — EXCLUSIVE: "anthropic" (default; Haiku/Sonnet) or
+      # "sarvam" (Sarvam-M via their OpenAI-compatible API). Set in .env per box;
+      # unset means today's Claude behaviour exactly. Never both at once.
+      VOCX_STRUCTURE_PROVIDER: "${VOCX_STRUCTURE_PROVIDER:-anthropic}"
+      SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
+      SARVAM_MODEL: "${SARVAM_MODEL:-}"
+      SARVAM_BASE_URL: "${SARVAM_BASE_URL:-}"
       # Per-RM Google tokens, PKCE state, alias map, audio archive, Whisper model cache —
       # all on the persistent volume below. Losing it only means RMs reconnect Google
       # and the first transcription re-downloads the model.

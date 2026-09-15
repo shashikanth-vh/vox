@@ -389,6 +389,36 @@ def test_lender_second_pass_knows_when_not_to_ask():
     assert len(calls) == 1
 
 
+def test_the_structure_provider_switch_is_exclusive(monkeypatch):
+    """One box, one model: default is Claude (Haiku notes / Sonnet live) exactly
+    as production runs; VOCX_STRUCTURE_PROVIDER=sarvam routes EVERYTHING to
+    Sarvam-M — never both at once — and the run is attributed to the model
+    that actually structured it."""
+    from app.vocx.pipeline.structure import _structure_model, structure_transcript
+
+    monkeypatch.delenv("VOCX_STRUCTURE_PROVIDER", raising=False)
+    monkeypatch.delenv("SARVAM_MODEL", raising=False)
+    assert _structure_model("post_meeting") == "claude-haiku-4-5-20251001"
+    assert _structure_model("live") == "claude-sonnet-5"
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    assert _structure_model("post_meeting") == "sarvam-m"
+    assert _structure_model("live") == "sarvam-m"
+    monkeypatch.setenv("SARVAM_MODEL", "sarvam-m-large")
+    assert _structure_model("live") == "sarvam-m-large"
+    monkeypatch.delenv("SARVAM_MODEL", raising=False)
+
+    seen: list[str] = []
+
+    def ask(model, system, user):
+        seen.append(model)
+        return json.dumps(_valid_report())
+
+    out = structure_transcript("we met suryodaya", mode="post_meeting",
+                               ask_model=ask, capture_ts="2026-09-15T10:00:00Z")
+    assert out["model"] == "sarvam-m" and seen[0] == "sarvam-m"
+
+
 def test_lender_second_pass_failure_never_breaks_the_take():
     """The focused round answering prose instead of JSON — or anything else
     going wrong in it — leaves the report exactly as the main pass made it."""

@@ -631,6 +631,44 @@ async def test_committed_interaction_lands_in_structured_columns(stub_register):
     assert "captured by priya via VocX" in inter["notes"]
 
 
+def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
+    """The Sarvam branch: OpenAI-compatible chat call, both auth header styles,
+    deterministic temperature — and a missing key fails LOUDLY instead of
+    silently structuring nothing."""
+    import httpx
+
+    from app.vocx.core import server as core_server
+
+    calls: dict = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"ok": 1}'}}]}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.update(url=url, headers=headers, body=json)
+        return FakeResp()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setenv("SARVAM_API_KEY", "k-test")
+    got = core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+    assert got == '{"ok": 1}'
+    assert calls["url"] == "https://api.sarvam.ai/v1/chat/completions"
+    assert calls["headers"]["Authorization"] == "Bearer k-test"
+    assert calls["headers"]["api-subscription-key"] == "k-test"
+    assert calls["body"]["model"] == "sarvam-m"
+    assert calls["body"]["temperature"] == 0.0
+    assert calls["body"]["messages"] == [{"role": "system", "content": "SYS"},
+                                         {"role": "user", "content": "USR"}]
+
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+
+
 async def test_suggest_typeahead_matches_and_new_company(stub_register):
     """/v1/suggest ranks the live corpus for a partial name; an unknown name answers
     new_company=true so the UI can offer 'create as new company'."""
