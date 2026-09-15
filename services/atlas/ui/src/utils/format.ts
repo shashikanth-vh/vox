@@ -32,3 +32,22 @@ export const normName = (s?: string) =>
   String(s || '').toLowerCase()
     .replace(/\b(private|pvt|limited|ltd|llp|india|energy|energies|solutions?|services?|technologies|technology|ventures?|renewables?)\b/g, '')
     .replace(/[^a-z0-9]/g, '');
+
+// Bigram Dice similarity: how alike two names are as TYPED, tolerant of the
+// one-letter slips substring matching cannot see ("greenphill" ~ "Greenpill").
+// 0..1; ~0.55+ reads as "probably the same name".
+export function nameAlike(a: string, b: string): number {
+  const grams = (s: string) => {
+    const t = ` ${s.toLowerCase().replace(/\s+/g, ' ').trim()} `;
+    const out: string[] = [];
+    for (let i = 0; i < t.length - 1; i++) out.push(t.slice(i, i + 2));
+    return out;
+  };
+  const ga = grams(a); const gb = grams(b);
+  if (ga.length === 0 || gb.length === 0) return 0;
+  const counts = new Map<string, number>();
+  ga.forEach((g) => counts.set(g, (counts.get(g) || 0) + 1));
+  let hit = 0;
+  gb.forEach((g) => { const c = counts.get(g) || 0; if (c > 0) { hit += 1; counts.set(g, c - 1); } });
+  return (2 * hit) / (ga.length + gb.length);
+}

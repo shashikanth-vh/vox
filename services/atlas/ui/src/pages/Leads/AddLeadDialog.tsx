@@ -5,7 +5,7 @@ import { FieldGrid, TextFld, SelectFld } from '../../components/common/Field';
 import { referenceService } from '../../services/referenceService';
 import { leadsService } from '../../services/leadsService';
 import { db } from '../../api/atlasStore';
-import { normName } from '../../utils/format';
+import { nameAlike, normName } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 
 const ADAPT_SECT = ['Industrial Water', 'Water Treatment / WASH', 'Climate Data & IoT', 'Agri / Drone'];
@@ -27,17 +27,38 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
   const ref = referenceService;
   const blank = { company: '', contact: '', designation: '', sector: 'Other', lens: 'Mitigation', source: 'BDRM', sourceDetail: '', rm: defaultRm(user), temp: 'Warm', phone: '', notes: '' };
   const [f, setF] = useState(blank);
-  const [dupes, setDupes] = useState<string[]>([]);
+  // Live matches against the register as the name is TYPED: existing clients
+  // are selectable (the new lead attaches to them — a linked lead converts
+  // into a second deal under the SAME company, never a GREENPILLREN-2), open
+  // leads warn. Fuzzy, because "greenphill" must still find "Greenpill".
+  const [clientHits, setClientHits] = useState<{ code: string; name: string; rm?: string; entityId?: string }[]>([]);
+  const [leadHits, setLeadHits] = useState<string[]>([]);
+  const [linked, setLinked] = useState<{ code: string; name: string; entityId: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { if (open) { setF(blank); setDupes([]); setErr(''); setSaving(false); } }, [open]);
+  useEffect(() => { if (open) { setF(blank); setClientHits([]); setLeadHits([]); setLinked(null); setErr(''); setSaving(false); } }, [open]);
 
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v, ...(k === 'sector' ? { lens: ADAPT_SECT.includes(v) ? 'Adaptation' : 'Mitigation' } : {}) }));
 
   const checkDupes = (name: string) => {
-    const q = normName(name); if (q.length < 3) { setDupes([]); return; }
-    const c = Object.entries(db().clients).filter(([, v]: any) => normName(v.name).includes(q)).slice(0, 3).map(([code, v]: any) => `Existing client: ${v.name} (${code})`);
-    const l = db().leads.filter((x: any) => x.status === 'Active' && normName(x.company).includes(q)).slice(0, 2).map((x: any) => `Active lead: ${x.company} (${x.id})`);
-    setDupes([...c, ...l]);
+    const q = normName(name);
+    if (q.length < 3) { setClientHits([]); setLeadHits([]); return; }
+    const alike = (a: string) => normName(a).includes(q) || q.includes(normName(a))
+      || nameAlike(name, a) >= 0.55;
+    setClientHits(Object.entries(db().clients)
+      .filter(([, v]: any) => v?.name && alike(v.name))
+      .slice(0, 3)
+      .map(([code, v]: any) => ({ code, name: v.name, rm: v.rm, entityId: v.entityId })));
+    setLeadHits(db().leads
+      .filter((x: any) => x.status === 'Active' && !x.conv && alike(x.company))
+      .slice(0, 2)
+      .map((x: any) => `An active lead for this company already exists: ${x.company} (${x.id}${x.rm ? ` · RM ${x.rm}` : ''}) — adding another is allowed, but check first.`));
+  };
+
+  const linkTo = (c: { code: string; name: string; entityId?: string }) => {
+    if (!c.entityId) return;
+    setLinked({ code: c.code, name: c.name, entityId: c.entityId });
+    set('company', c.name);           // the canonical spelling travels with the link
+    setClientHits([]);
   };
 
   // Forms spec (Add lead): Company, Sector, Source all MANDATORY; Source detail is
@@ -55,7 +76,8 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
     setSaving(true);
     // The dialog stays open on failure so the entered lead isn't lost and the API's
     // own message (which field it rejected) is readable next to the fields.
-    const r = await leadsService.create(f, user.full);
+    const r = await leadsService.create(
+      { ...f, ...(linked ? { entityId: linked.entityId } : {}) }, user.full);
     setSaving(false);
     if (!r.ok) { setErr(r.error || 'Could not add the lead.'); return; }
     onSaved(); onClose();
@@ -68,10 +90,27 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
       </DialogTitle>
       <DialogContent dividers>
         <FieldGrid>
-          <TextFld label="Company" required value={f.company} onChange={(v) => { set('company', v); checkDupes(v); }} />
+          <TextFld label="Company" required live value={f.company}
+            onChange={(v) => { set('company', v); if (linked) setLinked(null); checkDupes(v); }} />
           <TextFld label="Contact person" value={f.contact} onChange={(v) => set('contact', v)} />
         </FieldGrid>
-        {dupes.map((d, i) => <Alert key={i} severity="warning" sx={{ mt: 1, py: 0, fontSize: 12 }}>{d}</Alert>)}
+        {linked && (
+          <Alert severity="success" sx={{ mt: 1, py: 0, fontSize: 12 }}
+            onClose={() => setLinked(null)}>
+            This lead will be attached to <b>{linked.name}</b> ({linked.code}) — its
+            conversion adds a deal under that company, never a duplicate one.
+          </Alert>
+        )}
+        {!linked && clientHits.map((c) => (
+          <Alert key={c.code} severity="info" icon={false}
+            sx={{ mt: 1, py: 0, fontSize: 12, cursor: c.entityId ? 'pointer' : 'default' }}
+            onClick={() => linkTo(c)}
+            action={c.entityId ? <Button size="small" onClick={() => linkTo(c)}>Attach</Button> : undefined}>
+            Existing client: <b>{c.name}</b> ({c.code}{c.rm ? ` · RM ${c.rm}` : ''}) — same
+            company? Attach the lead to it.
+          </Alert>
+        ))}
+        {leadHits.map((d, i) => <Alert key={i} severity="warning" sx={{ mt: 1, py: 0, fontSize: 12 }}>{d}</Alert>)}
         <Box sx={{ mt: 1.4 }}>
           <FieldGrid>
             <SelectFld label="Sector" required value={f.sector} onChange={(v) => set('sector', v)} options={ref.getRefSync('Sector')} />

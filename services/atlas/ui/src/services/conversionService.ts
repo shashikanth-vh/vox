@@ -12,6 +12,10 @@ import type { Lead } from '../pages/Leads/lead.types';
 export interface PushPayload {
   code: string;
   existing: boolean;
+  /** The resolved existing client's register id — sent with the conversion so
+   *  the plane attaches the deal to EXACTLY that company, never a same-named
+   *  sibling. Empty/undefined when the company is genuinely new. */
+  existingEntityId?: string;
   client: { sector: string; lens: string; state: string; about: string; toi: string };
   deal: { temp: string; source: string; sourceDetail: string; an: string };
   flags: { lend: boolean; syn: boolean; am: boolean };
@@ -104,17 +108,18 @@ export const conversionService = {
    * search returns null — the conversion settles the company canonically server-side
    * anyway, so a missed match costs nothing.
    */
-  async findExistingCode(company: string): Promise<string | null> {
+  async findExisting(company: string): Promise<{ code: string; entityId?: string } | null> {
     if (USE_REAL_API) {
       try {
-        return (await entitiesService.findByName(company))?.code ?? null;
+        const row = await entitiesService.findByName(company);
+        return row?.code ? { code: row.code, entityId: (row as any).entityId } : null;
       } catch (e) {
         console.warn('[register] existing-company search failed:', e);
         return null;
       }
     }
     const hit = Object.entries(db().clients).find(([, v]: any) => normName(v.name) === normName(company));
-    return hit ? hit[0] : null;
+    return hit ? { code: hit[0], entityId: (hit[1] as any)?.entityId } : null;
   },
   /**
    * Push a lead to Deals: qualify it on the workflow plane, and convert it only if that
@@ -215,6 +220,9 @@ export const conversionService = {
           analyst,
           analyst_id: accessIdOf(analyst),
           note: `Converted from lead ${lead.id} (${lead.company}).`,
+          // The dialog's resolved client, verified plane-side — a same-named
+          // sibling company can never swallow the conversion.
+          entity_id: p.existingEntityId || undefined,
           // THE CLIENT this dialog collects — the "one save: client + deal + product
           // rows" promise. A deal must belong to a company, and a lead added through
           // the Add-lead form carries none, so the plane links the matching client or

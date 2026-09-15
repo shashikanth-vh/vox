@@ -36,7 +36,7 @@ export function FieldShell({ label, required, children }: { label: string; requi
   );
 }
 
-export function TextFld({ label, value, onChange, disabled, required, type = 'text', multiline, placeholder, minRows, maxRows }: Base & { type?: string; multiline?: boolean; placeholder?: string; minRows?: number; maxRows?: number }) {
+export function TextFld({ label, value, onChange, disabled, required, type = 'text', multiline, placeholder, minRows, maxRows, live }: Base & { type?: string; multiline?: boolean; placeholder?: string; minRows?: number; maxRows?: number; live?: boolean }) {
   // COMMIT ON LEAVING THE FIELD, not per keystroke. The old per-keystroke onChange
   // reached remoteDebounced, whose trailing 700ms fired at every typing PAUSE — one
   // slowly-typed remark became six PATCHes and six audit rows ("Updated … remarks
@@ -55,7 +55,10 @@ export function TextFld({ label, value, onChange, disabled, required, type = 'te
       <TextField value={draft ?? value ?? ''} disabled={disabled} type={type} multiline={multiline}
         minRows={multiline ? (minRows ?? 2) : undefined}
         maxRows={multiline ? maxRows : undefined} placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
+        // `live` opts back into per-keystroke onChange — for LOCAL-ONLY state
+        // that drives a typeahead (the Add-lead company matcher). Never use it
+        // for a field whose parent writes to the server on change.
+        onChange={(e) => (live ? onChange(e.target.value) : setDraft(e.target.value))}
         onBlur={commit}
         onKeyDown={multiline ? undefined : (e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         fullWidth size="small" sx={CONTROL_SX} />

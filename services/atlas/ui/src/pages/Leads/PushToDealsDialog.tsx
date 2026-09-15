@@ -37,6 +37,7 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
   const { user } = useAuth();
   const ref = referenceService;
   const [existingCode, setExistingCode] = useState<string | null>(null);
+  const [existingEntityId, setExistingEntityId] = useState<string | undefined>(undefined);
   // A LIVE conversion run on this lead: the dialog becomes the request's control
   // surface (resubmit a returned one, withdraw an open one) instead of a second push.
   const [run, setRun] = useState<{ returned: boolean; workflowId: string } | null>(null);
@@ -60,11 +61,11 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
     void referenceService.hydrate();
     // The register owns the answer, so it is awaited; the dialog opens on the minted code
     // and corrects itself if the company turns out to be on the register already.
-    setExistingCode(null); setCode(mintCode(lead.company));
+    setExistingCode(null); setExistingEntityId(undefined); setCode(mintCode(lead.company));
     let alive = true;
-    void conversionService.findExistingCode(lead.company).then((ex) => {
+    void conversionService.findExisting(lead.company).then((ex) => {
       if (!alive || !ex) return;
-      setExistingCode(ex); setCode(ex);
+      setExistingCode(ex.code); setCode(ex.code); setExistingEntityId(ex.entityId);
     });
     setErr(''); setBusy(false); setRun(null);
     void conversionService.conversionRun(lead).then((r) => {
@@ -113,7 +114,7 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
     // busy until both land rather than closing on a push that may still be refused.
     setBusy(true);
     const r = await conversionService.pushLeadToDeals(lead, {
-      code, existing: !!existingCode,
+      code, existing: !!existingCode, existingEntityId,
       client: { sector: cl.sector, lens: cl.lens, state: cl.state, about: cl.about, toi: cl.toi },
       deal: { temp: cl.temp, source: cl.source, sourceDetail: cl.sourceDetail, an: cl.an === '—' ? '' : cl.an },
       flags, lending: lend, syndication: syn, am,

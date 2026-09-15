@@ -731,6 +731,10 @@ class LeadConversionIn(BaseModel):
     # Without these, RM/analyst line assignments are never created on conversion.
     rm_id: str | None = None
     analyst_id: str | None = None
+    # The client the pusher RESOLVED in the dialog ("existing client — records
+    # will merge"): honoured ahead of name matching, so a same-named sibling
+    # company can never swallow the conversion.
+    entity_id: str | None = None
     note: str | None = None
     # Deal + product-line opening facts (Push-to-Deals dialog) — forwarded into the
     # conversion input verbatim so every ticked line is born carrying its OWN figure
@@ -766,6 +770,7 @@ class LeadConversionIn(BaseModel):
     industry: str | None = Field(default=None, max_length=200)
     about: str | None = None
 
+    _entity_is_uuid = field_validator("entity_id")(_uuid_or_none)
     _ids_are_uuids = field_validator("rm_id", "analyst_id")(_uuid_or_none)
 
     @field_validator("lead_id")
@@ -1512,6 +1517,37 @@ def create_app() -> FastAPI:
         Without a company name anywhere, nothing can be resolved — that is the one case
         the caller must fix, and the message says how."""
         from app.activities import _canonical, _entity_code
+
+        # 0. The pusher already resolved the client in the dialog — that explicit
+        # choice outranks name matching (canonical folding once missed a
+        # same-named sibling and minted GREENPILLREN-2). Verified, never trusted.
+        if payload.entity_id:
+            tenant0 = caller.tenant or settings.register_tenant
+            base0 = settings.register_base_url.rstrip('/')
+            svc0 = {"X-API-Key": settings.register_api_key, "X-Tenant": tenant0}
+            try:
+                got = await request.app.state.http.get(
+                    f"{base0}/v1/entities/{payload.entity_id}", headers=svc0)
+            except httpx.HTTPError as exc:
+                return "", _problem(503, "Service unavailable",
+                                    f"The chosen client could not be verified: {exc}")
+            if got.status_code == 200:
+                entity_id0 = str(got.json()["id"])
+                path0 = f"/v1/leads/{payload.lead_id}"
+                try:
+                    linked0 = await request.app.state.http.patch(
+                        f"{base0}{path0}", json={"entity_id": entity_id0},
+                        headers=_delegated_headers(request, who, caller, "PATCH", path0))
+                except httpx.HTTPError as exc:
+                    return "", _problem(502, "Upstream unavailable",
+                                        f"The lead could not be linked to its client: {exc}")
+                if linked0.status_code >= 300:
+                    return "", _problem(502, "Upstream error",
+                                        f"The lead could not be linked to its client "
+                                        f"(HTTP {linked0.status_code}).")
+                return entity_id0, None
+            # An id the register does not know falls through to name matching —
+            # the dialog's snapshot can be stale; the register stays the truth.
 
         name = ((payload.company_name or lead_row.get("company") or "").strip())
         if not name or name == "(unknown)":
