@@ -1,4 +1,5 @@
 import { USE_REAL_API } from '../api/http';
+import { db } from '../api/atlasStore';
 import { leadsService } from './leadsService';
 import { dealsService } from './dealsService';
 import { lendingService } from './lendingService';
@@ -39,6 +40,28 @@ function armFocusRehydrate(): void {
 }
 armFocusRehydrate();
 
+// FACILITY ALIASES. A company's second deal is numbered <code>-2, and the
+// Deals grid keys a row by that number — but no ENTITY carries it, so the
+// drawer opened on such a row looked up db().clients["GREENPILLREN-2"],
+// found nothing, and rendered an empty shell (blank profile, zero
+// interactions) while the company's whole story sat one row up. Any deal
+// code without a client entry now points at its OWNING company's record
+// (aliasOf marks it, so firm-scans and dupe checks can skip the doubles) —
+// both rows open the same company.
+function aliasFacilityCodes(): void {
+  const clients = db().clients as Record<string, any>;
+  const byEntity = new Map<string, string>();
+  Object.entries(clients).forEach(([code, c]: [string, any]) => {
+    if (c?.entityId && !c.aliasOf) byEntity.set(String(c.entityId), code);
+  });
+  (db().deals as any[]).forEach((d: any) => {
+    const code = d?.code;
+    if (!code || clients[code] || !d?.entityId) return;
+    const owner = byEntity.get(String(d.entityId));
+    if (owner && clients[owner]) clients[code] = { ...clients[owner], aliasOf: owner };
+  });
+}
+
 export async function hydrateBook(force = false): Promise<void> {
   if (!USE_REAL_API) return;
   if (!force && Date.now() - hydratedAt < TTL_MS) return;
@@ -53,6 +76,7 @@ export async function hydrateBook(force = false): Promise<void> {
       assetMonService.hydrateAll(),
       fiService.hydrate(),
     ]);
+    aliasFacilityCodes();
     hydratedAt = Date.now();
   })().finally(() => { inflight = null; });
   return inflight;

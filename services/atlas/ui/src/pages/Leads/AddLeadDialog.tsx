@@ -55,7 +55,7 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
       return !!qd && !!ad && nameAlike(qd, ad) >= 0.62;    // one-letter slips
     };
     setClientHits(Object.entries(db().clients)
-      .filter(([, v]: any) => v?.name && alike(v.name))
+      .filter(([, v]: any) => v?.name && !v.aliasOf && alike(v.name))
       .slice(0, 3)
       .map(([code, v]: any) => ({ code, name: v.name, rm: v.rm, entityId: v.entityId })));
     setLeadHits(db().leads

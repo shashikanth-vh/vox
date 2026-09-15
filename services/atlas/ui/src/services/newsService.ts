@@ -490,7 +490,8 @@ export const newsService = {
    */
   async sweepAll(by: string, onProgress: (s: { done: number; total: number; found: number }) => void) {
     await refreshFirms();
-    const codes = Object.keys(db().clients || {});
+    const codes = Object.keys(db().clients || {})
+      .filter((c) => !(db().clients as any)[c]?.aliasOf);   // one firm, one scan
     // term -> the firms watching it. Two firms watching the same promoter is ONE
     // search whose result files against both.
     const owners = new Map<string, string[]>();
@@ -567,7 +568,8 @@ export const newsService = {
     // firms and reported success. Warm it here rather than trusting the route someone
     // took to arrive.
     await refreshFirms();
-    const codes = Object.keys(db().clients || {});
+    const codes = Object.keys(db().clients || {})
+      .filter((c) => !(db().clients as any)[c]?.aliasOf);   // one firm, one scan
     let found = 0, failTerms = 0, done = 0;
     for (const code of codes) {
       const r = await this.scanCompany(code, by, true);
