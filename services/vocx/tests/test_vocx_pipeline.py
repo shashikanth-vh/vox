@@ -706,6 +706,24 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert "reasoning_effort" not in calls["body"]
     monkeypatch.delenv("SARVAM_REASONING_EFFORT", raising=False)
 
+    # Transient failures (429/5xx/network) retry with backoff before failing —
+    # a blip never kills a take outright.
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    hits = {"n": 0}
+
+    def flaky_post(url, headers=None, json=None, timeout=None):
+        hits["n"] += 1
+        if hits["n"] < 3:
+            return FakeResp(status=503, text="upstream busy")
+        return FakeResp(payload={"choices": [{"message": {"content": "OK"}}],
+                                 "usage": {"prompt_tokens": 10,
+                                           "completion_tokens": 5,
+                                           "total_tokens": 15}})
+
+    monkeypatch.setattr(httpx, "post", flaky_post)
+    assert core_server.ask_sarvam("sarvam-m", "SYS", "USR") == "OK"
+    assert hits["n"] == 3
+
     monkeypatch.delenv("SARVAM_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
         core_server.ask_sarvam("sarvam-m", "SYS", "USR")

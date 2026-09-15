@@ -85,20 +85,28 @@ def _logger(config: dict[str, Any]) -> logging.Logger:
 
 
 def ask_sarvam(model: str, system: str, user: str) -> str:
-    """Sarvam-M through the OpenAI-compatible chat API — the EXCLUSIVE
+    """Sarvam through the OpenAI-compatible chat API — the EXCLUSIVE
     alternative to Claude when VOCX_STRUCTURE_PROVIDER=sarvam. Text-only (no
     forced tool call), so the contract validator + repair round downstream are
     the wall, exactly as the text fallback always was.
 
-    Field lesson baked in: the first live call answered a bare '400 Bad
-    Request' and the error hid Sarvam's own explanation. Every refusal now
-    carries the response BODY; the two auth header styles Sarvam has used are
-    tried one at a time (some gateways 400 on unexpected auth headers); and
-    max_tokens defaults to a cautious 4096 (8000 exceeded a cap), tunable via
-    SARVAM_MAX_TOKENS. Base URL and model are env-overridable."""
-    import os
+    Production posture, each point paid for in the field:
+    * transient failures (network, 429, 5xx) retry twice with backoff before
+      failing into the pipeline's own retry path — a blip never kills a take;
+    * every refusal carries Sarvam's response BODY, never a bare status;
+    * the two auth header styles are tried one at a time (both at once may
+      itself 400);
+    * sarvam-105b REASONS by default and once spent the whole budget thinking:
+      reasoning_effort is requested at 'low' (SARVAM_REASONING_EFFORT
+      overrides; 'off' omits the field), max_tokens defaults to 8192
+      (SARVAM_MAX_TOKENS tunes);
+    * per-call token usage is logged, so the desk can reconcile the Sarvam
+      dashboard spend against conversations."""
+    import logging
+    import time
 
     import httpx
+    _slog = logging.getLogger("vox.pipeline")
     key = (os.environ.get("SARVAM_API_KEY") or "").strip()
     if not key:
         raise RuntimeError(
@@ -113,20 +121,27 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
-    # sarvam-105b REASONS by default and, unchecked, spent the whole token
-    # budget on reasoning_content and finished 'length' with content null.
-    # Ask for the minimum; SARVAM_REASONING_EFFORT overrides (low/medium/high),
-    # and 'off' omits the field for a model that rejects it.
     effort = (os.environ.get("SARVAM_REASONING_EFFORT") or "low").strip().lower()
     if effort != "off":
         body["reasoning_effort"] = effort
+
+    auth_styles = ({"Authorization": f"Bearer {key}"}, {"api-subscription-key": key})
+    style = 0
+    transient_left = 2
     failures: list[str] = []
-    for headers in ({"Authorization": f"Bearer {key}"},
-                    {"api-subscription-key": key}):
-        r = httpx.post(f"{base}/chat/completions", headers=headers, json=body,
-                       timeout=180.0)
+    while True:
+        try:
+            r = httpx.post(f"{base}/chat/completions", headers=auth_styles[style],
+                           json=body, timeout=180.0)
+        except httpx.HTTPError as exc:
+            if transient_left:
+                transient_left -= 1
+                time.sleep(3)
+                continue
+            raise RuntimeError(f"Sarvam unreachable after retries: {exc}") from exc
         if r.status_code < 300:
-            choice = (r.json().get("choices") or [{}])[0]
+            payload = r.json()
+            choice = (payload.get("choices") or [{}])[0]
             content = (choice.get("message") or {}).get("content")
             if not content:
                 if choice.get("finish_reason") == "length":
@@ -137,11 +152,24 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
                         f"at 'low'. Response head: {r.text[:200]}")
                 raise RuntimeError(
                     f"Sarvam answered without content: {r.text[:300]}")
+            usage = payload.get("usage") or {}
+            _slog.info("sarvam call: model=%s prompt_tokens=%s completion_tokens=%s "
+                       "total_tokens=%s", model, usage.get("prompt_tokens"),
+                       usage.get("completion_tokens"), usage.get("total_tokens"))
             return str(content)
-        failures.append(f"[{'/'.join(headers)} -> HTTP {r.status_code}] "
+        if r.status_code == 429 or r.status_code >= 500:
+            if transient_left:
+                transient_left -= 1
+                time.sleep(5 if r.status_code == 429 else 3)
+                continue
+            raise RuntimeError(
+                f"Sarvam kept failing: HTTP {r.status_code} {r.text[:300]}")
+        failures.append(f"[{'/'.join(auth_styles[style])} -> HTTP {r.status_code}] "
                         f"{r.text[:300]}")
-        if r.status_code not in (400, 401, 403):
-            break                        # 5xx/429: retrying auth style won't help
+        if r.status_code in (400, 401, 403) and style == 0:
+            style = 1
+            continue
+        break
     raise RuntimeError("Sarvam refused the request — " + " | ".join(failures))
 
 
@@ -1038,7 +1066,11 @@ class VocxApp:
         # directory, which exists, so the unguarded check would report configured=True.
         google_configured = bool(secret) and (os.path.exists(secret) or (
             not os.path.isabs(secret) and os.path.exists(os.path.join(HERE, secret))))
-        extraction = "haiku" if os.environ.get(self.config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")) else "offline_stub"
+        provider = (os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+        if provider == "sarvam":
+            extraction = "sarvam" if os.environ.get("SARVAM_API_KEY") else "offline_stub"
+        else:
+            extraction = "haiku" if os.environ.get(self.config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")) else "offline_stub"
         astore = self.audio_store()
         return {"ok": True, "stt": stt, "stt_backend": backend,
                 "audio_store": getattr(astore, "kind", None) or "off",
