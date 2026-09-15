@@ -244,7 +244,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   /** A company can carry several open leads and live deals at once — after the
    *  company is chosen, the recording still has to say WHICH line it is about. */
   const [lineChoice, setLineChoice] =
-    useState<{ entityId: string; name: string; leads: any[]; deals: any[] } | null>(null);
+    useState<{ entityId: string; name: string; code?: string; leads: any[]; deals: any[] } | null>(null);
   const [dealRow, setDealRow] = useState<any>(null);
   const [mandateLenders, setMandateLenders] = useState<string[]>([]);
   // transcript correction: the fix is written here, the original never changes
@@ -469,7 +469,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         await pinTo({ entity_id: entityId, lead_id: '', deal_id: '' });
         return;
       }
-      setLineChoice({ entityId, name: c.name, leads, deals });
+      setLineChoice({ entityId, name: c.name, code: c.code, leads, deals });
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
@@ -804,7 +804,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           /* The company is chosen — now WHICH of its lines is this recording about? */
           <>
             <div className="atlas-cand" style={{ marginBottom: 12 }}>
-              <span className="as-heard">{lineChoice.name}</span>
+              <span className="as-heard">{lineChoice.name}{lineChoice.code ? ` · ${lineChoice.code}` : ''}</span>
               {linkThenApprove
                 ? 'Belongs to one of these lines? Pick it — otherwise continue and it files on the company timeline.'
                 : 'This company has open lines. Pick the one this conversation belongs to.'}
@@ -844,7 +844,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                   entity_id: String(d.entity_id || lineChoice.entityId), lead_id: '' })}>
                 <div>
                   <div className="ao-name">Deal {d.deal_no || d.code || ''}</div>
-                  <div className="ao-meta">{[d.product_type, d.stage, d.rm && `RM ${d.rm}`]
+                  <div className="ao-meta">{[lineChoice.code && `on ${lineChoice.code}`,
+                    d.product_type, d.stage, d.rm && `RM ${d.rm}`]
                     .filter(Boolean).join(' · ')}</div>
                 </div>
                 <div className="ao-score possible">Pick</div>
