@@ -816,6 +816,14 @@ _SARVAM_FIELD_EXTRAS = {
                      "when a split was spoken, else the full requirement"),
     "asset_location": (" — the location as spoken, even shorthand or a site "
                        "code (e.g. 'AMPY (2.5 into 4 sites)')"),
+    # the review header reads "Sector · Subsector · <location>" from this
+    # cell — the canonical prompt's rule is 'city, site or place AS SPOKEN',
+    # not the meeting venue; unbriefed, the model nulled it on a call while
+    # 'Jhansi, Uttar Pradesh' sat in the transcript.
+    "location": (" — the city/site/place spoken in the conversation (the "
+                 "counterparty's or project's place counts, e.g. 'Jhansi, "
+                 "Uttar Pradesh'), not only the meeting venue; null only "
+                 "when no place was spoken"),
     "opportunity_score": (" — SUGGEST from the business substance, not only "
                           "spoken sentiment: 1-2 vague interest or no real "
                           "ask; 3 a concrete, actionable ask (a specific "

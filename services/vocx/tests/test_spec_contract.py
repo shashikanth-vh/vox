@@ -522,6 +522,10 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "syndicated portion" in dsize
     loc = _sarvam_field_brief(am["asset_location"], reg)
     assert "shorthand" in loc
+    # the header's "Sector · Subsector · UP" reads common.location — any
+    # place spoken counts, not only the meeting venue
+    mloc = _sarvam_field_brief(common["location"], reg)
+    assert "not only the meeting venue" in mloc
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal
