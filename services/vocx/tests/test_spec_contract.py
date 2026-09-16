@@ -1071,6 +1071,38 @@ def test_lane_status_lines_are_composed_from_the_cells(monkeypatch):
     assert r2["lending"]["remarks"]["value"].count("₹5 Cr") == 1
 
 
+def test_a_pure_chase_note_files_without_the_word_syndication(monkeypatch):
+    """The RM records "chased HDFC Bank on the mandate, they will revert" —
+    nobody says "syndication". The lender ledger lives on the syndication
+    block, so chase/reply language with lender context carries the lane
+    deterministically and the focused pass files the event. A reminder with
+    no lender context stays out of the lane."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({"detected_use_cases": [],
+                               "entity_candidates": [], "common": {}})
+        if "lender chase/reply" in system:
+            return json.dumps([{"lender": "HDFC Bank", "kind": "chase",
+                                "note": "Chased on the mandate; will revert."}])
+        return json.dumps({})
+
+    r = structure_transcript(
+        "I chased HDFC Bank on the Greenpill mandate, they will revert",
+        mode="note", ask_model=ask, capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert "syndication" in r["detected_use_cases"]
+    lu = r["syndication"]["lender_updates"]["value"]
+    assert lu and lu[0]["lender"] == "HDFC Bank"
+
+    r2 = structure_transcript(
+        "reminded the team to finish the deck for tomorrow",
+        mode="note", ask_model=ask, capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert "syndication" not in r2["detected_use_cases"]
+
+
 def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():
     """Defense in depth behind the assembly wrap: a non-object cell reaching
     the validator raises ContractError (which salvage handles), never

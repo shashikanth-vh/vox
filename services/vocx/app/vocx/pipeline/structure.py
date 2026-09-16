@@ -954,6 +954,12 @@ def _sarvam_parallelism() -> int:
 # survives; data_quality_flags (system field) is the artifacts' one home and
 # is never touched. Sarvam path only.
 
+# Lender-ish context for a chase/reply note — the verbs alone are too broad
+# ("reminded the team to send the deck" is not a lender event).
+_CHASE_CONTEXT_RE = _re.compile(
+    r"lender|bank|nbfc|sanction|mandate|syndicat|co-?lend|term\s+sheet",
+    _re.IGNORECASE)
+
 _REQUIREMENT_RE = _re.compile(
     r"working\s+capital|term\s+loan|project\s+financ|"
     r"fund(?:ing)?\s+requirement|requirement\s+(?:of|is)|"
@@ -1282,6 +1288,16 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
     # alone, so the companion is deterministic: requirement language spoken
     # + syndication detected => lending rides too. A chase-only follow-up
     # has no requirement language and stays syndication-alone.
+    # Log-chase / log-reply notes: the RM records "chased HDFC, they will
+    # revert" — nobody says the word "syndication". The lender ledger lives
+    # on the syndication block, so chase/reply language with lender context
+    # carries the lane deterministically and the focused lender pass then
+    # files the events; without this, a mis-classified chase note would
+    # silently never reach the chase board.
+    if ("syndication" not in detected and "syndication" in ucs
+            and _LENDER_VERB_RE.search(transcript)
+            and _CHASE_CONTEXT_RE.search(transcript)):
+        detected.append("syndication")
     if ("syndication" in detected and "lending" not in detected
             and "lending" in ucs and _REQUIREMENT_RE.search(transcript)):
         detected.append("lending")
