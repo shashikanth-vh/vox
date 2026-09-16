@@ -146,10 +146,12 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     * every refusal carries Sarvam's response BODY, never a bare status;
     * the two auth header styles are tried one at a time (both at once may
       itself 400);
-    * sarvam-105b REASONS by default and once spent the whole budget thinking:
-      reasoning_effort is requested at 'low' (SARVAM_REASONING_EFFORT
-      overrides; 'off' omits the field), max_tokens defaults to 8192
-      (SARVAM_MAX_TOKENS tunes);
+    * the PRESENCE of reasoning_effort is what switches sarvam-105b into
+      thinking mode ('low' still reasoned past an 8192 budget; the desk's
+      prototype, sending no field, answered directly) — the default request
+      OMITS it, and SARVAM_REASONING_EFFORT=low/medium/high opts thinking
+      back in deliberately; max_tokens defaults to 8192 (SARVAM_MAX_TOKENS
+      tunes);
     * per-call token usage is logged, so the desk can reconcile the Sarvam
       dashboard spend against conversations."""
     import logging
@@ -175,8 +177,8 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     body = {"model": model, "temperature": 0.0, "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
-    effort = (os.environ.get("SARVAM_REASONING_EFFORT") or "low").strip().lower()
-    if effort != "off":
+    effort = (os.environ.get("SARVAM_REASONING_EFFORT") or "").strip().lower()
+    if effort in ("low", "medium", "high"):
         body["reasoning_effort"] = effort
 
     auth_styles = ({"Authorization": f"Bearer {key}"}, {"api-subscription-key": key})

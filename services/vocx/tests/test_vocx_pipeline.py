@@ -666,7 +666,13 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     assert calls["body"]["model"] == "sarvam-m"
     assert calls["body"]["temperature"] == 0.0
     assert calls["body"]["max_tokens"] == 8192
+    # Presence of reasoning_effort SWITCHES THINKING ON (field-proven): the
+    # default request omits it, exactly like the desk's working prototype.
+    assert "reasoning_effort" not in calls["body"]
+    monkeypatch.setenv("SARVAM_REASONING_EFFORT", "low")
+    core_server.ask_sarvam("sarvam-m", "SYS", "USR")
     assert calls["body"]["reasoning_effort"] == "low"
+    monkeypatch.delenv("SARVAM_REASONING_EFFORT", raising=False)
     assert calls["body"]["messages"] == [{"role": "system", "content": "SYS"},
                                          {"role": "user", "content": "USR"}]
 
