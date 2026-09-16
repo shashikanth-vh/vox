@@ -718,6 +718,24 @@ def test_ask_sarvam_speaks_the_openai_compatible_dialect(monkeypatch):
     monkeypatch.setattr(httpx, "post", parked_post)
     assert core_server.ask_sarvam("sarvam-m", "SYS", "USR") == '{"ok": 2}'
 
+    # The salvage demands VALID JSON and prefers the report-shaped object:
+    # a schema snippet the model quoted while thinking ({"value": ..., with a
+    # literal ellipsis) must never win over the actual report further down.
+    def quoted_schema_post(url, headers=None, json=None, timeout=None):
+        return FakeResp(payload={"choices": [{
+            "finish_reason": "stop",
+            "message": {"content": None,
+                        "reasoning_content":
+                            'the shape is {"value": ..., "confidence": "high"} '
+                            'so I will answer {"detected_use_cases": [], '
+                            '"note": {"value": 1, "confidence": "high"}} done'}}]})
+
+    monkeypatch.setattr(httpx, "post", quoted_schema_post)
+    got2 = core_server.ask_sarvam("sarvam-m", "SYS", "USR")
+    assert got2.startswith('{"detected_use_cases"')
+    import json as _json
+    assert _json.loads(got2)["note"]["value"] == 1
+
     # …and when a bigger budget is enough, the take survives.
     budgets.clear()
 

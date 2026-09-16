@@ -86,26 +86,52 @@ def _logger(config: dict[str, Any]) -> logging.Logger:
 
 def _sarvam_answer_text(message: dict) -> str:
     """The answer sarvam actually produced. content first; when the model left
-    it inside reasoning_content instead (seen live, and proven salvageable by
-    the desk's own probe app), strip the <think> blocks and lift the outermost
-    JSON object out of the surrounding prose. Empty string when there is no
-    answer anywhere — the caller decides whether that is a budget wall."""
+    it inside reasoning_content instead, salvage it — but only a VALID JSON
+    object counts. The naive first-to-last-brace lift once grabbed a schema
+    snippet the model was quoting in its thinking ({"value": ..., literally})
+    and fed garbage to the validator; candidates are now parsed, and the one
+    that looks like the report (detected_use_cases) wins, else the largest."""
+    import json as _json
     import re
 
-    def _lift(text: str) -> tuple[str, str]:
+    def _candidates(text: str) -> list[str]:
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        return (m.group(0) if m else "", text.strip())
+        dec = _json.JSONDecoder()
+        out: list[str] = []
+        i = tries = 0
+        while tries < 40:
+            j = text.find("{", i)
+            if j < 0:
+                break
+            tries += 1
+            try:
+                obj, end = dec.raw_decode(text[j:])
+            except ValueError:
+                i = j + 1
+                continue
+            if isinstance(obj, dict):
+                out.append(text[j:j + end])
+                i = j + end
+            else:
+                i = j + 1
+        return out
+
+    def _best(cands: list[str], fallback: str = "") -> str:
+        if not cands:
+            return fallback
+        for c in cands:
+            if '"detected_use_cases"' in c:
+                return c
+        return max(cands, key=len)
 
     content = str(message.get("content") or "")
     if content.strip():
-        obj, rest = _lift(content)
-        return obj or rest                 # content is the answer, JSON or not
-    # reasoning_content counts ONLY when a JSON object can be lifted from it —
-    # truncated thinking ("we need to parse the…") is not an answer, and must
-    # fall through to the budget-escalation path.
-    obj, _ = _lift(str(message.get("reasoning_content") or ""))
-    return obj
+        stripped = re.sub(r"<think>.*?</think>", "", content,
+                          flags=re.DOTALL).strip()
+        # content IS the answer; a parseable object inside it beats the prose
+        # around it, but unparseable content still goes to the repair round.
+        return _best(_candidates(content), stripped)
+    return _best(_candidates(str(message.get("reasoning_content") or "")))
 
 
 def ask_sarvam(model: str, system: str, user: str) -> str:
