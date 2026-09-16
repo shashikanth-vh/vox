@@ -848,7 +848,10 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
                 f"{json.dumps(registry['taxonomy'])}, or null — judge by the "
                 "ACTIVITY discussed, never the company's name (a company "
                 "named 'X Biofuels' building CBG / compressed biogas plants "
-                "is Biogas, not Biofuels)")
+                "is Biogas, not Biofuels). Value-chain roles: OEM "
+                "manufactures the equipment; EPC builds projects for "
+                "others; Developer owns/operates projects; C&I serves "
+                "commercial consumers on their site")
     if t == "enum" and f.get("options"):
         return f"- {key} ({label}): one of {[o['value'] for o in f['options']]} or null{hint}"
     if f.get("item_shape"):
@@ -871,6 +874,23 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
     if t == "date":
         return f"- {key} ({label}): date YYYY-MM-DD or null"
     return f"- {key} ({label}): text or null{hint}"
+
+
+def _details_briefs(canon: list[dict]) -> str:
+    """One brief line per canonical KEY DATA field. Dropdowns offer their
+    options (portfolio_stage stayed empty until they were listed); text
+    cells insist that a spoken plan WITHOUT numbers still files — 'Three
+    CBG plants' was left null live because no capacity figure accompanied
+    it, where the desk wants 'Three CBG plants (capacity not specified)'."""
+    return "\n".join(
+        (f"- {f['key']} ({f.get('label', f['key'])}): one of "
+         f"{f['options']} or null" if f.get("options") else
+         f"- {f['key']} ({f.get('label', f['key'])}): text or null — carry "
+         "every spoken detail (capacities incl. planned, tenors, "
+         "counterparties); a spoken plan WITHOUT numbers still fills the "
+         "cell (e.g. 'Three CBG plants (capacity not specified)'); null "
+         "only when nothing was said about it")
+        for f in canon)
 
 
 def _sarvam_parallelism() -> int:
@@ -1185,14 +1205,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             "from the transcript. Shape: {\"subsector_details\": "
             f"{{\"{subsector}\": {{<key>: {{\"value\": ..., \"confidence\": "
             "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}}\n"
-            "keys:\n" + "\n".join(
-                (f"- {f['key']} ({f.get('label', f['key'])}): one of "
-                 f"{f['options']} or null" if f.get("options") else
-                 f"- {f['key']} ({f.get('label', f['key'])}): text or null — "
-                 "carry every spoken detail (capacities incl. planned, "
-                 "tenors, counterparties), e.g. '26.3 MW operational; 12 MW "
-                 "planned' or 'UBPCL, 25 years'")
-                for f in canon))
+            "keys:\n" + _details_briefs(canon))
         got = _call(det_system, user)
         inner = (got.get("subsector_details")
                  if isinstance(got.get("subsector_details"), dict) else got)

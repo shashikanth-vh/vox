@@ -506,6 +506,7 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     # CBG plants filed under Biofuels live — compressed biogas is Biogas
     subsector = _sarvam_field_brief(common["subsector"], reg)
     assert "never the company's name" in subsector
+    assert "OEM" in subsector and "owns/operates" in subsector  # role key
     lending = {f["key"]: f for f in reg["blocks"]["lending"]["fields"]}
     nature = _sarvam_field_brief(lending["requirement_nature"], reg)
     assert "project_finance" in nature and "BUILD" in nature
@@ -802,6 +803,29 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
                                 capture_ts="2026-09-16T06:00:00Z",
                                 recorder="admin")
     assert out2["report"]["asset_monetisation"]["party_role"]["value"] == "owner"
+
+
+def test_every_subsectors_key_data_brief_renders_completely():
+    """The whole taxonomy, not just the two subsectors the trial exercised:
+    for all 32 subsectors, every canonical KEY DATA field is offered to the
+    model, every dropdown lists its options (portfolio_stage stayed empty
+    live until it was shown its choices), and every text cell carries the
+    plans-without-numbers rule ('Three CBG plants' was nulled live for
+    lacking a capacity figure)."""
+    from app.vocx.pipeline.structure import _details_briefs
+
+    reg = load_registry()
+    taxonomy_subs = {s for subs in reg["taxonomy"].values() for s in subs}
+    assert set(reg["subsector_canonicals"]) == taxonomy_subs
+    for sub, canon in reg["subsector_canonicals"].items():
+        briefs = _details_briefs(canon)
+        for f in canon:
+            assert f["key"] in briefs, (sub, f["key"])
+            if f.get("options"):
+                for opt in f["options"]:
+                    assert str(opt) in briefs, (sub, f["key"], opt)
+            else:
+                assert "WITHOUT numbers still fills" in briefs
 
 
 def test_machinery_talk_is_scrubbed_from_prose_deterministically(monkeypatch):
