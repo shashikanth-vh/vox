@@ -770,25 +770,160 @@ _SARVAM_RULES = (
     "object — no prose, no thinking, no code fences.")
 
 
+def _field_hint(f: dict) -> str:
+    """The registry's own per-field guidance, folded into the brief. The Claude
+    prompt renders these notes in full; the sarvam briefs dropping them is why
+    the trial run left deal_size empty and invented free-form chips — the model
+    was never told what each cell wants. First sentence, capped: guidance, not
+    an essay."""
+    notes = str(f.get("notes") or "").strip()
+    if not notes:
+        return ""
+    head = notes.split(". ")[0].strip().rstrip(".")
+    return f" — {head[:160]}" if head else ""
+
+
 def _sarvam_field_brief(f: dict, registry: dict) -> str:
     t = f.get("type", "string")
     key = f["key"]
+    label = f.get("label") or key
+    hint = _field_hint(f)
     if f.get("options_from") == "taxonomy.sectors":
         return f"- {key}: one of {list(registry['taxonomy'])} or null"
     if f.get("options_from") == "taxonomy.subsectors_of_selected_sector":
         return (f"- {key}: the subsector under the chosen sector, from "
                 f"{json.dumps(registry['taxonomy'])}, or null")
     if t == "enum" and f.get("options"):
-        return f"- {key}: one of {[o['value'] for o in f['options']]} or null"
+        return f"- {key} ({label}): one of {[o['value'] for o in f['options']]} or null{hint}"
     if f.get("item_shape"):
-        return f"- {key}: list of objects shaped {json.dumps(f['item_shape'])}"
+        return f"- {key}: list of objects shaped {json.dumps(f['item_shape'])}{hint}"
+    if t == "list" and f.get("closed_set"):
+        # e.g. offer_components: the UI renders these tokens as chips — spoken
+        # components must land as the canonical token, anything else spoken is
+        # appended as free text in the SAME list, never invented.
+        return (f"- {key} ({label}): list; use these exact tokens for what was "
+                f"spoken: {f['closed_set']}; append any OTHER spoken component "
+                f"as a short free-text string in the same list{hint}")
     if t == "list":
-        return f"- {key}: list of short strings"
+        return f"- {key} ({label}): list of short strings{hint}"
     if t in ("number", "int"):
-        return f"- {key}: number or null"
+        rng = ""
+        if f.get("min") is not None and f.get("max") is not None:
+            rng = f", integer {f['min']}-{f['max']},"
+        return f"- {key} ({label}): number{rng} or null{hint}"
     if t == "date":
-        return f"- {key}: date YYYY-MM-DD or null"
-    return f"- {key}: {f.get('label', key)} (text) or null"
+        return f"- {key} ({label}): date YYYY-MM-DD or null"
+    return f"- {key} ({label}): text or null{hint}"
+
+
+def _sarvam_parallelism() -> int:
+    """How many sarvam calls may run at once (block calls, digest chunks).
+    Default 3 — enough to collapse the wall-clock, gentle on their rate
+    limits; SARVAM_MAX_PARALLEL=1 restores strictly sequential calls."""
+    try:
+        n = int(_os.environ.get("SARVAM_MAX_PARALLEL") or 3)
+    except ValueError:
+        n = 3
+    return max(1, min(n, 8))
+
+
+# ----------------------------------------------------- the 90-minute wall
+# A 3-minute voice note (~2-3K chars) rides into every sarvam call whole. A
+# 90-minute live take (~60-90K chars) cannot: sarvam-105b has no long-context
+# headroom, and even where it fits, a 20K-token prompt is what drove the model
+# into runaway reasoning live. So above a budget the transcript is condensed
+# chunk by chunk into dense factual minutes (map), and the combined minutes
+# stand in for the transcript in the head call, every block call and the
+# lender pass (reduce). The minutes keep names, numbers, dates and lender
+# events verbatim — extraction fodder, not a summary.
+
+_SARVAM_DIGEST_SYSTEM = (
+    "You condense one segment of an Indian climate-finance desk meeting "
+    "transcript into dense factual minutes for a downstream extractor. Keep "
+    "EVERY company and person name, every number with its unit, every date "
+    "and time, every lender or bank mention with who chased or replied and "
+    "what was said, every commitment and follow-up — verbatim where spoken. "
+    "Do not interpret, do not drop specifics, do not add anything unspoken. "
+    "Return ONLY one JSON object shaped {\"minutes\": [\"...\"]} — one string "
+    "per fact, no prose, no thinking, no code fences.")
+
+
+def _sarvam_transcript_budget() -> tuple[int, int]:
+    try:
+        budget = int(_os.environ.get("SARVAM_TRANSCRIPT_CHAR_BUDGET") or 14000)
+    except ValueError:
+        budget = 14000
+    try:
+        chunk = int(_os.environ.get("SARVAM_DIGEST_CHUNK_CHARS") or 9000)
+    except ValueError:
+        chunk = 9000
+    return max(budget, 1000), max(chunk, 500)
+
+
+def _split_speech(text: str, chunk_chars: int) -> list[str]:
+    """Sentence-boundary chunking: every chunk ends at a sentence break (or,
+    failing that, whitespace), so no amount, name or date is cut in half."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if n - i <= chunk_chars:
+            out.append(text[i:])
+            break
+        window = text[i:i + chunk_chars]
+        cut = max(window.rfind(". "), window.rfind("? "), window.rfind("! "),
+                  window.rfind("\n"))
+        if cut < chunk_chars // 2:
+            cut = window.rfind(" ")
+        if cut <= 0:
+            cut = chunk_chars - 1
+        out.append(text[i:i + cut + 1])
+        i += cut + 1
+    return [c.strip() for c in out if c.strip()]
+
+
+def _sarvam_condense(transcript: str, ask: Callable[[str, str], str],
+                     context: str) -> str:
+    """Returns the transcript itself when it fits the budget (the 3-minute
+    case, byte-identical behavior), else the CONDENSED MINUTES that stand in
+    for it. Chunks condense in parallel; order is preserved on assembly. A
+    failed chunk fails the take into the runner's retry path — the minutes are
+    load-bearing, never best-effort."""
+    budget, chunk_chars = _sarvam_transcript_budget()
+    if len(transcript) <= budget:
+        return transcript
+    chunks = _split_speech(transcript, chunk_chars)
+
+    def _one(idx: int, chunk: str) -> list[str]:
+        raw = ask(_SARVAM_DIGEST_SYSTEM,
+                  f"{context}SEGMENT {idx + 1} of {len(chunks)}:\n{chunk}").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+        try:
+            got = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise StructuringError(
+                f"sarvam digest call {idx + 1}/{len(chunks)} returned non-JSON: "
+                f"{exc}") from exc
+        mins = got.get("minutes") if isinstance(got, dict) else None
+        if not isinstance(mins, list):
+            raise StructuringError(
+                f"sarvam digest call {idx + 1}/{len(chunks)} returned no minutes")
+        return [str(m).strip() for m in mins if str(m).strip()]
+
+    workers = min(_sarvam_parallelism(), len(chunks))
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            per_chunk = list(pool.map(lambda ic: _one(*ic), enumerate(chunks)))
+    else:
+        per_chunk = [_one(i, c) for i, c in enumerate(chunks)]
+    lines = [m for mins in per_chunk for m in mins]
+    log.info("sarvam digest: %s chars condensed to %s minutes across %s chunks",
+             len(transcript), len(lines), len(chunks))
+    return ("CONDENSED MINUTES (machine-condensed, in spoken order, from a "
+            "long recording — treat as the transcript):\n- " + "\n- ".join(lines))
 
 
 def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
@@ -852,11 +987,10 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             if isinstance(cell, dict):
                 cell["confidence"] = "n/a"
 
-    for uc in detected:
+    def _block(uc: str) -> tuple[str, dict]:
         fields = (blocks.get(uc) or {}).get("fields") or []
         if not fields:
-            obj[uc] = {}
-            continue
+            return uc, {}
         label = (blocks.get(uc) or {}).get("label") or uc
         block_system = (
             f"{_SARVAM_RULES}\n"
@@ -868,8 +1002,23 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         got = _call(block_system, user)
         cells = got.get(uc) if isinstance(got.get(uc), dict) else got
         known = {f["key"] for f in fields}
-        obj[uc] = ({k: v for k, v in cells.items() if k in known}
-                   if isinstance(cells, dict) else {})
+        return uc, ({k: v for k, v in cells.items() if k in known}
+                    if isinstance(cells, dict) else {})
+
+    # The block calls are independent — running them concurrently collapses
+    # the wall-clock from sum(blocks) to max(blocks). pool.map preserves
+    # order and re-raises the first failure, exactly like the loop it
+    # replaces; SARVAM_MAX_PARALLEL=1 restores sequential calls.
+    workers = min(_sarvam_parallelism(), len(detected))
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for uc, cells in pool.map(_block, detected):
+                obj[uc] = cells
+    else:
+        for uc in detected:
+            got_uc, cells = _block(uc)
+            obj[got_uc] = cells
     return obj
 
 
@@ -918,11 +1067,18 @@ def structure_transcript(
             else ask_model(model, system, u)
 
     provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+    # What the extraction calls actually read: the transcript itself, or — on
+    # the sarvam path, above the char budget — its condensed minutes. The
+    # Claude path never condenses (200K context; production behavior is
+    # byte-identical), so this stays `transcript` there.
+    work_transcript = transcript
     if provider == "sarvam":
         # The batched path (see _structure_sarvam). No repair round — each
         # small call either parses or fails; salvage still stands behind the
         # validator, exactly as on the Claude path.
-        obj0 = _structure_sarvam(transcript,
+        work_transcript = _sarvam_condense(
+            transcript, lambda sys2, u2: ask_model(model, sys2, u2), context)
+        obj0 = _structure_sarvam(work_transcript,
                                  lambda sys2, u2: ask_model(model, sys2, u2),
                                  registry_version, context, recorder, capture_ts)
         norm = _normalize(obj0, registry_version)
@@ -982,7 +1138,7 @@ def structure_transcript(
     # only (see _backfill_lender_updates).
     try:
         report = _backfill_lender_updates(
-            report, transcript, lambda s, u: ask_model(model, s, u),
+            report, work_transcript, lambda s, u: ask_model(model, s, u),
             registry_version, context=context) or report
     except Exception as exc:  # noqa: BLE001 — a bonus pass never fails the take
         log.warning("lender-updates second pass skipped: %s", exc)

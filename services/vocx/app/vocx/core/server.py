@@ -185,6 +185,7 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
     style = 0
     transient_left = 2
     failures: list[str] = []
+    t0 = time.monotonic()
     while True:
         try:
             r = httpx.post(f"{base}/chat/completions", headers=auth_styles[style],
@@ -218,10 +219,18 @@ def ask_sarvam(model: str, system: str, user: str) -> str:
                         f"off / another SARVAM_MODEL. Response head: {r.text[:200]}")
                 raise RuntimeError(
                     f"Sarvam answered without content: {r.text[:300]}")
+            if choice.get("finish_reason") == "length":
+                # The answer arrived but generation was cut at the budget — the
+                # salvage layer found a complete JSON object inside. Worth a
+                # warning: a call that pins the cap every run is burning
+                # tokens on trailing output nobody reads.
+                _slog.warning("sarvam answer hit max_tokens=%s; a complete "
+                              "JSON object was still salvaged", body["max_tokens"])
             usage = payload.get("usage") or {}
             _slog.info("sarvam call: model=%s prompt_tokens=%s completion_tokens=%s "
-                       "total_tokens=%s", model, usage.get("prompt_tokens"),
-                       usage.get("completion_tokens"), usage.get("total_tokens"))
+                       "total_tokens=%s in %.1fs", model, usage.get("prompt_tokens"),
+                       usage.get("completion_tokens"), usage.get("total_tokens"),
+                       time.monotonic() - t0)
             return str(content)
         if r.status_code == 429 or r.status_code >= 500:
             if transient_left:

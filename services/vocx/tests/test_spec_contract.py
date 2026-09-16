@@ -474,6 +474,217 @@ def test_sarvam_mode_structures_in_small_batched_calls(monkeypatch):
     assert r["common"]["meeting_date"]["value"] == "2026-09-16"  # capture fill
 
 
+def test_sarvam_briefs_carry_the_registrys_own_guidance():
+    """The trial run left AM deal_size empty, returned raw phrases for offer
+    chips and skipped the score — because the briefs told the model each
+    field's TYPE but not what the cell wants. The registry's own notes,
+    closed_set and min/max now ride in every brief, so a registry bump keeps
+    flowing through with zero code changes."""
+    from app.vocx.pipeline.structure import _sarvam_field_brief
+
+    reg = load_registry()
+    am = {f["key"]: f for f in reg["blocks"]["asset_monetisation"]["fields"]}
+    offer = _sarvam_field_brief(am["offer_components"], reg)
+    assert "entire_project" in offer and "free-text" in offer
+    deal = _sarvam_field_brief(am["deal_size"], reg)
+    assert "Free text" in deal                        # the registry note itself
+    common = {f["key"]: f for f in (reg["common"] if isinstance(reg["common"], list)
+                                    else reg["common"]["fields"])}
+    score = _sarvam_field_brief(common["opportunity_score"], reg)
+    assert "1-5" in score and "null" in score
+    summary = _sarvam_field_brief(common["meeting_summary"], reg)
+    assert "narrative" in summary                     # judgement guidance rides too
+
+
+def test_sarvam_long_take_condenses_before_extraction(monkeypatch):
+    """The 90-minute wall: above the char budget the transcript is condensed
+    chunk by chunk into minutes, and the minutes — never the raw transcript —
+    ride into the head call, the block calls AND the lender pass. Order is
+    preserved across the parallel chunk calls; a 3-minute note (the sibling
+    test below) rides whole."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    monkeypatch.setenv("SARVAM_TRANSCRIPT_CHAR_BUDGET", "1000")
+    monkeypatch.setenv("SARVAM_DIGEST_CHUNK_CHARS", "500")
+
+    sentence = ("We discussed the Kusum solar asset of ten megawatt with the "
+                "owner and the working capital fund of five crore. ")
+    transcript = "RAWMARKER " + sentence * 30          # ~3.3K chars, > budget
+    digest_users: list[str] = []
+    extraction_users: list[str] = []
+
+    def ask(model, system, user):
+        if "condense one segment" in system:
+            import re as _tre
+            digest_users.append(user)
+            # number the minutes by the SEGMENT header, not call order — the
+            # chunks digest in parallel, so call order is not chunk order
+            k = int(_tre.search(r"SEGMENT (\d+) of", user).group(1))
+            return json.dumps({"minutes": [
+                f"fact {k}: 10 MW Kusum asset, 5 crore working capital",
+                *(["chased HDFC Bank for the sanction, they will revert"]
+                  if k == 1 else [])]})
+        extraction_users.append(user)
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["syndication"],
+                "entity_candidates": ["Sangara Limited"],
+                "common": {"meeting_summary": {"value": "Long take.",
+                                               "confidence": "n/a"}}})
+        if "lender chase/reply events" in system:
+            return json.dumps([{"lender": "HDFC Bank", "kind": "chase",
+                                "note": "Chased for the sanction; will revert."}])
+        return json.dumps({"syndication": {
+            "deal_size_cr": {"value": 5, "confidence": "high"}}})
+
+    out = structure_transcript(transcript, mode="live", ask_model=ask,
+                               capture_ts="2026-09-16T06:00:00Z")
+    assert len(digest_users) >= 2                     # it really chunked
+    assert any("SEGMENT 1 of" in u for u in digest_users)
+    # every extraction call read the minutes, none the raw transcript
+    assert extraction_users and all("CONDENSED MINUTES" in u for u in extraction_users)
+    assert all("RAWMARKER" not in u for u in extraction_users)
+    # order preserved across parallel chunk digests
+    head_user = extraction_users[0]
+    assert head_user.index("fact 1") < head_user.index("fact 2")
+    lu = out["report"]["syndication"]["lender_updates"]["value"]
+    assert lu and lu[0]["lender"] == "HDFC Bank"      # lender pass saw the minutes
+
+
+def test_sarvam_short_note_rides_whole(monkeypatch):
+    """A 3-minute note is far under the default budget: no digest calls, the
+    raw transcript rides into every call — byte-identical to the pre-digest
+    behavior."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    users: list[str] = []
+
+    def ask(model, system, user):
+        assert "condense one segment" not in system
+        users.append(user)
+        if '"detected_use_cases"' in system:
+            return json.dumps({"detected_use_cases": ["lending"],
+                               "entity_candidates": [], "common": {}})
+        return json.dumps({"lending": {
+            "requirement_quantum_cr": {"value": 5, "confidence": "high"}}})
+
+    structure_transcript("met sangara, five crore working capital",
+                         mode="post_meeting", ask_model=ask,
+                         capture_ts="2026-09-16T06:00:00Z")
+    assert all("met sangara" in u and "CONDENSED MINUTES" not in u for u in users)
+
+
+def test_sarvam_block_calls_run_concurrently(monkeypatch):
+    """Two detected blocks must be in flight at the same time — the barrier
+    only releases when both calls have arrived, so a sequential regression
+    deadlocks it (and fails fast on its timeout) instead of passing slowly."""
+    import threading
+
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    barrier = threading.Barrier(2, timeout=10)
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({"detected_use_cases": ["lending", "syndication"],
+                               "entity_candidates": [], "common": {}})
+        barrier.wait()
+        if "Syndication" in system:
+            return json.dumps({"syndication": {
+                "deal_size_cr": {"value": 5, "confidence": "high"}}})
+        return json.dumps({"lending": {
+            "requirement_quantum_cr": {"value": 5, "confidence": "high"}}})
+
+    out = structure_transcript("sale and working capital", mode="post_meeting",
+                               ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
+    r = out["report"]
+    assert r["lending"]["requirement_quantum_cr"]["value"] == 5
+    assert r["syndication"]["deal_size_cr"]["value"] == 5
+
+
+def test_sarvam_parallelism_can_be_pinned_to_sequential(monkeypatch):
+    """SARVAM_MAX_PARALLEL=1 restores strictly sequential calls — the escape
+    hatch if their API ever rate-limits concurrent requests."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    monkeypatch.setenv("SARVAM_MAX_PARALLEL", "1")
+    in_flight = {"now": 0, "max": 0}
+
+    def ask(model, system, user):
+        in_flight["now"] += 1
+        in_flight["max"] = max(in_flight["max"], in_flight["now"])
+        try:
+            if '"detected_use_cases"' in system:
+                return json.dumps({"detected_use_cases": ["lending", "syndication"],
+                                   "entity_candidates": [], "common": {}})
+            if "Syndication" in system:
+                return json.dumps({"syndication": {
+                    "deal_size_cr": {"value": 5, "confidence": "high"}}})
+            return json.dumps({"lending": {
+                "requirement_quantum_cr": {"value": 5, "confidence": "high"}}})
+        finally:
+            in_flight["now"] -= 1
+
+    structure_transcript("sale and working capital", mode="post_meeting",
+                         ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
+    assert in_flight["max"] == 1
+
+
+def test_sarvam_covers_the_interaction_shapes_of_the_field(monkeypatch):
+    """The desk's real conversation shapes, end to end under the sarvam
+    provider: a lending-only chat; an asset-monetisation chat whose offer
+    components mix closed-set tokens with a spoken free-text extra; and a
+    vague check-in where nothing product-shaped was said (falls to
+    operations, common only). Each must produce a contract-valid report."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def run(head, blocks):
+        def ask(model, system, user):
+            if '"detected_use_cases"' in system:
+                return json.dumps(head)
+            for uc, cells in blocks.items():
+                label = {"lending": "Lending", "syndication": "Syndication",
+                         "asset_monetisation": "Asset monetisation"}[uc]
+                if label in system:
+                    return json.dumps({uc: cells})
+            raise AssertionError(f"unexpected call: {system[:80]}")
+        return structure_transcript("spoken words", mode="post_meeting",
+                                    ask_model=ask,
+                                    capture_ts="2026-09-16T06:00:00Z")["report"]
+
+    # 1. lending-only
+    r = run({"detected_use_cases": ["lending"], "entity_candidates": ["Acme"],
+             "common": {}},
+            {"lending": {"requirement_nature": {"value": "working_capital",
+                                                "confidence": "high"},
+                         "requirement_quantum_cr": {"value": 5,
+                                                    "confidence": "high"}}})
+    assert r["detected_use_cases"] == ["lending"]
+    assert "syndication" not in r
+
+    # 2. asset monetisation: closed-set tokens + a spoken free-text component
+    r = run({"detected_use_cases": ["asset_monetisation"],
+             "entity_candidates": [], "common": {}},
+            {"asset_monetisation": {
+                "party_role": {"value": "owner", "confidence": "high"},
+                "offer_components": {"value": ["entire_project",
+                                               "10 MW Kusum capacity"],
+                                     "confidence": "medium"},
+                "asset_status": {"value": "operational", "confidence": "medium"}}})
+    assert r["asset_monetisation"]["offer_components"]["value"] == \
+        ["entire_project", "10 MW Kusum capacity"]
+
+    # 3. nothing product-shaped spoken: operations fallback, common only
+    r = run({"detected_use_cases": [], "entity_candidates": [], "common": {}}, {})
+    assert r["detected_use_cases"] == ["operations"]
+
+
 def test_lender_second_pass_failure_never_breaks_the_take():
     """The focused round answering prose instead of JSON — or anything else
     going wrong in it — leaves the report exactly as the main pass made it."""

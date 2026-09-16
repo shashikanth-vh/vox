@@ -299,6 +299,18 @@ services:
       SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
       SARVAM_MODEL: "${SARVAM_MODEL:-}"
       SARVAM_BASE_URL: "${SARVAM_BASE_URL:-}"
+      # Sarvam tuning (all optional; the code defaults are the production
+      # posture). REASONING_EFFORT: unset/off omits the field — its PRESENCE
+      # switches sarvam-105b into thinking mode; low/medium/high opt in.
+      SARVAM_MAX_TOKENS: "${SARVAM_MAX_TOKENS:-}"
+      SARVAM_MAX_TOKENS_CEILING: "${SARVAM_MAX_TOKENS_CEILING:-}"
+      SARVAM_REASONING_EFFORT: "${SARVAM_REASONING_EFFORT:-}"
+      # Long-recording batching: transcripts above the char budget are
+      # condensed chunk-by-chunk into minutes before extraction (the
+      # 90-minute live case); parallelism caps concurrent sarvam calls.
+      SARVAM_TRANSCRIPT_CHAR_BUDGET: "${SARVAM_TRANSCRIPT_CHAR_BUDGET:-}"
+      SARVAM_DIGEST_CHUNK_CHARS: "${SARVAM_DIGEST_CHUNK_CHARS:-}"
+      SARVAM_MAX_PARALLEL: "${SARVAM_MAX_PARALLEL:-}"
       # Per-RM Google tokens, PKCE state, alias map, audio archive, Whisper model cache —
       # all on the persistent volume below. Losing it only means RMs reconnect Google
       # and the first transcription re-downloads the model.
