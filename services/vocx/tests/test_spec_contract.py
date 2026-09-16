@@ -463,6 +463,8 @@ def test_sarvam_mode_structures_in_small_batched_calls(monkeypatch):
         "met sangara, ten megawatt sale and five crore working capital",
         mode="post_meeting", ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
     assert len(systems) == 3            # head + lending + syndication
+    # a requirement taken to syndication is BOTH blocks (own book + arranged)
+    assert "BOTH lending and syndication" in systems[0]
     r = out["report"]
     assert out["model"] == "sarvam-105b-conversations"
     assert r["detected_use_cases"] == ["lending", "syndication"]
@@ -510,6 +512,16 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     lending = {f["key"]: f for f in reg["blocks"]["lending"]["fields"]}
     nature = _sarvam_field_brief(lending["requirement_nature"], reg)
     assert "project_finance" in nature and "BUILD" in nature
+    # the own-book / syndicated split: a 25 Cr ask can be 2 Cr from the
+    # desk's book and 23 Cr syndicated — quantum and deal size each know
+    # which portion they carry
+    quantum = _sarvam_field_brief(lending["requirement_quantum_cr"], reg)
+    assert "own-book portion" in quantum
+    synd = {f["key"]: f for f in reg["blocks"]["syndication"]["fields"]}
+    dsize = _sarvam_field_brief(synd["deal_size_cr"], reg)
+    assert "syndicated portion" in dsize
+    loc = _sarvam_field_brief(am["asset_location"], reg)
+    assert "shorthand" in loc
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal

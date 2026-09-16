@@ -808,6 +808,14 @@ _SARVAM_FIELD_EXTRAS = {
                            "is project_finance; term_loan is general or "
                            "asset-backed corporate borrowing; working_capital "
                            "is operating cycle"),
+    "requirement_quantum_cr": (" — when a split between the desk's own book "
+                               "and a syndicated portion was spoken, this is "
+                               "the own-book portion; otherwise the full "
+                               "requirement"),
+    "deal_size_cr": (" — the amount to syndicate: the syndicated portion "
+                     "when a split was spoken, else the full requirement"),
+    "asset_location": (" — the location as spoken, even shorthand or a site "
+                       "code (e.g. 'AMPY (2.5 into 4 sites)')"),
     "opportunity_score": (" — SUGGEST from the business substance, not only "
                           "spoken sentiment: 1-2 vague interest or no real "
                           "ask; 3 a concrete, actionable ask (a specific "
@@ -1136,8 +1144,11 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}\n"
         f"detected_use_cases: the subset of {ucs} the conversation is actually "
         "about — include one ONLY when that specific ask was spoken (an asset "
-        "sale alone is asset_monetisation, not lending; a borrowing ask alone "
-        "is lending, not syndication).\n"
+        "sale alone is asset_monetisation, not lending). A funding "
+        "requirement being taken to syndication is BOTH lending and "
+        "syndication: the desk may fund part from its own book and "
+        "syndicate the rest. A borrowing ask with no syndication spoken is "
+        "lending alone.\n"
         "entity_candidates: the company names the conversation is about.\n"
         "common keys:\n" + "\n".join(_sarvam_field_brief(f, registry)
                                       for f in common_f))
