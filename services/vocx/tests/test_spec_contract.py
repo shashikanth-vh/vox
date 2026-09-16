@@ -503,7 +503,7 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "infer" in sector
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
-    assert "capacity offered" in deal
+    assert "offered capacity" in deal
     remarks = _sarvam_field_brief(
         {"key": "remarks", "label": "Remarks", "type": "string"}, reg)
     assert "analyst note" in remarks
@@ -734,6 +734,55 @@ def test_sarvam_bare_cells_are_wrapped_not_crashed(monkeypatch):
     assert r["common"]["meeting_summary"]["confidence"] == "n/a"  # judgement
     assert r["syndication"]["deal_size_cr"] == {"value": 5, "confidence": "medium"}
     assert r["syndication"]["remarks"] == {"value": None, "confidence": "n/a"}
+
+
+def test_sarvam_fills_the_subsector_key_data(monkeypatch):
+    """The panel's SOLAR-DEVELOPER KEY DATA stayed empty on every sarvam run:
+    Claude's one full-contract call carries subsector_details, the batched
+    path never asked. Once the head picks a subsector, a focused call now
+    fills its canonical data points — wrapped or bare cells land, unspoken
+    ones are dropped, and a failure skips (bonus data, never a dead take)."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    reg = load_registry()
+    canon_keys = [f["key"] for f in reg["subsector_canonicals"]["Solar-Developer"]]
+    systems: list[str] = []
+
+    def ask(model, system, user):
+        systems.append(system)
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["asset_monetisation"],
+                "entity_candidates": [],
+                "common": {"sector": {"value": "Renewables", "confidence": "high"},
+                           "subsector": {"value": "Solar-Developer",
+                                         "confidence": "medium"}}})
+        if "canonical data points" in system:
+            return json.dumps({"subsector_details": {"Solar-Developer": {
+                canon_keys[0]: "26.3 MW operational; 12 MW under construction",
+                canon_keys[1]: None}}})           # unspoken → dropped, bare → wrapped
+        return json.dumps({"asset_monetisation": {
+            "party_role": {"value": "owner", "confidence": "high"}}})
+
+    out = structure_transcript("remanindia sells 26.3 MW", mode="post_meeting",
+                               ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
+    assert len(systems) == 3               # head + block + details
+    details = out["report"]["subsector_details"]
+    got = details.get("Solar-Developer") or details   # wrapped or flattened
+    assert got[canon_keys[0]]["value"].startswith("26.3 MW")
+    assert canon_keys[1] not in got
+
+    # a details failure skips, never fails the take
+    def ask_broken(model, system, user):
+        if "canonical data points" in system:
+            return "not json at all"
+        return ask(model, system, user)
+
+    out2 = structure_transcript("remanindia sells 26.3 MW", mode="post_meeting",
+                                ask_model=ask_broken,
+                                capture_ts="2026-09-16T06:00:00Z")
+    assert out2["report"]["asset_monetisation"]["party_role"]["value"] == "owner"
 
 
 def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():

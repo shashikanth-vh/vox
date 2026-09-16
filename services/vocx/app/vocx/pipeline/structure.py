@@ -785,8 +785,10 @@ _SARVAM_RULES = (
 # other fields: the dialogue tune leaves these null unless told what the
 # desk actually wants in them.
 _SARVAM_FIELD_EXTRAS = {
-    "deal_size": (" — no rupee figure spoken? the capacity offered stands in "
-                  "(e.g. '26.3 MW operational assets')"),
+    "deal_size": (" — FILL whenever anything is offered for sale: the rupee/EV "
+                  "figure if spoken, otherwise the offered capacity (e.g. "
+                  "'26.3 MW operational assets'); null only when no sale was "
+                  "discussed"),
     "remarks": (" — a 1-2 sentence analyst note from THIS conversation: gaps, "
                 "clarifications needed, follow-ups; null only when nothing "
                 "needs noting"),
@@ -1011,7 +1013,9 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         "\"common\": {<key>: {\"value\": ..., \"confidence\": "
         "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}\n"
         f"detected_use_cases: the subset of {ucs} the conversation is actually "
-        "about.\n"
+        "about — include one ONLY when that specific ask was spoken (an asset "
+        "sale alone is asset_monetisation, not lending; a borrowing ask alone "
+        "is lending, not syndication).\n"
         "entity_candidates: the company names the conversation is about.\n"
         "common keys:\n" + "\n".join(_sarvam_field_brief(f, registry)
                                       for f in common_f))
@@ -1036,7 +1040,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             if isinstance(cell, dict):
                 cell["confidence"] = "n/a"
 
-    def _block(uc: str) -> tuple[str, dict]:
+    def _block(uc: str) -> tuple[str, dict | None]:
         fields = (blocks.get(uc) or {}).get("fields") or []
         if not fields:
             return uc, {}
@@ -1053,20 +1057,68 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         known = {f["key"] for f in fields}
         return uc, (_wrap_bare(cells, known) if isinstance(cells, dict) else {})
 
-    # The block calls are independent — running them concurrently collapses
-    # the wall-clock from sum(blocks) to max(blocks). pool.map preserves
-    # order and re-raises the first failure, exactly like the loop it
-    # replaces; SARVAM_MAX_PARALLEL=1 restores sequential calls.
-    workers = min(_sarvam_parallelism(), len(detected))
+    # The per-subsector canonical data points (Solar-Developer KEY DATA etc.)
+    # ride inside Claude's one full-contract call; the batched path never
+    # asked for them, so the panel's KEY DATA stayed empty live. Once the
+    # head has chosen a subsector, one focused call fills them — alongside
+    # the block calls, since they are independent.
+    sub_cell = obj["common"].get("subsector")
+    subsector = sub_cell.get("value") if isinstance(sub_cell, dict) else None
+    canon = (registry.get("subsector_canonicals", {}).get(subsector)
+             if isinstance(subsector, str) else None) or []
+
+    def _details(_target: str) -> tuple[str, dict | None]:
+        # Bonus data, same posture as the lender pass: a failure here logs
+        # and skips — it never fails a take that the block calls carried.
+        try:
+            return "subsector_details", _details_cells()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("subsector-details call skipped: %s", exc)
+            return "subsector_details", None
+
+    def _details_cells() -> dict | None:
+        det_system = (
+            f"{_SARVAM_RULES}\n"
+            f"The company is a {subsector}. Fill its canonical data points "
+            "from the transcript. Shape: {\"subsector_details\": "
+            f"{{\"{subsector}\": {{<key>: {{\"value\": ..., \"confidence\": "
+            "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}}\n"
+            "keys:\n" + "\n".join(
+                f"- {f['key']} ({f.get('label', f['key'])}): text or null"
+                for f in canon))
+        got = _call(det_system, user)
+        inner = (got.get("subsector_details")
+                 if isinstance(got.get("subsector_details"), dict) else got)
+        cells = (inner.get(subsector)
+                 if isinstance(inner, dict) and isinstance(inner.get(subsector), dict)
+                 else inner)
+        known = {f["key"] for f in canon}
+        wrapped = _wrap_bare(cells, known) if isinstance(cells, dict) else {}
+        spoken = {k: v for k, v in wrapped.items()
+                  if isinstance(v, dict) and v.get("value") not in (None, "", [])}
+        return {subsector: spoken} if spoken else None
+
+    def _job(target: str) -> tuple[str, dict | None]:
+        return _details(target) if target == "__details__" else _block(target)
+
+    targets = list(detected)
+    if subsector and canon:
+        targets.append("__details__")
+
+    # The calls are independent — running them concurrently collapses the
+    # wall-clock from sum(calls) to max(calls). pool.map preserves order and
+    # re-raises the first failure, exactly like the loop it replaces;
+    # SARVAM_MAX_PARALLEL=1 restores sequential calls.
+    workers = min(_sarvam_parallelism(), len(targets))
     if workers > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for uc, cells in pool.map(_block, detected):
-                obj[uc] = cells
+            results = list(pool.map(_job, targets))
     else:
-        for uc in detected:
-            got_uc, cells = _block(uc)
-            obj[got_uc] = cells
+        results = [_job(t) for t in targets]
+    for key, cells in results:
+        if cells is not None:
+            obj[key] = cells
     return obj
 
 
