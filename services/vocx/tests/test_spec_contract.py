@@ -543,7 +543,9 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "offered capacity" in deal
     remarks = _sarvam_field_brief(
         {"key": "remarks", "label": "Remarks", "type": "string"}, reg)
-    assert "analyst note" in remarks
+    # remarks REPLACE the register's lane status line on approval — briefed
+    # as one: current state + gaps, never a quoted artifact
+    assert "status line" in remarks
     assert "data_quality_flags" in remarks     # artifacts never quoted in remarks
     assert "never mention use cases" in summary  # no machinery in the debrief
     from app.vocx.pipeline.structure import _SARVAM_RULES

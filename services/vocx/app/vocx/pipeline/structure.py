@@ -791,10 +791,15 @@ _SARVAM_FIELD_EXTRAS = {
                   "figure if spoken, otherwise the offered capacity (e.g. "
                   "'26.3 MW operational assets'); null only when no sale was "
                   "discussed"),
-    "remarks": (" — a 1-2 sentence analyst note from THIS conversation: gaps, "
-                "clarifications needed, follow-ups; null only when nothing "
-                "needs noting. NEVER quote a garbled/artifact term here — "
-                "those go only in data_quality_flags"),
+    # On approval this cell REPLACES the company's status line for its lane
+    # in the register (lending remarks / syndication latest remarks /
+    # asset-mon notes) — it must read like one.
+    "remarks": (" — THIS lane's status line, 1-2 sentences: where the lane "
+                "stands after this conversation (the ask or mandate as "
+                "stated) and what is missing or next — unspoken turnover, "
+                "bankers or location are worth naming. NEVER quote a "
+                "garbled/artifact term here — those go only in "
+                "data_quality_flags"),
     "meeting_summary": (" — a colleague's debrief of the business only: never "
                         "mention use cases, fields, extraction or "
                         "transcription artifacts"),
