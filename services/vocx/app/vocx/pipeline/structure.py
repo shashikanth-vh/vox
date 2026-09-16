@@ -938,6 +938,11 @@ def _sarvam_parallelism() -> int:
 # survives; data_quality_flags (system field) is the artifacts' one home and
 # is never touched. Sarvam path only.
 
+_REQUIREMENT_RE = _re.compile(
+    r"working\s+capital|term\s+loan|project\s+financ|"
+    r"fund(?:ing)?\s+requirement|requirement\s+(?:of|is)|"
+    r"crore\s+(?:of\s+)?(?:fund|requirement)", _re.IGNORECASE)
+
 _META_SENTENCE_RE = _re.compile(
     r"transcript\s+(?:mentions|references|contains)|speech.to.text|"
     r"transcription\s+artifacts?|known.names\s+block|could\s+not\s+be\s+"
@@ -958,9 +963,14 @@ def _scrub_machinery(report: dict, registry_version: str | None) -> None:
                 terms.append(t.lower())
 
     def _dirty(sentence: str) -> bool:
+        # Meta-language always dies. A flagged term only dirties a sentence
+        # when it is being QUOTED ('SHIT and DA') — i.e. discussed as a term.
+        # USING the term is legitimate prose: the model once flagged 'Kosum'
+        # and 'AMPY' as artifacts and the term match then gutted the whole
+        # summary, leaving only the one sentence without proper nouns.
         low = sentence.lower()
         return bool(_META_SENTENCE_RE.search(sentence)) or \
-            any(t in low for t in terms)
+            any(f"'{t}'" in low or f'"{t}"' in low for t in terms)
 
     def _walk(cells: dict, fields: list[dict]) -> None:
         for f in fields:
@@ -1173,6 +1183,15 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
                 if isinstance(u, str) and u in ucs]
     if not detected:
         detected = ["operations"]
+    # The desk rule, owner-confirmed: a funding requirement taken to
+    # syndication is BOTH blocks — part may fund from Evam's own book, the
+    # rest syndicated. Instructed twice, the model still picked syndication
+    # alone, so the companion is deterministic: requirement language spoken
+    # + syndication detected => lending rides too. A chase-only follow-up
+    # has no requirement language and stays syndication-alone.
+    if ("syndication" in detected and "lending" not in detected
+            and "lending" in ucs and _REQUIREMENT_RE.search(transcript)):
+        detected.append("lending")
     known_common = {f["key"] for f in common_f}
     raw_common = head.get("common") if isinstance(head.get("common"), dict) else {}
     obj: dict = {

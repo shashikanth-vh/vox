@@ -892,14 +892,97 @@ def test_machinery_talk_is_scrubbed_from_prose_deterministically(monkeypatch):
                              ask_model=ask,
                              capture_ts="2026-09-16T06:00:00Z")["report"]
     remark = r["asset_monetisation"]["remarks"]["value"]
-    assert "SHIT" not in remark and "artifact" not in remark
+    assert "artifact" not in remark                   # meta-sentence dropped
     assert "53 acres" in remark                       # substance survives
     summary = r["common"]["meeting_summary"]["value"]
     assert "use cases" not in summary and "Mr. Bhumik" in summary
+    # USING a flagged term is legitimate prose and survives (the term match
+    # once gutted a whole summary over flagged 'Kosum'/'AMPY'); only QUOTED
+    # mentions — discussing the term — die with the meta sentences
     ki = r["common"]["key_discussion_points"]["value"]
-    assert ki == ["26.3 MW project discussed"]        # artifact bullet dropped
+    assert ki == ["26.3 MW project discussed",
+                  "SHIT and DA data required for developers"]
     flags = r["common"]["data_quality_flags"]["value"]
     assert "transcription artifact: SHIT and DA" in flags  # home untouched
+
+
+def test_flagged_terms_in_use_survive_the_scrub(monkeypatch):
+    """The 247 live run: the model flagged 'Kosum' and 'AMPY' as artifacts
+    and the scrubber then deleted every summary sentence containing them —
+    the report kept only the one sentence without proper nouns. Terms IN USE
+    stay; a QUOTED term ('Kosum') still reads as discussing-the-term and
+    dies with its sentence."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["asset_monetisation"],
+                "entity_candidates": [],
+                "common": {
+                    "meeting_summary": {
+                        "value": ("Sangara offered the 10 MW Kosum asset "
+                                  "across 2.5 into 4 sites in AMPY. The term "
+                                  "'Kosum' could not be resolved."),
+                        "confidence": "n/a"},
+                    "data_quality_flags": {
+                        "value": ["transcription artifact: Kosum",
+                                  "transcription artifact: AMPY"],
+                        "confidence": "n/a"}}})
+        return json.dumps({"asset_monetisation": {
+            "party_role": {"value": "owner", "confidence": "high"}}})
+
+    r = structure_transcript("sangara call", mode="post_meeting", ask_model=ask,
+                             capture_ts="2026-09-16T06:00:00Z")["report"]
+    summary = r["common"]["meeting_summary"]["value"]
+    assert "10 MW Kosum asset" in summary and "AMPY" in summary   # usage kept
+    assert "could not be resolved" not in summary                 # meta died
+
+
+def test_a_spoken_requirement_taken_to_syndication_rides_as_lending_too(monkeypatch):
+    """The desk rule, deterministic: '5 Cr working capital, taking it to
+    syndication' files BOTH blocks even when the model detects syndication
+    alone — part can fund from the desk's own book. A chase-only follow-up
+    (no requirement language) stays syndication-alone."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def make_ask(seen):
+        def ask(model, system, user):
+            seen.append(system)
+            if '"detected_use_cases"' in system:
+                return json.dumps({"detected_use_cases": ["syndication"],
+                                   "entity_candidates": [], "common": {}})
+            if "lender chase/reply" in system:
+                return "[]"
+            if "Lending" in system and "Syndication" not in system:
+                return json.dumps({"lending": {
+                    "requirement_nature": {"value": "working_capital",
+                                           "confidence": "high"},
+                    "requirement_quantum_cr": {"value": 5, "confidence": "high"}}})
+            return json.dumps({"syndication": {
+                "deal_size_cr": {"value": 5, "confidence": "high"}}})
+        return ask
+
+    seen: list[str] = []
+    r = structure_transcript(
+        "they need five crore working capital, we are taking it to syndication",
+        mode="post_meeting", ask_model=make_ask(seen),
+        capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert set(r["detected_use_cases"]) == {"syndication", "lending"}
+    assert r["lending"]["requirement_quantum_cr"]["value"] == 5
+    assert r["syndication"]["deal_size_cr"]["value"] == 5
+
+    seen2: list[str] = []
+    r2 = structure_transcript(
+        "chased HDFC on the mandate, they will revert on sanction",
+        mode="post_meeting", ask_model=make_ask(seen2),
+        capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert r2["detected_use_cases"] == ["syndication"]
+    assert "lending" not in r2
 
 
 def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():
