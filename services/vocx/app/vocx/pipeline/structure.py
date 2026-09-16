@@ -752,6 +752,127 @@ def _backfill_lender_updates(report: dict, transcript: str,
         return None
 
 
+# --------------------------------------------------------------------------
+# DECOMPOSED structuring for sarvam. The one contract-sized call defeated
+# sarvam-105b live, twice: ~12K prompt tokens made it reason past any output
+# budget and truncate. The desk's own prototype proved the same model handles
+# PROTOTYPE-SIZED asks cleanly — so sarvam mode batches several small calls
+# (detect + meeting basics, then one per detected product block), assembles
+# the report, and everything downstream is IDENTICAL to the Claude path:
+# _normalize, validate_report, _salvage, never-fabricate. Registry-driven,
+# so a registry bump flows through with zero code changes.
+
+_SARVAM_RULES = (
+    "You extract structured fields from an Indian climate-finance desk "
+    "voice-note transcript. NEVER fabricate: anything not spoken gets value "
+    "null and confidence \"n/a\". Dates are YYYY-MM-DD; amounts are plain "
+    "numbers denominated in crore (50 lakh = 0.5). Return ONLY one JSON "
+    "object — no prose, no thinking, no code fences.")
+
+
+def _sarvam_field_brief(f: dict, registry: dict) -> str:
+    t = f.get("type", "string")
+    key = f["key"]
+    if f.get("options_from") == "taxonomy.sectors":
+        return f"- {key}: one of {list(registry['taxonomy'])} or null"
+    if f.get("options_from") == "taxonomy.subsectors_of_selected_sector":
+        return (f"- {key}: the subsector under the chosen sector, from "
+                f"{json.dumps(registry['taxonomy'])}, or null")
+    if t == "enum" and f.get("options"):
+        return f"- {key}: one of {[o['value'] for o in f['options']]} or null"
+    if f.get("item_shape"):
+        return f"- {key}: list of objects shaped {json.dumps(f['item_shape'])}"
+    if t == "list":
+        return f"- {key}: list of short strings"
+    if t in ("number", "int"):
+        return f"- {key}: number or null"
+    if t == "date":
+        return f"- {key}: date YYYY-MM-DD or null"
+    return f"- {key}: {f.get('label', key)} (text) or null"
+
+
+def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
+                      registry_version: str | None, context: str,
+                      recorder: str | None, capture_ts: str | None) -> dict:
+    """The batched sarvam path: returns the ASSEMBLED raw report object; the
+    caller normalizes, validates and salvages it exactly like any other."""
+    registry = load_registry(registry_version)
+    blocks = registry["blocks"]
+    common = registry["common"]
+    common_f = common if isinstance(common, list) else common["fields"]
+    ucs = list(registry["use_cases"])
+
+    def _call(system: str, user: str) -> dict:
+        raw = ask(system, user).strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.startswith("json"):
+                raw = raw[4:]
+        try:
+            got = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise StructuringError(
+                f"sarvam decomposed call returned non-JSON: {exc}") from exc
+        if not isinstance(got, dict):
+            raise StructuringError("sarvam decomposed call returned a non-object")
+        return got
+
+    by = f"Recorded by: {recorder}\n" if recorder else ""
+    user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
+            f"{context}TRANSCRIPT:\n{transcript}")
+
+    head_system = (
+        f"{_SARVAM_RULES}\n"
+        "Shape: {\"detected_use_cases\": [...], \"entity_candidates\": [...], "
+        "\"common\": {<key>: {\"value\": ..., \"confidence\": "
+        "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}\n"
+        f"detected_use_cases: the subset of {ucs} the conversation is actually "
+        "about.\n"
+        "entity_candidates: the company names the conversation is about.\n"
+        "common keys:\n" + "\n".join(_sarvam_field_brief(f, registry)
+                                      for f in common_f))
+    head = _call(head_system, user)
+    detected = [u for u in (head.get("detected_use_cases") or [])
+                if isinstance(u, str) and u in ucs]
+    if not detected:
+        detected = ["operations"]
+    known_common = {f["key"] for f in common_f}
+    raw_common = head.get("common") if isinstance(head.get("common"), dict) else {}
+    obj: dict = {
+        "detected_use_cases": detected,
+        "common": {k: v for k, v in raw_common.items() if k in known_common},
+        "entity_candidates": [c for c in (head.get("entity_candidates") or [])
+                              if isinstance(c, str)],
+    }
+    # Judgement/system fields carry confidence "n/a" by contract — the model
+    # habitually stamps them anyway; correct it here, not in a repair round.
+    for f in common_f:
+        if f.get("judgement") or f.get("system"):
+            cell = obj["common"].get(f["key"])
+            if isinstance(cell, dict):
+                cell["confidence"] = "n/a"
+
+    for uc in detected:
+        fields = (blocks.get(uc) or {}).get("fields") or []
+        if not fields:
+            obj[uc] = {}
+            continue
+        label = (blocks.get(uc) or {}).get("label") or uc
+        block_system = (
+            f"{_SARVAM_RULES}\n"
+            f"From the transcript, fill the {label} fields. Shape: "
+            f"{{\"{uc}\": {{<key>: {{\"value\": ..., \"confidence\": "
+            "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}\n"
+            "keys:\n" + "\n".join(_sarvam_field_brief(f, registry)
+                                   for f in fields))
+        got = _call(block_system, user)
+        cells = got.get(uc) if isinstance(got.get(uc), dict) else got
+        known = {f["key"] for f in fields}
+        obj[uc] = ({k: v for k, v in cells.items() if k in known}
+                   if isinstance(cells, dict) else {})
+    return obj
+
+
 def structure_transcript(
     transcript: str,
     *,
@@ -796,36 +917,55 @@ def structure_transcript(
         return ask_model(model, system, u, schema=schema) if takes_schema \
             else ask_model(model, system, u)
 
-    raw = _ask(user)
-    obj1: dict | None = None
-    try:
-        obj1 = _normalize(_parse_strict(raw), registry_version)
-        report = validate_report(obj1, registry_version)
-    except (ContractError, StructuringError) as first:
-        # One self-repair round: the model sees its own violations, verbatim.
-        detail = "; ".join(first.errors) if isinstance(first, ContractError) else str(first)
-        repair = (f"{user}\n\nYour previous output violated the contract:\n{detail}\n"
-                  f"Return the corrected single JSON object only.")
-        raw = _ask(repair)
-        obj2: dict | None = None
+    provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+    if provider == "sarvam":
+        # The batched path (see _structure_sarvam). No repair round — each
+        # small call either parses or fails; salvage still stands behind the
+        # validator, exactly as on the Claude path.
+        obj0 = _structure_sarvam(transcript,
+                                 lambda sys2, u2: ask_model(model, sys2, u2),
+                                 registry_version, context, recorder, capture_ts)
+        norm = _normalize(obj0, registry_version)
         try:
-            obj2 = _normalize(_parse_strict(raw), registry_version)
-            report = validate_report(obj2, registry_version)
-        except (ContractError, StructuringError) as second:
-            # The take must not die for a field: salvage what stands (repair
-            # round first — it saw the violations), flag what was cleared, and
-            # let the reviewer update or select the rest. Only output with
-            # nothing usable in it (no JSON object at all) still fails here,
-            # into the runner's retry path.
-            report = None
-            for cand in (obj2, obj1):
-                if isinstance(cand, dict):
-                    report = _salvage(cand, registry_version)
-                    if report is not None:
-                        break
+            report = validate_report(norm, registry_version)
+        except ContractError as first:
+            report = _salvage(norm, registry_version)
             if report is None:
-                detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
-                raise StructuringError(f"contract violation after repair round: {detail2}") from second
+                detail = "; ".join(first.errors)
+                raise StructuringError(
+                    f"sarvam decomposed structuring failed: {detail}") from first
+    else:
+        raw = _ask(user)
+        obj1: dict | None = None
+        try:
+            obj1 = _normalize(_parse_strict(raw), registry_version)
+            report = validate_report(obj1, registry_version)
+        except (ContractError, StructuringError) as first:
+            # One self-repair round: the model sees its own violations, verbatim.
+            detail = "; ".join(first.errors) if isinstance(first, ContractError) else str(first)
+            repair = (f"{user}\n\nYour previous output violated the contract:\n{detail}\n"
+                      f"Return the corrected single JSON object only.")
+            raw = _ask(repair)
+            obj2: dict | None = None
+            try:
+                obj2 = _normalize(_parse_strict(raw), registry_version)
+                report = validate_report(obj2, registry_version)
+            except (ContractError, StructuringError) as second:
+                # The take must not die for a field: salvage what stands (repair
+                # round first — it saw the violations), flag what was cleared, and
+                # let the reviewer update or select the rest. Only output with
+                # nothing usable in it (no JSON object at all) still fails here,
+                # into the runner's retry path.
+                report = None
+                for cand in (obj2, obj1):
+                    if isinstance(cand, dict):
+                        report = _salvage(cand, registry_version)
+                        if report is not None:
+                            break
+                if report is None:
+                    detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
+                    raise StructuringError(f"contract violation after repair round: {detail2}") from second
+
 
     # A post-meeting note is recorded when the meeting just happened: if the
     # model still left meeting_date null (nothing spoken, older prompt), the

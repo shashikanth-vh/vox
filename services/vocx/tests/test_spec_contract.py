@@ -419,6 +419,61 @@ def test_the_structure_provider_switch_is_exclusive(monkeypatch):
     assert out["model"] == "sarvam-105b" and seen[0] == "sarvam-105b"
 
 
+def test_sarvam_mode_structures_in_small_batched_calls(monkeypatch):
+    """The contract-sized single call defeated sarvam live (it reasons past any
+    budget); the desk's prototype proved small asks work. Under the sarvam
+    provider the pipeline BATCHES: one detect+common call, one call per
+    detected block — assembled, then normalized/validated exactly like the
+    Claude path. Wrapped or bare block answers both land; unspoken fields
+    arrive null; judgement confidences are forced to n/a."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    systems: list[str] = []
+
+    def ask(model, system, user):
+        systems.append(system)
+        assert model == "sarvam-105b"
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["lending", "syndication"],
+                "entity_candidates": ["Sangara Limited"],
+                "common": {
+                    "sector": {"value": "Renewables", "confidence": "high"},
+                    "meeting_summary": {"value": "Sangara: 10 MW sale + 5 Cr WC.",
+                                        "confidence": "high"},
+                    # the model habitually stamps judgement fields — forced to n/a
+                    "opportunity_assessment": {"value": "Strong ask.",
+                                               "confidence": "high"},
+                }})
+        if "syndication" in system:
+            return json.dumps({          # bare cells — no block wrapper
+                "deal_size_cr": {"value": 5, "confidence": "high"},
+                "lender_updates": {"value": [], "confidence": "n/a"},
+                "not_a_field": {"value": 1, "confidence": "high"},  # dropped
+            })
+        return json.dumps({"lending": {
+            "requirement_quantum_cr": {"value": 5, "confidence": "high"},
+            "present_requirement": {"value": "5 Cr working capital",
+                                    "confidence": "high"}}})
+
+    out = structure_transcript(
+        "met sangara, ten megawatt sale and five crore working capital",
+        mode="post_meeting", ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
+    assert len(systems) == 3            # head + lending + syndication
+    r = out["report"]
+    assert out["model"] == "sarvam-105b"
+    assert r["detected_use_cases"] == ["lending", "syndication"]
+    assert r["entity_candidates"] == ["Sangara Limited"]
+    assert r["common"]["sector"]["value"] == "Renewables"
+    assert r["common"]["opportunity_assessment"]["confidence"] == "n/a"
+    assert r["lending"]["requirement_quantum_cr"]["value"] == 5
+    assert r["lending"]["remarks"]["value"] is None      # unspoken → null
+    assert r["syndication"]["deal_size_cr"]["value"] == 5
+    assert "not_a_field" not in r["syndication"]
+    assert r["common"]["meeting_date"]["value"] == "2026-09-16"  # capture fill
+
+
 def test_lender_second_pass_failure_never_breaks_the_take():
     """The focused round answering prose instead of JSON — or anything else
     going wrong in it — leaves the report exactly as the main pass made it."""
