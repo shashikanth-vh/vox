@@ -509,6 +509,9 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "analyst note" in remarks
     from app.vocx.pipeline.structure import _SARVAM_RULES
     assert "transcription artifact" in _SARVAM_RULES  # garbles flagged, not copied
+    # the narrator is named, never labelled: "Chetan had a call", not
+    # "the admin (Recorded by) had a call" — seen verbatim on the 238 run
+    assert "never echo the label" in _SARVAM_RULES
 
 
 def test_sarvam_long_take_condenses_before_extraction(monkeypatch):

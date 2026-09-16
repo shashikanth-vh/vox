@@ -776,9 +776,11 @@ _SARVAM_RULES = (
     "Renewables). An obvious speech-to-text garble you cannot resolve from "
     "the KNOWN NAMES block never rides into a summary or note — record it "
     "in data_quality_flags as 'transcription artifact: <term>' instead. "
-    "Dates are YYYY-MM-DD; amounts are plain numbers denominated in crore "
-    "(50 lakh = 0.5). Return ONLY one JSON object — no prose, no thinking, "
-    "no code fences.")
+    "The 'Recorded by' person is the narrator — the transcript's 'I'; refer "
+    "to them by name alone and never echo the label ('Recorded by', 'the "
+    "recorder') into a summary or note. Dates are YYYY-MM-DD; amounts are "
+    "plain numbers denominated in crore (50 lakh = 0.5). Return ONLY one "
+    "JSON object — no prose, no thinking, no code fences.")
 
 
 # Field-shaped lessons from the live bake-off, keyed so they never leak onto
