@@ -798,6 +798,9 @@ _SARVAM_FIELD_EXTRAS = {
     "meeting_summary": (" — a colleague's debrief of the business only: never "
                         "mention use cases, fields, extraction or "
                         "transcription artifacts"),
+    "offer_notes": (" — FILL whenever a sale was discussed: what is offered, "
+                    "the land/expansion picture, PPA and tenors, in the "
+                    "seller's substance"),
 }
 
 
@@ -860,6 +863,72 @@ def _sarvam_parallelism() -> int:
     except ValueError:
         n = 3
     return max(1, min(n, 8))
+
+
+# The dialogue tune insists on DISCUSSING transcription artifacts in prose
+# ("The transcript references SHIT and DA, which appears to be a
+# speech-to-text artifact...") — told twice not to, it rephrased and did it
+# again. Prompting lost; this is deterministic now: after validation, any
+# sentence of a prose field that talks about the machinery (the transcript,
+# artifacts, extraction, use cases) or quotes a flagged artifact term is
+# dropped. Sentence-level, so the analyst substance in the same remark
+# survives; data_quality_flags (system field) is the artifacts' one home and
+# is never touched. Sarvam path only.
+
+_META_SENTENCE_RE = _re.compile(
+    r"transcript\s+(?:mentions|references|contains)|speech.to.text|"
+    r"transcription\s+artifacts?|known.names\s+block|could\s+not\s+be\s+"
+    r"resolved|use.cases?\s+(?:discussed|include)|noted\s+contextually",
+    _re.IGNORECASE)
+
+
+def _scrub_machinery(report: dict, registry_version: str | None) -> None:
+    common_cells = report.get("common") or {}
+    flags = ((common_cells.get("data_quality_flags") or {}).get("value")
+             if isinstance(common_cells.get("data_quality_flags"), dict) else None) or []
+    terms: list[str] = []
+    for fl in flags:
+        m = _re.match(r"\s*transcription artifacts?:\s*(.+)", str(fl), _re.IGNORECASE)
+        if m:
+            t = m.group(1).strip().strip("'\"").strip()
+            if len(t) >= 3:
+                terms.append(t.lower())
+
+    def _dirty(sentence: str) -> bool:
+        low = sentence.lower()
+        return bool(_META_SENTENCE_RE.search(sentence)) or \
+            any(t in low for t in terms)
+
+    def _walk(cells: dict, fields: list[dict]) -> None:
+        for f in fields:
+            if f.get("system"):
+                continue                     # flags keep their artifact entries
+            cell = cells.get(f["key"])
+            if not isinstance(cell, dict):
+                continue
+            v = cell.get("value")
+            if isinstance(v, str) and v.strip():
+                kept = [s for s in _re.split(r"(?<=[.!?])\s+", v) if not _dirty(s)]
+                cleaned = " ".join(kept).strip()
+                if cleaned != v:
+                    cell["value"] = cleaned or None
+                    if not cleaned:
+                        cell["confidence"] = "n/a"
+            elif (isinstance(v, list) and not f.get("item_shape")
+                  and all(isinstance(x, str) for x in v)):
+                kept_l = [x for x in v if not _dirty(x)]
+                if kept_l != v:
+                    cell["value"] = kept_l
+                    if not kept_l:
+                        cell["confidence"] = "n/a"
+
+    registry = load_registry(registry_version)
+    common_f = (registry["common"] if isinstance(registry["common"], list)
+                else registry["common"]["fields"])
+    _walk(common_cells, common_f)
+    for uc, block in registry["blocks"].items():
+        if isinstance(report.get(uc), dict):
+            _walk(report[uc], block.get("fields") or [])
 
 
 # ----------------------------------------------------- the 90-minute wall
@@ -1209,6 +1278,7 @@ def structure_transcript(
                 detail = "; ".join(first.errors)
                 raise StructuringError(
                     f"sarvam decomposed structuring failed: {detail}") from first
+        _scrub_machinery(report, registry_version)
     else:
         raw = _ask(user)
         obj1: dict | None = None

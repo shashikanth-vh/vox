@@ -796,6 +796,58 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
     assert out2["report"]["asset_monetisation"]["party_role"]["value"] == "owner"
 
 
+def test_machinery_talk_is_scrubbed_from_prose_deterministically(monkeypatch):
+    """Told twice not to, the dialogue tune still wrote 'The transcript
+    references SHIT and DA, which appears to be a speech-to-text artifact'
+    into Remarks. Prompting lost — the scrubber drops machinery sentences
+    and flagged artifact terms from every prose field and list bullet,
+    keeps the analyst substance beside them, and never touches
+    data_quality_flags (the artifacts' one home)."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["asset_monetisation"],
+                "entity_candidates": [],
+                "common": {
+                    "meeting_summary": {
+                        "value": ("Admin held a call with Mr. Bhumik. "
+                                  "The use cases discussed include asset "
+                                  "monetisation and lending."),
+                        "confidence": "n/a"},
+                    "key_discussion_points": {
+                        "value": ["26.3 MW project discussed",
+                                  "SHIT and DA data required for developers"],
+                        "confidence": "medium"},
+                    "data_quality_flags": {
+                        "value": ["transcription artifact: SHIT and DA"],
+                        "confidence": "n/a"}}})
+        return json.dumps({"asset_monetisation": {
+            "party_role": {"value": "owner", "confidence": "high"},
+            "remarks": {
+                "value": ("The transcript references SHIT and DA, which "
+                          "appears to be a speech-to-text artifact for "
+                          "unidentified terms. Clarification is needed on "
+                          "the 53 acres of additional land."),
+                "confidence": "medium"}}})
+
+    r = structure_transcript("remanindia call", mode="post_meeting",
+                             ask_model=ask,
+                             capture_ts="2026-09-16T06:00:00Z")["report"]
+    remark = r["asset_monetisation"]["remarks"]["value"]
+    assert "SHIT" not in remark and "artifact" not in remark
+    assert "53 acres" in remark                       # substance survives
+    summary = r["common"]["meeting_summary"]["value"]
+    assert "use cases" not in summary and "Mr. Bhumik" in summary
+    ki = r["common"]["key_discussion_points"]["value"]
+    assert ki == ["26.3 MW project discussed"]        # artifact bullet dropped
+    flags = r["common"]["data_quality_flags"]["value"]
+    assert "transcription artifact: SHIT and DA" in flags  # home untouched
+
+
 def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():
     """Defense in depth behind the assembly wrap: a non-object cell reaching
     the validator raises ContractError (which salvage handles), never
