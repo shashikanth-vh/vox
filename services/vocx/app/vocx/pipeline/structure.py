@@ -816,14 +816,22 @@ _SARVAM_FIELD_EXTRAS = {
                      "when a split was spoken, else the full requirement"),
     "asset_location": (" — the location as spoken, even shorthand or a site "
                        "code (e.g. 'AMPY (2.5 into 4 sites)')"),
-    # the review header reads "Sector · Subsector · <location>" from this
-    # cell — the canonical prompt's rule is 'city, site or place AS SPOKEN',
-    # not the meeting venue; unbriefed, the model nulled it on a call while
-    # 'Jhansi, Uttar Pradesh' sat in the transcript.
-    "location": (" — the city/site/place spoken in the conversation (the "
-                 "counterparty's or project's place counts, e.g. 'Jhansi, "
-                 "Uttar Pradesh'), not only the meeting venue; null only "
-                 "when no place was spoken"),
+    # Matches the glossary correction rules that ride in every call's
+    # context: location is the venue lane; project/asset places each have
+    # their own block field (asset_location, project_location).
+    "location": (" — the MEETING VENUE only, as spoken ('met at their "
+                 "Whitefield office' -> 'Whitefield'); project, plant and "
+                 "asset places go to their own block fields, never here; "
+                 "null when the venue was not spoken"),
+    # HOWEVER the speaker phrased it, a follow-up must land as a concrete
+    # date+time — that pair is what the Add-to-Calendar / Google Meet flow
+    # consumes; a null here is a lost meeting.
+    "follow_up_date": (" — resolve WHATEVER form was spoken against the "
+                       "Capture timestamp: 'tomorrow', 'day after', 'next "
+                       "Monday', 'the 16th', '16-09' (Indian day-month) all "
+                       "become the concrete YYYY-MM-DD, confidence medium"),
+    "follow_up_time": (" — the spoken time as 24-hour HH:MM ('11 am' -> "
+                       "'11:00', 'at 4' in business context -> '16:00')"),
     "opportunity_score": (" — SUGGEST from the business substance, not only "
                           "spoken sentiment: 1-2 vague interest or no real "
                           "ask; 3 a concrete, actionable ask (a specific "
@@ -888,7 +896,7 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
             rng = f", integer {f['min']}-{f['max']},"
         return f"- {key} ({label}): number{rng} or null{hint}"
     if t == "date":
-        return f"- {key} ({label}): date YYYY-MM-DD or null"
+        return f"- {key} ({label}): date YYYY-MM-DD or null{hint}"
     return f"- {key} ({label}): text or null{hint}"
 
 

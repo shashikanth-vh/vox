@@ -645,15 +645,23 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     if (!when) return;
     setBusy(true); setFuMsg('');
     try {
+      // A follow-up spoken as a video call gets a real Google Meet room on
+      // the event: the server attaches conferenceData when mode is 'video'.
+      const fuText = `${(common.next_steps as any)?.value ?? ''} ${(common.meeting_summary as any)?.value ?? ''}`;
+      const fuVideo = /\b(video|google meet|vc)\b/i.test(fuText)
+        || String((common.meeting_type as any)?.value ?? '') === 'video';
       const r = await vocxClient.post('/v1/vox/follow_up', {
         rm: user.full,
         title: ((common.next_steps as any)?.value as string) || `Follow-up — ${entityName || leadName || 'VOX'}`,
         date: when,
         time: ((common.follow_up_time as any)?.value as string) || '',
+        mode: fuVideo ? 'video' : '',
         description: ((common.meeting_summary as any)?.value as string) || '',
       });
       if (r.data?.ok) {
-        setFuMsg('On your calendar · reminder set 1 day before');
+        setFuMsg(r.data?.meet
+          ? 'On your calendar with a Google Meet link · reminder set 1 day before'
+          : 'On your calendar · reminder set 1 day before');
         setFuDone(true);
         // the job is done — show the confirmation for a beat, then leave on
         // our own (field feedback: "I had to exit manually")
@@ -1220,7 +1228,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           )}
         </div>
         <div className="review-meta">
-          {[row.sector, row.subsector, (common.location as any)?.value].filter(Boolean).join(' · ') || 'Sector not determined'}
+          {[row.sector, row.subsector,
+            (common.location as any)?.value
+              || ((report as any)?.asset_monetisation?.asset_location as any)?.value
+              || ((report as any)?.lending?.project_location as any)?.value
+              || ((report as any)?.syndication?.project_location as any)?.value,
+          ].filter(Boolean).join(' · ') || 'Sector not determined'}
         </div>
         <div className="review-meta-2">
           <span>{new Date(row.created_at || '').toLocaleString('en', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>

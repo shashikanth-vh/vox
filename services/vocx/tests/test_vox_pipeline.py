@@ -564,6 +564,55 @@ def test_calendar_event_carries_the_promised_reminder():
     assert "reminders" not in fake._e.body
 
 
+def test_a_video_follow_up_gets_a_real_google_meet_room():
+    """"We can do a video call tomorrow at 11" must land as an event WITH a
+    Meet link: mode 'video' attaches conferenceData (conferenceDataVersion=1)
+    and the minted link rides back as 'meet'. An account that refuses
+    conferences still gets its event — the link degrades, the meeting never."""
+    from app.vocx.google.workspace import CalendarWriter
+
+    class FakeEvents:
+        def __init__(self, refuse_conference=False):
+            self.refuse = refuse_conference
+            self.calls = []
+        def insert(self, **kwargs):
+            self.calls.append(kwargs)
+            refuse = self.refuse and "conferenceData" in kwargs["body"]
+            class _X:
+                def execute(_s):
+                    if refuse:
+                        raise RuntimeError("conference not allowed")
+                    out = {"id": "e2", "htmlLink": "http://cal/e2",
+                           "start": kwargs["body"]["start"]}
+                    if "conferenceData" in kwargs["body"]:
+                        out["hangoutLink"] = "https://meet.google.com/abc-defg-hij"
+                    return out
+            return _X()
+
+    class FakeCal:
+        def __init__(self, **kw): self._e = FakeEvents(**kw)
+        def events(self): return self._e
+
+    fake = FakeCal()
+    w = CalendarWriter(fake)
+    r = w.create_event("Video call", "2026-09-17", "11:00", "video", "confirm timing")
+    assert r["meet"] == "https://meet.google.com/abc-defg-hij"
+    call = fake._e.calls[0]
+    assert call["conferenceDataVersion"] == 1
+    cd = call["body"]["conferenceData"]["createRequest"]
+    assert cd["conferenceSolutionKey"] == {"type": "hangoutsMeet"}
+    # non-video mode asks for no conference
+    fake2 = FakeCal()
+    r2 = CalendarWriter(fake2).create_event("Site visit", "2026-09-17", None, "site")
+    assert "meet" not in r2 and "conferenceData" not in fake2._e.calls[0]["body"]
+    # refusal degrades to a plain event, never a lost meeting
+    fake3 = FakeCal(refuse_conference=True)
+    r3 = CalendarWriter(fake3).create_event("Video call", "2026-09-17", "11:00", "video")
+    assert r3["id"] == "e2" and "meet" not in r3
+    assert len(fake3._e.calls) == 2
+    assert "conferenceData" not in fake3._e.calls[1]["body"]
+
+
 def test_unspoken_meeting_date_defaults_to_the_capture_date():
     """Field finding: a note recorded now is about a meeting that just happened.
     A null meeting_date backfills from the capture timestamp at MEDIUM

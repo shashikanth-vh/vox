@@ -840,7 +840,8 @@ class VocxApp:
                 (data.get("mode") or "").strip() or None,
                 (data.get("description") or "").strip(),
                 reminder_minutes_before=1440)
-            return 200, "application/json", _j({"ok": True, "link": r.get("link")})
+            return 200, "application/json", _j({"ok": True, "link": r.get("link"),
+                                                "meet": r.get("meet")})
         except Exception as e:  # noqa: BLE001 — API refusal is a told truth
             return 200, "application/json", _j({"ok": False, "error": str(e)[:300]})
 

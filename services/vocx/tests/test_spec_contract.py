@@ -522,10 +522,16 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "syndicated portion" in dsize
     loc = _sarvam_field_brief(am["asset_location"], reg)
     assert "shorthand" in loc
-    # the header's "Sector · Subsector · UP" reads common.location — any
-    # place spoken counts, not only the meeting venue
+    # location is the VENUE lane (matching the glossary rules that ride in
+    # every call's context); project/asset places live in their own fields
     mloc = _sarvam_field_brief(common["location"], reg)
-    assert "not only the meeting venue" in mloc
+    assert "MEETING VENUE only" in mloc
+    # a follow-up spoken in ANY form must land as concrete date+time — the
+    # Add-to-Calendar / Google Meet flow consumes exactly that pair
+    fud = _sarvam_field_brief(common["follow_up_date"], reg)
+    assert "tomorrow" in fud and "Capture timestamp" in fud
+    fut = _sarvam_field_brief(common["follow_up_time"], reg)
+    assert "HH:MM" in fut
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal

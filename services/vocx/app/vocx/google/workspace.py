@@ -135,9 +135,36 @@ class CalendarWriter:
         if reminder_minutes_before is not None:
             body["reminders"] = {"useDefault": False, "overrides": [
                 {"method": "popup", "minutes": int(reminder_minutes_before)}]}
-        created = self.calendar.events().insert(calendarId=calendar_id, body=body).execute()
-        return {"id": created.get("id"), "link": created.get("htmlLink"),
-                "start": created.get("start")}
+        insert_kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body}
+        if (mode or "") == "video":
+            # A video follow-up gets a REAL Google Meet room: conferenceData
+            # asks Calendar to mint one (requires conferenceDataVersion=1).
+            # If the account or API refuses conferences, the event must still
+            # land — retried plain below, never lost over the link.
+            import uuid
+            body["conferenceData"] = {"createRequest": {
+                "requestId": uuid.uuid4().hex,
+                "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
+            insert_kwargs["conferenceDataVersion"] = 1
+        try:
+            created = self.calendar.events().insert(**insert_kwargs).execute()
+        except Exception:  # noqa: BLE001 — only the conference ask may degrade
+            if "conferenceData" not in body:
+                raise
+            body.pop("conferenceData", None)
+            insert_kwargs.pop("conferenceDataVersion", None)
+            created = self.calendar.events().insert(**insert_kwargs).execute()
+        out = {"id": created.get("id"), "link": created.get("htmlLink"),
+               "start": created.get("start")}
+        meet = created.get("hangoutLink")
+        if not meet:
+            for ep in ((created.get("conferenceData") or {}).get("entryPoints") or []):
+                if ep.get("entryPointType") == "video" and ep.get("uri"):
+                    meet = ep["uri"]
+                    break
+        if meet:
+            out["meet"] = meet
+        return out
 
 
 def _esc(s: str) -> str:
