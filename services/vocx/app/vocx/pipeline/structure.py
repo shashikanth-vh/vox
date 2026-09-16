@@ -816,6 +816,11 @@ _SARVAM_FIELD_EXTRAS = {
                      "when a split was spoken, else the full requirement"),
     "asset_location": (" — the location as spoken, even shorthand or a site "
                        "code (e.g. 'AMPY (2.5 into 4 sites)')"),
+    # Lane discipline, seen violated live: the asset-for-sale's site rode
+    # into Lending's project_location.
+    "project_location": (" — where the project being FINANCED sits; never "
+                         "the location of an asset offered for sale (that "
+                         "is asset_location in Asset monetisation)"),
     # Matches the glossary correction rules that ride in every call's
     # context: location is the venue lane; project/asset places each have
     # their own block field (asset_location, project_location).
@@ -1215,7 +1220,13 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         label = (blocks.get(uc) or {}).get("label") or uc
         block_system = (
             f"{_SARVAM_RULES}\n"
-            f"From the transcript, fill the {label} fields. Shape: "
+            f"From the transcript, fill the {label} fields — from what was "
+            f"said about the {label} thread ONLY. A conversation can carry "
+            "several threads (an asset sale AND a loan): selling/buying an "
+            "asset belongs to Asset monetisation; borrowing and facilities "
+            "belong to Lending/Syndication. Another thread's content stays "
+            "out of every cell here, including remarks — at most a "
+            "half-sentence cross-reference. Shape: "
             f"{{\"{uc}\": {{<key>: {{\"value\": ..., \"confidence\": "
             "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}\n"
             "keys:\n" + "\n".join(_sarvam_field_brief(f, registry)
@@ -1248,7 +1259,11 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         det_system = (
             f"{_SARVAM_RULES}\n"
             f"The company is a {subsector}. Fill its canonical data points "
-            "from the transcript. Shape: {\"subsector_details\": "
+            "from the transcript. These describe the COMPANY's profile, so "
+            "evidence may come from any thread of the conversation — an "
+            "asset the company built or owns evidences its capacity and "
+            "track record (a 10 MW asset offered for sale still counts "
+            "toward projects executed). Shape: {\"subsector_details\": "
             f"{{\"{subsector}\": {{<key>: {{\"value\": ..., \"confidence\": "
             "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}}\n"
             "keys:\n" + _details_briefs(canon))

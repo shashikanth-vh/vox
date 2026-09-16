@@ -465,6 +465,9 @@ def test_sarvam_mode_structures_in_small_batched_calls(monkeypatch):
     assert len(systems) == 3            # head + lending + syndication
     # a requirement taken to syndication is BOTH blocks (own book + arranged)
     assert "BOTH lending and syndication" in systems[0]
+    # lane discipline: each block call extracts its own thread only — the
+    # asset sale retold inside Lending remarks (seen live) is out of lane
+    assert all("thread ONLY" in s for s in systems[1:])
     r = out["report"]
     assert out["model"] == "sarvam-105b-conversations"
     assert r["detected_use_cases"] == ["lending", "syndication"]
@@ -522,6 +525,9 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "syndicated portion" in dsize
     loc = _sarvam_field_brief(am["asset_location"], reg)
     assert "shorthand" in loc
+    # the asset-for-sale's site rode into Lending's project_location live
+    ploc = _sarvam_field_brief(lending["project_location"], reg)
+    assert "FINANCED" in ploc and "asset offered for sale" in ploc
     # location is the VENUE lane (matching the glossary rules that ride in
     # every call's context); project/asset places live in their own fields
     mloc = _sarvam_field_brief(common["location"], reg)
@@ -643,7 +649,7 @@ def test_sarvam_block_calls_run_concurrently(monkeypatch):
             return json.dumps({"detected_use_cases": ["lending", "syndication"],
                                "entity_candidates": [], "common": {}})
         barrier.wait()
-        if "Syndication" in system:
+        if "fill the Syndication fields" in system:
             return json.dumps({"syndication": {
                 "deal_size_cr": {"value": 5, "confidence": "high"}}})
         return json.dumps({"lending": {
@@ -958,7 +964,7 @@ def test_a_spoken_requirement_taken_to_syndication_rides_as_lending_too(monkeypa
                                    "entity_candidates": [], "common": {}})
             if "lender chase/reply" in system:
                 return "[]"
-            if "Lending" in system and "Syndication" not in system:
+            if "fill the Lending fields" in system:
                 return json.dumps({"lending": {
                     "requirement_nature": {"value": "working_capital",
                                            "confidence": "high"},
