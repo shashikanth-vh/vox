@@ -770,9 +770,27 @@ def _backfill_lender_updates(report: dict, transcript: str,
 _SARVAM_RULES = (
     "You extract structured fields from an Indian climate-finance desk "
     "voice-note transcript. NEVER fabricate: anything not spoken gets value "
-    "null and confidence \"n/a\". Dates are YYYY-MM-DD; amounts are plain "
-    "numbers denominated in crore (50 lakh = 0.5). Return ONLY one JSON "
-    "object — no prose, no thinking, no code fences.")
+    "null and confidence \"n/a\" — but classification fields (sector, "
+    "subsector, chips) MAY be inferred at medium confidence when the "
+    "business discussed plainly implies them (a solar project implies "
+    "Renewables). An obvious speech-to-text garble you cannot resolve from "
+    "the KNOWN NAMES block never rides into a summary or note — record it "
+    "in data_quality_flags as 'transcription artifact: <term>' instead. "
+    "Dates are YYYY-MM-DD; amounts are plain numbers denominated in crore "
+    "(50 lakh = 0.5). Return ONLY one JSON object — no prose, no thinking, "
+    "no code fences.")
+
+
+# Field-shaped lessons from the live bake-off, keyed so they never leak onto
+# other fields: the dialogue tune leaves these null unless told what the
+# desk actually wants in them.
+_SARVAM_FIELD_EXTRAS = {
+    "deal_size": (" — no rupee figure spoken? the capacity offered stands in "
+                  "(e.g. '26.3 MW operational assets')"),
+    "remarks": (" — a 1-2 sentence analyst note from THIS conversation: gaps, "
+                "clarifications needed, follow-ups; null only when nothing "
+                "needs noting"),
+}
 
 
 def _field_hint(f: dict) -> str:
@@ -792,12 +810,15 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
     t = f.get("type", "string")
     key = f["key"]
     label = f.get("label") or key
-    hint = _field_hint(f)
+    hint = _field_hint(f) + _SARVAM_FIELD_EXTRAS.get(key, "")
     if f.get("options_from") == "taxonomy.sectors":
-        return f"- {key}: one of {list(registry['taxonomy'])} or null"
+        return (f"- {key}: one of {list(registry['taxonomy'])} or null — infer "
+                "from the business discussed when plainly implied (a solar "
+                "project implies Renewables)")
     if f.get("options_from") == "taxonomy.subsectors_of_selected_sector":
         return (f"- {key}: the subsector under the chosen sector, from "
-                f"{json.dumps(registry['taxonomy'])}, or null")
+                f"{json.dumps(registry['taxonomy'])}, or null — infer from "
+                "what the company does when plainly implied")
     if t == "enum" and f.get("options"):
         return f"- {key} ({label}): one of {[o['value'] for o in f['options']]} or null{hint}"
     if f.get("item_shape"):
@@ -807,8 +828,9 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
         # components must land as the canonical token, anything else spoken is
         # appended as free text in the SAME list, never invented.
         return (f"- {key} ({label}): list; use these exact tokens for what was "
-                f"spoken: {f['closed_set']}; append any OTHER spoken component "
-                f"as a short free-text string in the same list{hint}")
+                f"spoken: {f['closed_set']} ('selling the entire project / all "
+                "assets' means entire_project); append any OTHER spoken "
+                f"component as a short free-text string in the same list{hint}")
     if t == "list":
         return f"- {key} ({label}): list of short strings{hint}"
     if t in ("number", "int"):

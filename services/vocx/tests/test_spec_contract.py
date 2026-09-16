@@ -496,6 +496,19 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "1-5" in score and "null" in score
     summary = _sarvam_field_brief(common["meeting_summary"], reg)
     assert "narrative" in summary                     # judgement guidance rides too
+    # bake-off lessons: sector may be inferred from the business; "sell all
+    # assets" means the entire_project chip; deal_size takes the offered
+    # capacity when no rupee figure was spoken; remarks wants an analyst note
+    sector = _sarvam_field_brief(common["sector"], reg)
+    assert "infer" in sector
+    assert "entire_project)" in offer or "entire_project'" in offer or \
+        "means entire_project" in offer
+    assert "capacity offered" in deal
+    remarks = _sarvam_field_brief(
+        {"key": "remarks", "label": "Remarks", "type": "string"}, reg)
+    assert "analyst note" in remarks
+    from app.vocx.pipeline.structure import _SARVAM_RULES
+    assert "transcription artifact" in _SARVAM_RULES  # garbles flagged, not copied
 
 
 def test_sarvam_long_take_condenses_before_extraction(monkeypatch):
