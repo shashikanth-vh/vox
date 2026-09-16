@@ -804,6 +804,10 @@ _SARVAM_FIELD_EXTRAS = {
     # "no evaluative language heard" left the score null on every clean run —
     # but the desk scores DEAL SUBSTANCE, not spoken sentiment, exactly as
     # the Claude path does.
+    "requirement_nature": (" — funding to BUILD plants/projects (incl. land) "
+                           "is project_finance; term_loan is general or "
+                           "asset-backed corporate borrowing; working_capital "
+                           "is operating cycle"),
     "opportunity_score": (" — SUGGEST from the business substance, not only "
                           "spoken sentiment: 1-2 vague interest or no real "
                           "ask; 3 a concrete, actionable ask (a specific "
@@ -837,9 +841,14 @@ def _sarvam_field_brief(f: dict, registry: dict) -> str:
                 "from the business discussed when plainly implied (a solar "
                 "project implies Renewables)")
     if f.get("options_from") == "taxonomy.subsectors_of_selected_sector":
+        # Judged by activity, never by the company's name: "Chemenergy
+        # Biofuels Limited" building CBG plants filed under Biofuels live —
+        # compressed biogas is Biogas, whatever the letterhead says.
         return (f"- {key}: the subsector under the chosen sector, from "
-                f"{json.dumps(registry['taxonomy'])}, or null — infer from "
-                "what the company does when plainly implied")
+                f"{json.dumps(registry['taxonomy'])}, or null — judge by the "
+                "ACTIVITY discussed, never the company's name (a company "
+                "named 'X Biofuels' building CBG / compressed biogas plants "
+                "is Biogas, not Biofuels)")
     if t == "enum" and f.get("options"):
         return f"- {key} ({label}): one of {[o['value'] for o in f['options']]} or null{hint}"
     if f.get("item_shape"):

@@ -502,6 +502,13 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     # capacity when no rupee figure was spoken; remarks wants an analyst note
     sector = _sarvam_field_brief(common["sector"], reg)
     assert "infer" in sector
+    # subsector by activity, never letterhead: "Chemenergy Biofuels" building
+    # CBG plants filed under Biofuels live — compressed biogas is Biogas
+    subsector = _sarvam_field_brief(common["subsector"], reg)
+    assert "never the company's name" in subsector
+    lending = {f["key"]: f for f in reg["blocks"]["lending"]["fields"]}
+    nature = _sarvam_field_brief(lending["requirement_nature"], reg)
+    assert "project_finance" in nature and "BUILD" in nature
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal
