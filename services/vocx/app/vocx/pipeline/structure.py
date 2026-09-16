@@ -806,6 +806,12 @@ _SARVAM_FIELD_EXTRAS = {
     "offer_notes": (" — FILL whenever a sale was discussed: what is offered, "
                     "the land/expansion picture, PPA and tenors, in the "
                     "seller's substance"),
+    # The desk reads (and edits) these bullets one fact at a time — the live
+    # run compressed five facts into two compound bullets.
+    "key_discussion_points": (" — one FACT per bullet, granular and "
+                              "scannable: a ₹5 Cr requirement, a completed "
+                              "credit call and pending documents are THREE "
+                              "bullets, never one sentence"),
     # "no evaluative language heard" left the score null on every clean run —
     # but the desk scores DEAL SUBSTANCE, not spoken sentiment, exactly as
     # the Claude path does.
@@ -1012,6 +1018,83 @@ def _scrub_machinery(report: dict, registry_version: str | None) -> None:
     for uc, block in registry["blocks"].items():
         if isinstance(report.get(uc), dict):
             _walk(report[uc], block.get("fields") or [])
+
+
+# The lane status lines, composed deterministically. Briefed three times,
+# the dialogue tune still shipped lending remarks without the ₹5 Cr ask and
+# with the syndication thread retold — and the register REPLACES the lane's
+# status field with this cell, so its shape is contract, not style. The
+# composer never invents: the lead sentence comes from the lane's own
+# validated cells (nature + quantum / deal size), the gaps line from its
+# null cells, and the model's remaining prose stays after them.
+
+_NATURE_LABELS = {
+    "project_finance": "Project finance", "term_loan": "Term loan",
+    "working_capital": "Working capital", "ncd": "NCD",
+    "structured_mezzanine": "Structured mezzanine", "refinance": "Refinance",
+}
+
+
+def _num_str(v) -> str:
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{v:g}"
+    return str(v).strip()
+
+
+def _compose_lane_status(report: dict) -> None:
+    lending = report.get("lending")
+    if isinstance(lending, dict):
+        cell = lending.get("remarks")
+        if isinstance(cell, dict):
+            text = str(cell.get("value") or "").strip()
+            quantum = (lending.get("requirement_quantum_cr") or {}).get("value") \
+                if isinstance(lending.get("requirement_quantum_cr"), dict) else None
+            if quantum is not None and _num_str(quantum) not in text:
+                nature = (lending.get("requirement_nature") or {}).get("value") \
+                    if isinstance(lending.get("requirement_nature"), dict) else None
+                label = _NATURE_LABELS.get(str(nature or ""), "Funding")
+                text = f"{label} requirement stated as ₹{_num_str(quantum)} Cr. {text}".strip()
+            gaps = [lbl for key, lbl in (
+                ("company_turnover_cr", "company turnover"),
+                ("existing_bankers", "existing bankers"),
+                ("project_location", "project location"))
+                if not ((lending.get(key) or {}).get("value")
+                        if isinstance(lending.get(key), dict) else None)]
+            if gaps and "not discussed" not in text.lower():
+                tail = (", ".join(gaps[:-1]) + " and " + gaps[-1]
+                        if len(gaps) > 1 else gaps[0])
+                text = f"{text} {tail[0].upper()}{tail[1:]} not discussed.".strip()
+            if text and text != str(cell.get("value") or "").strip():
+                cell["value"] = text
+                if cell.get("confidence") in (None, "n/a"):
+                    cell["confidence"] = "medium"
+    synd = report.get("syndication")
+    if isinstance(synd, dict):
+        cell = synd.get("remarks")
+        if isinstance(cell, dict):
+            text = str(cell.get("value") or "").strip()
+            ds = (synd.get("deal_size_cr") or {}).get("value") \
+                if isinstance(synd.get("deal_size_cr"), dict) else None
+            if ds is not None and _num_str(ds) not in text:
+                text = f"₹{_num_str(ds)} Cr syndication mandate. {text}".strip()
+                cell["value"] = text
+                if cell.get("confidence") in (None, "n/a"):
+                    cell["confidence"] = "medium"
+    # A project_location that merely echoes the asset-for-sale's location is
+    # the other lane's fact (seen live: 'AMPY' riding into syndication) —
+    # cleared, the asset keeps its own cell.
+    am = report.get("asset_monetisation")
+    am_loc = (am.get("asset_location") or {}).get("value") \
+        if isinstance(am, dict) and isinstance(am.get("asset_location"), dict) else None
+    if isinstance(am_loc, str) and am_loc.strip():
+        for lane in ("lending", "syndication"):
+            block = report.get(lane)
+            pl = block.get("project_location") if isinstance(block, dict) else None
+            if isinstance(pl, dict) and isinstance(pl.get("value"), str) \
+                    and pl["value"].strip() \
+                    and pl["value"].strip().lower() in am_loc.strip().lower():
+                pl["value"] = None
+                pl["confidence"] = "n/a"
 
 
 # ----------------------------------------------------- the 90-minute wall
@@ -1377,6 +1460,7 @@ def structure_transcript(
                 raise StructuringError(
                     f"sarvam decomposed structuring failed: {detail}") from first
         _scrub_machinery(report, registry_version)
+        _compose_lane_status(report)
     else:
         raw = _ask(user)
         obj1: dict | None = None

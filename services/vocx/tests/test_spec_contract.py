@@ -475,7 +475,11 @@ def test_sarvam_mode_structures_in_small_batched_calls(monkeypatch):
     assert r["common"]["sector"]["value"] == "Renewables"
     assert r["common"]["opportunity_assessment"]["confidence"] == "n/a"
     assert r["lending"]["requirement_quantum_cr"]["value"] == 5
-    assert r["lending"]["remarks"]["value"] is None      # unspoken → null
+    assert r["lending"]["company_turnover_cr"]["value"] is None  # unspoken → null
+    # the composer builds the lane status from the cells (nature unspoken →
+    # the generic "Funding" lead)
+    assert r["lending"]["remarks"]["value"].startswith(
+        "Funding requirement stated as ₹5 Cr.")
     assert r["syndication"]["deal_size_cr"]["value"] == 5
     assert "not_a_field" not in r["syndication"]
     assert r["common"]["meeting_date"]["value"] == "2026-09-16"  # capture fill
@@ -538,6 +542,9 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "tomorrow" in fud and "Capture timestamp" in fud
     fut = _sarvam_field_brief(common["follow_up_time"], reg)
     assert "HH:MM" in fut
+    # KI bullets are edited one fact at a time — never compound sentences
+    ki = _sarvam_field_brief(common["key_discussion_points"], reg)
+    assert "one FACT per bullet" in ki
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal
@@ -777,7 +784,10 @@ def test_sarvam_bare_cells_are_wrapped_not_crashed(monkeypatch):
     assert r["common"]["opportunity_score"]["value"] == 3
     assert r["common"]["meeting_summary"]["confidence"] == "n/a"  # judgement
     assert r["syndication"]["deal_size_cr"] == {"value": 5, "confidence": "medium"}
-    assert r["syndication"]["remarks"] == {"value": None, "confidence": "n/a"}
+    # composed from the deal size cell — the register's status line is never
+    # left empty when the lane carries a mandate
+    assert r["syndication"]["remarks"] == {"value": "₹5 Cr syndication mandate.",
+                                           "confidence": "medium"}
 
 
 def test_sarvam_fills_the_subsector_key_data(monkeypatch):
@@ -991,6 +1001,74 @@ def test_a_spoken_requirement_taken_to_syndication_rides_as_lending_too(monkeypa
         capture_ts="2026-09-16T06:00:00Z")["report"]
     assert r2["detected_use_cases"] == ["syndication"]
     assert "lending" not in r2
+
+
+def test_lane_status_lines_are_composed_from_the_cells(monkeypatch):
+    """Third strike went deterministic: the register REPLACES each lane's
+    status field with the remarks cell, so its shape is contract. The lead
+    sentence comes from the lane's own validated cells (₹5 Cr working
+    capital), the gaps line from its null cells, the model's prose stays —
+    and a project_location merely echoing the asset-for-sale's site is
+    cleared back to its own lane."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({"detected_use_cases":
+                               ["asset_monetisation", "lending", "syndication"],
+                               "entity_candidates": [], "common": {}})
+        if "lender chase/reply" in system:
+            return "[]"
+        if "fill the Lending fields" in system:
+            return json.dumps({"lending": {
+                "requirement_nature": {"value": "working_capital", "confidence": "high"},
+                "requirement_quantum_cr": {"value": 5, "confidence": "high"},
+                "remarks": {"value": "Documents are partly in hand; follow-up needed.",
+                            "confidence": "medium"}}})
+        if "fill the Syndication fields" in system:
+            return json.dumps({"syndication": {
+                "deal_size_cr": {"value": 5, "confidence": "high"},
+                "project_location": {"value": "AMPY", "confidence": "medium"},
+                "remarks": {"value": "Credit call done; documents pending.",
+                            "confidence": "medium"}}})
+        return json.dumps({"asset_monetisation": {
+            "party_role": {"value": "owner", "confidence": "high"},
+            "asset_location": {"value": "AMPY (2.5 into 4 sites)",
+                               "confidence": "medium"}}})
+
+    r = structure_transcript(
+        "ten megawatt sale in AMPY and five crore working capital to syndication",
+        mode="post_meeting", ask_model=ask,
+        capture_ts="2026-09-16T06:00:00Z")["report"]
+    lr = r["lending"]["remarks"]["value"]
+    assert lr.startswith("Working capital requirement stated as ₹5 Cr.")
+    assert "Documents are partly in hand" in lr        # model prose survives
+    assert "not discussed" in lr                       # gaps line from nulls
+    sr = r["syndication"]["remarks"]["value"]
+    assert "₹5 Cr syndication mandate" in sr
+    # the asset's site stays in its own lane
+    assert r["syndication"]["project_location"]["value"] is None
+    assert r["asset_monetisation"]["asset_location"]["value"].startswith("AMPY")
+
+    # a remark already carrying the figure is left alone (idempotent style)
+    def ask2(model, system, user):
+        if "fill the Lending fields" in system:
+            return json.dumps({"lending": {
+                "requirement_nature": {"value": "working_capital", "confidence": "high"},
+                "requirement_quantum_cr": {"value": 5, "confidence": "high"},
+                "remarks": {"value": ("Working capital requirement stated as "
+                                      "₹5 Cr. Company turnover, existing bankers "
+                                      "and project location not discussed."),
+                            "confidence": "medium"}}})
+        return ask(model, system, user)
+
+    r2 = structure_transcript(
+        "ten megawatt sale in AMPY and five crore working capital to syndication",
+        mode="post_meeting", ask_model=ask2,
+        capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert r2["lending"]["remarks"]["value"].count("₹5 Cr") == 1
 
 
 def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():
