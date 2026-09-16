@@ -161,10 +161,17 @@ def _check_block(registry: dict, block: str, data: Any, errors: list[str]) -> No
         _check_value(fdef, cell["value"], errors, where)
 
 
+def _cell_value(cell):
+    """A cell that is not an object (the dialogue-tuned model answers bare
+    strings) reads as no value here — the shape check names the violation;
+    the taxonomy check must never crash on it."""
+    return cell.get("value") if isinstance(cell, dict) else None
+
+
 def _check_taxonomy(registry: dict, common: dict, errors: list[str]) -> None:
     taxonomy = registry["taxonomy"]
-    sector = (common.get("sector") or {}).get("value")
-    subsector = (common.get("subsector") or {}).get("value")
+    sector = _cell_value(common.get("sector"))
+    subsector = _cell_value(common.get("subsector"))
     if sector is not None and sector not in taxonomy:
         errors.append(f"common.sector: {sector!r} is not one of the six locked sectors")
         return
@@ -233,7 +240,7 @@ def validate_report(obj: Any, registry_version: str | None = None) -> dict:
     # renderer shows them under Additional details with no code change per subsector.
     details = obj.get("subsector_details")
     if details not in (None, {}):
-        subsector = (((obj.get("common") or {}).get("subsector")) or {}).get("value") \
+        subsector = _cell_value((obj.get("common") or {}).get("subsector")) \
             if isinstance(obj.get("common"), dict) else None
         if not isinstance(details, dict):
             errors.append("subsector_details: must be an object")
@@ -270,7 +277,8 @@ def compute_data_quality_flags(obj: dict, registry_version: str | None = None) -
     registry = load_registry(registry_version)
     flags: list[str] = []
     detected = obj.get("detected_use_cases") or []
-    sector = ((obj.get("common") or {}).get("sector") or {}).get("value")
+    common_obj = obj.get("common") if isinstance(obj.get("common"), dict) else {}
+    sector = _cell_value(common_obj.get("sector"))
     if "lending" in detected and sector is None:
         flags.append("sector not determinable")
     for uc in detected:

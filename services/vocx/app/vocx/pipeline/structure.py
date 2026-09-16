@@ -480,7 +480,8 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
                     notes.append(f"sector aligned to subsector "
                                  f"'{subsector}' (was '{sector}')")
                 sector = parent_of[subsector]
-                sub_conf = (common.get("subsector") or {}).get("confidence")
+                sub_cell = common.get("subsector")
+                sub_conf = sub_cell.get("confidence") if isinstance(sub_cell, dict) else None
                 _set("sector", sector,
                      sub_conf if sub_conf in ("high", "medium", "low") else "medium")
         if isinstance(sector, str) and sector not in taxonomy:
@@ -956,6 +957,28 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             raise StructuringError("sarvam decomposed call returned a non-object")
         return got
 
+    def _wrap_bare(cells: dict, known: set[str]) -> dict:
+        """The dialogue tune habitually answers bare values ("sector":
+        "Renewables", "deal_size_cr": 5) instead of {value, confidence}
+        cells — proven live on the first conversations run, where a bare
+        sector crashed the validator and a bare number silently nulled.
+        Wrap them at assembly: spoken facts are never lost to a missing
+        wrapper. A missing confidence reads medium (n/a when nothing was
+        said), and the judgement/system n/a forcing still runs after."""
+        out: dict = {}
+        for k, cell in cells.items():
+            if k not in known:
+                continue
+            if isinstance(cell, dict) and "value" in cell:
+                if "confidence" not in cell:
+                    cell = {**cell, "confidence": "medium"}
+            else:
+                conf = "n/a" if cell in (None, "", []) else "medium"
+                out[k] = {"value": cell, "confidence": conf}
+                continue
+            out[k] = cell
+        return out
+
     by = f"Recorded by: {recorder}\n" if recorder else ""
     user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
             f"{context}TRANSCRIPT:\n{transcript}")
@@ -979,7 +1002,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
     raw_common = head.get("common") if isinstance(head.get("common"), dict) else {}
     obj: dict = {
         "detected_use_cases": detected,
-        "common": {k: v for k, v in raw_common.items() if k in known_common},
+        "common": _wrap_bare(raw_common, known_common),
         "entity_candidates": [c for c in (head.get("entity_candidates") or [])
                               if isinstance(c, str)],
     }
@@ -1006,8 +1029,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         got = _call(block_system, user)
         cells = got.get(uc) if isinstance(got.get(uc), dict) else got
         known = {f["key"] for f in fields}
-        return uc, ({k: v for k, v in cells.items() if k in known}
-                    if isinstance(cells, dict) else {})
+        return uc, (_wrap_bare(cells, known) if isinstance(cells, dict) else {})
 
     # The block calls are independent — running them concurrently collapses
     # the wall-clock from sum(blocks) to max(blocks). pool.map preserves

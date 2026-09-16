@@ -687,6 +687,52 @@ def test_sarvam_covers_the_interaction_shapes_of_the_field(monkeypatch):
     assert r["detected_use_cases"] == ["operations"]
 
 
+def test_sarvam_bare_cells_are_wrapped_not_crashed(monkeypatch):
+    """The first live sarvam-105b-conversations run, verbatim: the dialogue
+    tune answered bare values — "sector": "Renewables", "deal_size_cr": 5 —
+    instead of {value, confidence} cells. The bare sector crashed the
+    validator with AttributeError (escaping the ContractError salvage wall)
+    and the bare number silently nulled. Both are now wrapped at assembly:
+    the spoken fact survives at medium confidence, judgement fields still
+    force n/a, and nothing crashes."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+
+    def ask(model, system, user):
+        if '"detected_use_cases"' in system:
+            return json.dumps({"detected_use_cases": ["syndication"],
+                               "entity_candidates": ["Sangara Limited"],
+                               "common": {"sector": "Renewables",
+                                          "subsector": "Solar-Developer",
+                                          "meeting_summary": "Met Sangara.",
+                                          "opportunity_score": 3}})
+        return json.dumps({"syndication": {
+            "facility_nature": "term_loan_syndication",
+            "deal_size_cr": 5,
+            "remarks": None}})
+
+    r = structure_transcript("met sangara five crore", mode="post_meeting",
+                             ask_model=ask,
+                             capture_ts="2026-09-16T06:00:00Z")["report"]
+    assert r["common"]["sector"] == {"value": "Renewables", "confidence": "medium"}
+    assert r["common"]["subsector"]["value"] == "Solar-Developer"
+    assert r["common"]["opportunity_score"]["value"] == 3
+    assert r["common"]["meeting_summary"]["confidence"] == "n/a"  # judgement
+    assert r["syndication"]["deal_size_cr"] == {"value": 5, "confidence": "medium"}
+    assert r["syndication"]["remarks"] == {"value": None, "confidence": "n/a"}
+
+
+def test_a_bare_sector_cell_is_a_named_violation_never_a_crash():
+    """Defense in depth behind the assembly wrap: a non-object cell reaching
+    the validator raises ContractError (which salvage handles), never
+    AttributeError (which killed the take live)."""
+    r = _valid_report()
+    r["common"]["sector"] = "Renewables"            # bare string, no cell
+    with pytest.raises(ContractError):
+        validate_report(r)
+
+
 def test_lender_second_pass_failure_never_breaks_the_take():
     """The focused round answering prose instead of JSON — or anything else
     going wrong in it — leaves the report exactly as the main pass made it."""
