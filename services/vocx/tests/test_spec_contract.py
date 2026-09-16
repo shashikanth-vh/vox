@@ -507,6 +507,8 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     remarks = _sarvam_field_brief(
         {"key": "remarks", "label": "Remarks", "type": "string"}, reg)
     assert "analyst note" in remarks
+    assert "data_quality_flags" in remarks     # artifacts never quoted in remarks
+    assert "never mention use cases" in summary  # no machinery in the debrief
     from app.vocx.pipeline.structure import _SARVAM_RULES
     assert "transcription artifact" in _SARVAM_RULES  # garbles flagged, not copied
     # the narrator is named, never labelled: "Chetan had a call", not
@@ -754,6 +756,8 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
 
     def ask(model, system, user):
         systems.append(system)
+        # an all-lowercase recorder username is sentence-cased for the model
+        assert "Recorded by: Admin" in user
         if '"detected_use_cases"' in system:
             return json.dumps({
                 "detected_use_cases": ["asset_monetisation"],
@@ -762,6 +766,8 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
                            "subsector": {"value": "Solar-Developer",
                                          "confidence": "medium"}}})
         if "canonical data points" in system:
+            # a dropdown canonical (portfolio_stage) lists its options
+            assert "Mixed portfolio" in system
             return json.dumps({"subsector_details": {"Solar-Developer": {
                 canon_keys[0]: "26.3 MW operational; 12 MW under construction",
                 canon_keys[1]: None}}})           # unspoken → dropped, bare → wrapped
@@ -769,7 +775,8 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
             "party_role": {"value": "owner", "confidence": "high"}}})
 
     out = structure_transcript("remanindia sells 26.3 MW", mode="post_meeting",
-                               ask_model=ask, capture_ts="2026-09-16T06:00:00Z")
+                               ask_model=ask, capture_ts="2026-09-16T06:00:00Z",
+                               recorder="admin")
     assert len(systems) == 3               # head + block + details
     details = out["report"]["subsector_details"]
     got = details.get("Solar-Developer") or details   # wrapped or flattened
@@ -784,7 +791,8 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
 
     out2 = structure_transcript("remanindia sells 26.3 MW", mode="post_meeting",
                                 ask_model=ask_broken,
-                                capture_ts="2026-09-16T06:00:00Z")
+                                capture_ts="2026-09-16T06:00:00Z",
+                                recorder="admin")
     assert out2["report"]["asset_monetisation"]["party_role"]["value"] == "owner"
 
 

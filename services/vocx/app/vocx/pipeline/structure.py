@@ -793,7 +793,11 @@ _SARVAM_FIELD_EXTRAS = {
                   "discussed"),
     "remarks": (" — a 1-2 sentence analyst note from THIS conversation: gaps, "
                 "clarifications needed, follow-ups; null only when nothing "
-                "needs noting"),
+                "needs noting. NEVER quote a garbled/artifact term here — "
+                "those go only in data_quality_flags"),
+    "meeting_summary": (" — a colleague's debrief of the business only: never "
+                        "mention use cases, fields, extraction or "
+                        "transcription artifacts"),
 }
 
 
@@ -1005,7 +1009,15 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             out[k] = cell
         return out
 
-    by = f"Recorded by: {recorder}\n" if recorder else ""
+    # "admin held a call" read wrong in the live summary: an all-lowercase
+    # recorder username is sentence-cased before the model ever sees it
+    # (chetan malik -> Chetan Malik); a name already carrying capitals
+    # passes through untouched. Sarvam path only — Claude's user message
+    # stays byte-identical to production.
+    nice_recorder = (" ".join(w.capitalize() if w.islower() else w
+                              for w in recorder.split())
+                     if recorder else recorder)
+    by = f"Recorded by: {nice_recorder}\n" if recorder else ""
     user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
             f"{context}TRANSCRIPT:\n{transcript}")
 
@@ -1086,7 +1098,12 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             f"{{\"{subsector}\": {{<key>: {{\"value\": ..., \"confidence\": "
             "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}}\n"
             "keys:\n" + "\n".join(
-                f"- {f['key']} ({f.get('label', f['key'])}): text or null"
+                (f"- {f['key']} ({f.get('label', f['key'])}): one of "
+                 f"{f['options']} or null" if f.get("options") else
+                 f"- {f['key']} ({f.get('label', f['key'])}): text or null — "
+                 "carry every spoken detail (capacities incl. planned, "
+                 "tenors, counterparties), e.g. '26.3 MW operational; 12 MW "
+                 "planned' or 'UBPCL, 25 years'")
                 for f in canon))
         got = _call(det_system, user)
         inner = (got.get("subsector_details")
