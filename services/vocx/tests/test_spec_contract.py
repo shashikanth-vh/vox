@@ -817,6 +817,11 @@ def test_sarvam_fills_the_subsector_key_data(monkeypatch):
         if "canonical data points" in system:
             # a dropdown canonical (portfolio_stage) lists its options
             assert "Mixed portfolio" in system
+            # runs AFTER the blocks, with their cells as EXTRACTED FACTS —
+            # the tune refused Haiku's inference from the transcript alone
+            # ("the asset for sale evidences projects executed")
+            assert "EXTRACTED FACTS" in user
+            assert "asset_monetisation.party_role: owner" in user
             return json.dumps({"subsector_details": {"Solar-Developer": {
                 canon_keys[0]: "26.3 MW operational; 12 MW under construction",
                 canon_keys[1]: None}}})           # unspoken → dropped, bare → wrapped

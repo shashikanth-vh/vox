@@ -1340,38 +1340,64 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         known = {f["key"] for f in fields}
         return uc, (_wrap_bare(cells, known) if isinstance(cells, dict) else {})
 
+    # The block calls are independent — running them concurrently collapses
+    # the wall-clock from sum(calls) to max(calls). pool.map preserves order
+    # and re-raises the first failure, exactly like the loop it replaces;
+    # SARVAM_MAX_PARALLEL=1 restores sequential calls.
+    workers = min(_sarvam_parallelism(), len(detected))
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_block, detected))
+    else:
+        results = [_block(t) for t in detected]
+    for key, cells in results:
+        if cells is not None:
+            obj[key] = cells
+
     # The per-subsector canonical data points (Solar-Developer KEY DATA etc.)
     # ride inside Claude's one full-contract call; the batched path never
-    # asked for them, so the panel's KEY DATA stayed empty live. Once the
-    # head has chosen a subsector, one focused call fills them — alongside
-    # the block calls, since they are independent.
+    # asked for them, so the panel's KEY DATA stayed empty live. The call
+    # runs AFTER the block calls on purpose: fed only the transcript, the
+    # dialogue tune refused the inference Haiku makes ("the 10 MW asset for
+    # sale evidences projects executed") even with that exact example in the
+    # brief — so the extracted block cells now ride along as EXTRACTED
+    # FACTS, turning the inference into transcription.
     sub_cell = obj["common"].get("subsector")
     subsector = sub_cell.get("value") if isinstance(sub_cell, dict) else None
     canon = (registry.get("subsector_canonicals", {}).get(subsector)
              if isinstance(subsector, str) else None) or []
 
-    def _details(_target: str) -> tuple[str, dict | None]:
-        # Bonus data, same posture as the lender pass: a failure here logs
-        # and skips — it never fails a take that the block calls carried.
-        try:
-            return "subsector_details", _details_cells()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("subsector-details call skipped: %s", exc)
-            return "subsector_details", None
+    def _evidence_lines() -> str:
+        lines: list[str] = []
+        for uc in detected:
+            block = obj.get(uc)
+            if not isinstance(block, dict):
+                continue
+            for k, cell in block.items():
+                v = cell.get("value") if isinstance(cell, dict) else None
+                if isinstance(v, (str, int, float)) and str(v).strip():
+                    lines.append(f"- {uc}.{k}: {v}")
+        return "\n".join(lines[:24])
 
     def _details_cells() -> dict | None:
         det_system = (
             f"{_SARVAM_RULES}\n"
             f"The company is a {subsector}. Fill its canonical data points "
-            "from the transcript. These describe the COMPANY's profile, so "
-            "evidence may come from any thread of the conversation — an "
-            "asset the company built or owns evidences its capacity and "
-            "track record (a 10 MW asset offered for sale still counts "
-            "toward projects executed). Shape: {\"subsector_details\": "
+            "from the transcript and the EXTRACTED FACTS below it. These "
+            "describe the COMPANY's profile, so evidence may come from any "
+            "thread — an asset the company built or owns evidences its "
+            "capacity and track record (a 10 MW asset offered for sale "
+            "still counts toward projects executed). Shape: "
+            "{\"subsector_details\": "
             f"{{\"{subsector}\": {{<key>: {{\"value\": ..., \"confidence\": "
             "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}}}}}\n"
             "keys:\n" + _details_briefs(canon))
-        got = _call(det_system, user)
+        ev = _evidence_lines()
+        det_user = (f"{user}\n\nEXTRACTED FACTS (already confirmed from this "
+                    f"conversation — evidence for the company profile):\n{ev}"
+                    if ev else user)
+        got = _call(det_system, det_user)
         inner = (got.get("subsector_details")
                  if isinstance(got.get("subsector_details"), dict) else got)
         cells = (inner.get(subsector)
@@ -1383,27 +1409,16 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
                   if isinstance(v, dict) and v.get("value") not in (None, "", [])}
         return {subsector: spoken} if spoken else None
 
-    def _job(target: str) -> tuple[str, dict | None]:
-        return _details(target) if target == "__details__" else _block(target)
-
-    targets = list(detected)
     if subsector and canon:
-        targets.append("__details__")
-
-    # The calls are independent — running them concurrently collapses the
-    # wall-clock from sum(calls) to max(calls). pool.map preserves order and
-    # re-raises the first failure, exactly like the loop it replaces;
-    # SARVAM_MAX_PARALLEL=1 restores sequential calls.
-    workers = min(_sarvam_parallelism(), len(targets))
-    if workers > 1:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_job, targets))
-    else:
-        results = [_job(t) for t in targets]
-    for key, cells in results:
-        if cells is not None:
-            obj[key] = cells
+        # Bonus data, same posture as the lender pass: a failure here logs
+        # and skips — it never fails a take that the block calls carried.
+        try:
+            details = _details_cells()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("subsector-details call skipped: %s", exc)
+            details = None
+        if details is not None:
+            obj["subsector_details"] = details
     return obj
 
 
