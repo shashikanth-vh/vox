@@ -43,11 +43,15 @@ def _structure_model(mode: str) -> str:
     model actually structured the take."""
     provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
     if provider == "sarvam":
-        # sarvam-m was deprecated mid-trial ("use sarvam-105b or
-        # sarvam-105b-conversations"); the base instruct model follows the
-        # schema contract better than the conversations tune. SARVAM_MODEL
+        # sarvam-m was deprecated mid-trial. Of the two survivors, the
+        # catalogue marks sarvam-105b "Always-on reasoning" — it burned its
+        # whole 8192 completion budget thinking on the head call every run,
+        # answer recovered only by salvage. The conversations tune carries no
+        # such tag: direct answers, same price, same 128K context — the
+        # better fit for single-turn temperature-0 extraction. SARVAM_MODEL
         # overrides when their catalogue moves again.
-        return (_os.environ.get("SARVAM_MODEL") or "").strip() or "sarvam-105b"
+        return ((_os.environ.get("SARVAM_MODEL") or "").strip()
+                or "sarvam-105b-conversations")
     return MODEL_LIVE if mode == "live" else MODEL_NOTE
 
 log = logging.getLogger("vox.pipeline")
