@@ -493,7 +493,8 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     common = {f["key"]: f for f in (reg["common"] if isinstance(reg["common"], list)
                                     else reg["common"]["fields"])}
     score = _sarvam_field_brief(common["opportunity_score"], reg)
-    assert "1-5" in score and "null" in score
+    assert "1-5" in score and "ull" in score
+    assert "business substance" in score   # scored on the deal, not sentiment
     summary = _sarvam_field_brief(common["meeting_summary"], reg)
     assert "narrative" in summary                     # judgement guidance rides too
     # bake-off lessons: sector may be inferred from the business; "sell all

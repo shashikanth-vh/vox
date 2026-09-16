@@ -801,6 +801,16 @@ _SARVAM_FIELD_EXTRAS = {
     "offer_notes": (" — FILL whenever a sale was discussed: what is offered, "
                     "the land/expansion picture, PPA and tenors, in the "
                     "seller's substance"),
+    # "no evaluative language heard" left the score null on every clean run —
+    # but the desk scores DEAL SUBSTANCE, not spoken sentiment, exactly as
+    # the Claude path does.
+    "opportunity_score": (" — SUGGEST from the business substance, not only "
+                          "spoken sentiment: 1-2 vague interest or no real "
+                          "ask; 3 a concrete, actionable ask (a specific "
+                          "asset or requirement with a named counterparty); "
+                          "4 concrete plus sizeable/urgent/multiple threads; "
+                          "5 exceptional. Null only when the conversation "
+                          "offers nothing to judge"),
 }
 
 
