@@ -14,6 +14,7 @@ from app.api.activity import router as activity_router
 from app.api.advaya import router as advaya_router
 from app.api.advaya_manual import router as advaya_manual_router
 from app.api.calendar import router as calendar_router
+from app.api.chitti import router as chitti_router
 from app.api.closure import router as closure_router
 from app.api.covenants import router as covenants_router
 from app.api.cpcs import router as cpcs_router
@@ -89,6 +90,8 @@ def create_app() -> FastAPI:
         evidence_router,
         series_router,
         vox_router,
+        # Chitti (chatbot) read-only machine lane — svc_chitti principal only.
+        chitti_router,
         build_resource_router(),
     ]
     # The DORMANT Advaya acknowledgement path (internal handoff record) is registered ONLY under an
