@@ -1,0 +1,21 @@
+# PRISM services host: merge LAST, after base and prod-posture.
+# Run Chitti in its own Compose project, on this host or another private host.
+# Existing service credentials, database login, sign-in, and logging are inherited.
+# Set SVC_CHITTI_KEY and INTERNAL_SIGNING_SECRET in .env to match .env.chitti;
+# the base file already supplies them to Register and Gateway.
+services:
+  gateway:
+    environment:
+      GATEWAY_CHITTI_URL: "${GATEWAY_CHITTI_URL:?Set GATEWAY_CHITTI_URL}"
+      GATEWAY_UPSTREAM_CA_FILE: /etc/prism/chitti-ca.crt
+      GATEWAY_CHITTI_API_KEY: "${CHITTI_GATEWAY_KEY:?Set CHITTI_GATEWAY_KEY}"
+    volumes:
+      - type: bind
+        source: "${GATEWAY_CHITTI_CA_FILE:?Set GATEWAY_CHITTI_CA_FILE}"
+        target: /etc/prism/chitti-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+  register:
+    # Register is reachable only on the services Docker network, through Nginx remotely.
+    ports: !reset []

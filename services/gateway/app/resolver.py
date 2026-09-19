@@ -71,11 +71,13 @@ class Resolver:
                 log.warning("access unreachable — serving last-known-good for %s", email)
                 return cached
             raise AccessUnavailableError(str(exc)) from exc
-        if resp.status_code == 404:
+        if resp.status_code in (403, 404):
             self._cache.pop(key, None)
             raise UserDeniedError(email)
         if resp.status_code >= 400:
-            if cached is not None and (
+            if resp.status_code < 500:
+                self._cache.pop(key, None)
+            if resp.status_code >= 500 and cached is not None and (
                     time.monotonic() - cached.fetched_at) < settings.cache_max_stale_s:
                 return cached
             # Surface Access's own explanation — "resolve returned 403" alone hides

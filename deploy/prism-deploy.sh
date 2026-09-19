@@ -101,6 +101,16 @@ compose_files() {           # in a given tree, the -f flags that tree supports
   files=(-f "$tree/deploy/compose/docker-compose.yml")
   [[ -f "$tree/deploy/compose/docker-compose.prod-posture.yml" ]] &&
     files+=(-f "$tree/deploy/compose/docker-compose.prod-posture.yml")
+  # The Chitti services overlay is opt-in BY CONFIGURATION, merged last: it
+  # hard-requires its variables (`:?`), so it only rides when the box's .env
+  # actually points at a Chitti VM. Boxes without GATEWAY_CHITTI_URL keep the
+  # exact stack they had — the overlay (and its Register port unpublish and CA
+  # mount) never loads there. The .env is restored into a new tree before any
+  # compose call, so this test is valid during an upgrade too.
+  if [[ -f "$tree/deploy/compose/docker-compose.services.yml" ]] &&
+     grep -qE '^GATEWAY_CHITTI_URL=.+' "$tree/deploy/compose/.env" 2>/dev/null; then
+    files+=(-f "$tree/deploy/compose/docker-compose.services.yml")
+  fi
   printf '%s\n' "${files[@]}"
 }
 dc() {                      # docker compose, against a tree, with profiles + project
@@ -359,6 +369,18 @@ restore_images() {          # re-point the compose image names at the tagged sna
 # without dropping a connection; a restart is the fallback if the reload is refused.
 reload_edge() {
   dc "$LIVE" ps --status running --services 2>/dev/null | grep -qx nginx || return 0
+  # A single-file bind mount binds the INODE, not the path: after the tree swap the
+  # running container still reads the PREVIOUS release's nginx.conf, and a reload
+  # would faithfully re-read that stale file. When the config in the container
+  # differs from the live tree's, only a recreate picks the new file up.
+  local live_sum ctr_sum
+  live_sum="$(md5sum "$LIVE/deploy/nginx/nginx.conf" 2>/dev/null | cut -d' ' -f1)"
+  ctr_sum="$(dc "$LIVE" exec -T nginx md5sum /etc/nginx/nginx.conf 2>/dev/null | cut -d' ' -f1)"
+  if [[ -n "$live_sum" && -n "$ctr_sum" && "$live_sum" != "$ctr_sum" ]]; then
+    step "Edge config changed in this release — recreating nginx to rebind it"
+    run dc "$LIVE" up -d --force-recreate nginx || warn "could not recreate nginx; check it by hand"
+    return 0
+  fi
   step "Reloading the edge so it re-resolves the recreated containers"
   if dc "$LIVE" exec -T nginx nginx -s reload >>"$LOG" 2>&1; then
     say "  reloaded"

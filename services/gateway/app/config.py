@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ssl
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +34,8 @@ class Settings(BaseSettings):
     vocx_url: str = ""
     pulse_url: str = ""
     orchestrator_url: str = ""
+    chitti_url: str = ""
+    upstream_ca_file: str = ""
 
     # Per-upstream SERVICE credential the gateway INJECTS (having stripped the client's own
     # X-API-Key). A client authenticates to the edge with a bearer token; it never presents
@@ -41,6 +45,13 @@ class Settings(BaseSettings):
     vocx_api_key: str = ""
     pulse_api_key: str = ""
     orchestrator_api_key: str = ""
+    chitti_api_key: str = ""
+
+    # Chitti admission limits apply per Gateway worker, including streaming responses.
+    chitti_max_concurrent_requests: int = Field(default=4, ge=1, le=100)
+    chitti_max_request_bytes: int = Field(default=131072, ge=1024, le=1048576)
+    # Above Chitti's maximum 300s pipeline budget; the edge allows 325s.
+    chitti_timeout_s: float = Field(default=310.0, gt=0, le=320)
 
     # The API key + tenant the gateway uses when calling the ACCESS service itself.
     access_api_key: str = "dev-local-key"
@@ -125,6 +136,14 @@ class Settings(BaseSettings):
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    def tls_verify(self) -> ssl.SSLContext | bool:
+        """Trust the private upstream CA in addition to public authorities."""
+        if not self.upstream_ca_file:
+            return True
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=self.upstream_ca_file)
+        return context
 
 
 @lru_cache

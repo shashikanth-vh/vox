@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+import anyio
 import httpx
 from evam_backend_core.errors import register_exception_handlers
 from evam_backend_core.internal_token import mint_internal_context
-from evam_backend_core.logging import configure_logging, get_logger
+from evam_backend_core.logging import configure_logging, get_logger, request_id_ctx
 from evam_backend_core.middleware import RequestContextMiddleware
 from evam_backend_core.oidc import (
     OidcError,
@@ -30,6 +31,7 @@ from evam_backend_core.rbac_catalog import POLICY_VERSION
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import ORJSONResponse
 
+from app.chitti_proxy import proxy_chitti
 from app.config import get_settings
 from app.resolver import AccessUnavailableError, Resolver, UserDeniedError
 from app.routes_map import operation_for
@@ -57,7 +59,7 @@ _SKIP_REQUEST_HEADERS = {"host", "content-length", "connection", "keep-alive",
                          # make about a person it has itself verified (VocX, for the RM
                          # who dictated a capture). Forwarded from a browser it would let
                          # anyone file rows under a colleague's name.
-                         "x-on-behalf-of"}
+                         "x-on-behalf-of", "x-chitti-presentation"}
 _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
                           "transfer-encoding", "server", "date"}
 
@@ -110,6 +112,7 @@ def _route(settings, full_path: str) -> tuple[str, str, str]:  # noqa: ANN001
         ("/vocx", settings.vocx_url, settings.vocx_api_key),
         ("/pulse", settings.pulse_url, settings.pulse_api_key),
         ("/orchestrator", settings.orchestrator_url, settings.orchestrator_api_key),
+        ("/chitti", settings.chitti_url, settings.chitti_api_key),
     )
     for prefix, url, key in prefixes:
         if url and (full_path == prefix or full_path.startswith(prefix + "/")):
@@ -122,6 +125,8 @@ def _problem(status: int, detail: str) -> ORJSONResponse:
     kind, title = {
         401: ("unauthorized", "Authentication required"),
         403: ("forbidden", "Forbidden"),
+        404: ("not_found", "Not found"),
+        503: ("unavailable", "Service unavailable"),
     }.get(status, ("bad_gateway", "Upstream unavailable"))
     return ORJSONResponse(
         status_code=status,
@@ -135,7 +140,9 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # noqa: ANN202
-        app.state.client = httpx.AsyncClient(timeout=settings.upstream_timeout_s)
+        app.state.client = httpx.AsyncClient(
+            timeout=settings.upstream_timeout_s, verify=settings.tls_verify(),
+        )
         app.state.resolver = Resolver(app.state.client)
         app.state.oidc = (
             build_verifier(
@@ -152,6 +159,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="PRISM Gateway", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,
                   docs_url="/docs", openapi_url="/openapi.json")
+    app.state.chitti_limiter = anyio.CapacityLimiter(settings.chitti_max_concurrent_requests)
     app.add_middleware(RequestContextMiddleware)
     if settings.cors_origin_list():
         # Cross-origin UI support (GATEWAY_CORS_ORIGINS). One implementation at the
@@ -298,8 +306,21 @@ def create_app() -> FastAPI:
     async def proxy(path: str, request: Request) -> Response:
         method = request.method
         full_path = "/" + path
+        is_chitti = full_path == "/chitti" or full_path.startswith("/chitti/")
         tenant = request.headers.get("X-Tenant", settings.default_tenant_code)
         verifier: TokenVerifier | None = request.app.state.oidc
+        if is_chitti:
+            # Reserve this namespace: disabled/unknown Chitti routes never fall through
+            # to Register. Even local chat requires a verified individual bearer.
+            if (method, full_path) not in {
+                ("GET", "/chitti/v1/models"),
+                ("POST", "/chitti/v1/chat/completions"),
+            }:
+                return _problem(404, "Unknown Chitti route.")
+            if verifier is None:
+                return _problem(401, "Authentication required (Bearer token).")
+            if not (settings.chitti_url and settings.chitti_api_key and settings.internal_signing_secret):
+                return _problem(503, "Chitti is not configured.")
         try:
             email = await _trusted_email(request)
         except OidcError as exc:
@@ -309,7 +330,7 @@ def create_app() -> FastAPI:
         # Exception: the explicit exempt list (OAuth redirects arrive bearer-less).
         exempt = full_path in {p.strip() for p in settings.auth_exempt_paths.split(",")
                                if p.strip()}
-        if (verifier is not None or settings.require_auth) and not email and not exempt:
+        if not email and (is_chitti or ((verifier is not None or settings.require_auth) and not exempt)):
             return _problem(401, "Authentication required (Bearer token).")
 
         user = None
@@ -338,6 +359,22 @@ def create_app() -> FastAPI:
         # DOWNSTREAM (stripped) method + path so it can't be replayed on another route.
         base_url, api_key, downstream_path = _route(settings, full_path)
         upstream = f"{base_url}{downstream_path}"
+        if is_chitti:
+            headers = _forward_headers(request, user, decision,
+                                       method=method, path=downstream_path, api_key=api_key)
+            # The verified context is the identity on this hop; keep browser bearer
+            # credentials at the Gateway and propagate its correlation ID explicitly.
+            headers.pop("authorization", None)
+            # X-Gateway-Auth is the STATIC secret the Register accepts as proof that
+            # identity headers came through this gateway. Chitti runs on a separate
+            # box outside that trust boundary: handing it the secret would let that
+            # box forge any user's identity to the Register. The signed, path-bound
+            # X-Internal-Context is the only delegation Chitti gets.
+            headers.pop("X-Gateway-Auth", None)
+            headers["x-request-id"] = request_id_ctx.get()
+            headers["x-tenant"] = tenant
+            headers["x-chitti-presentation"] = "business"
+            return await proxy_chitti(request, upstream, headers, settings)
         # Inject the tenant-admin credential only for a verified Admin on an admin route,
         # so the browser never possesses it (the internal trust boundary stays internal).
         admin_key = None
