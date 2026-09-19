@@ -3,9 +3,10 @@ import { Box, Button, GlobalStyles } from "@mui/material";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Navbar from "./Navbar";
 import BottomNav from "./BottomNav";
-import Copilot from "../copilot/Copilot";
 import { VocxProvider, useVocx } from "../vocx/VocxProvider";
 import VocxPanel from "../vocx/VocxPanel";
+import { ChittiProvider, chittiKey } from "../chat/ChittiProvider";
+import ChittiWidget from "../chat/ChittiWidget";
 import { NAV } from "./navConfig";
 import { useAuth } from "../../auth/AuthContext";
 import { canSee } from "../../auth/rbac";
@@ -79,7 +80,7 @@ function NavArrow({
 }
 
 export default function AppLayout() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const visible = NAV.filter((n) => canSee(user.roles, n.tab));
@@ -164,6 +165,9 @@ export default function AppLayout() {
 
   return (
    <VocxProvider>
+    {/* Keyed on identity so a signed-in switch never inherits the previous person's
+        conversation from sessionStorage. */}
+    <ChittiProvider key={chittiKey(session)}>
     <Box
       sx={{
         height: "100dvh",
@@ -316,10 +320,8 @@ export default function AppLayout() {
             [MOBILE]: {
               px: 1.25,
               py: 1.5,
-              // 76px cleared the BOTTOM NAV but not the copilot bubble floating
-              // above it — a list's last row (its action button especially) sat
-              // under the bubble with no way to scroll past. Clear both.
-              pb: "calc(150px + env(safe-area-inset-bottom))",
+              // Keep the last row clear of the fixed bottom navigation.
+              pb: "calc(76px + env(safe-area-inset-bottom))",
             },
           }}
         >
@@ -327,14 +329,17 @@ export default function AppLayout() {
         </Box>
       </Box>
       <BottomNav />
-      {/* v17 AUGMENT 12 — floating ATLAS Copilot (chat over the live Register). */}
-      <Copilot />
       {/* VocX's floating panel. Mounted at the layout root, not inside a page, so an
           in-progress capture survives navigation — an RM can start a note on Lending, go
           and check something on Deals, and come back to it. (The launcher itself lives in
           the navbar on every width.) */}
       <VocxPanelMount />
+      {/* Chitti's floating bubble — mounted beside VocX's panel for the same reason: the
+          conversation has to outlive page navigation, so an answer asked for on Deals is
+          still streaming when the user walks over to Lending to check it. */}
+      <ChittiWidget />
     </Box>
+    </ChittiProvider>
    </VocxProvider>
   );
 }

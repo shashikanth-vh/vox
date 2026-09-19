@@ -5,7 +5,7 @@ import { syndicationService } from './syndicationService';
 import { assetMonService } from './assetMonService';
 import type { Role } from '../auth/rbac';
 
-// Stage-change request (Copilot workflow). Non-approvers raise a request on a product
+// Stage-change request workflow. Non-approvers raise a request on a product
 // line; Admin / Management / the relevant vertical Head approve or reject. Approval
 // applies the actual stage change to the line.
 export type StageLine = 'Lending' | 'Syndication' | 'Asset Monetisation';

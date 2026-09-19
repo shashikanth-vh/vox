@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Drag-to-place, for the things the user is meant to put where they like: the floating
- * VocX panel, and the capture button on a phone.
+ * VocX panel, the Chitti chat bubble and its panel, and the capture button on a phone.
  *
  * Pointer events rather than mouse+touch: one code path covers mouse, touch and pen, and
  * `setPointerCapture` means a fast drag that leaves the element still tracks instead of
@@ -52,6 +52,14 @@ export interface Draggable {
   wasTap: () => boolean;
   /** Put it back where it started. */
   reset: () => void;
+  /**
+   * Place it somewhere deliberately — docking a minimised panel into a corner, say.
+   * Clamped and persisted exactly as a drag would be. Pass `measured` when the element
+   * is changing size in the same click (a panel collapsing to its title bar): the
+   * clamp has to use the size it is BECOMING, and `size()` still reports the old one
+   * until React has re-rendered.
+   */
+  moveTo: (p: Point, measured?: { w: number; h: number }) => void;
 }
 
 export function useDraggable(opts: {
@@ -143,11 +151,18 @@ export function useDraggable(opts: {
     setPos(p); persist(p);
   }, [initial, margin, persist, size]);
 
+  const moveTo = useCallback((p: Point, measured?: { w: number; h: number }) => {
+    const { w, h } = measured ?? size();
+    const next = clamp(p, w, h, margin);
+    setPos(next); persist(next);
+  }, [margin, persist, size]);
+
   return {
     pos,
     dragging,
     wasTap: () => !movedRef.current,
     reset,
+    moveTo,
     handleProps: { onPointerDown, style: { touchAction: 'none' } },
   };
 }

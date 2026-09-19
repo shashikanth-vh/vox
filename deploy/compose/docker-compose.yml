@@ -497,6 +497,12 @@ services:
     depends_on:
       - gateway
       - ui
+    # The Chitti bot runs on ANOTHER VM: the edge's /chitti/v1/ proxy resolves
+    # "chitti.internal" to whatever .env says. The 127.0.0.1 default keeps the
+    # proxy harmlessly dead (connection refused → widget shows "unavailable")
+    # on boxes with no bot.
+    extra_hosts:
+      - "chitti.internal:${CHITTI_UPSTREAM_IP:-127.0.0.1}"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro

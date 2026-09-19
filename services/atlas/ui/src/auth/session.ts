@@ -9,6 +9,7 @@
 // Carrying both at once is safe: the prod gateway ignores the headers it does not trust.
 
 import { ROLE_RANK, primaryRole, type Role } from './rbac';
+import { chatOwner, clearChatMemory } from './chatMemory';
 
 export interface PrismSession {
   email: string;
@@ -45,6 +46,8 @@ export function getSession(): PrismSession | null {
 }
 
 export function setSession(s: PrismSession | null): void {
+  const previous = getSession();
+  if (!s || !previous || chatOwner(previous) !== chatOwner(s)) clearChatMemory();
   current = s;
   try {
     if (s) sessionStorage.setItem(KEY, JSON.stringify(s));
@@ -84,10 +87,10 @@ export function authHeaders(s: PrismSession | null = getSession()): Record<strin
   if (!s) return {};
   const h: Record<string, string> = {
     'X-Tenant': s.tenant,
-    // 'X-Actor': s.email,
-    // 'X-User-Email': s.email,
+    'X-Actor': s.email,
+    'X-User-Email': s.email,
   };
-  // if (s.roles.length) h['X-User-Roles'] = topRole(s.roles);
+  if (s.roles.length) h['X-User-Roles'] = topRole(s.roles);
   if (s.idToken) h.Authorization = `Bearer ${s.idToken}`;
   return h;
 }

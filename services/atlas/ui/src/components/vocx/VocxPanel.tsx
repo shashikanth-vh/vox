@@ -5,7 +5,7 @@ import MinimizeIcon from '@mui/icons-material/Minimize';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
-import { useDraggable } from './useDraggable';
+import { useDraggable } from '../common/useDraggable';
 import VoxApp from './vox/VoxApp';
 import { useVocx } from './VocxProvider';
 import { vx } from './vocxStyles';
