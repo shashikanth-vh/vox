@@ -57,13 +57,22 @@ services:
       - pgdata:/var/lib/postgresql/data
       # First-init only: creates the Access service's database on the shared server.
       - ./initdb:/docker-entrypoint-initdb.d:ro
+      # Live backup (PITR): finished WAL segments land here; the walship sidecar
+      # pushes them to S3 and prunes. Inert while WAL_ARCHIVE_MODE stays off.
+      - walarchive:/wal_archive
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U prism -d register"]
       interval: 5s
       timeout: 3s
       retries: 10
     # Cap connections so pool_size * replicas stays well under the ceiling.
-    command: ["postgres", "-c", "max_connections=200"]
+    # WAL archiving is the live-backup feed: set WAL_ARCHIVE_MODE=on in .env
+    # together with the LIVEBACKUP_* settings (deploy/backup/README.md). Off —
+    # the default — is byte-identical to the pre-live-backup behaviour.
+    command: ["postgres", "-c", "max_connections=200",
+              "-c", "archive_mode=${WAL_ARCHIVE_MODE:-off}",
+              "-c", "archive_timeout=60",
+              "-c", "archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f"]
     restart: unless-stopped
 
   # Object storage for document bytes (S3-compatible). The Register stores references;
@@ -728,6 +737,62 @@ services:
   # its own volume, keeping PGBACKUP_KEEP days (default 14). Enable with
   # `--profile backup`; restore with psql/pg_restore from /backups (see
   # docs/PRODUCTION_DEPLOYMENT.md → "Backups & restore").
+  # ---- LIVE backup (near-zero RPO) --------------------------------------------------
+  # Nightly dumps bound the loss to a day; these two sidecars bound it to about a
+  # minute. walship: continuous WAL -> S3 plus a daily base backup = restore the
+  # database to ANY second (deploy/backup/restore-pitr.sh). objship: the MinIO data
+  # volume mirrors to S3 every minute (documents and recordings), and the small
+  # stateful volumes (vocx tokens, pulse, dex) snapshot every 6 hours. Both idle
+  # harmlessly until LIVEBACKUP_S3_BUCKET (and AWS credentials) are set in .env —
+  # see deploy/backup/README.md for the S3 bucket setup, versioning and retention.
+  livebackup-wal:
+    logging: *default-logging
+    build: ../backup
+    image: prism-livebackup
+    profiles: ["backup"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGUSER: prism
+      PGPASSWORD: "${PRISM_DB_PASSWORD:-prism}"
+      LIVEBACKUP_S3_BUCKET: "${LIVEBACKUP_S3_BUCKET:-}"
+      LIVEBACKUP_S3_PREFIX: "${LIVEBACKUP_S3_PREFIX:-prism}"
+      LIVEBACKUP_KEEP_BASES: "${LIVEBACKUP_KEEP_BASES:-8}"
+      AWS_ACCESS_KEY_ID: "${LIVEBACKUP_AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${LIVEBACKUP_AWS_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${LIVEBACKUP_AWS_REGION:-ap-south-1}"
+    volumes:
+      - walarchive:/wal_archive
+      - ../backup/walship.sh:/walship.sh:ro
+    entrypoint: ["/bin/sh", "/walship.sh"]
+    restart: unless-stopped
+
+  livebackup-objects:
+    logging: *default-logging
+    build: ../backup
+    image: prism-livebackup
+    profiles: ["backup"]
+    depends_on:
+      - minio
+    environment:
+      LIVEBACKUP_S3_BUCKET: "${LIVEBACKUP_S3_BUCKET:-}"
+      LIVEBACKUP_S3_PREFIX: "${LIVEBACKUP_S3_PREFIX:-prism}"
+      LIVEBACKUP_VOLUMES_EVERY_S: "${LIVEBACKUP_VOLUMES_EVERY_S:-21600}"
+      LIVEBACKUP_KEEP_VOLUME_SNAPSHOTS: "${LIVEBACKUP_KEEP_VOLUME_SNAPSHOTS:-12}"
+      AWS_ACCESS_KEY_ID: "${LIVEBACKUP_AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${LIVEBACKUP_AWS_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${LIVEBACKUP_AWS_REGION:-ap-south-1}"
+    volumes:
+      - miniodata:/data/minio:ro
+      - vocx_state:/state/vocx:ro
+      - pulsedata:/state/pulse:ro
+      - dexdata:/state/dex:ro
+      - pgbackups:/backups
+      - ../backup/objship.sh:/objship.sh:ro
+    entrypoint: ["/bin/sh", "/objship.sh"]
+    restart: unless-stopped
+
   pgbackup:
     logging: *default-logging
     image: postgres:16-alpine
@@ -813,6 +878,9 @@ services:
 
 volumes:
   pgdata:
+  # PITR staging: finished WAL segments wait here for walship's S3 push (small —
+  # the sidecar prunes; only grows if archiving is on with no shipper running).
+  walarchive:
   miniodata:
   vocx_state:
   dexdata:
