@@ -63,6 +63,18 @@ SERVICE_READ_GRANTS: dict[str, set[str]] = {
     "svc_pulse": {"/v1/entities", "/v1/external-intelligence"},
     "svc_workflows": {"/v1/entities", "/v1/leads", "/v1/deals", "/v1/lending",
                       "/v1/syndication", "/v1/asset-monetisation"},
+    # Chitti — the chatbot VM — answers questions about anything in the book,
+    # so it holds the WIDEST own-key read grant: every list resource. Two
+    # lines still hold: the edge's machine window is GET-only (a write dies
+    # at nginx, and svc_chitti has no entry in SERVICE_GRANTS, so it dies
+    # again here), and the composite company capability below stays
+    # human-delegated — this service included.
+    "svc_chitti": {"/v1/entities", "/v1/leads", "/v1/people", "/v1/interactions",
+                   "/v1/deals", "/v1/lending", "/v1/syndication",
+                   "/v1/asset-monetisation", "/v1/syndication-lenders",
+                   "/v1/financials", "/v1/contracts-assets", "/v1/counterparties",
+                   "/v1/documents", "/v1/document-checklist",
+                   "/v1/external-intelligence", "/v1/monitoring"},
 }
 # NOTE: the composite-company capability key ("company:composite") is deliberately in NO
 # service's read grants — dossier/financial-history/timeline/documents/lender-matrix are

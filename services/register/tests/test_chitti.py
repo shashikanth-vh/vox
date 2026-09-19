@@ -131,6 +131,26 @@ async def test_company_snapshot_carries_the_whole_story(chitti_client):
         "/v1/internal/chitti/company/NOPE")).status_code == 404
 
 
+async def test_chitti_reads_the_whole_book_but_writes_nothing(chitti_client):
+    """The bot's brief is "ask anything about any data": svc_chitti holds the
+    widest own-key READ grant across the CRUD surface (proven live: /v1/entities
+    was 403 "may not read ... on its own key" before the grant). Writes stay
+    dead at BOTH walls — the edge window is GET-only, and even calling the
+    service directly (as this test does, beneath nginx) the service has no
+    write grant."""
+    for path in ("/v1/entities", "/v1/leads", "/v1/deals", "/v1/interactions",
+                 "/v1/syndication", "/v1/lending", "/v1/asset-monetisation",
+                 "/v1/financials"):
+        r = await chitti_client.get(path, params={"limit": 5})
+        assert r.status_code == 200, (path, r.text)
+    assert (await chitti_client.get(
+        "/v1/entities", params={"limit": 2})).json()  # body parses
+    # a write on the bot's own key is refused by the authz engine itself
+    w = await chitti_client.post("/v1/entities",
+                                 json={"code": "EVIL", "legal_name": "Evil Co"})
+    assert w.status_code == 403, w.text
+
+
 async def test_interaction_feed_is_scoped_and_capped(chitti_client):
     r = await chitti_client.get("/v1/internal/chitti/interactions",
                                 params={"company": "SUNGARNER", "limit": 1})
