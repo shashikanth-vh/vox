@@ -132,3 +132,44 @@ async def test_two_leads_for_the_same_new_company_share_one_master(reg):
     assert str(first.json()["entity_id"]) == str(second.json()["entity_id"])
     assert len([m for m in await _masters(client)
                 if "amit" in m["legal_name"].lower()]) == 1
+
+
+async def test_the_backfill_settles_the_existing_book(reg):
+    """Leads that predate birth-linking (planted straight into the DB, no hook)
+    get the same rule applied by app.maintenance.backfill_lead_masters:
+    dry-run writes nothing; --apply links unique matches, births Prospect
+    masters for new names, and leaves same-named siblings for a human.
+    A second apply is a no-op."""
+    from app.maintenance.backfill_lead_masters import run as backfill
+    from app.models.deals import Lead
+
+    client, existing_id = reg
+    sm = get_sessionmaker()
+    async with sm() as session:
+        tid = (await session.execute(
+            select(Tenant.id).where(Tenant.code == "EVAM"))).scalar_one()
+        session.add(Entity(tenant_id=tid, code="GREENPILL2",
+                           legal_name="Greenpill Renewable Energy Limited"))
+        session.add(Lead(tenant_id=tid, lead_no="LD-901", status="Active",
+                         company="greenpill renewable energy pvt ltd"))
+        session.add(Lead(tenant_id=tid, lead_no="LD-902", status="Active",
+                         company="Desco Infratech Limited", sector="Infra"))
+        await session.commit()
+
+    async def unlinked() -> list[str]:
+        r = await client.get("/v1/leads", params={"limit": 100})
+        return [x["lead_no"] for x in r.json()["items"] if not x["entity_id"]]
+
+    await backfill(apply=False)                       # dry run: nothing written
+    assert set(await unlinked()) == {"LD-901", "LD-902"}
+
+    await backfill(apply=True)
+    # LD-901 matches BOTH Greenpill masters now → left for a human;
+    # LD-902 births a Prospect master and links to it.
+    assert await unlinked() == ["LD-901"]
+    masters = {m["legal_name"]: m for m in await _masters(client)}
+    born = masters["Desco Infratech Limited"]
+    assert born["lifecycle"] == "Prospect" and born["sector"] == "Infra"
+
+    await backfill(apply=True)                        # idempotent re-run
+    assert await unlinked() == ["LD-901"]
