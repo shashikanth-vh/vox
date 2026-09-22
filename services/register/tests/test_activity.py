@@ -41,7 +41,11 @@ async def test_activity_reads_the_audit_trail_in_plain_english(client):
     assert "Updated lead" in top["summary"]
     # The before → after pair the repository records is what makes the row worth reading.
     assert "temperature" in top["summary"] and "Hot" in top["summary"]
-    assert "Added a new lead" in items[1]["summary"]
+    # The lead's company entered the client master at creation, and the trail
+    # says so in its own sentence — then the lead's own birth row.
+    assert "Added a new entity" in items[1]["summary"]
+    assert "Helios Wind" in items[1]["summary"]
+    assert "Added a new lead" in items[2]["summary"]
     # No UUID leaks into what the desk reads.
     assert str(lead["id"]) not in top["summary"]
 
