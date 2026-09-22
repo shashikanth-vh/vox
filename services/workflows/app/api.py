@@ -1113,7 +1113,13 @@ class CheckerRejectIn(BaseModel):
 
 # The Push-to-Deals CLIENT fields: consumed by the conversion pre-flight (link-or-create
 # the company) and deliberately NOT carried into workflow history.
-_CLIENT_ONLY_FIELDS = {"company_name", "sector", "lens", "state", "industry", "about"}
+# Payload fields the CONVERSION PRE-FLIGHT consumes (link-or-create the client,
+# honour the dialog's resolved entity) — settled before the workflow starts, so
+# they must NOT travel into LeadConversionInput: the dataclass has no seat for
+# them, and an unexpected keyword is a 500 on every push. The contract test
+# (test_conversion_input_contract.py) fails the build if the two drift again.
+_CLIENT_ONLY_FIELDS = {"company_name", "sector", "lens", "state", "industry", "about",
+                       "entity_id"}
 
 
 class CheckerReturnIn(BaseModel):
