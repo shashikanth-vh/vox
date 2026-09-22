@@ -818,9 +818,11 @@ async def test_the_picked_line_owns_the_company_pin(client: AsyncClient):
     assert moved["deal_id"] == deal2["id"]
     assert moved["subject_type"] == "Deal" and moved["subject_id"] == deal2["id"]
 
-    # A standalone lead has no parent — the sent entity stands (the heal path).
+    # A lead is now BORN linked (its company enters the master at creation), so a
+    # lead pin derives the company from the lead itself — same rule as a deal's.
     lone = (await client.post("/v1/leads", json={
         "company": f"Standalone {uuid.uuid4()}"}, headers=MGMT)).json()
+    assert lone["entity_id"], "a fresh lead carries its client master from birth"
     row2 = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
     await _to_ready(client, row2["id"])
     r2 = await client.post(f"/v1/vox/conversations/{row2['id']}/edits",
@@ -828,8 +830,24 @@ async def test_the_picked_line_owns_the_company_pin(client: AsyncClient):
                                  "deal_id": ""},
                            headers=RECORDER)
     assert r2.status_code == 200, r2.text
-    assert r2.json()["entity_id"] == e1["id"]
+    assert r2.json()["entity_id"] == lone["entity_id"]
     assert r2.json()["lead_id"] == lone["id"]
+
+    # An UNLINKED lead still exists — same-named siblings leave the link to a
+    # human (and the pre-existing book predates birth-linking). THERE the sent
+    # entity stands: the heal path, unchanged.
+    amb = (await client.post("/v1/leads", json={
+        "company": "Greenpill Renewable Energy Limited"}, headers=MGMT)).json()
+    assert amb["entity_id"] is None, "two same-named masters: never guessed between"
+    row4 = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row4["id"])
+    r4 = await client.post(f"/v1/vox/conversations/{row4['id']}/edits",
+                           json={"entity_id": e1["id"], "lead_id": amb["id"],
+                                 "deal_id": ""},
+                           headers=RECORDER)
+    assert r4.status_code == 200, r4.text
+    assert r4.json()["entity_id"] == e1["id"]
+    assert r4.json()["lead_id"] == amb["id"]
 
 
 async def test_reanalysis_merges_new_lender_events_into_confirmed_rows(client: AsyncClient):

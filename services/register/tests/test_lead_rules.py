@@ -109,6 +109,21 @@ async def test_an_explicit_entity_id_is_respected(reg):
                    for m in await _masters(client))
 
 
+async def test_same_named_siblings_are_never_guessed_between(reg):
+    """Two live masters with the same canonical name (the GREENPILLREN wound):
+    linking to either would be a guess, so the lead stays unlinked and a human
+    resolves it — the Attach row or the conversion dialog."""
+    client, existing_id = reg
+    r = await client.post("/v1/entities", json={
+        "code": "GREENPILL2", "legal_name": "Greenpill Renewable Energy Limited"})
+    assert r.status_code == 201, r.text
+    lead = await client.post("/v1/leads", json={"company": "Greenpill Renewable Energy"})
+    assert lead.status_code == 201
+    assert lead.json()["entity_id"] is None
+    assert len([m for m in await _masters(client)
+                if "Greenpill" in m["legal_name"]]) == 2, "and no third row was minted"
+
+
 async def test_two_leads_for_the_same_new_company_share_one_master(reg):
     client, _ = reg
     first = await client.post("/v1/leads", json={"company": "Amit Solar Pvt Ltd"})

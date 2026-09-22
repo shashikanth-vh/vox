@@ -23,7 +23,9 @@ async def test_export_counts(client: AsyncClient):
     r = await client.get("/v1/export/counts")
     assert r.status_code == 200
     c = r.json()
-    assert c["entities"] == 1 and c["leads"] == 1 and c["interactions"] == 1
+    # Two entities: the seeded Export Co plus the master born with the Lead Co
+    # lead (a lead's company enters the client master at creation).
+    assert c["entities"] == 2 and c["leads"] == 1 and c["interactions"] == 1
 
 
 async def test_export_excel(client: AsyncClient):
@@ -40,8 +42,9 @@ async def test_export_excel(client: AsyncClient):
     rows = list(ws.iter_rows(values_only=True))
     header, data = rows[0], rows[1:]
     assert "legal_name" in header and "id" in header and "version" in header
-    assert len(data) == 1
-    assert data[0][header.index("legal_name")] == "Export Co"
+    # Export Co (seeded) + Lead Co (the master born with the lead).
+    names = {row[header.index("legal_name")] for row in data}
+    assert names == {"Export Co", "Lead Co"}
 
 
 async def test_export_json_and_subset(client: AsyncClient):

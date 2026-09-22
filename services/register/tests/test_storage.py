@@ -58,7 +58,9 @@ async def test_upload_through_api_to_s3_and_presigned_download(
         store = _store()
         monkeypatch.setattr(storage_mod, "get_storage", lambda: store)
 
-        lead_id = (await client.post("/v1/leads", json={"company": "EcoSoch"})).json()["id"]
+        lead_created = (await client.post("/v1/leads",
+                                          json={"company": "EcoSoch"})).json()
+        lead_id = lead_created["id"]
         blob = b"%PDF-1.4 uploaded certificate"
         r = await client.post("/v1/documents/upload",
                               files={"file": ("coi.pdf", blob, "application/pdf")},
@@ -71,7 +73,10 @@ async def test_upload_through_api_to_s3_and_presigned_download(
         assert doc["storage_backend"] == "s3"
         assert doc["storage_uri"].startswith("s3://prism-documents/")
         assert doc["size_bytes"] == len(blob) and doc["checksum"]
-        assert doc["entity_id"] is None  # lead with no entity
+        # The lead was born linked to its client master (created with the lead),
+        # so the document inherits the company key instead of floating entity-less.
+        assert doc["entity_id"] == lead_created["entity_id"]
+        assert doc["entity_id"] is not None
 
         # The bytes really landed in the store.
         _bucket, key = storage_mod.parse_s3_uri(doc["storage_uri"])

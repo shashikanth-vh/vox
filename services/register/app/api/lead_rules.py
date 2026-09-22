@@ -41,11 +41,17 @@ async def lead_company_to_master(ctx: Any, body: dict) -> None:
     rows = (await ctx.session.execute(
         select(Entity.id, Entity.code, Entity.legal_name, Entity.display_name).where(
             Entity.tenant_id == ctx.tenant_id, Entity.deleted_at.is_(None)))).all()
-    for row in rows:
-        if any(c and canonical_name(c) == wanted
-               for c in (row.legal_name, row.display_name)):
-            body["entity_id"] = row.id
-            return
+    matches = [row for row in rows
+               if any(c and canonical_name(c) == wanted
+                      for c in (row.legal_name, row.display_name))]
+    if len(matches) == 1:
+        body["entity_id"] = matches[0].id
+        return
+    if matches:
+        # SAME-NAMED SIBLINGS (the GREENPILLREN story): guessing between them is
+        # exactly the wound this rule exists to close. The lead stays unlinked;
+        # a human resolves it (the Attach row, or the conversion dialog).
+        return
 
     # Genuinely new. The deterministic code is stable per name; if a LIVE row
     # somehow already holds it under a different canonical name (hash overlap),
