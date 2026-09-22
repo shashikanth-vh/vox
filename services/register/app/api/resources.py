@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
+from app.api.lead_rules import lead_company_to_master as _lead_company_to_master
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
 from app.api.tracker_rules import lending_pre_write
@@ -77,6 +78,9 @@ _SPECS: list[ResourceSpec] = [
                     "converted_deal_id"],
         subject_type="Lead", view_name="leads",
         # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.
+        # A lead's company reaches the client master AT CREATION: canonical match →
+        # link, genuinely new → a Prospect master row (see app.api.lead_rules).
+        enrich_create=_lead_company_to_master,
     ),
     ResourceSpec(
         name="deal", prefix="/v1/deals", tags=["Deals"],

@@ -15,7 +15,6 @@ workflow, not here.
 from __future__ import annotations
 
 import hashlib
-import re
 from typing import Any
 
 from evam_register_client import AsyncRegisterClient
@@ -86,22 +85,13 @@ def _client(caller: CallerContext | None = None) -> AsyncRegisterClient:
 
 
 # --------------------------------------------------------------------------- #
-# Canonical company-name matching (same philosophy as PULSE: explainable)
+# Canonical company-name matching (same philosophy as PULSE: explainable).
+# The rule ITSELF lives in evam_backend_core.company_identity, shared with the
+# register — its lead-create hook and this plane must never disagree on what
+# "the same company" means. The local names stay for every existing import.
 # --------------------------------------------------------------------------- #
-_SUFFIXES = re.compile(
-    r"\b(private|pvt|limited|ltd|llp|india|co|company)\b\.?", re.IGNORECASE)
-
-
-def _canonical(name: str) -> str:
-    """'EcoSoch Solar Pvt. Ltd' → 'ecosoch solar' — the comparison key for matching."""
-    return re.sub(r"\s+", " ", _SUFFIXES.sub(" ", name)).strip().lower()
-
-
-def _entity_code(name: str) -> str:
-    """A deterministic code for a NEW entity: name slug + a short stable hash, so a
-    retried create derives the same code (and the idempotency key dedupes anyway)."""
-    slug = re.sub(r"[^A-Z0-9]", "", _canonical(name).upper())[:12] or "ENTITY"
-    return f"{slug}-{hashlib.sha256(name.encode()).hexdigest()[:4].upper()}"
+from evam_backend_core.company_identity import canonical_name as _canonical  # noqa: E402
+from evam_backend_core.company_identity import entity_code as _entity_code  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #

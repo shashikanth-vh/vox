@@ -60,6 +60,7 @@ class ResourceSpec:
         parent_scope: tuple | None = None,
         pre_write: Any = None,
         pre_delete: Any = None,
+        enrich_create: Any = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -95,6 +96,11 @@ class ResourceSpec:
         # or update lands, for the invariants a column constraint cannot express — see
         # app.api.people_rules. It raises; it never edits the body.
         self.pre_write = pre_write
+        # An async (ctx, body) -> None hook run on CREATE ONLY, immediately after the
+        # body is built and BEFORE any RBAC/policy check reads it — the one hook that
+        # MAY edit the body, for server-settled fields (a lead's company → its client-
+        # master link). The checks then see the body that will actually land.
+        self.enrich_create = enrich_create
         # An async (ctx, obj_id) -> None hook run before a soft-delete lands — for
         # referential invariants (an entity carrying live product rows must not be
         # deletable out from under them). It raises; it never deletes anything itself.
@@ -422,6 +428,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         ) -> Any:
             body = payload.model_dump(exclude_unset=False)
+            if spec.enrich_create is not None:
+                await spec.enrich_create(ctx, body)
             # RBAC on an entity-carrying resource create (contracts, intel, monitoring):
             # require the resource's write operation AND, for a SCOPED creator, that the
             # payload's company is in their scope. Closes "creation validates neither the
