@@ -1556,7 +1556,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9, color: 'var(--muted)',
                 letterSpacing: '0.04em', marginTop: 8 }}>
                 {score?.user_override ? 'You set this — user-override · confidence n/a'
-                  : score?.value ? `AI-suggested · ${score.value} of 5 · tap to override` : 'Null — no evaluative language heard · tap to set'}
+                  : score?.value ? (
+                    // The guards flag a score the recorder never SPOKE as an AI
+                    // suggestion; a spoken rating is a recorded fact and must not
+                    // wear the AI label (the diagnostic's Test 1 said "4 out of 5"
+                    // aloud — that is speech, not inference).
+                    ((report?.common?.data_quality_flags?.value as string[]) || [])
+                      .some((f) => f.includes('AI suggestion'))
+                      ? `AI-suggested · ${score.value} of 5 · confirm or tap to override`
+                      : `Spoken by the recorder · ${score.value} of 5 · tap to override`
+                  ) : 'Null — no evaluative language heard · tap to set'}
               </div>
               {score?.user_override && !readOnly && (
                 <div style={{ marginTop: 10 }}>
