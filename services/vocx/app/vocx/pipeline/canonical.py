@@ -32,7 +32,7 @@ from .glossary import LENDER_GLOSSARY
 
 # Observed garble → canonical. Word-boundary, case-insensitive, longest first.
 # Every entry here was SEEN in a real transcript (diagnostic appendices B/D,
-# staging A/B of 23 Sep) or is a trivial variant of one.
+# staging A/Bs and the fresh take of 23 Sep) or is a trivial variant of one.
 _SEED_ALIASES: dict[str, str] = {
     "ICAC Bank": "ICICI Bank",
     "ICIC Bank": "ICICI Bank",
@@ -40,6 +40,8 @@ _SEED_ALIASES: dict[str, str] = {
     "Ajit Berla": "Aditya Birla",
     "Ajit Birla": "Aditya Birla",
     "Aditya Berla": "Aditya Birla",
+    "Egypt Burla": "Aditya Birla",
+    "Egypt Berla": "Aditya Birla",
     "Kotak Menindra": "Kotak Mahindra",
     "Kotak Mahendra": "Kotak Mahindra",
     "Potak Mahendra": "Kotak Mahindra",
@@ -49,7 +51,15 @@ _SEED_ALIASES: dict[str, str] = {
     "Greenco": "Greenko",
     "Exact Climate Solutions": "Hexa Climate Solutions",
     "USD returns": "GST returns",
+    # Dotted form only: the case-blind bare "us returns" occurs in ordinary
+    # English ("gives us returns of 18%") and must never match.
+    "U.S. returns": "GST returns",
     "dexindication": "debt syndication",
+    "dex indication": "debt syndication",
+    # "deteriorating" alone is ordinary English and must never be rewritten;
+    # this exact bigram, twice observed as STT's rendering of the document-list
+    # item "debtor ageing", cannot occur in a legitimate sentence.
+    "bank statements, deteriorating": "bank statements, debtor ageing",
     "VARKS": "VOX",
     "performance by guarantee": "performance bank guarantee",
     "collateral curve": "collateral cover",

@@ -36,6 +36,26 @@ def test_the_diagnostics_garbles_all_become_canonical():
     assert all(n.startswith("canonical:") for n in notes)
 
 
+def test_the_fresh_take_variants_of_23_sep_become_canonical():
+    # The first post-267 fresh recording surfaced four NEW renderings of already
+    # known garbles — the alias store compounding exactly as designed.
+    out, notes = canonicalize_transcript(
+        "We may approach Access Bank, Kotak Menindra Bank, Bajaj Finance and "
+        "Egypt Burla for this requirement. The company has asked AVM to manage "
+        "the entire dex indication process. Pallavi will collect the audited "
+        "financial statements, U.S. returns, bank statements, deteriorating and "
+        "the details of the current order book.")
+    assert "Aditya Birla" in out and "Egypt Burla" not in out
+    assert "debt syndication" in out and "dex indication" not in out
+    assert "GST returns" in out and "U.S." not in out
+    assert "debtor ageing" in out and "deteriorating" not in out
+    assert any("Egypt Burla" in n and "Aditya Birla" in n for n in notes)
+    # The bare word stays untouchable: only the exact document-list bigram maps.
+    keep, _ = canonicalize_transcript(
+        "Asset quality is deteriorating. The fund gives us returns of 18%.")
+    assert "deteriorating" in keep and "us returns" in keep
+
+
 def test_fuzzy_lender_matching_is_conservative():
     # A fresh mishearing of a KNOWN lender is caught by the roster...
     out, notes = canonicalize_transcript("We spoke to Kotak Mahendru Bank yesterday.")
