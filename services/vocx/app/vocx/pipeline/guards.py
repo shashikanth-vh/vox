@@ -71,6 +71,15 @@ _SAN_RE = re.compile(r"\bsanction(?:ed)?\b", re.IGNORECASE)
 _SAN_NEG_RE = re.compile(
     r"\b(?:not?\s+(?:a\s+|yet\s+|been\s+)?sanction(?:ed)?|no\s+(?:formal\s+)?sanction|"
     r"sanction\s+(?:is\s+)?(?:not|pending|awaited))\b", re.IGNORECASE)
+# ASPIRATION IS NOT EVIDENCE: "would like the loan to be sanctioned within three
+# weeks" is a request; counting it as rung-3 evidence once unlocked an invented
+# "indicative proposal stage" remark on the two-test transcript. These forms
+# neither evidence a sanction in the transcript nor claim one in a field value.
+_SAN_ASPIRATIONAL_RE = re.compile(
+    r"\b(?:to\s+be\s+sanction(?:ed)?|sanction(?:ed)?\s+within|"
+    r"sanction\s+(?:is\s+)?(?:required|requested|expected|targeted|sought)|"
+    r"(?:requested?|seeking|want(?:s|ed)?|hope[sd]?)\s+(?:a\s+)?sanction)\b",
+    re.IGNORECASE)
 # An explicit correction caps the ladder: "this is ONLY an indicative proposal"
 # (typically right after an STT-garbled "in-principle approval") is the speaker
 # saying the lower rung is the truth — the correction is the controlling
@@ -91,10 +100,11 @@ def stage_evidence_level(transcript: str) -> int:
     if _INP_RE.search(t):
         level = 2
     if _SAN_RE.search(t):
-        # Every sanction mention must be non-negated for it to count.
+        # Every sanction mention must be non-negated AND non-aspirational to count.
         mentions = len(_SAN_RE.findall(t))
-        negated = len(_SAN_NEG_RE.findall(t)) + len(_INP_RE.findall(t))
-        if mentions > negated:
+        discounted = (len(_SAN_NEG_RE.findall(t)) + len(_INP_RE.findall(t))
+                      + len(_SAN_ASPIRATIONAL_RE.findall(t)))
+        if mentions > discounted:
             level = 3
     # The controlling correction: "this is ONLY an indicative proposal" caps the
     # ladder at rung 1 whatever else was (mis)heard earlier in the transcript.
@@ -107,7 +117,8 @@ def _value_level(text: str) -> int:
     """The highest rung a FIELD VALUE claims."""
     if not text:
         return 0
-    if _SAN_RE.search(text) and not _SAN_NEG_RE.search(text) and not _INP_RE.search(text):
+    if (_SAN_RE.search(text) and not _SAN_NEG_RE.search(text)
+            and not _SAN_ASPIRATIONAL_RE.search(text) and not _INP_RE.search(text)):
         return 3
     if _INP_RE.search(text):
         return 2

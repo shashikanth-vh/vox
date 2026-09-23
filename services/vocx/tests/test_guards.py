@@ -106,3 +106,28 @@ def test_extract_report_gains_quality_flags():
     assert any("Sanctioned" in f for f in flags)      # chip flagged, not rewritten
     assert any("AI suggestion" in f for f in flags)
     assert any("negation check" in f for f in flags)
+
+
+TEST1_ASK = ("The company presently requires a 2 crore working capital loan. The "
+             "management would like the loan to be sanctioned within the next "
+             "three weeks.")
+
+
+def test_a_requested_sanction_is_aspiration_not_evidence():
+    """Test 1's own sentence: 'would like the loan to be sanctioned within three
+    weeks' is a REQUEST. It must not unlock stage wording — this exact hole let
+    Regional's invented 'indicative proposal stage' remark pass unflagged on the
+    staging A/B (23 Sep)."""
+    assert stage_evidence_level(TEST1_ASK) == 0
+    value = "The 2 crore working capital ask is at the indicative proposal stage."
+    _new, note = stage_guard_text(value, stage_evidence_level(TEST1_ASK))
+    assert note and "does not evidence any stage" in note
+
+
+def test_a_faithful_sanction_request_in_a_field_is_not_a_claim():
+    """The mirror case: a field that reports 'sanction requested within three
+    weeks' repeats the ask faithfully — it claims no rung and must not be
+    flagged as one (the false positive the aspirational rule also prevents)."""
+    value = "Working capital loan of ₹2 Cr; sanction requested within three weeks."
+    new, note = stage_guard_text(value, stage_evidence_level(TEST1_ASK))
+    assert new == value and note is None
