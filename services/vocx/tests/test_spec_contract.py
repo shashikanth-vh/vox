@@ -1504,3 +1504,49 @@ def test_no_json_object_at_all_still_fails_into_retry():
 
     with pytest.raises(StructuringError):
         structure_transcript("hello", mode="note", ask_model=ask)
+
+
+def test_a_takes_engine_choice_outranks_the_box_default(monkeypatch):
+    """The vendor-blind per-take switch: "regional" routes THIS take to the
+    Indic engine on a box whose default is Claude, and "default" pins Claude
+    on a box whose default is Sarvam — the deployment switch only decides
+    what an unmarked take gets. Junk falls back to the box default rather
+    than failing a capture."""
+    from app.vocx.pipeline.structure import _structure_model
+
+    monkeypatch.delenv("VOCX_STRUCTURE_PROVIDER", raising=False)
+    monkeypatch.delenv("SARVAM_MODEL", raising=False)
+    assert _structure_model("post_meeting", engine="regional") == "sarvam-105b-conversations"
+    assert _structure_model("post_meeting", engine="default") == "claude-sonnet-5"
+    assert _structure_model("post_meeting", engine="weird") == "claude-sonnet-5"
+
+    monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")
+    assert _structure_model("post_meeting", engine="default") == "claude-sonnet-5"
+    assert _structure_model("post_meeting", engine=None) == "sarvam-105b-conversations"
+
+
+def test_structuring_records_the_engine_that_ran(monkeypatch):
+    """structure_transcript stamps "engine" on its result — 'regional' when the
+    sarvam path structured the take (chosen per-take here, with NO box-wide
+    switch set), 'default' otherwise — so the A/B analysis reads the record,
+    never guesses from model names."""
+    monkeypatch.delenv("VOCX_STRUCTURE_PROVIDER", raising=False)
+    from app.vocx.pipeline.structure import structure_transcript
+
+    def ask(model, system, user):
+        assert model.startswith("sarvam"), "the per-take choice must pick the model"
+        if '"detected_use_cases"' in system:
+            return json.dumps({
+                "detected_use_cases": ["lending"],
+                "entity_candidates": ["SunGarner"],
+                "common": {"meeting_summary": {
+                    "value": "SunGarner: 5 Cr working capital.",
+                    "confidence": "high"}}})
+        return json.dumps({"lending": {
+            "requirement_quantum_cr": {"value": 5, "confidence": "high"}}})
+
+    out = structure_transcript(
+        "Met SunGarner about a five crore working capital need.",
+        mode="post_meeting", ask_model=ask, engine="regional")
+    assert out["engine"] == "regional"
+    assert out["model"].startswith("sarvam")

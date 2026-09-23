@@ -38,14 +38,28 @@ MODEL_NOTE = (_os.environ.get("VOCX_NOTE_MODEL") or "").strip() or "claude-sonne
 MODEL_LIVE = "claude-sonnet-5"
 
 
-def _structure_model(mode: str) -> str:
-    """The model this box structures with — an EXCLUSIVE configuration switch.
-    Default (unset / "anthropic"): Claude, Haiku for notes and Sonnet for live,
-    exactly as production runs. "sarvam": Sarvam-M for everything, so a trial
-    box compares like for like. Never both at once; the server's ask_model
-    dispatches on the same variable, and the conversation log records whichever
-    model actually structured the take."""
-    provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+# The user-facing ENGINE names, mapped to providers HERE and nowhere else: the
+# UI says "Default" / "Regional", never a vendor. A take's stored engine choice
+# outranks the box-wide VOCX_STRUCTURE_PROVIDER default; records carry the
+# engine AND the exact model, so the A/B analysis stays precise while the
+# screen stays vendor-blind.
+_ENGINE_PROVIDERS = {"default": "anthropic", "regional": "sarvam"}
+
+
+def _resolve_provider(engine: str | None) -> str:
+    eng = (engine or "").strip().lower()
+    if eng in _ENGINE_PROVIDERS:
+        return _ENGINE_PROVIDERS[eng]
+    return (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+
+
+def _structure_model(mode: str, engine: str | None = None) -> str:
+    """The model this take structures with. Resolution order: the take's own
+    engine choice ("default" | "regional", user-picked at record or re-analyse
+    time) → the box-wide VOCX_STRUCTURE_PROVIDER switch → anthropic. The
+    server's ask_model dispatches on the MODEL NAME this returns, so per-take
+    choices route correctly whatever the box default is."""
+    provider = _resolve_provider(engine)
     if provider == "sarvam":
         # sarvam-m was deprecated mid-trial. Of the two survivors, the
         # catalogue marks sarvam-105b "Always-on reasoning" — it burned its
@@ -1444,6 +1458,7 @@ def structure_transcript(
     registry_version: str | None = None,
     known_names: str | None = None,
     recorder: str | None = None,
+    engine: str | None = None,
 ) -> dict[str, Any]:
     """Run the structuring stage. ``ask_model(model, system, user)`` is injected so
     the pipeline is testable without a network and swappable without a rewrite.
@@ -1454,7 +1469,7 @@ def structure_transcript(
     prompt_version — stay untouched.
 
     Returns {"report", "prompt_version", "registry_version", "model"}."""
-    model = _structure_model(mode)
+    model = _structure_model(mode, engine)
     system = build_prompt(registry_version)
     context = f"{known_names}\n\n" if known_names else ""
     # The narrator has a name: summaries should read "Ananda H met R. Sharma",
@@ -1479,7 +1494,7 @@ def structure_transcript(
         return ask_model(model, system, u, schema=schema) if takes_schema \
             else ask_model(model, system, u)
 
-    provider = (_os.environ.get("VOCX_STRUCTURE_PROVIDER") or "anthropic").strip().lower()
+    provider = _resolve_provider(engine)
     # What the extraction calls actually read: the transcript itself, or — on
     # the sarvam path, above the char budget — its condensed minutes. The
     # Claude path never condenses (200K context; production behavior is
@@ -1582,4 +1597,5 @@ def structure_transcript(
         "prompt_version": latest_prompt_version(),
         "registry_version": registry_version or latest_registry_version(),
         "model": model,
+        "engine": "regional" if provider == "sarvam" else "default",
     }

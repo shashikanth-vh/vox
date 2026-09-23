@@ -76,6 +76,8 @@ export interface VoxRegistry {
 
 let specCache: { registry: VoxRegistry; prompt_version: string } | null = null;
 
+let enginesCache: string[] | null = null;
+
 export const voxService = {
   /** The registry the renderer is driven by — fetched once per session. */
   async spec(): Promise<{ registry: VoxRegistry; prompt_version: string }> {
@@ -90,7 +92,7 @@ export const voxService = {
   async capture(audio: Blob, opts: {
     captureId: string; mode?: 'post_meeting' | 'live'; rm?: string; email?: string;
     durationSeconds?: number; lat?: number; lng?: number; consentId?: string;
-    quick?: boolean;
+    quick?: boolean; engine?: string;
   }): Promise<{ conversation_id: string; replayed?: boolean; status?: string }> {
     try {
       const r = await vocxClient.post('/v1/vox/capture', await audio.arrayBuffer(), {
@@ -109,6 +111,7 @@ export const voxService = {
           consent_id: opts.consentId ?? '',
           content_type: audio.type || '',
           quick: opts.quick ? '1' : '',
+          engine: opts.engine || '',
           ts: new Date().toISOString(),
         },
       });
@@ -150,7 +153,7 @@ export const voxService = {
   async streamFinish(opts: {
     captureId: string; mode?: string; durationSeconds?: number;
     lat?: number; lng?: number; consentId?: string; email?: string; rm?: string;
-    quick?: boolean;
+    quick?: boolean; engine?: string;
   }): Promise<{ conversation_id: string; replayed?: boolean }> {
     const r = await vocxClient.post('/v1/vox/stream/finish', null, {
       timeout: 60_000,
@@ -158,12 +161,25 @@ export const voxService = {
         capture_id: opts.captureId, mode: opts.mode || 'post_meeting',
         duration: opts.durationSeconds ?? '', lat: opts.lat ?? '', lng: opts.lng ?? '',
         consent_id: opts.consentId ?? '', email: opts.email || '', rm: opts.rm || '',
-        quick: opts.quick ? '1' : '',
+        quick: opts.quick ? '1' : '', engine: opts.engine || '',
         ts: new Date().toISOString(),
       },
     });
     if (!r.data?.ok) throw new Error(r.data?.error || 'finish failed');
     return r.data;
+  },
+
+  /** The structuring engines this deployment serves ("default" always;
+   *  "regional" when the alternative is configured). Vendor-blind labels — the
+   *  picker renders only when there is a real choice. Cached per page load. */
+  async engines(): Promise<string[]> {
+    if (enginesCache) return enginesCache;
+    try {
+      const r = await vocxClient.get('/v1/capabilities');
+      const list = (r.data?.engines as string[]) || ['default'];
+      enginesCache = list.length ? list : ['default'];
+    } catch { enginesCache = ['default']; }
+    return enginesCache;
   },
 
   streamDiscard(captureId: string): Promise<any> {

@@ -85,6 +85,7 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         "deal_id": str(c.deal_id) if c.deal_id else None,
         "interaction_id": str(c.interaction_id) if c.interaction_id else None,
         "recording_mode": c.recording_mode,
+        "engine": c.engine,
         "capture_id": c.capture_id,
         "status": c.status,
         "processing_stage": c.processing_stage,
@@ -545,6 +546,8 @@ class ConversationIn(BaseModel):
     # for the recorder); a human caller's verified identity always wins.
     recorder_email: str | None = Field(default=None, max_length=200)
     recorder_name: str | None = Field(default=None, max_length=200)
+    # Vendor-blind structuring engine choice; None = the deployment default.
+    engine: str | None = Field(default=None, pattern="^(default|regional)$")
 
 
 @router.post("/v1/vox/conversations", status_code=201)
@@ -574,6 +577,7 @@ async def create_conversation(payload: ConversationIn,
         recorder_email=recorder_email,
         recorder_name=recorder_name,
         recording_mode=payload.recording_mode,
+        engine=payload.engine,
         capture_id=payload.capture_id,
         audio_ref=payload.audio_ref,
         duration_seconds=payload.duration_seconds,
@@ -949,8 +953,17 @@ async def apply_edits(conversation_id: str, payload: EditsIn,
     return {**_row_dict(row, full=True), "changed": changed}
 
 
+class RegenerateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Switch the structuring engine for this rebuild (and onward) — the live
+    # A/B: same transcript, other engine, overrides preserved. None keeps the
+    # row's current choice.
+    engine: str | None = Field(default=None, pattern="^(default|regional)$")
+
+
 @router.post("/v1/vox/conversations/{conversation_id}/regenerate")
 async def regenerate_conversation(conversation_id: str,
+                                  payload: RegenerateIn | None = None,
                                   ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
     """Rebuild the structured report from the (corrected) transcript.
 
@@ -984,6 +997,9 @@ async def regenerate_conversation(conversation_id: str,
             if isinstance(cell, dict) and cell.get("user_override"):
                 overrides[f"{block_key}.{field_key}"] = cell
     row.preserved_overrides = overrides or None
+    engine_switched = bool(payload and payload.engine and payload.engine != row.engine)
+    if payload and payload.engine:
+        row.engine = payload.engine
     row.structured_report = None
     row.status = "processing"
     row.processing_stage = "structuring"
@@ -992,7 +1008,8 @@ async def regenerate_conversation(conversation_id: str,
                              resource_type="vox_conversations", resource_id=str(row.id),
                              request_id=request_id_ctx.get(),
                              changes={"corrected": bool(row.corrected_transcript),
-                                      "overrides_preserved": len(overrides)}))
+                                      "overrides_preserved": len(overrides),
+                                      **({"engine": row.engine} if engine_switched else {})}))
     await ctx.session.flush()
     await ctx.session.refresh(row)
     return _row_dict(row, full=True)

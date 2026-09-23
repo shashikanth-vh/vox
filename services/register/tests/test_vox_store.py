@@ -1135,3 +1135,35 @@ async def test_the_recovery_card_can_ask_whether_a_capture_landed(client: AsyncC
                              params={"capture_id": f"never-{uuid.uuid4()}"},
                              headers=RECORDER)).json()
     assert miss["total"] == 0 and miss["items"] == []
+
+
+async def test_the_engine_choice_rides_the_row_and_switches_on_regenerate(client: AsyncClient):
+    """The vendor-blind A/B: the recorder's engine choice ("default"|"regional")
+    is stored at creation, echoed in every read, and switchable at regenerate —
+    same transcript, other engine — with the switch audited. Junk is refused at
+    the schema; absence means the box default and stays NULL."""
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}", engine="regional")
+    assert row["engine"] == "regional"
+
+    plain = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    assert plain["engine"] is None
+
+    bad = await client.post("/v1/vox/conversations", json={
+        "recording_mode": "post_meeting", "engine": "anthropic"}, headers=RECORDER)
+    assert bad.status_code == 422
+
+    # Regenerate with the OTHER engine: the row remembers the new choice.
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/regenerate",
+                          json={"engine": "default"}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["engine"] == "default"
+    assert body["processing_stage"] == "structuring"
+
+    # A bodyless regenerate keeps the row's engine untouched.
+    await _to_ready(client, row["id"])
+    r2 = await client.post(f"/v1/vox/conversations/{row['id']}/regenerate",
+                           headers=RECORDER)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["engine"] == "default"

@@ -150,6 +150,11 @@ class VoxConversation(RegisterBase):
 
     prompt_version: Mapped[str | None] = mapped_column(String(20))
     registry_version: Mapped[str | None] = mapped_column(String(20))
+    # The structuring ENGINE the recorder chose ("default" | "regional") — the
+    # vendor-blind A/B switch. NULL = the box default. Honoured on the first
+    # structuring pass and on every regenerate; the exact model that ran is in
+    # the report metadata, so the screen stays neutral while the record is precise.
+    engine: Mapped[str | None] = mapped_column(String(20))
 
     # Set (with an audit row) when an authorised erasure hard-deleted the content;
     # the consent record and this marker are what remain.

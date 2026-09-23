@@ -135,6 +135,8 @@ function buildPrintHtml(row: VoxConversation, report: VoxReport | null,
     ['Business lines', lanes.join(' · ')],
     ['Recording', [row.recording_mode === 'live' ? 'Live meeting' : 'Post-meeting note', dur]
       .filter(Boolean).join(' · ')],
+    ['Engine', (row as any).engine === 'regional' ? 'Regional' :
+      ((row as any).engine === 'default' ? 'Default' : '')],
     ['Location', pdfVal(common.location?.value)],
     ['GPS', (row.latitude != null && row.longitude != null)
       ? `${Math.abs(row.latitude).toFixed(4)}°${row.latitude >= 0 ? 'N' : 'S'}, `
@@ -205,6 +207,13 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 }) {
   const { user } = useAuth();
   const [row, setRow] = useState<VoxConversation | null>(null);
+  // Vendor-blind structuring engines: the re-analyse control offers the choice
+  // only when this deployment serves both. reEngine seeds from the row so a
+  // plain re-analyse keeps the take's engine unless the reviewer switches —
+  // the live A/B: same transcript, other engine, overrides preserved.
+  const [engines, setEngines] = useState<string[]>(['default']);
+  const [reEngine, setReEngine] = useState<string>('default');
+  useEffect(() => { void voxService.engines().then(setEngines); }, []);
   const [registry, setRegistry] = useState<VoxRegistry | null>(null);
   const [report, setReport] = useState<VoxReport | null>(null);
   const [dirty, setDirty] = useState<Record<string, VoxCell>>({});
@@ -271,6 +280,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     try {
       const r = await voxService.get(conversationId);
       setRow(r);
+      setReEngine(((r as any).engine as string) || 'default');
       setReport((prev) => prev ?? (r.structured_report as VoxReport) ?? null);
       return r;
     } catch (e: any) { setErr(String(e?.message || e)); return null; }
@@ -498,7 +508,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     setBusy(true); setErr('');
     try {
       await saveEdits({ corrected_transcript: fixDraft });
-      await api.post(`/vox/conversations/${conversationId}/regenerate`, {});
+      await api.post(`/vox/conversations/${conversationId}/regenerate`,
+        { engine: reEngine });
       await voxService.process(conversationId);
       setFixingTranscript(false);
       // Drop the LOCAL report copy: polling deliberately never overwrites a
@@ -1389,6 +1400,20 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                       + 'machine-generated original stays on record. Your own confirmed field '
                       + 'values survive the rebuild.'}
                 </div>
+                {engines.includes('regional') && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center',
+                                margin: '0 2px 10px', fontSize: 12 }}>
+                    <span style={{ color: 'var(--muted)' }}>Re-analyse with:</span>
+                    {(['default', 'regional'] as const).map((e) => (
+                      <button key={e} className="btn btn-ghost"
+                        style={{ width: 'auto', padding: '2px 10px',
+                                 opacity: reEngine === e ? 1 : 0.45,
+                                 fontWeight: reEngine === e ? 700 : 400 }}
+                        onClick={() => setReEngine(e)}>
+                        {e === 'default' ? 'Default engine' : 'Regional engine'}</button>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-primary" disabled={busy || !fixDraft.trim()}
                     onClick={() => void correctAndRegenerate()}>Save &amp; re-analyze</button>

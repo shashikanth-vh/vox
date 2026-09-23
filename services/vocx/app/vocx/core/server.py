@@ -743,12 +743,13 @@ class VocxApp:
                 if stub:
                     with open(stub, encoding="utf-8") as fh:
                         return fh.read()
-                # EXCLUSIVE provider switch (VOCX_STRUCTURE_PROVIDER): "sarvam"
-                # routes EVERY structuring call to Sarvam-M; anything else (the
-                # default) is Claude below, untouched. Never both at once — the
-                # model name arriving here was chosen from the same variable, so
-                # the conversation log records what actually ran.
-                if (os.environ.get("VOCX_STRUCTURE_PROVIDER") or "").strip().lower() == "sarvam":
+                # Dispatch on the MODEL NAME: _structure_model resolved the
+                # take's engine choice (per-take "regional" outranks the box-wide
+                # VOCX_STRUCTURE_PROVIDER default) into a concrete model, and the
+                # name says which house serves it — so one box can structure one
+                # take with Sarvam and the next with Claude, and the conversation
+                # log records what actually ran either way.
+                if model.strip().lower().startswith("sarvam"):
                     return ask_sarvam(model, system, user)
                 import anthropic  # lazy: offline paths never import the SDK
                 client = anthropic.Anthropic(
@@ -1019,9 +1020,17 @@ class VocxApp:
         finish. The audio is SAFE before this runs; failures say so."""
         if (_one(query, "quick") or "").strip().lower() in ("1", "true", "yes"):
             self._mark_quick(ref)
+        # The take's ENGINE choice ("default" | "regional"), user-picked in the
+        # recorder. Stored on the row so structuring — now or on any later
+        # re-analyse — honours it; anything unrecognised falls back to the box
+        # default rather than failing a capture whose audio is already safe.
+        engine = (_one(query, "engine") or "").strip().lower()
+        if engine not in ("default", "regional"):
+            engine = None
         try:
             row = self.vox_runner().register.create(
                 recording_mode=mode,
+                engine=engine,
                 recorder_email=_one(query, "email") or None,
                 recorder_name=rm if rm != "unknown" else None,
                 capture_id=cap_id or None,
@@ -1148,7 +1157,12 @@ class VocxApp:
         else:
             extraction = "haiku" if os.environ.get(self.config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")) else "offline_stub"
         astore = self.audio_store()
+        # Structuring engines this box can serve: "default" always (Claude);
+        # "regional" only when the Sarvam key is configured — the UI hides the
+        # picker entirely when there is only one engine to pick.
+        engines = ["default"] + (["regional"] if os.environ.get("SARVAM_API_KEY") else [])
         return {"ok": True, "stt": stt, "stt_backend": backend,
+                "engines": engines,
                 "audio_store": getattr(astore, "kind", None) or "off",
                 "google_configured": google_configured, "extraction": extraction,
                 "calendar_enabled": gcfg.get("calendar_enabled", True),

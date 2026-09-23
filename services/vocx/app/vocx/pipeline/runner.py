@@ -197,6 +197,7 @@ class PipelineRunner:
                 capture_ts=row.get("created_at"),
                 known_names=glossary,
                 recorder=row.get("recorder_name") or None,
+                engine=row.get("engine") or None,
             ),
             "structure", self.timeouts["structure"])
         log.info("conversation %s structured by %s in %.1fs",

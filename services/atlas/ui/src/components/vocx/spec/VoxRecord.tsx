@@ -35,6 +35,21 @@ export default function VoxRecord({ onCaptured }: {
   /** A take a previous page-load never sent — found in IndexedDB, offered back. */
   const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
+  // The vendor-blind structuring engine choice. "default" unless the user picks
+  // "regional"; remembered per browser so a comparison week needs one pick. The
+  // control renders only when this deployment actually serves two engines.
+  const [engines, setEngines] = useState<string[]>(['default']);
+  const [engine, setEngine] = useState<string>(() => {
+    try {
+      const v = localStorage.getItem('vox.engine');
+      return v === 'regional' ? 'regional' : 'default';
+    } catch { return 'default'; }
+  });
+  const pickEngine = (e: string) => {
+    setEngine(e);
+    try { localStorage.setItem('vox.engine', e); } catch { /* private mode */ }
+  };
+  useEffect(() => { void voxService.engines().then(setEngines); }, []);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const captureIdRef = useRef('');
@@ -163,6 +178,7 @@ export default function VoxRecord({ onCaptured }: {
         rm: user.full,
         email: getSession()?.email || '',
         durationSeconds: elapsedRef.current,
+        engine,
         ...gpsRef.current,
       });
       await deleteTake(captureIdRef.current);   // safely on the server
@@ -189,7 +205,7 @@ export default function VoxRecord({ onCaptured }: {
       const out = await voxService.capture(blob, {
         captureId: captureIdRef.current, mode: 'post_meeting',
         rm: user.full, email: getSession()?.email || '',
-        durationSeconds: elapsedRef.current, ...gpsRef.current,
+        durationSeconds: elapsedRef.current, engine, ...gpsRef.current,
       });
       await deleteTake(captureIdRef.current);
       setRecording(false);
@@ -205,7 +221,7 @@ export default function VoxRecord({ onCaptured }: {
       const out = await voxService.capture(blob, {
         captureId: take.id, mode: 'post_meeting',
         rm: user.full, email: getSession()?.email || '',
-        durationSeconds: take.elapsed, ...gpsRef.current,
+        durationSeconds: take.elapsed, engine, ...gpsRef.current,
       });
       await deleteTake(take.id);
       setRecovered(null);
@@ -234,6 +250,16 @@ export default function VoxRecord({ onCaptured }: {
         Post-meeting note · cap {mmss(CAP_SECONDS)}
         {paused && <b style={{ color: vx.amberInk }}> · PAUSED</b>}
       </Typography>
+      {engines.includes('regional') && phase === 'idle' && (
+        <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'center', my: 0.6 }}>
+          {(['default', 'regional'] as const).map((e) => (
+            <Chip key={e} size="small" clickable
+              label={e === 'default' ? 'Default engine' : 'Regional engine'}
+              onClick={() => pickEngine(e)}
+              sx={chip(engine === e)} />
+          ))}
+        </Box>
+      )}
       <Typography sx={{ fontSize: 46, fontWeight: 200, fontVariantNumeric: 'tabular-nums', my: 0.5,
                         color: recording && CAP_SECONDS - elapsed <= WARN_LEAD ? '#E5484D' : undefined }}>
         {mmss(elapsed)} <span style={{ fontSize: 16, color: vx.mut }}>/ {mmss(CAP_SECONDS)}</span>
