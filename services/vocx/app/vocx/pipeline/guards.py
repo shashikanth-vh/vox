@@ -172,6 +172,69 @@ def score_suggestion_flag(score, transcript: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Lender chases & replies — a ledger of interactions, not a candidate list
+# ---------------------------------------------------------------------------
+# The same interaction verbs the focused lender pass keys on. An entry whose
+# lender is never spoken near such a verb records an interaction that did not
+# happen. Seen live (23 Sep): "we may approach Axis Bank, Kotak Mahindra Bank,
+# Bajaj Finance and Aditya Birla" became four "chase" entries reading
+# "identified as a probable lender" — candidates belong in probable_lenders,
+# and a fake chase pollutes the deal's chase board on approval.
+_LENDER_EVENT_RE = re.compile(
+    r"chas(?:e|ed|ing)|follow(?:ed|ing)?[\s-]?up|revert|repli|respond|"
+    r"reached out|wrote to|ping(?:ed)?|remind|quer(?:y|ies|ied)|sanction|"
+    r"declin|came back|commit", re.IGNORECASE)
+
+
+def lender_log_flags(report: dict, transcript: str) -> list[str]:
+    """Drop lender_updates entries with no spoken interaction behind them,
+    returning one flag sentence per dropped entry. Evidence is judged in the
+    sentence naming the lender plus the one after it (the pronoun pattern:
+    "spoke about Axis Finance. They reverted with queries." — a verb in the
+    PRECEDING sentence belongs to the previous lender's event and must not
+    bless a "we may approach X next" that follows), with aspirational sanction
+    wording ("to be sanctioned within three weeks") discounted first."""
+    synd = report.get("syndication")
+    if not isinstance(synd, dict):
+        return []
+    cell = synd.get("lender_updates")
+    value = cell.get("value") if isinstance(cell, dict) else None
+    if not isinstance(value, list) or not value:
+        return []
+    sents = [s for s in re.split(r"(?<=[.!?;])\s+", transcript or "") if s.strip()]
+
+    def evidenced(lender: str) -> bool:
+        words = (lender or "").strip().split()
+        if not words:
+            return False
+        name_re = re.compile(re.escape(words[0]), re.IGNORECASE)
+        for i, s in enumerate(sents):
+            if not name_re.search(s):
+                continue
+            window = " ".join(sents[i:i + 2])
+            window = _SAN_ASPIRATIONAL_RE.sub(" ", window)
+            if _LENDER_EVENT_RE.search(window):
+                return True
+        return False
+
+    notes: list[str] = []
+    kept: list = []
+    for item in value:
+        name = (str(item.get("lender") or "").strip()
+                if isinstance(item, dict) else "")
+        if name and evidenced(name):
+            kept.append(item)
+        else:
+            notes.append(f"lender log: dropped ‘{name or '?'}’ — named only as "
+                         "a probable lender, no chase or reply was spoken")
+    if notes:
+        cell["value"] = kept
+        if not kept:
+            cell["confidence"] = "n/a"
+    return notes
+
+
+# ---------------------------------------------------------------------------
 # Application to the two report shapes
 # ---------------------------------------------------------------------------
 _SPEC_GUARDED_BLOCKS = ("lending", "syndication", "asset_monetisation")
@@ -213,6 +276,7 @@ def apply_spec_guards(report: dict, transcript: str) -> list[str]:
         for cell in cells.values():
             if isinstance(cell, dict) and "value" in cell:
                 cell["value"] = _guard_cell_value(cell["value"], evidence, notes)
+    notes.extend(lender_log_flags(report, transcript))
     common = report.get("common")
     if isinstance(common, dict):
         for key in _SPEC_GUARDED_COMMON:

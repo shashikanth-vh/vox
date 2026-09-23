@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.vocx.pipeline.guards import (
     apply_extract_guards,
     apply_spec_guards,
+    lender_log_flags,
     negation_sentences,
     score_suggestion_flag,
     stage_evidence_level,
@@ -131,3 +132,51 @@ def test_a_faithful_sanction_request_in_a_field_is_not_a_claim():
     value = "Working capital loan of ₹2 Cr; sanction requested within three weeks."
     new, note = stage_guard_text(value, stage_evidence_level(TEST1_ASK))
     assert new == value and note is None
+
+
+def test_candidate_lenders_never_become_chase_entries():
+    """The 23 Sep live failure verbatim: 'we may approach X, Y, Z' produced
+    four 'chase' entries reading 'identified as a probable lender' — a fake
+    interaction ledger that would pollute the deal's chase board on approval.
+    The guard drops every entry with no spoken chase/reply behind it, and the
+    aspirational 'sanctioned within three weeks' nearby must not evidence one."""
+    transcript = (
+        "Apart from Evam's loan, the company requires an additional 10 crore "
+        "term loan for expanding its manufacturing facility. We may approach "
+        "Axis Bank, Kotak Mahindra Bank, Bajaj Finance and Aditya Birla for "
+        "this requirement. The company has asked Evam to manage the entire "
+        "debt syndication process. The management would like the loan to be "
+        "sanctioned within the next three weeks.")
+    report = {"syndication": {"lender_updates": {"value": [
+        {"lender": "Axis Bank", "kind": "chase",
+         "note": "Identified as a probable lender for the 10 Cr term loan."},
+        {"lender": "Kotak Mahindra Bank", "kind": "chase",
+         "note": "Identified as a probable lender for the 10 Cr term loan."},
+        {"lender": "Bajaj Finance", "kind": "chase",
+         "note": "Identified as a probable lender."},
+    ], "confidence": "medium"}}}
+    notes = lender_log_flags(report, transcript)
+    cell = report["syndication"]["lender_updates"]
+    assert cell["value"] == [] and cell["confidence"] == "n/a"
+    assert len(notes) == 3
+    assert all("no chase or reply was spoken" in n for n in notes)
+    assert any("Axis Bank" in n for n in notes)
+
+
+def test_real_lender_interactions_survive_the_log_guard():
+    """The ledger's legitimate content — a spoken chase and a spoken reply —
+    passes untouched, including when the verb sits in the neighbouring
+    sentence, and the fabricated entry beside them is the only one dropped."""
+    transcript = (
+        "Chased Godrej Capital for the IM response, no reply yet. I also "
+        "spoke about Axis Finance. They reverted with queries on the security "
+        "structure. We may approach Tata Capital next month.")
+    report = {"syndication": {"lender_updates": {"value": [
+        {"lender": "Godrej Capital", "kind": "chase", "note": "Chased for the IM."},
+        {"lender": "Axis Finance", "kind": "reply", "note": "Queries on security."},
+        {"lender": "Tata Capital", "kind": "chase", "note": "Identified as probable."},
+    ], "confidence": "medium"}}}
+    notes = lender_log_flags(report, transcript)
+    kept = [e["lender"] for e in report["syndication"]["lender_updates"]["value"]]
+    assert kept == ["Godrej Capital", "Axis Finance"]
+    assert len(notes) == 1 and "Tata Capital" in notes[0]

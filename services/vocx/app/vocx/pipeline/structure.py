@@ -729,8 +729,10 @@ _LENDER_PASS_SYSTEM = (
     '"reply", "note": the substance in one or two sentences including any '
     'promised date}. A KNOWN NAMES block may precede the transcript: when a '
     'spoken lender name is clearly an STT mangling of a name there, use the '
-    'KNOWN spelling. Record only events actually spoken in the transcript; '
-    'return [] when none were.')
+    'KNOWN spelling. Record only events actually spoken in the transcript. '
+    'Lenders merely IDENTIFIED as candidates ("we may approach Axis Bank and '
+    'Kotak Mahindra") are NOT events — never invent a chase for them; return '
+    '[] when the desk has not yet contacted anyone and nobody has replied.')
 
 
 def _backfill_lender_updates(report: dict, transcript: str,
