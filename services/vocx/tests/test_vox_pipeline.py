@@ -108,7 +108,7 @@ def test_a_note_reaches_ready_with_a_validated_report():
     assert row["status"] == "ready"
     assert row["processing_stage"] == "ready"
     assert row["structured_report"]["detected_use_cases"] == ["lending"]
-    assert row["prompt_version"] == "v1" and row["registry_version"] == "v1"
+    assert row["prompt_version"] == "v2" and row["registry_version"] == "v2"
     assert row["entity_candidates"] == ["Suryodaya"]
     # the null-sector-on-lending nudge arrived server-side
     flags = row["structured_report"]["common"]["data_quality_flags"]["value"]
@@ -125,7 +125,7 @@ def test_processing_a_ready_row_is_a_no_op():
     assert len(reg.patches) == n  # idempotent: nothing re-ran
 
 
-def test_live_mode_routes_to_sonnet_and_notes_to_haiku():
+def test_both_modes_route_to_sonnet_with_notes_overridable():
     seen = []
 
     def spy_model(model, system, user):

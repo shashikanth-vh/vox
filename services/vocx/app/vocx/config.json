@@ -1,6 +1,6 @@
 {
   "_comment": "VOX configuration. Confidence is gated PER CRITICAL FIELD (entity match, next_meeting date, register writes). Non-critical fields (discussion points, commitments, attendees, note prose) never block an auto-write.",
-  "model": "claude-haiku-4-5-20251001",
+  "model": "claude-sonnet-5",
   "anthropic_api_key_env": "ANTHROPIC_API_KEY",
   "thresholds": {
     "VOX_ENTITY_MATCH_MIN": 0.75,
@@ -62,12 +62,12 @@
     "vad_filter": true,
     "archive_dir": "captures",
     "api": {
-      "_comment": "timeout_s caps ONE attempt; budget_s caps the whole call including retries. Both must expire BEFORE the browser's own 300s capture timeout, so a clip that needs too long comes back as a 504 that says so rather than as a blind client abort.",
+      "_comment": "timeout_s caps ONE attempt; budget_s caps the whole call including retries. Both must expire BEFORE the browser's own 560s capture timeout, so a clip that needs too long comes back as a 504 that says so rather than as a blind client abort.",
       "endpoint_env": "VOCX_STT_API_URL",
       "key_env": "VOCX_STT_API_KEY",
       "model": "whisper-1",
-      "timeout_s": 240,
-      "budget_s": 240,
+      "timeout_s": 480,
+      "budget_s": 480,
       "attempts": 3
     },
     "vocabulary": [

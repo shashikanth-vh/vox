@@ -255,6 +255,19 @@ export default function ReportCard({ preview, initialStatus, onFiled, onDiscarde
       {note && <Alert severity="success" sx={{ mb: 1, py: 0, fontSize: 12 }}
         onClose={() => setNote('')}>{note}</Alert>}
 
+      {/* Deterministic review steers from the pipeline guards: negations, stage
+          checks, an AI-suggested score. These are the small number of facts that
+          can reverse a commercial conclusion — surfaced FIRST, before the polished
+          prose below gets the chance to look settled. */}
+      {(rep.quality_flags || []).length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1, py: 0.4, fontSize: 12, textAlign: 'left' }}>
+          <b>Check before approving:</b>
+          <ul style={{ margin: '4px 0 2px', paddingLeft: 18 }}>
+            {rep.quality_flags.map((f: string, i: number) => <li key={i}>{f}</li>)}
+          </ul>
+        </Alert>
+      )}
+
       {/* Status + temperature */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Box component="span" sx={badge(status)}>{status.toUpperCase()}</Box>

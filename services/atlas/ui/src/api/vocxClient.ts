@@ -24,7 +24,12 @@ import { attach401Recovery } from '../auth/refresh';
 export const VOCX_URL: string =
   import.meta.env.VITE_VOCX_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/vocx` : '/vocx');
 
-const CAPTURE_TIMEOUT_MS = 300_000;
+// 5-minute clips (the raised recorder cap) decode near-realtime on CPU: the STT
+// budget below allows 480s, so the browser waits a little longer than that and the
+// edge a little longer still — the chain fails inward, with the STT 504 (which
+// names the problem and proves the audio is stored) arriving before anyone's
+// blind abort. Chain: STT 480s < browser 560s < edge 565s < gateway 600s.
+const CAPTURE_TIMEOUT_MS = 560_000;
 
 const vocxClient = axios.create({
   baseURL: VOCX_URL,

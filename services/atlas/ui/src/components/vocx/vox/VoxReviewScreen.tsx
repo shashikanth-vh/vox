@@ -1364,7 +1364,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             <div className="transcript-sub">
               {row.corrected_transcript
                 ? 'Corrected copy in use — the verbatim original is preserved below.'
-                : 'Translated inline — word-for-word. Evidence: never editable.'}
+                : 'Machine-generated transcript, preserved as processed. Evidence: never editable.'}
             </div>
             {audioSegs > 0 && (
               <div style={{ margin: '4px 0 10px' }}>
@@ -1383,10 +1383,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                     ? 'Fix mis-heard names and terms here — the report rebuilds from your '
                       + 'corrected text and the record STAYS approved; the filed timeline '
                       + 'entry updates with it. Your own confirmed field values survive the '
-                      + 'rebuild, and the word-for-word original stays on record.'
+                      + 'rebuild, and the machine-generated original stays on record.'
                     : 'Fix mis-heard names and terms here — a corrected name updates every '
                       + 'field, bullet and snippet when the report regenerates. The '
-                      + 'word-for-word original stays on record. Your own confirmed field '
+                      + 'machine-generated original stays on record. Your own confirmed field '
                       + 'values survive the rebuild.'}
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>

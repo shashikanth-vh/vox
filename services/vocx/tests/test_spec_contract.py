@@ -19,9 +19,9 @@ from app.vocx.spec import (
 
 # ---------------------------------------------------------------- the registry
 
-def test_the_registry_loads_and_is_v1():
+def test_the_registry_loads_and_is_v2():
     reg = load_registry()
-    assert reg["registry_version"] == latest_registry_version() == "v1"
+    assert reg["registry_version"] == latest_registry_version() == "v2"
     assert set(reg["use_cases"]) == {
         "lending", "syndication", "asset_monetisation", "credit_diligence",
         "investor_relations", "banking_relations", "operations",
@@ -55,7 +55,7 @@ def test_thin_use_cases_ship_common_only():
 
 def test_the_canonical_prompt_exists_with_its_anchor_rules():
     prompt = " ".join(load_prompt().split())  # anchors may span the spec's line breaks
-    assert latest_prompt_version() == "v1"
+    assert latest_prompt_version() == "v2"
     for anchor in (
         "Never fabricate",
         "party_role",
@@ -109,6 +109,7 @@ def _valid_report():
             "deal_size": _cell("~180 Cr EV (indicative)", "medium"),
             "offer_components": _cell(["land", "ppa", "connectivity"], "high"),
             "asset_status": _cell("under_construction", "medium"),
+            "process_status": _cell(None, "n/a"),
             "asset_location": _cell("Chikkaballapur", "medium"),
             "offer_notes": _cell(None, "n/a"),
             "target_project_size": _cell(None, "n/a"),
@@ -398,7 +399,7 @@ def test_the_structure_provider_switch_is_exclusive(monkeypatch):
 
     monkeypatch.delenv("VOCX_STRUCTURE_PROVIDER", raising=False)
     monkeypatch.delenv("SARVAM_MODEL", raising=False)
-    assert _structure_model("post_meeting") == "claude-haiku-4-5-20251001"
+    assert _structure_model("post_meeting") == "claude-sonnet-5"
     assert _structure_model("live") == "claude-sonnet-5"
 
     monkeypatch.setenv("VOCX_STRUCTURE_PROVIDER", "sarvam")

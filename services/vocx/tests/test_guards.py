@@ -1,0 +1,108 @@
+"""Deterministic output guards — driven by the two-test diagnostic's own words.
+
+The fixtures below are lifted from the report's appendices (the raw Test 2
+transcript), so the guards are proven against the exact production sentences
+that motivated them: the in-principle upgrade the correction should have
+capped, the reversed collateral negation, the unspoken score.
+"""
+
+from __future__ import annotations
+
+from app.vocx.pipeline.guards import (
+    apply_extract_guards,
+    apply_spec_guards,
+    negation_sentences,
+    score_suggestion_flag,
+    stage_evidence_level,
+    stage_guard_text,
+)
+
+# Condensed from the diagnostic's Appendix D — the sentences that matter.
+TEST2 = (
+    "Kotak Mahindra has shared an in principle approval for 12 crore rupees. "
+    "The proposal is subject to satisfactory DD, promoter contribution of 3 crore "
+    "rupees and the creation of first charge over new machinery. This is only "
+    "indicative proposal and not a sanction. AU Small Finance Bank has asked for "
+    "100% collateral cover which the promoters are unwilling to provide. The "
+    "company has already approached State Bank of India for the bank guarantee "
+    "but no formal sanction has been received."
+)
+
+
+def test_the_controlling_correction_caps_the_stage_ladder():
+    """The diagnostic's exact case: 'in principle approval' was (mis)heard, the
+    speaker corrected to 'only indicative proposal and not a sanction'. The
+    evidence level is rung 1 — the correction controls."""
+    assert stage_evidence_level(TEST2) == 1
+
+
+def test_stage_wording_is_downgraded_never_silently_kept():
+    value = "Kotak Mahindra has shared an in-principle approval for ₹12 Cr."
+    new, note = stage_guard_text(value, stage_evidence_level(TEST2))
+    assert "in-principle" not in new.lower()
+    assert "indicative proposal" in new
+    assert note and "downgraded" in note
+
+
+def test_plain_stage_evidence_still_reads_each_rung():
+    assert stage_evidence_level("Kotak shared an indicative proposal.") == 1
+    assert stage_evidence_level("HDFC gave an in-principle approval.") == 2
+    assert stage_evidence_level("The loan was sanctioned on Friday.") == 3
+    # A negated sanction is evidence AGAINST rung 3.
+    assert stage_evidence_level("No formal sanction has been received.") == 0
+
+
+def test_a_true_sanction_is_never_downgraded():
+    ev = stage_evidence_level("The facility was sanctioned yesterday.")
+    new, note = stage_guard_text("Sanctioned: ₹5 Cr facility.", ev)
+    assert new == "Sanctioned: ₹5 Cr facility." and note is None
+
+
+def test_negation_sentences_catch_the_reversal_risks():
+    got = " ".join(negation_sentences(TEST2))
+    assert "unwilling to provide" in got
+    assert "no formal sanction" in got
+    assert "not a sanction" in got
+
+
+def test_an_unspoken_score_is_labelled_a_suggestion():
+    assert score_suggestion_flag(4, TEST2)                       # never spoken
+    spoken = TEST2 + " I would currently rate this opportunity 4 out of 5."
+    assert score_suggestion_flag(4, spoken) is None              # spoken → no flag
+    assert score_suggestion_flag(None, TEST2) is None            # no score → no flag
+
+
+def test_spec_report_guards_rewrite_cells_and_flag():
+    report = {
+        "common": {
+            "meeting_summary": {"value": "Kotak shared an in-principle approval "
+                                          "for ₹12 Cr.", "confidence": "high"},
+            "opportunity_score": {"value": 4, "confidence": "medium"},
+            "data_quality_flags": {"value": [], "confidence": "n/a"},
+        },
+        "syndication": {
+            "remarks": {"value": "In-principle approval received from Kotak.",
+                        "confidence": "high"},
+        },
+    }
+    notes = apply_spec_guards(report, TEST2)
+    assert "indicative proposal" in report["syndication"]["remarks"]["value"]
+    assert "indicative proposal" in report["common"]["meeting_summary"]["value"]
+    assert any("downgraded" in n for n in notes)
+    assert any("AI suggestion" in n for n in notes)
+    assert any("negation check" in n for n in notes)
+
+
+def test_extract_report_gains_quality_flags():
+    ext = {"report": {"summary": "Kotak gave an in-principle approval.",
+                      "key_intel": ["In-principle approval of ₹12 Cr from Kotak"],
+                      "nuances": [], "pipeline_stage": "Sanctioned",
+                      "opportunity_score": 4}}
+    apply_extract_guards(ext, TEST2)
+    rep = ext["report"]
+    assert "indicative proposal" in rep["summary"]
+    assert "indicative proposal" in rep["key_intel"][0]
+    flags = rep["quality_flags"]
+    assert any("Sanctioned" in f for f in flags)      # chip flagged, not rewritten
+    assert any("AI suggestion" in f for f in flags)
+    assert any("negation check" in f for f in flags)

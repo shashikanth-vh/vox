@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import re
 from typing import Any
@@ -54,6 +55,13 @@ Rules:
 
 ALL output fields — summaries, bullets, next steps, attendees' roles, every report field — must be in ENGLISH regardless of the language(s) spoken; translate faithfully, keep proper nouns as-is.
 
+CORRECTIONS, CONTRADICTIONS AND STAGE LANGUAGE:
+- A LATER EXPLICIT CORRECTION IS THE CONTROLLING STATEMENT ("indicative proposal and not a sanction" overrides an earlier "in-principle approval") — apply it in every field and mention the correction in key_intel.
+- Contradictions with no explicit correction are NEVER resolved silently: keep the weaker reading, lower the confidence, and note both readings.
+- Stage words are a ladder (indicative proposal -> in-principle approval -> sanction): use exactly the rung the transcript states, never a higher one. "No formal sanction received" is evidence AGAINST the sanction rung.
+- NEGATIONS ARE LOAD-BEARING: "unwilling", "not", "declined", "cannot" reverse a conclusion — carry them into the extracted value, never drop them.
+- Prefer null over a plausible guess. report.opportunity_score: leave null unless the speaker actually rated or scored the opportunity; an inferred score will be labelled an AI suggestion to the user.
+
 Also produce the "report" object — a polished field-intel call report:
 - report.title: the client / counterparty name as a clean report title (usually company_mentioned).
 - report.summary: a 2-4 sentence third-person narrative summary of the meeting ("The BDM met with ... to discuss ...").
@@ -64,7 +72,7 @@ Also produce the "report" object — a polished field-intel call report:
 - report.attendees: people present as [{name, role, company}] — role/company null if unknown.
 - Additional deal fields (null if not stated): report.sector (same as sector_hint), report.project_type, report.project_size (e.g. "10000 MW"), report.location (sites/geographies), report.loan_product (e.g. "Project Finance", "Term Loan"), report.ticket_size (loan amount, keep the spoken units e.g. "₹100 Cr"), report.collateral, report.equity_raised, report.turnover.
 - report.pipeline_stage: one of Prospecting, Proposal, Negotiation, Sanctioned, Disbursed, Closed, or null.
-- report.opportunity_score: integer 1-5 (5 = strongest opportunity) based on intent, ticket size, and stage, or null.
+- report.opportunity_score: integer 1-5 (5 = strongest opportunity) ONLY when the speaker rated or scored the opportunity; otherwise null (see the stage rules above).
 - report.business_line: which Evam desk this belongs to — "lending" (a direct loan / term loan / project finance to the client), "syndication" (arranging debt from OTHER lenders / a consortium), or "asset_mgmt" (asset monetisation / divestment / fund) — or null.
 - report.lender: for syndication only — the specific lender/bank being chased or that responded, else null.
 - report.direction: for syndication only — "outbound" (we reached out / chased a lender) or "inbound" (a lender responded), else null.
@@ -283,7 +291,7 @@ def extract(
     offline=True forces the heuristic stub (no network, deterministic).
     """
     config = config or {}
-    model = config.get("model", "claude-haiku-4-5-20251001")
+    model = config.get("model", "claude-sonnet-5")
     key_env = config.get("anthropic_api_key_env", "ANTHROPIC_API_KEY")
 
     use_stub = offline or (client is None and not os.environ.get(key_env))
@@ -294,6 +302,15 @@ def extract(
 
     ext = _coerce(result)
     _backfill_next_meeting(ext, transcript, capture_ts)
+    # Deterministic guards (pipeline.guards): stage wording never exceeds the
+    # transcript's evidence, negation sentences become review flags, an
+    # unspoken opportunity score is labelled an AI suggestion. Code, not
+    # prompt obedience — and identical whichever model interpreted.
+    try:
+        from app.vocx.pipeline.guards import apply_extract_guards
+        apply_extract_guards(ext, transcript)
+    except Exception:  # noqa: BLE001 — a guard never fails the capture
+        logging.getLogger("vox.extract").warning("output guards skipped", exc_info=True)
     ext["_meta"] = {"capture_ts": capture_ts, "rm": rm, "transcript_ref": transcript_ref}
     return ext
 

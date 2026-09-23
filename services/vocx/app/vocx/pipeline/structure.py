@@ -29,8 +29,12 @@ from ..spec import (
     validate_report,
 )
 
-# Model routing per the spec's cost/quality split.
-MODEL_NOTE = "claude-haiku-4-5-20251001"
+# Model routing per the spec's cost/quality split. The two-test diagnostic
+# (21 Sep 2026) moved NOTES to Sonnet too: the interpretation stage must hold
+# corrections ("indicative proposal, not a sanction") against earlier phrasing,
+# read negations as load-bearing, and reconcile contradictions — where Haiku
+# demonstrably slipped. VOCX_NOTE_MODEL dials it back without a rebuild.
+MODEL_NOTE = (_os.environ.get("VOCX_NOTE_MODEL") or "").strip() or "claude-sonnet-5"
 MODEL_LIVE = "claude-sonnet-5"
 
 
@@ -776,6 +780,15 @@ _SARVAM_RULES = (
     "Renewables). An obvious speech-to-text garble you cannot resolve from "
     "the KNOWN NAMES block never rides into a summary or note — record it "
     "in data_quality_flags as 'transcription artifact: <term>' instead. "
+    "A LATER EXPLICIT CORRECTION CONTROLS: if the speaker corrects an earlier "
+    "phrase ('this is only an indicative proposal and not a sanction'), the "
+    "corrected reading wins in every field and note, with a data_quality_flag "
+    "naming both phrasings. Contradictions with no explicit correction are "
+    "never resolved silently: keep the weaker reading at low confidence and "
+    "flag both. Stage words are a ladder — indicative proposal, in-principle "
+    "approval, sanction — use exactly the rung spoken, never a higher one. "
+    "Negations (not, unwilling, declined) reverse meaning and must survive "
+    "into the field value. "
     "The 'Recorded by' person is the narrator — the transcript's 'I'; refer "
     "to them by name alone and never echo the label ('Recorded by', 'the "
     "recorder') into a summary or note. Dates are YYYY-MM-DD; amounts are "
@@ -1545,11 +1558,23 @@ def structure_transcript(
     except Exception as exc:  # noqa: BLE001 — a bonus pass never fails the take
         log.warning("lender-updates second pass skipped: %s", exc)
 
+    # Deterministic guards (pipeline.guards) — provider-independent because they
+    # run on the OUTPUT: the stage ladder (indicative → in-principle → sanction)
+    # is never climbed beyond what the transcript evidences, every negation
+    # sentence is put in front of the reviewer, and an unspoken opportunity
+    # score is labelled an AI suggestion. Prompt rules ask; this enforces.
+    from .guards import apply_spec_guards
+    try:
+        guard_notes = apply_spec_guards(report, work_transcript)
+    except Exception as exc:  # noqa: BLE001 — a guard never fails the take
+        log.warning("output guards skipped: %s", exc)
+        guard_notes = []
+
     # Server-side data-quality nudges merge into the model's own flags (deduplicated,
     # order preserved) — flags never block, they steer the review.
     server_flags = compute_data_quality_flags(report, registry_version)
     cell = report["common"].get("data_quality_flags") or {"value": [], "confidence": "n/a"}
-    merged = list(dict.fromkeys([*(cell.get("value") or []), *server_flags]))
+    merged = list(dict.fromkeys([*(cell.get("value") or []), *server_flags, *guard_notes]))
     report["common"]["data_quality_flags"] = {"value": merged, "confidence": "n/a"}
 
     return {

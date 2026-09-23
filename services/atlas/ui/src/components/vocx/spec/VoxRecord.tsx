@@ -18,7 +18,9 @@ import { banner, card, chip, microHeading, pill, pillGhost, pillPrimary, vx } fr
 import { deleteTake, loadUnsentTake, saveTake } from './takeStore';
 import type { StoredTake } from './takeStore';
 
-const CAP_SECONDS = 180; // Mode A: 3:00. Mode B (live, 90:00) arrives with Phase 2.
+const CAP_SECONDS = 300; // Mode A: 5:00 (raised from 3:00 — a multi-workstream field
+                         // note needs the room). Mode B (live, 90:00) is Phase 2.
+const WARN_LEAD = 30;    // countdown turns urgent here: land the last facts and actions
 
 type Phase = 'idle' | 'recording' | 'paused' | 'uploading' | 'done' | 'error';
 
@@ -232,9 +234,15 @@ export default function VoxRecord({ onCaptured }: {
         Post-meeting note · cap {mmss(CAP_SECONDS)}
         {paused && <b style={{ color: vx.amberInk }}> · PAUSED</b>}
       </Typography>
-      <Typography sx={{ fontSize: 46, fontWeight: 200, fontVariantNumeric: 'tabular-nums', my: 0.5 }}>
+      <Typography sx={{ fontSize: 46, fontWeight: 200, fontVariantNumeric: 'tabular-nums', my: 0.5,
+                        color: recording && CAP_SECONDS - elapsed <= WARN_LEAD ? '#E5484D' : undefined }}>
         {mmss(elapsed)} <span style={{ fontSize: 16, color: vx.mut }}>/ {mmss(CAP_SECONDS)}</span>
       </Typography>
+      {recording && CAP_SECONDS - elapsed <= WARN_LEAD && (
+        <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#E5484D', mb: 0.5 }}>
+          ⏱ {mmss(Math.max(0, CAP_SECONDS - elapsed))} left — finish the key facts and actions
+        </Typography>
+      )}
 
       {(recording || paused) && (
         <Box sx={{ mb: 1 }}>

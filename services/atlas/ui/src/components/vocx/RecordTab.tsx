@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, TextField, Typography } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import StopIcon from '@mui/icons-material/Stop';
-import { useRecorder, MAX_SECONDS } from './useRecorder';
+import { useRecorder, MAX_SECONDS, WARN_LEAD_SECONDS } from './useRecorder';
 import { vocxService, currentPosition, type VocxPreview } from '../../services/vocxService';
 import { currentRm } from './rm';
 import { useVocx } from './VocxProvider';
@@ -248,10 +248,16 @@ export default function RecordTab({ onFiled }: { onFiled: () => void }) {
           })}
         </Box>
       ) : (
-        <Typography sx={{ fontSize: 15, color: vx.mut, minHeight: 22 }}>
+        <Typography sx={{ fontSize: 15, minHeight: 22,
+                          color: recording && remaining <= WARN_LEAD_SECONDS ? '#E5484D' : vx.mut,
+                          fontWeight: recording && remaining <= WARN_LEAD_SECONDS ? 700 : 400 }}>
           {status
             || (recording
-              ? `Tap again to stop · ${clock(Math.max(0, remaining))} left`
+              ? (remaining <= WARN_LEAD_SECONDS
+                  // The hard stop once clipped a decline REASON mid-sentence; the
+                  // countdown turns it into a prompt to land the last fact.
+                  ? `⏱ ${clock(Math.max(0, remaining))} left — finish the key facts and actions`
+                  : `Tap again to stop · ${clock(Math.max(0, remaining))} left`)
               : rec.state === 'requesting' ? 'Waiting for the microphone…' : '')}
         </Typography>
       )}

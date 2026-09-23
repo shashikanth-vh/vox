@@ -16,10 +16,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *
  * THE CAP IS DEPLOYMENT CONFIGURATION, not a constant, because the right number depends
  * on how fast THAT deployment decodes. `VITE_VOCX_MAX_SECONDS` sets it at build time (the
- * ui image takes it as a build arg); three minutes is the default.
+ * ui image takes it as a build arg); five minutes is the default (raised from three after the two-test diagnostic: a multi-workstream field note needs the room, and the chain below was widened to match).
  *
  * Raising it is only safe while a clip of that length still finishes inside VocX's
- * transcription budget (`stt.api.budget_s`, 240s by default) — past that the capture comes
+ * transcription budget (`stt.api.budget_s`, 480s by default) — past that the capture comes
  * back as a timeout instead of a note, which is the failure this number exists to avoid.
  * Measure before raising: time a full-length capture, and compare against the budget.
  *
@@ -30,7 +30,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const _envCap = Number(import.meta.env.VITE_VOCX_MAX_SECONDS);
 export const MAX_SECONDS = Number.isFinite(_envCap) && _envCap > 0
   ? Math.min(600, Math.max(30, Math.round(_envCap)))
-  : 180;
+  : 300;
+
+/** The countdown warning leads the stop by this much: enough to finish the
+ *  sentence and the final action list, short enough to stay urgent. The
+ *  two-test diagnostic lost a decline REASON to a silent hard stop — the
+ *  warning exists so the last material fact is spoken before the cut. */
+export const WARN_LEAD_SECONDS = 30;
 
 export type RecorderState = 'idle' | 'requesting' | 'recording' | 'finishing';
 
