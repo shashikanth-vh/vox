@@ -543,9 +543,16 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "tomorrow" in fud and "Capture timestamp" in fud
     fut = _sarvam_field_brief(common["follow_up_time"], reg)
     assert "HH:MM" in fut
-    # KI bullets are edited one fact at a time — never compound sentences
+    # KI bullets are edited one fact at a time — never compound sentences.
+    # The rule lives in the registry notes so BOTH engines read it: the Claude
+    # prompt renders the notes in full (the live A/B of 23 Sep showed Default
+    # consolidating a 13-fact meeting into 4 compound bullets), and the first
+    # sentence rides into the sarvam brief alongside the field extra.
+    ki_notes = str(common["key_discussion_points"].get("notes") or "")
+    assert "per bullet" in ki_notes and "compound" in ki_notes
     ki = _sarvam_field_brief(common["key_discussion_points"], reg)
     assert "one FACT per bullet" in ki
+    assert "never a compound summary sentence" in ki
     assert "entire_project)" in offer or "entire_project'" in offer or \
         "means entire_project" in offer
     assert "offered capacity" in deal

@@ -89,7 +89,8 @@
    "key": "key_discussion_points",
    "label": "Key discussion points",
    "type": "list",
-   "control": "list"
+   "control": "list",
+   "notes": "One distinct spoken fact, decision or commitment per bullet — never a compound summary sentence. A multi-thread meeting typically yields 8-14 bullets: every amount, tenor, named lender, document asked for and deadline gets its own bullet, even when the same fact also lands in a structured field below. Keep the order spoken."
   },
   {
    "key": "meeting_summary",
