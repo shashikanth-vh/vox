@@ -180,3 +180,26 @@ def test_real_lender_interactions_survive_the_log_guard():
     kept = [e["lender"] for e in report["syndication"]["lender_updates"]["value"]]
     assert kept == ["Godrej Capital", "Axis Finance"]
     assert len(notes) == 1 and "Tata Capital" in notes[0]
+
+
+def test_narrator_role_labels_are_scrubbed_from_prose():
+    """The 23 Sep takes: 'Tech (narrator) and Pallavi met...' and 'Pallavi and
+    the recorder (Tech) met...' — the name stands alone, exactly as any other
+    attendee's. The scrub is deterministic label hygiene, never content."""
+    from app.vocx.pipeline.guards import strip_narrator_labels
+    assert (strip_narrator_labels("Tech (narrator) and Pallavi met Rohan.")
+            == "Tech and Pallavi met Rohan.")
+    assert (strip_narrator_labels("Pallavi and the recorder (Tech) met Rohan.")
+            == "Pallavi and Tech met Rohan.")
+    assert (strip_narrator_labels("The Recorder (Tech) rated it 4 out of 5.")
+            == "Tech rated it 4 out of 5.")
+    # Legitimate parentheticals survive untouched.
+    keep = "Rohan Mehta (MD) and Priya Sharma (CFO) attended; PPA (25-year) discussed."
+    assert strip_narrator_labels(keep) == keep
+    # And the spec-report wrapper applies it to summary cells.
+    report = {"common": {"meeting_summary": {
+        "value": "Tech (narrator) and Pallavi met Rohan Mehta (MD).",
+        "confidence": "high"}}}
+    apply_spec_guards(report, "We met Rohan and discussed the site visit.")
+    assert (report["common"]["meeting_summary"]["value"]
+            == "Tech and Pallavi met Rohan Mehta (MD).")

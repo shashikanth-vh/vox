@@ -140,6 +140,10 @@ def build_known_names_block(company_names: Iterable[str] | None = None,
         "- The narrator is the person named under 'Recorded by'. When the "
         "transcript says 'I', 'me', 'the BDM', 'the RM' or similar, that is "
         "this person — use their actual NAME in meeting_summary and "
-        "key_discussion_points ('Ananda H met R. Sharma', never 'the BDM met')."
+        "key_discussion_points ('Ananda H met R. Sharma', never 'the BDM met'). "
+        "The name stands ALONE, exactly as any other attendee's would: write "
+        "'Tech and Pallavi met Rohan Mehta', NEVER 'Tech (narrator)', "
+        "'the recorder (Tech)', 'the narrator' or 'the recorder' — no role "
+        "label appears anywhere in a summary, bullet or note."
     )
     return "\n\n".join(lines)

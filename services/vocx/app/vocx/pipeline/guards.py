@@ -241,10 +241,27 @@ _SPEC_GUARDED_BLOCKS = ("lending", "syndication", "asset_monetisation")
 _SPEC_GUARDED_COMMON = ("meeting_summary", "key_discussion_points", "remarks")
 
 
+# Role labels for the narrator never belong in prose — the prompt says "name
+# alone", but the 23 Sep takes still produced "Tech (narrator)" and "the
+# recorder (Tech)". These exact shapes are unambiguous, so the scrub is
+# deterministic and silent: pure label hygiene, never a content change.
+_NARRATOR_LABEL_RES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bthe\s+(?:recorder|narrator)\s*\(\s*([^)]+?)\s*\)",
+                re.IGNORECASE), r"\1"),
+    (re.compile(r"\s*\(\s*(?:narrator|recorder)\s*\)", re.IGNORECASE), ""),
+]
+
+
+def strip_narrator_labels(text: str) -> str:
+    for pat, rep in _NARRATOR_LABEL_RES:
+        text = pat.sub(rep, text)
+    return text
+
+
 def _guard_cell_value(value, evidence: int, notes: list[str]):
     """Stage-guard a cell's value in place-shape: strings and lists of strings."""
     if isinstance(value, str):
-        new, note = stage_guard_text(value, evidence)
+        new, note = stage_guard_text(strip_narrator_labels(value), evidence)
         if note:
             notes.append(note)
         return new
@@ -252,7 +269,7 @@ def _guard_cell_value(value, evidence: int, notes: list[str]):
         out = []
         for item in value:
             if isinstance(item, str):
-                new, note = stage_guard_text(item, evidence)
+                new, note = stage_guard_text(strip_narrator_labels(item), evidence)
                 if note:
                     notes.append(note)
                 out.append(new)

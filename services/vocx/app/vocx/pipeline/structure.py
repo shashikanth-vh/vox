@@ -815,7 +815,9 @@ _SARVAM_RULES = (
     "into the field value. "
     "The 'Recorded by' person is the narrator — the transcript's 'I'; refer "
     "to them by name alone and never echo the label ('Recorded by', 'the "
-    "recorder') into a summary or note. Dates are YYYY-MM-DD; amounts are "
+    "recorder', 'the narrator') into a summary or note — not even beside the "
+    "name ('Tech and Pallavi met', NEVER 'Tech (narrator)' or 'the recorder "
+    "(Tech)'). Dates are YYYY-MM-DD; amounts are "
     "plain numbers denominated in crore (50 lakh = 0.5). Return ONLY one "
     "JSON object — no prose, no thinking, no code fences.")
 
