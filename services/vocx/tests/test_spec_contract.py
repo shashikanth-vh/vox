@@ -570,6 +570,30 @@ def test_sarvam_briefs_carry_the_registrys_own_guidance():
     assert "never echo the label" in _SARVAM_RULES
 
 
+def test_the_recorder_name_is_sentence_cased_for_every_engine():
+    """A lowercase account name ("tech") reads as a word, not a person: the
+    23 Sep live A/B had the Claude path writing 'the narrator' while the
+    already-cased Sarvam path wrote 'Tech met...'. Both engines now see the
+    sentence-cased name; one that carries its own capitals passes untouched."""
+    from app.vocx.pipeline.structure import structure_transcript
+
+    users: list[str] = []
+
+    def ask(model, system, user):
+        users.append(user)
+        return json.dumps(_hedged_syndication_report())
+
+    structure_transcript("We discussed the solar project and the site visit.",
+                         mode="note", ask_model=ask, recorder="tech",
+                         capture_ts="2026-09-23T03:00:00Z")
+    assert "Recorded by: Tech" in users[0]
+    users.clear()
+    structure_transcript("We discussed the solar project and the site visit.",
+                         mode="note", ask_model=ask, recorder="Ananda H",
+                         capture_ts="2026-09-23T03:00:00Z")
+    assert "Recorded by: Ananda H" in users[0]
+
+
 def test_sarvam_long_take_condenses_before_extraction(monkeypatch):
     """The 90-minute wall: above the char budget the transcript is condensed
     chunk by chunk into minutes, and the minutes — never the raw transcript —

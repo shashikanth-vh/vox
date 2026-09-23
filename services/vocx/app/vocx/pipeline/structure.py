@@ -885,6 +885,19 @@ _SARVAM_FIELD_EXTRAS = {
 }
 
 
+def _nice_recorder(recorder: str | None) -> str | None:
+    """An all-lowercase recorder username reads as a word, not a person ("tech",
+    "admin held a call") — sentence-case it before ANY model sees it
+    (chetan malik -> Chetan Malik); a name already carrying capitals passes
+    through untouched. Both engines: the 23 Sep live A/B showed Sonnet writing
+    'the narrator' rather than treat lowercase 'tech' as a name, while the
+    already-cased Sarvam path wrote 'Tech met...' correctly."""
+    if not recorder:
+        return recorder
+    return " ".join(w.capitalize() if w.islower() else w
+                    for w in recorder.split())
+
+
 def _field_hint(f: dict) -> str:
     """The registry's own per-field guidance, folded into the brief. The Claude
     prompt renders these notes in full; the sarvam briefs dropping them is why
@@ -1277,15 +1290,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
             out[k] = cell
         return out
 
-    # "admin held a call" read wrong in the live summary: an all-lowercase
-    # recorder username is sentence-cased before the model ever sees it
-    # (chetan malik -> Chetan Malik); a name already carrying capitals
-    # passes through untouched. Sarvam path only — Claude's user message
-    # stays byte-identical to production.
-    nice_recorder = (" ".join(w.capitalize() if w.islower() else w
-                              for w in recorder.split())
-                     if recorder else recorder)
-    by = f"Recorded by: {nice_recorder}\n" if recorder else ""
+    by = f"Recorded by: {_nice_recorder(recorder)}\n" if recorder else ""
     user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
             f"{context}TRANSCRIPT:\n{transcript}")
 
@@ -1485,7 +1490,7 @@ def structure_transcript(
     context = f"{known_names}\n\n" if known_names else ""
     # The narrator has a name: summaries should read "Ananda H met R. Sharma",
     # not "the BDM met" — the transcript's "I"/"the BDM"/"the RM" is this person.
-    by = f"Recorded by: {recorder}\n" if recorder else ""
+    by = f"Recorded by: {_nice_recorder(recorder)}\n" if recorder else ""
     user = (f"Capture timestamp: {capture_ts or 'unknown'}\n{by}\n"
             f"{context}TRANSCRIPT:\n{transcript}")
 
