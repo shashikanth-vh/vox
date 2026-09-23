@@ -78,6 +78,17 @@ let specCache: { registry: VoxRegistry; prompt_version: string } | null = null;
 
 let enginesCache: string[] | null = null;
 
+/** Picker presentation for the structuring engines. The chip stays short and
+ *  vendor-blind (the record screen is phone-width and the field A/B judges
+ *  quality, not brands); the vendor rides only in the desktop hover title.
+ *  Vendor names only — the exact model behind each engine is env-dialable, so
+ *  naming it here would go stale silently. The printed report stays
+ *  vendor-blind on purpose: it travels outside the desk. */
+export const ENGINE_UI: Record<string, { label: string; vendor: string }> = {
+  default: { label: 'Default model', vendor: 'Powered by Claude (Anthropic)' },
+  regional: { label: 'Regional model', vendor: 'Powered by Sarvam AI' },
+};
+
 export const voxService = {
   /** The registry the renderer is driven by — fetched once per session. */
   async spec(): Promise<{ registry: VoxRegistry; prompt_version: string }> {

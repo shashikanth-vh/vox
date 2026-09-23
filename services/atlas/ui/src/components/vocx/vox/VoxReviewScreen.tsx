@@ -17,7 +17,7 @@ import { api } from '../../../api/http';
 import { useAuth } from '../../../auth/AuthContext';
 import { getSession } from '../../../auth/session';
 import { referenceService } from '../../../services/referenceService';
-import { needsYou, voxService } from '../../../services/voxService';
+import { ENGINE_UI, needsYou, voxService } from '../../../services/voxService';
 import type { VoxCell, VoxConversation, VoxRegistry, VoxReport } from '../../../services/voxService';
 import { AuthAudio, Ic } from './VoxApp';
 
@@ -1406,11 +1406,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                     <span style={{ color: 'var(--muted)' }}>Re-analyse with:</span>
                     {(['default', 'regional'] as const).map((e) => (
                       <button key={e} className="btn btn-ghost"
+                        title={ENGINE_UI[e].vendor}
                         style={{ width: 'auto', padding: '2px 10px',
                                  opacity: reEngine === e ? 1 : 0.45,
                                  fontWeight: reEngine === e ? 700 : 400 }}
                         onClick={() => setReEngine(e)}>
-                        {e === 'default' ? 'Default engine' : 'Regional engine'}</button>
+                        {ENGINE_UI[e].label}</button>
                     ))}
                   </div>
                 )}

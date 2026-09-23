@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
 import { useVocx } from '../VocxProvider';
 import { getSession } from '../../../auth/session';
-import { voxService } from '../../../services/voxService';
+import { ENGINE_UI, voxService } from '../../../services/voxService';
 import { banner, card, chip, microHeading, pill, pillGhost, pillPrimary, vx } from '../vocxStyles';
 import { deleteTake, loadUnsentTake, saveTake } from './takeStore';
 import type { StoredTake } from './takeStore';
@@ -254,7 +254,7 @@ export default function VoxRecord({ onCaptured }: {
         <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'center', my: 0.6 }}>
           {(['default', 'regional'] as const).map((e) => (
             <Chip key={e} size="small" clickable
-              label={e === 'default' ? 'Default engine' : 'Regional engine'}
+              label={ENGINE_UI[e].label} title={ENGINE_UI[e].vendor}
               onClick={() => pickEngine(e)}
               sx={chip(engine === e)} />
           ))}
