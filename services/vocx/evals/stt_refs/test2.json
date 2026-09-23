@@ -1,0 +1,52 @@
+{
+  "name": "Test 2 — mobile, Bangalore Test Company (diagnostic Appendix C)",
+  "facts": {
+    "names": [
+      {"label": "Greenko Industrial Solutions", "any": ["greenko"]},
+      {"label": "Hexa Climate Solutions", "any": ["hexa climate"]},
+      {"label": "Radiance Renewables", "any": ["radiance renewable"]},
+      {"label": "State Bank of India", "any": ["state bank of india", "sbi"]},
+      {"label": "AU Small Finance Bank", "any": ["au small finance"]},
+      {"label": "Tata Capital", "any": ["tata capital"]},
+      {"label": "Kotak Mahindra Bank", "any": ["kotak mahindra"]},
+      {"label": "Bajaj Finance", "any": ["bajaj"]},
+      {"label": "Rohan Mehta", "any": ["rohan"]},
+      {"label": "Priya Sharma", "any": ["priya sharma"]}
+    ],
+    "amounts": [
+      {"label": "₹46 crore order", "any": ["46 crore", "46 crores"]},
+      {"label": "₹18 crore invoices", "any": ["18 crore", "18 crores"]},
+      {"label": "₹7.5 crore facility", "any": ["7 crore 50 lakh", "7 crore-50 lakh", "7.5 crore", "seven crore fifty lakh"]},
+      {"label": "₹5 crore bank guarantee", "any": ["5 crore performance", "5 crore bank"]},
+      {"label": "₹2.5 crore LC", "any": ["2 crore 50 lakh", "2 crore-50 lakh", "2.5 crore"]},
+      {"label": "₹92 crore turnover", "any": ["92 crore", "92 crores"]},
+      {"label": "EBITDA ₹11.60 crore (NOT 7.60)", "any": ["11 crore 60 lakh", "11.60", "11.6 crore", "eleven crore sixty"]},
+      {"label": "₹23 crore debt", "any": ["23 crore", "23 crores"]},
+      {"label": "DSCR 1.65", "any": ["1.65"]},
+      {"label": "₹12 crore proposal", "any": ["12 crore", "12 crores"]},
+      {"label": "₹3 crore contribution", "any": ["3 crore", "3 crores"]},
+      {"label": "100% collateral cover", "any": ["100% collateral", "100 percent collateral", "100% collateral cover"]}
+    ],
+    "terms": [
+      {"label": "EBITDA", "any": ["ebitda"]},
+      {"label": "invoices", "any": ["invoices", "invoice"]},
+      {"label": "performance bank guarantee", "any": ["performance bank guarantee"]},
+      {"label": "letter of credit", "any": ["letter of credit"]},
+      {"label": "collateral cover", "any": ["collateral cover"]},
+      {"label": "first charge", "any": ["first charge"]},
+      {"label": "indicative proposal", "any": ["indicative proposal"]},
+      {"label": "land-title documents", "any": ["land-title", "land title"]},
+      {"label": "PPA tenure", "any": ["power-purchase agreement", "power purchase agreement", "ppa"]},
+      {"label": "GST returns", "any": ["gst returns", "gst return"]}
+    ],
+    "negations": [
+      {"label": "promoter UNWILLING (not willing)", "any": ["unwilling to provide"]},
+      {"label": "not a term loan", "any": ["not a term loan"]},
+      {"label": "no formal sanction", "any": ["no formal sanction"]},
+      {"label": "not a sanction", "any": ["not a sanction"]},
+      {"label": "Hexa declined / not to proceed", "any": ["not to proceed", "declined"]},
+      {"label": "not rejected (Radiance)", "any": ["not rejected"]}
+    ]
+  },
+  "notes": "The decisive Test-2 errors: EBITDA 11.60→7.60, unwilling→willing, Greenko→Greenco, Hexa→Exact, indicative proposal→in-principle approval, first charge→first order."
+}

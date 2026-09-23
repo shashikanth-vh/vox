@@ -1469,6 +1469,17 @@ def structure_transcript(
     prompt_version — stay untouched.
 
     Returns {"report", "prompt_version", "registry_version", "model"}."""
+    # Deterministic canonical correction BEFORE any model reads the text: known
+    # STT garbles (ICAC Bank, AVM Finance, Ajit Berla...) become the desk's real
+    # names, identically for every engine, each replacement flagged. The raw
+    # transcript stays untouched wherever it is stored — this corrects what the
+    # STRUCTURING step reads, not the evidence.
+    from .canonical import canonicalize_transcript
+    try:
+        transcript, canonical_notes = canonicalize_transcript(transcript)
+    except Exception as exc:  # noqa: BLE001 — correction is a bonus, never fatal
+        log.warning("canonical pass skipped: %s", exc)
+        canonical_notes = []
     model = _structure_model(mode, engine)
     system = build_prompt(registry_version)
     context = f"{known_names}\n\n" if known_names else ""
@@ -1589,7 +1600,8 @@ def structure_transcript(
     # order preserved) — flags never block, they steer the review.
     server_flags = compute_data_quality_flags(report, registry_version)
     cell = report["common"].get("data_quality_flags") or {"value": [], "confidence": "n/a"}
-    merged = list(dict.fromkeys([*(cell.get("value") or []), *server_flags, *guard_notes]))
+    merged = list(dict.fromkeys([*(cell.get("value") or []), *server_flags,
+                                 *canonical_notes, *guard_notes]))
     report["common"]["data_quality_flags"] = {"value": merged, "confidence": "n/a"}
 
     return {

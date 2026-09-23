@@ -1,0 +1,42 @@
+{
+  "name": "Test 1 — laptop, Bangalore Test Company (diagnostic Appendix A)",
+  "facts": {
+    "names": [
+      {"label": "ICICI Bank", "any": ["icici bank", "icici"]},
+      {"label": "HDFC Bank", "any": ["hdfc bank", "hdfc"]},
+      {"label": "Axis Bank", "any": ["axis bank"]},
+      {"label": "Kotak Mahindra Bank", "any": ["kotak mahindra"]},
+      {"label": "Bajaj Finance", "any": ["bajaj finance", "bajaj"]},
+      {"label": "Aditya Birla Finance", "any": ["aditya birla"]},
+      {"label": "Evam Finance", "any": ["evam finance", "evam"]},
+      {"label": "Hexa Climate Solutions", "any": ["hexa climate"]},
+      {"label": "Radiance Renewables", "any": ["radiance renewable"]},
+      {"label": "Rohan Mehta", "any": ["rohan mehta"]},
+      {"label": "Priya Sharma", "any": ["priya sharma"]},
+      {"label": "Pallavi", "any": ["pallavi"]}
+    ],
+    "amounts": [
+      {"label": "₹120 crore (checkpoint + valuation)", "any": ["120 crore", "120 crores", "₹120"]},
+      {"label": "₹85 crore revenue", "any": ["85 crore", "85 crores"]},
+      {"label": "₹120 crore projection (NOT 125)", "any": ["120 crore this year", "increase to 120"]},
+      {"label": "₹60 crore order book", "any": ["60 crore", "60 crores"]},
+      {"label": "₹2 crore working capital", "any": ["2 crore", "2 crores"]},
+      {"label": "₹10 crore term loan", "any": ["10 crore", "10 crores"]},
+      {"label": "30 MW project", "any": ["30 megawatt", "30 mw"]},
+      {"label": "12-month tenor", "any": ["12 months", "twelve months"]}
+    ],
+    "terms": [
+      {"label": "GST returns", "any": ["gst returns", "gst return"]},
+      {"label": "debtor ageing", "any": ["debtor ageing", "debtor aging"]},
+      {"label": "debt syndication", "any": ["debt syndication", "debt-syndication"]},
+      {"label": "working capital", "any": ["working capital"]},
+      {"label": "PPA", "any": ["ppa"]},
+      {"label": "grid connectivity", "any": ["grid connectivity"]},
+      {"label": "battery energy storage", "any": ["battery energy storage"]},
+      {"label": "leverage and repayment obligations", "any": ["repayment obligations"]},
+      {"label": "VOX (product name)", "any": ["vox recording", "vox "]}
+    ],
+    "negations": []
+  },
+  "notes": "Projection intended as ₹120 crore; the original run heard 125. Checkpoint phrase 'first important number is ₹120 crore' was heard as '11th growth'."
+}

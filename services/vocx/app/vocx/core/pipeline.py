@@ -58,11 +58,24 @@ def process_capture(
     capture_ts = capture_ts or _dt.datetime.now().isoformat(timespec="seconds")
 
     # 1) extract
+    # Deterministic canonical correction (pipeline.canonical) before the model
+    # reads the note — known STT garbles become real names, each one flagged.
+    # The verbatim transcript still rides in _meta as the evidence copy.
+    raw_transcript = transcript
+    canonical_notes: list[str] = []
+    try:
+        from app.vocx.pipeline.canonical import canonicalize_transcript
+        transcript, canonical_notes = canonicalize_transcript(transcript)
+    except Exception:  # noqa: BLE001 — correction is a bonus, never fatal
+        transcript = raw_transcript
     ext = vocx_extract.extract(transcript, capture_ts=capture_ts, rm=rm,
                               transcript_ref=transcript_ref, config=config, offline=offline)
+    if canonical_notes and isinstance(ext.get("report"), dict):
+        existing = ext["report"].get("quality_flags") or []
+        ext["report"]["quality_flags"] = list(dict.fromkeys([*canonical_notes, *existing]))
     # The raw transcript + capture-side facts land in the interaction's structured
     # columns at commit; the report's transcript_english stays the polished copy.
-    ext["_meta"]["transcript"] = transcript
+    ext["_meta"]["transcript"] = raw_transcript
     if meta_extra:
         ext["_meta"].update({k: v for k, v in meta_extra.items() if v not in (None, "")})
     _promote_followup(ext)   # a meeting-like next step becomes the scheduled follow-up

@@ -345,9 +345,21 @@ class VocxApp:
                     names.append(n)
         except Exception:  # noqa: BLE001 — priming is best-effort, never fatal
             pass
+        # The two-test diagnostic's worst corruptions were LENDER names (ICAC,
+        # Access Bank, Ajit Berla) and the house's own (AVM Finance) — none of
+        # which this priming carried: it knew clients and leads only. The desk's
+        # lender roster and Evam itself now ride ahead of the client names.
+        import re as _re
+
+        from app.vocx.pipeline.glossary import LENDER_GLOSSARY
+        lenders: list[str] = []
+        for entry in LENDER_GLOSSARY:
+            m = _re.match(r"^(.*?)\s*\(", entry)
+            lenders.append((m.group(1) if m else entry).strip())
         seen: set[str] = set()
-        uniq = [n for n in names if not (n.lower() in seen or seen.add(n.lower()))]
-        parts = terms + uniq[:60]
+        uniq = [n for n in ["Evam Finance", *lenders, *names]
+                if not (n.lower() in seen or seen.add(n.lower()))]
+        parts = terms + uniq[:90]
         return (", ".join(parts))[:1500] or None
 
     # ---- recorded-audio playback -------------------------------------------
