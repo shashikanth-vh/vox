@@ -1,7 +1,7 @@
 /**
  * Record — the blueprint's screen, verbatim markup, with every hardening the
  * field testing bought: the provider close-guard from mic-open to safe-on-server,
- * refs so the 3:00 cap cannot be missed, per-second IndexedDB persistence with
+ * refs so the 5:00 cap cannot be missed, per-second IndexedDB persistence with
  * recovery on return, the same capture id across retries, and the in-app discard
  * sheet instead of a native dialog. Mode B (live) shows honestly as next-round.
  */
@@ -10,12 +10,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../../auth/AuthContext';
 import { getSession } from '../../../auth/session';
 import { useVocx } from '../VocxProvider';
-import { voxService } from '../../../services/voxService';
+import { ENGINE_UI, voxService } from '../../../services/voxService';
 import { appendTakeChunk, deleteTake, loadUnsentTake } from '../spec/takeStore';
 import type { StoredTake } from '../spec/takeStore';
 import { AuthAudio, Ic } from './VoxApp';
 
-const CAP_SECONDS = 180;          // Mode A — a post-meeting note is minutes, not a meeting
+// Mode A — 5 minutes, matching the rest of Pass 1 (the prompt itself says "up
+// to 5 minutes"); this screen lagged at 3:00 and squeezed real field takes.
+const CAP_SECONDS = 300;
 const CAP_LIVE_SECONDS = 5400;    // Mode B — the blueprint's 90-minute live meeting
 const BARS = 44;
 
@@ -55,6 +57,19 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     try { localStorage.setItem('vox.quickTranscript', next ? '1' : '0'); } catch { /* private mode */ }
     return next;
   });
+  // The vendor-blind structuring engine, picked BEFORE recording — the FIRST
+  // analysis runs on it directly, no default-then-re-analyze detour. Shares
+  // the 'vox.engine' choice with the other pickers, persisted per browser;
+  // the chips render only when this deployment serves both engines.
+  const [engines, setEngines] = useState<string[]>(['default']);
+  const [engine, setEngine] = useState<string>(() => {
+    try { return localStorage.getItem('vox.engine') || 'default'; } catch { return 'default'; }
+  });
+  const pickEngine = (e: string) => {
+    setEngine(e);
+    try { localStorage.setItem('vox.engine', e); } catch { /* private mode */ }
+  };
+  useEffect(() => { void voxService.engines().then(setEngines); }, []);
   const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
   const [bars, setBars] = useState<number[]>(() => Array.from({ length: BARS }, () => 4));
@@ -275,7 +290,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
       consentId: consentIdRef.current || undefined,
       rm: user.full, email: getSession()?.email || '',
       durationSeconds: elapsedRef.current, ...gpsRef.current,
-      quick,
+      quick, engine,
     };
     // Streamed-first: the audio is already on the server chunk by chunk — the
     // last batch flushes, then finish is a tiny POST. Any failure in this path
@@ -323,6 +338,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         consentId: consentIdRef.current || undefined,
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: elapsedRef.current, ...gpsRef.current,
+        engine,
       });
       await deleteTake(captureIdRef.current);
       setRecording(false);
@@ -349,6 +365,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
         captureId: take.id, mode: 'post_meeting',
         rm: user.full, email: getSession()?.email || '',
         durationSeconds: take.elapsed, ...gpsRef.current,
+        engine,
       });
       await deleteTake(take.id);
       setRecovered(null);
@@ -485,6 +502,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
               captureId: t.capture_id, mode: t.mode,
               durationSeconds: t.elapsed, consentId: t.consent_id || undefined,
               rm: user.full, email: getSession()?.email || '',
+              engine,
             }).then((out) => { setRecording(false); onCaptured(out.conversation_id); })
               .catch((e) => { setErr(String(e?.message || e)); setPhase('idle'); });
           }}>Finish &amp; process now</button>
@@ -525,6 +543,19 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             <Ic i="i-trash" /> Discard</span>
         </div>
 
+        {(phase === 'idle' || phase === 'error') && engines.includes('regional') && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 6 }}>
+            {(['default', 'regional'] as const).map((e) => (
+              <button key={e} type="button" className="chip" title={ENGINE_UI[e].vendor}
+                style={{ cursor: 'pointer',
+                         opacity: engine === e ? 1 : 0.45,
+                         fontWeight: engine === e ? 700 : 400,
+                         outline: engine === e ? '1px solid currentColor' : 'none' }}
+                onClick={() => pickEngine(e)}>
+                {ENGINE_UI[e].label}</button>
+            ))}
+          </div>
+        )}
         {(phase === 'idle' || phase === 'error') && (
           <label className="rec-quick-row">
             <input type="checkbox" checked={quick} onChange={toggleQuick} />
