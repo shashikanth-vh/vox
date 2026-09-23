@@ -580,7 +580,8 @@ def _normalize(obj: dict, registry_version: str | None = None) -> dict:
     return obj
 
 
-def _salvage(obj: dict, registry_version: str | None = None) -> dict | None:
+def _salvage(obj: dict, registry_version: str | None = None,
+             cause: str | None = None) -> dict | None:
     """The human can fix a field; nobody can fix a dead take.
 
     Last resort AFTER coercion and the repair round have both lost: force the
@@ -597,6 +598,13 @@ def _salvage(obj: dict, registry_version: str | None = None) -> dict | None:
     ucs = list(registry["use_cases"])
     blocks = registry.get("blocks", {})
     notes: list[str] = []
+    # The 23 Sep staging incident: a take salvaged to a near-empty report with
+    # four clean INFO lines in the log and no trace of WHY. The violation that
+    # forced the salvage now rides both channels — the log (for the operator)
+    # and a flag (for whoever reads the row later).
+    if cause:
+        log.warning("structuring salvaged — %s", cause)
+        notes.append(f"salvage cause: {cause[:200]}")
 
     # -- the skeleton, forced right ------------------------------------------
     if not isinstance(obj.get("common"), dict):
@@ -1531,9 +1539,10 @@ def structure_transcript(
         try:
             report = validate_report(norm, registry_version)
         except ContractError as first:
-            report = _salvage(norm, registry_version)
+            detail = "; ".join(first.errors)
+            report = _salvage(norm, registry_version,
+                              cause=f"sarvam contract violation: {detail}")
             if report is None:
-                detail = "; ".join(first.errors)
                 raise StructuringError(
                     f"sarvam decomposed structuring failed: {detail}") from first
         _scrub_machinery(report, registry_version)
@@ -1560,14 +1569,20 @@ def structure_transcript(
                 # let the reviewer update or select the rest. Only output with
                 # nothing usable in it (no JSON object at all) still fails here,
                 # into the runner's retry path.
+                detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
+                log.warning(
+                    "structuring: repair round also failed — first: %s | "
+                    "second: %s | raw head: %r",
+                    detail[:400], detail2[:400], (raw or "")[:400])
                 report = None
                 for cand in (obj2, obj1):
                     if isinstance(cand, dict):
-                        report = _salvage(cand, registry_version)
+                        report = _salvage(
+                            cand, registry_version,
+                            cause=f"contract violation after repair: {detail2}")
                         if report is not None:
                             break
                 if report is None:
-                    detail2 = "; ".join(second.errors) if isinstance(second, ContractError) else str(second)
                     raise StructuringError(f"contract violation after repair round: {detail2}") from second
 
 
