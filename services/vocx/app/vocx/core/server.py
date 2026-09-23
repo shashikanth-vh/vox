@@ -767,7 +767,17 @@ class VocxApp:
                 client = anthropic.Anthropic(
                     api_key=os.environ[os.environ.get("VOCX_ANTHROPIC_KEY_ENV",
                                                       "ANTHROPIC_API_KEY")])
-                kwargs: dict = dict(model=model, max_tokens=8000, system=system,
+                # Output budget. The 23 Sep staging incident: a three-lane take
+                # with granular bullets grew the report JSON to the old 8000-token
+                # cap; the truncated FORCED TOOL CALL degenerated into junk input
+                # ({"parameter_name": ...}), the repair round truncated the same
+                # way, and the take salvaged to an empty skeleton.
+                try:
+                    out_budget = int(os.environ.get("VOCX_ANTHROPIC_MAX_TOKENS")
+                                     or 16000)
+                except ValueError:
+                    out_budget = 16000
+                kwargs: dict = dict(model=model, max_tokens=out_budget, system=system,
                                     messages=[{"role": "user", "content": user}])
 
                 def _create(**extra):
@@ -796,10 +806,26 @@ class VocxApp:
                                     "description": "File the structured conversation report.",
                                     "input_schema": schema}],
                             tool_choice={"type": "tool", "name": "file_report"})
+                        if getattr(msg, "stop_reason", None) == "max_tokens":
+                            self.log.warning(
+                                "VOX tool call hit max_tokens=%s — output "
+                                "truncated; raise VOCX_ANTHROPIC_MAX_TOKENS if "
+                                "this repeats", out_budget)
+                        # Accept the tool input only when it is REPORT-shaped:
+                        # a truncated forced call can surface a degenerate dict
+                        # (seen live: {"parameter_name": ...}) that would sail
+                        # to the validator and salvage the take. Anything else
+                        # falls through to the text path, which self-heals.
+                        expected = set((schema.get("properties") or {}).keys())
                         for blk in msg.content:
                             if getattr(blk, "type", "") == "tool_use" and isinstance(
                                     getattr(blk, "input", None), dict):
-                                return json.dumps(blk.input)
+                                if not expected or (expected & set(blk.input.keys())):
+                                    return json.dumps(blk.input)
+                                self.log.warning(
+                                    "VOX tool call returned a degenerate input "
+                                    "(keys %s) — text fallback",
+                                    sorted(blk.input.keys())[:6])
                     except Exception:  # noqa: BLE001 — degrade, never fail the take here
                         self.log.warning("VOX structured tool call unavailable; text fallback")
                 msg = _create()
