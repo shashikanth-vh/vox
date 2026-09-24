@@ -602,10 +602,12 @@ materialise_env() {         # $1: example file  $2: destination .env
     key="${line%%=*}"
     if [[ "$line" == *"<REPLACE_"* && " ${_FRESH_GENERATED_KEYS[*]} " == *" $key "* ]]; then
       printf '%s=%s\n' "$key" "$(openssl rand -hex 24)" >> "$dst"
-    elif [[ "$line" == *"<"*">"* && "$line" != \#* ]]; then
+    elif [[ ( "$line" == *"<"*">"* || "$line" == *example.com* ) && "$line" != \#* ]]; then
       # A placeholder this script cannot invent (an SSO client id, an SMTP account, a
       # model API key, the remote Chitti endpoint) — parked as a comment, not shipped
-      # as a live line with a fake value.
+      # as a live line with a fake value. example.com values count: the field test of
+      # 24 Sep shipped UI_DEX_URL=https://prism.example.com straight into the UI build
+      # and the sign-in form posted into the void.
       printf '# set when needed: %s\n' "$line" >> "$dst"
     else
       printf '%s\n' "$line" >> "$dst"
