@@ -53,7 +53,16 @@ set -Eeuo pipefail
 _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -n "${PRISM_ROOT:-}" ]]; then ROOT="$PRISM_ROOT"
 elif [[ -d "$_self_dir/prism/deploy/compose" ]]; then ROOT="$_self_dir"
-else ROOT="$(cd "$_self_dir/../.." && pwd)"; fi
+elif [[ -f "$_self_dir/compose/docker-compose.yml" ]]; then
+  # The script is running from inside a checkout at deploy/prism-deploy.sh —
+  # compose/ sits right beside it. Same ../.. resolution as always.
+  ROOT="$(cd "$_self_dir/../.." && pwd)"
+else
+  # A bare directory holding only this script and a release archive — the `fresh`
+  # starting position. Deploy HERE. The old fallback walked two directories up and
+  # planted a first install in the operator's home directory instead.
+  ROOT="$_self_dir"
+fi
 LIVE="$ROOT/prism"                       # the tree compose runs from
 RELEASES="$ROOT/releases"                # previous trees, newest last
 BACKUPS="$ROOT/backups"                  # dumps + secret snapshots (never inside a tree)

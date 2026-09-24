@@ -79,7 +79,11 @@ services:
   # the actual PDFs/XLSX land here. Console UI: http://localhost:9001 (prism / prism-secret).
   minio:
     logging: *default-logging
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # quay.io, not Docker Hub: MinIO removed the minio/minio repository from Docker
+    # Hub in 2025 (the hub API now answers "object not found" for the whole repo).
+    # Boxes that pulled before that keep serving from their local image cache; any
+    # fresh machine can only pull from quay. Same image, same tag, same digest line.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-prism}"
