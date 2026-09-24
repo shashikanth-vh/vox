@@ -1,0 +1,138 @@
+# Isolated synthetic authorization fixture. No application volumes or provider key.
+name: prism-chitti-acceptance
+x-register-env: &register-env
+  REGISTER_DB_HOST: postgres
+  REGISTER_DB_NAME: register
+  REGISTER_DB_USER: register_app
+  REGISTER_DB_PASSWORD: acceptance-runtime
+  REGISTER_ENVIRONMENT: production
+  REGISTER_ENFORCE_RBAC: "true"
+  REGISTER_ENFORCE_RLS: "true"
+  REGISTER_API_KEYS: ""
+  REGISTER_SERVICE_API_KEYS: "svc_chitti:acceptance-chitti,svc_gateway:acceptance-gateway"
+  REGISTER_INTERNAL_SIGNING_SECRET: acceptance-internal-signing-secret-32
+  REGISTER_GATEWAY_SHARED_SECRET: ""
+  REGISTER_WEB_CONCURRENCY: "1"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prism
+      POSTGRES_PASSWORD: acceptance-owner
+      POSTGRES_DB: register
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/access.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U prism -d register"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  migrate:
+    image: prism-register:chitti-acceptance
+    build:
+      context: ../../../..
+      dockerfile: services/register/Dockerfile
+    environment:
+      <<: *register-env
+      REGISTER_DB_USER: prism
+      REGISTER_DB_PASSWORD: acceptance-owner
+      REGISTER_APP_PASSWORD: acceptance-runtime
+    command: [bash, -ec, "./entrypoint.sh migrate\n./entrypoint.sh bootstrap"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  register:
+    image: prism-register:chitti-acceptance
+    build:
+      context: ../../../..
+      dockerfile: services/register/Dockerfile
+    environment: *register-env
+    command: [serve]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  access:
+    image: prism-access:chitti-acceptance
+    build:
+      context: ../../../..
+      dockerfile: services/access/Dockerfile
+    environment:
+      ACCESS_DB_HOST: postgres
+      ACCESS_DB_NAME: access
+      ACCESS_DB_USER: prism
+      ACCESS_DB_PASSWORD: acceptance-owner
+      ACCESS_API_KEYS: acceptance-access
+      ACCESS_AUTO_SEED: "false"
+      ACCESS_WEB_CONCURRENCY: "1"
+    command: [migrate-seed-serve]
+    depends_on:
+      postgres: {condition: service_healthy}
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    command: [dex, serve, /etc/dex/config.yaml]
+    volumes:
+      - ../../../../deploy/compose/dex/config.yaml:/etc/dex/config.yaml:ro
+      - dex:/var/dex
+  chitti:
+    image: prism-chitti:chitti-acceptance
+    build:
+      context: ../../../..
+      dockerfile: services/chitti/Dockerfile
+    volumes:
+      - ./probe.py:/app/acceptance_probe.py:ro
+    command: [uvicorn, acceptance_probe:app, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      CHITTI_ENVIRONMENT: production
+      CHITTI_PIPELINE_ENABLED: "true"
+      CHITTI_API_KEYS: acceptance-front
+      CHITTI_REGISTER_BASE_URL: http://register:8000
+      CHITTI_REGISTER_API_KEY: acceptance-chitti
+      CHITTI_REQUIRE_DELEGATION: "true"
+      CHITTI_INTERNAL_SIGNING_SECRET: acceptance-internal-signing-secret-32
+      CHITTI_REQUEST_TIMEOUT_SECONDS: "2"
+      CHITTI_LLM_BASE_URL: http://unused.invalid/v1
+      CHITTI_LLM_API_KEY: unused
+      CHITTI_CONVERSATION_MODEL: unused
+      CHITTI_INTERPRETATION_MODEL: unused
+      CHITTI_GROUNDING_MODEL: unused
+      CHITTI_ANSWERABILITY_MODEL: unused
+      CHITTI_PLANNING_MODEL: unused
+      CHITTI_QUALITATIVE_MODEL: unused
+      CHITTI_ANSWER_MODEL: unused
+      CHITTI_DENSE_MODEL: unused
+      CHITTI_SPARSE_MODEL: unused
+      CHITTI_RERANK_MODEL: unused
+      CHITTI_DENSE_MODEL_REVISION: unused
+      CHITTI_SPARSE_MODEL_REVISION: unused
+      CHITTI_RERANK_MODEL_REVISION: unused
+      CHITTI_LOG_PIPELINE: "false"
+  gateway:
+    image: prism-gateway:chitti-acceptance
+    build:
+      context: ../../../..
+      dockerfile: services/gateway/Dockerfile
+    environment:
+      GATEWAY_ENVIRONMENT: production
+      GATEWAY_REGISTER_URL: http://register:8000
+      GATEWAY_ACCESS_URL: http://access:8000
+      GATEWAY_CHITTI_URL: http://chitti:8000
+      GATEWAY_REGISTER_API_KEY: acceptance-gateway
+      GATEWAY_ACCESS_API_KEY: acceptance-access
+      GATEWAY_CHITTI_API_KEY: acceptance-front
+      GATEWAY_INTERNAL_SIGNING_SECRET: acceptance-internal-signing-secret-32
+      GATEWAY_REQUIRE_AUTH: "true"
+      GATEWAY_OIDC_ISSUER: http://dex:5556/dex
+      GATEWAY_OIDC_AUDIENCE: prism
+      GATEWAY_OIDC_ALLOWED_DOMAINS: evamfinance.com
+      GATEWAY_CACHE_TTL_S: "1"
+      GATEWAY_CACHE_MAX_STALE_S: "2"
+      GATEWAY_WEB_CONCURRENCY: "1"
+    depends_on: [register, access, chitti, dex]
+  edge:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./edge.conf:/etc/nginx/nginx.conf:ro
+    ports: ["127.0.0.1:18439:8080"]
+    depends_on: [gateway, dex]
+volumes:
+  database:
+  dex:

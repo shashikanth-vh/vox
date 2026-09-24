@@ -1,0 +1,186 @@
+# Chitti host: self-contained production serving with a remote Register.
+# Use --env-file deploy/compose/.env.chitti; do not merge the platform base.
+name: chitti
+
+x-chitti-logging: &chitti-logging
+  driver: journald
+  options:
+    tag: "prism.{{.Name}}"
+
+x-chitti-retrieval: &chitti-retrieval
+  HOME: "/tmp"
+  XDG_CACHE_HOME: "/tmp/.cache"
+  CHITTI_QDRANT_URL: "http://qdrant:6333"
+  CHITTI_QDRANT_COLLECTION_PREFIX: "chitti"
+  CHITTI_MODEL_CACHE_DIR: "/models"
+  CHITTI_DENSE_MODEL: "BAAI/bge-small-en-v1.5"
+  CHITTI_DENSE_MODEL_REVISION: "52398278842ec682c6f32300af41344b1c0b0bb2"
+  CHITTI_DENSE_DIMENSIONS: "384"
+  CHITTI_SPARSE_MODEL: "Qdrant/bm25"
+  CHITTI_SPARSE_MODEL_REVISION: "22b8d2af71a76161e18dd432d2cee0eefa66e412"
+  CHITTI_RERANK_MODEL: "Xenova/ms-marco-MiniLM-L-6-v2"
+  CHITTI_RERANK_MODEL_REVISION: "a09144355adeed5f58c8ed011d209bf8ee5a1fec"
+  CHITTI_DENSE_CANDIDATES: "${CHITTI_DENSE_CANDIDATES:-40}"
+  CHITTI_SPARSE_CANDIDATES: "${CHITTI_SPARSE_CANDIDATES:-40}"
+  CHITTI_FUSED_CANDIDATES: "${CHITTI_FUSED_CANDIDATES:-40}"
+  CHITTI_GROUNDING_RERANK_LIMIT: "${CHITTI_GROUNDING_RERANK_LIMIT:-24}"
+  CHITTI_PLANNING_RERANK_LIMIT: "${CHITTI_PLANNING_RERANK_LIMIT:-12}"
+  CHITTI_CAPTURE_RETRIEVAL_TRACE: "false"
+
+x-chitti-image: &chitti-image
+  image: prism-chitti:0.3.0
+  build:
+    context: ../..
+    dockerfile: services/chitti/Dockerfile
+
+services:
+  qdrant:
+    logging: *chitti-logging
+    image: qdrant/qdrant:v1.18.2-unprivileged@sha256:9f7a04503dbdc17531752927bf0f822b5e71a3b713db547eab92c22210430fc8
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /qdrant/snapshots:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000
+    volumes:
+      - chitti_qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 1
+
+  chitti-model-preload:
+    <<: *chitti-image
+    logging: *chitti-logging
+    environment:
+      <<: *chitti-retrieval
+      CHITTI_PIPELINE_ENABLED: "false"
+      CHITTI_MODEL_OFFLINE: "false"
+      HF_HUB_DISABLE_XET: "true"
+    volumes:
+      - chitti_model_cache:/models
+    command: ["python", "-m", "app.model_preload"]
+    restart: "no"
+
+  chitti-semantic-index:
+    <<: *chitti-image
+    logging: *chitti-logging
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      chitti-model-preload:
+        condition: service_completed_successfully
+    environment:
+      <<: *chitti-retrieval
+      CHITTI_PIPELINE_ENABLED: "false"
+      CHITTI_MODEL_OFFLINE: "true"
+      HF_HUB_OFFLINE: "true"
+    volumes:
+      - chitti_model_cache:/models:ro
+    command: ["python", "-m", "app.semantic_index"]
+    restart: "no"
+
+  chitti:
+    <<: *chitti-image
+    logging: *chitti-logging
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      chitti-semantic-index:
+        condition: service_completed_successfully
+    environment:
+      <<: *chitti-retrieval
+      CHITTI_ENVIRONMENT: production
+      CHITTI_API_KEYS: "${CHITTI_GATEWAY_KEY:?Set CHITTI_GATEWAY_KEY}"
+      CHITTI_PUBLIC_MODEL_ID: "${CHITTI_PUBLIC_MODEL_ID:-prism-chitti}"
+      CHITTI_LOG_JSON: "true"
+      CHITTI_LOG_PIPELINE: "false"
+      CHITTI_PIPELINE_ENABLED: "true"
+      CHITTI_PIPELINE_STOP_AFTER: "answer_generation"
+      CHITTI_REGISTER_BASE_URL: "${CHITTI_REGISTER_BASE_URL:?Set CHITTI_REGISTER_BASE_URL}"
+      CHITTI_REGISTER_CA_FILE: /etc/chitti/tls.crt
+      CHITTI_REGISTER_API_KEY: "${SVC_CHITTI_KEY:?Set SVC_CHITTI_KEY}"
+      CHITTI_REGISTER_TENANT: "EVAM"
+      CHITTI_REGISTER_TIMEOUT_SECONDS: "${CHITTI_REGISTER_TIMEOUT_SECONDS:-30}"
+      CHITTI_REQUEST_TIMEOUT_SECONDS: "${CHITTI_REQUEST_TIMEOUT_SECONDS:-240}"
+      CHITTI_PAGE_SIZE: "${CHITTI_PAGE_SIZE:-200}"
+      CHITTI_MAX_PAGES_PER_RESOURCE: "${CHITTI_MAX_PAGES_PER_RESOURCE:-10}"
+      CHITTI_MAX_RECORDS_PER_REQUEST: "${CHITTI_MAX_RECORDS_PER_REQUEST:-2000}"
+      CHITTI_QUALITATIVE_MAX_RECORDS: "${CHITTI_QUALITATIVE_MAX_RECORDS:-500}"
+      CHITTI_QUALITATIVE_MAX_CHARS_PER_FIELD: "${CHITTI_QUALITATIVE_MAX_CHARS_PER_FIELD:-4000}"
+      CHITTI_QUALITATIVE_MAX_TOTAL_CHARS: "${CHITTI_QUALITATIVE_MAX_TOTAL_CHARS:-100000}"
+      CHITTI_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:?Set INTERNAL_SIGNING_SECRET}"
+      CHITTI_INTERNAL_SIGNING_ALGORITHM: "HS256"
+      CHITTI_REQUIRE_DELEGATION: "true"
+      CHITTI_DEBUG_USER_ID: ""
+      CHITTI_DEBUG_USER_EMAIL: ""
+      CHITTI_DEBUG_USER_ROLES: ""
+      CHITTI_LLM_BASE_URL: "https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1"
+      CHITTI_LLM_API_KEY: "${CHITTI_LLM_API_KEY:?Set CHITTI_LLM_API_KEY}"
+      CHITTI_LLM_TIMEOUT_SECONDS: "60"
+      CHITTI_LLM_MAX_RETRIES: "2"
+      CHITTI_LLM_MAX_COMPLETION_TOKENS: "32768"
+      CHITTI_CONVERSATION_MODEL: "${CHITTI_CONVERSATION_MODEL:-zai.glm-5}"
+      CHITTI_INTERPRETATION_MODEL: "${CHITTI_INTERPRETATION_MODEL:-zai.glm-5}"
+      CHITTI_GROUNDING_MODEL: "${CHITTI_GROUNDING_MODEL:-zai.glm-5}"
+      CHITTI_ANSWERABILITY_MODEL: "${CHITTI_ANSWERABILITY_MODEL:-zai.glm-5}"
+      CHITTI_PLANNING_MODEL: "${CHITTI_PLANNING_MODEL:-zai.glm-5}"
+      CHITTI_QUALITATIVE_MODEL: "${CHITTI_QUALITATIVE_MODEL:-zai.glm-5}"
+      CHITTI_ANSWER_MODEL: "${CHITTI_ANSWER_MODEL:-zai.glm-5}"
+      CHITTI_MODEL_OFFLINE: "true"
+      HF_HUB_OFFLINE: "true"
+    volumes:
+      - chitti_model_cache:/models:ro
+      - type: bind
+        source: "${CHITTI_REGISTER_CA_FILE:-/etc/chitti/tls.crt}"
+        target: /etc/chitti/tls.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=256m"]
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  chitti-nginx:
+    image: nginx:1.27-alpine
+    logging: *chitti-logging
+    depends_on:
+      chitti:
+        condition: service_started
+    volumes:
+      - ../nginx/chitti.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: "${CHITTI_TLS_CERT_FILE:?Set CHITTI_TLS_CERT_FILE}"
+        target: /etc/nginx/certs/tls.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${CHITTI_TLS_KEY_FILE:?Set CHITTI_TLS_KEY_FILE}"
+        target: /etc/nginx/certs/tls.key
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "${CHITTI_BIND_IP:?Set CHITTI_BIND_IP}:${CHITTI_HTTPS_PORT:-8443}:443"
+    restart: unless-stopped
+
+volumes:
+  chitti_model_cache:
+  chitti_qdrant_data:

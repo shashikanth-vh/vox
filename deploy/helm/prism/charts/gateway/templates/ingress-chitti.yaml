@@ -1,0 +1,36 @@
+{{- if and .Values.ingress.enabled .Values.upstreams.chittiUrl }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "gateway.fullname" . }}-chitti
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+  annotations:
+    {{- with omit .Values.ingress.annotations "nginx.ingress.kubernetes.io/proxy-buffering" "nginx.ingress.kubernetes.io/proxy-read-timeout" "nginx.ingress.kubernetes.io/proxy-send-timeout" "nginx.ingress.kubernetes.io/proxy-body-size" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "325"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "325"
+    nginx.ingress.kubernetes.io/proxy-body-size: "128k"
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - {{- if .Values.ingress.host }}
+      host: {{ .Values.ingress.host | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /chitti
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "gateway.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

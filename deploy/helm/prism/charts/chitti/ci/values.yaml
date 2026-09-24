@@ -1,0 +1,7 @@
+# Render-only fixture. These references do not provision credentials.
+artifactId: fixture
+credentials:
+  existingSecret: fixture-chitti-credentials
+provider:
+  baseUrl: https://provider.invalid/v1
+  model: fixture

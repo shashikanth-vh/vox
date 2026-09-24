@@ -81,6 +81,7 @@ class AsyncRegisterClient:
         self.config = cfg
         self._client = httpx.AsyncClient(
             base_url=cfg.base_url,
+            verify=cfg.tls_verify(),
             timeout=httpx.Timeout(cfg.read_timeout_s, connect=cfg.connect_timeout_s),
             limits=httpx.Limits(max_connections=cfg.max_connections,
                                 max_keepalive_connections=cfg.max_keepalive_connections),

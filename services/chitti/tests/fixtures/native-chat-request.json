@@ -1,0 +1,5 @@
+{
+  "model": "prism-chitti",
+  "messages": [{"role": "user", "content": "status"}],
+  "stream": true
+}

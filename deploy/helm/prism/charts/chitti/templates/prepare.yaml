@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "chitti.name" . }}-prepare-{{ .Release.Revision }}
+spec:
+  activeDeadlineSeconds: 1800
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: {{ include "chitti.name" . }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: prepare
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "chitti.security" . | nindent 12 }}
+          command: [bash, -ec]
+          args:
+            - |
+              CHITTI_MODEL_OFFLINE=false HF_HUB_DISABLE_XET=true python -m app.model_preload --reuse-existing
+              CHITTI_MODEL_OFFLINE=true HF_HUB_OFFLINE=true python -m app.semantic_index --reuse-existing
+          env:
+            {{- include "chitti.retrievalEnv" . | nindent 12 }}
+            - name: CHITTI_PIPELINE_ENABLED
+              value: "false"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: models, mountPath: /models}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        {{- include "chitti.volumes" . | nindent 8 }}

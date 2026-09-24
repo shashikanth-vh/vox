@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1350" viewBox="0 0 1600 1350">
+<title>Chitti — two-instance deployment</title>
+<rect width="100%" height="100%" fill="white"/>
+<text x="800.0" y="35" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#172b4d">Chitti — two-instance deployment</text>
+<text x="800.0" y="74" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">HTTPS between instances · HTTP within each container network</text>
+<rect x="40" y="215" width="1520" height="295" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<rect x="40" y="795" width="1520" height="400" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<text x="70" y="245" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#172b4d">PRISM services instance</text>
+<text x="70" y="830" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#172b4d">Chitti instance</text>
+<rect x="440" y="115" width="260" height="65" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="570.0" y="147.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Browser / PRISM UI</text>
+<rect x="440" y="290" width="260" height="80" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="570.0" y="316.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Services Nginx</text>
+<text x="570.0" y="343.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">HTTPS :443 / :8443</text>
+<rect x="100" y="290" width="220" height="80" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="210.0" y="317.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Register</text>
+<text x="210.0" y="342.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Internal HTTP :8000</text>
+<rect x="1080" y="290" width="320" height="80" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="1240.0" y="330.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Gateway</text>
+<rect x="100" y="425" width="220" height="60" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="210.0" y="455.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Register PostgreSQL</text>
+<rect x="770" y="425" width="250" height="60" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="895.0" y="455.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Access · permissions</text>
+<rect x="440" y="880" width="260" height="80" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="570.0" y="906.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Chitti</text>
+<text x="570.0" y="933.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Internal HTTP :8000</text>
+<rect x="1080" y="880" width="320" height="80" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="1240.0" y="906.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Chitti Nginx</text>
+<text x="1240.0" y="933.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#172b4d">Private HTTPS :8443</text>
+<rect x="110" y="1060" width="250" height="80" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="235.0" y="1087.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Qdrant</text>
+<text x="235.0" y="1112.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Internal HTTP :6333</text>
+<rect x="110" y="1150" width="250" height="30" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="235.0" y="1165.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#172b4d">Persistent data volume</text>
+<rect x="445" y="1060" width="250" height="80" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="570.0" y="1088.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Model cache</text>
+<text x="570.0" y="1112.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Read-only serving mount</text>
+<rect x="885" y="1050" width="570" height="95" rx="10" fill="#fff3d6" stroke="#8993a4"/>
+<text x="1170.0" y="1072.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Preparation</text>
+<text x="1170.0" y="1097.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Model preload + Qdrant ready</text>
+<text x="1170.0" y="1122.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">→ ontology indexing → Chitti startup</text>
+<polyline points="570,180 570,290" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="570,290 564.7804135906653,279.1946347717679 575.2195864093347,279.1946347717679" fill="#526581"/>
+<text x="640" y="222" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">HTTPS</text>
+<polyline points="440,330 320,330" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="320,330 330.8053652282321,324.78041359066526 330.8053652282321,335.21958640933474" fill="#526581"/>
+<text x="380" y="307" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">HTTP /v1/…</text>
+<polyline points="210,370 210,425" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="210,425 204.78041359066523,414.1946347717679 215.21958640933477,414.1946347717679" fill="#526581"/>
+<polyline points="700,330 1080,330" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1080,330 1069.1946347717678,335.21958640933474 1069.1946347717678,324.78041359066526" fill="#526581"/>
+<text x="890" y="302" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">HTTP /chitti/v1/…</text>
+<polyline points="1120,370 1120,455 1020,455" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1020,455 1030.8053652282322,449.78041359066526 1030.8053652282322,460.21958640933474" fill="#526581"/>
+<polyline points="570,880 570,370" fill="none" stroke="#00875a" stroke-width="2"/>
+<polygon points="570,370 575.2195864093347,380.8053652282321 564.7804135906653,380.8053652282321" fill="#00875a"/>
+<rect x="70" y="540" width="460" height="220" rx="10" fill="white" stroke="#8993a4"/>
+<text x="95" y="569" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#00875a">CHITTI → REGISTER</text>
+<text x="95" y="605" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#172b4d">https://services.example.com:8443</text>
+<text x="95" y="638" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#172b4d">/machine/v1/…</text>
+<text x="95" y="677" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Register key + signed GET context</text>
+<text x="95" y="708" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Nginx strips /machine before Register</text>
+<text x="95" y="739" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">Readiness: /machine/readyz</text>
+<polyline points="1240,370 1240,880" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1240,880 1234.7804135906651,869.1946347717678 1245.2195864093349,869.1946347717678" fill="#526581"/>
+<rect x="660" y="540" width="530" height="220" rx="10" fill="white" stroke="#8993a4"/>
+<text x="685" y="569" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">GATEWAY → CHITTI</text>
+<text x="685" y="605" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#172b4d">https://chitti.example.com:8443</text>
+<text x="685" y="638" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#172b4d">/v1/…</text>
+<text x="685" y="677" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Chitti key + signed caller context</text>
+<text x="685" y="708" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Gateway strips /chitti before forwarding</text>
+<text x="685" y="739" text-anchor="start" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">Readiness: /readyz at Chitti Nginx</text>
+<polyline points="1080,920 700,920" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="700,920 710.8053652282322,914.7804135906653 710.8053652282322,925.2195864093347" fill="#526581"/>
+<text x="890" y="892" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">HTTP /v1/…</text>
+<polyline points="570,960 570,1060" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="570,1060 564.7804135906653,1049.1946347717678 575.2195864093347,1049.1946347717678" fill="#526581"/>
+<polyline points="440,920 235,920 235,1060" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="235,1060 229.78041359066523,1049.1946347717678 240.21958640933477,1049.1946347717678" fill="#526581"/>
+<text x="325" y="1010" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">Ontology search</text>
+<polyline points="235,1140 235,1150" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="235,1150 229.78041359066523,1139.1946347717678 240.21958640933477,1139.1946347717678" fill="#526581"/>
+<text x="800" y="1240" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Both instances can publish port 8443 independently. Application and Qdrant ports stay internal.</text>
+<text x="800" y="1280" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">TLS clients verify hostnames and retain system roots alongside mounted CA trust.</text>
+<text x="800" y="1320" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">Checked-in configuration · live deployment not verified</text>
+</svg>

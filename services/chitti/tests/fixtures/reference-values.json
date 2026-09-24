@@ -1,0 +1,19 @@
+{
+  "Sector": ["EV Mobility", "Solar - General"],
+  "Lens": ["Mitigation", "Adaptation"],
+  "Temperature": ["Hot", "Warm", "Cold"],
+  "Priority": ["High", "Medium", "Low"],
+  "Lead Status": ["Active", "Converted", "Dropped"],
+  "Product Type": ["Term Loan", "Syndication"],
+  "Register Status": ["Pipeline", "Sanctioned"],
+  "Entity Lifecycle": ["Prospect", "Dormant"],
+  "Entity Type": ["Company", "Promoter"],
+  "Deal Funnel Stage": ["New Inquiry", "In Pipeline"],
+  "Lending Stage": ["Diligence", "Ready for Disbursement"],
+  "Status of Proposal": ["Deal Sourced", "On Hold"],
+  "Asset Mon Status": ["In Discussion", "Closed"],
+  "Tenor": ["<12m", "12-24m"],
+  "IM in Place": ["In prep", "In place"],
+  "Syndication Type": ["Fee will be paid by customer", "Fee to be collected from lender"],
+  "Mandate Status 3": ["Yes", "No", "Under discussion"]
+}

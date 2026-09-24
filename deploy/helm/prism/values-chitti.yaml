@@ -1,0 +1,15 @@
+# Merge after values-prod.yaml and the deployment's protected values.
+chitti:
+  enabled: true
+  artifactId: ""
+  credentials:
+    existingSecret: prism-chitti-credentials
+  provider:
+    baseUrl: ""
+    model: ""
+gateway:
+  upstreams:
+    chittiUrl: http://prism-chitti
+  chittiCredential:
+    existingSecret: prism-chitti-credentials
+    existingSecretKey: gateway-api-key

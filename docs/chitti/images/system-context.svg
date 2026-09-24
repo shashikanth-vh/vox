@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="850" viewBox="0 0 1400 850">
+<title>Chitti — system context</title>
+<rect width="100%" height="100%" fill="white"/>
+<text x="700.0" y="35" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#172b4d">Chitti — system context</text>
+<text x="700.0" y="74" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Arrows show requests and dependencies; responses return on the same connections</text>
+<rect x="475" y="115" width="450" height="65" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="700.0" y="147.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">PRISM browser · user bearer token</text>
+<rect x="475" y="240" width="450" height="65" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="700.0" y="272.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Services Nginx / Gateway</text>
+<rect x="1040" y="240" width="310" height="65" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="1195.0" y="272.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Access · permissions</text>
+<rect x="450" y="390" width="500" height="100" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="700.0" y="427.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Chitti pipeline</text>
+<text x="700.0" y="452.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Local embedding and reranking models</text>
+<rect x="40" y="400" width="315" height="85" rx="10" fill="#fff3d6" stroke="#8993a4"/>
+<text x="197.5" y="430.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">External model provider</text>
+<text x="197.5" y="455.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Model inference</text>
+<rect x="1040" y="400" width="310" height="85" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="1195.0" y="430.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Qdrant</text>
+<text x="1195.0" y="455.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Business-definition index</text>
+<rect x="475" y="595" width="450" height="70" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="700.0" y="630.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Register · authorized GET APIs</text>
+<rect x="475" y="745" width="450" height="65" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="700.0" y="777.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Register PostgreSQL · ledger records</text>
+<polyline points="700,180 700,240" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="700,240 694.7804135906653,229.19463477176788 705.2195864093347,229.19463477176788" fill="#526581"/>
+<text x="800" y="210" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">HTTPS</text>
+<polyline points="925,272 1040,272" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1040,272 1029.1946347717678,277.21958640933474 1029.1946347717678,266.78041359066526" fill="#526581"/>
+<polyline points="700,305 700,390" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="700,390 694.7804135906653,379.1946347717679 705.2195864093347,379.1946347717679" fill="#526581"/>
+<rect x="505" y="331" width="390" height="34" rx="10" fill="white" stroke="#8993a4"/>
+<text x="700.0" y="348.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">HTTPS via Chitti Nginx + signed context</text>
+<polyline points="450,440 355,440" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="355,440 365.8053652282321,434.78041359066526 365.8053652282321,445.21958640933474" fill="#526581"/>
+<polyline points="950,440 1040,440" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1040,440 1029.1946347717678,445.21958640933474 1029.1946347717678,434.78041359066526" fill="#526581"/>
+<polyline points="700,490 700,595" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="700,595 694.7804135906653,584.1946347717678 705.2195864093347,584.1946347717678" fill="#526581"/>
+<rect x="470" y="528" width="460" height="34" rx="10" fill="white" stroke="#8993a4"/>
+<text x="700.0" y="545.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">HTTPS via services Nginx /machine + signed GET</text>
+<polyline points="700,665 700,745" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="700,745 694.7804135906653,734.1946347717678 705.2195864093347,734.1946347717678" fill="#526581"/>
+<text x="800" y="705" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#172b4d">Data access</text>
+</svg>

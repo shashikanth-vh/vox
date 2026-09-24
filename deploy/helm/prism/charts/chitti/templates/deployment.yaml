@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "chitti.name" . }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "chitti.name" . }}
+    component: serving
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "chitti.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "chitti.name" . }}
+      component: serving
+  template:
+    metadata:
+      labels:
+        app: {{ include "chitti.name" . }}
+        component: serving
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 330
+      securityContext:
+        fsGroup: 1000
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: prepared
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            {{- include "chitti.security" . | nindent 12 }}
+          command: [python, -c]
+          args:
+            - |
+              import asyncio
+              from app.config import get_settings
+              from app.semantic import verify_model_manifest, verify_index_integrity
+              from qdrant_client import AsyncQdrantClient
+              async def wait():
+                  s = get_settings()
+                  client = AsyncQdrantClient(url=s.qdrant_url, timeout=5)
+                  try:
+                      for attempt in range(180):
+                          try:
+                              verify_model_manifest(s)
+                              await verify_index_integrity(client, s)
+                              return
+                          except Exception:
+                              await asyncio.sleep(10)
+                      raise RuntimeError('Chitti artifacts did not become ready')
+                  finally:
+                      await client.close()
+              asyncio.run(wait())
+          env:
+            {{- include "chitti.retrievalEnv" . | nindent 12 }}
+            - {name: CHITTI_PIPELINE_ENABLED, value: "false"}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: models, mountPath: /models, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: chitti
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "chitti.security" . | nindent 12 }}
+          args: [gunicorn, app.main:app, --worker-class, uvicorn.workers.UvicornWorker, --workers, "2", --bind, "0.0.0.0:8000", --graceful-timeout, "310", --access-logfile, "-", --error-logfile, "-"]
+          env:
+            {{- include "chitti.retrievalEnv" . | nindent 12 }}
+            - {name: CHITTI_ENVIRONMENT, value: production}
+            - {name: CHITTI_PIPELINE_ENABLED, value: "true"}
+            - {name: CHITTI_REQUIRE_DELEGATION, value: "true"}
+            - {name: CHITTI_PIPELINE_STOP_AFTER, value: answer_generation}
+            - {name: CHITTI_LOG_PIPELINE, value: "false"}
+            - {name: CHITTI_CAPTURE_RETRIEVAL_TRACE, value: "false"}
+            - {name: CHITTI_MODEL_OFFLINE, value: "true"}
+            - {name: HF_HUB_OFFLINE, value: "true"}
+            - name: CHITTI_REGISTER_BASE_URL
+              value: {{ .Values.registerUrl | quote }}
+            - name: CHITTI_LLM_BASE_URL
+              value: {{ required "chitti.provider.baseUrl is required" .Values.provider.baseUrl | quote }}
+            {{- range $stage := list "CONVERSATION" "INTERPRETATION" "GROUNDING" "ANSWERABILITY" "PLANNING" "QUALITATIVE" "ANSWER" }}
+            - name: CHITTI_{{ $stage }}_MODEL
+              value: {{ required "chitti.provider.model is required" $.Values.provider.model | quote }}
+            {{- end }}
+            {{- range $name, $value := dict "REQUEST_TIMEOUT_SECONDS" .Values.requestTimeoutSeconds "LLM_TIMEOUT_SECONDS" .Values.provider.timeoutSeconds "LLM_MAX_RETRIES" .Values.provider.maxRetries "LLM_MAX_COMPLETION_TOKENS" .Values.provider.maxCompletionTokens }}
+            - name: CHITTI_{{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $name, $key := dict "API_KEYS" .Values.credentials.gatewayKey "REGISTER_API_KEY" .Values.credentials.registerKey "INTERNAL_SIGNING_SECRET" .Values.credentials.signingKey "LLM_API_KEY" .Values.credentials.providerKey }}
+            - name: CHITTI_{{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "chitti.credentials.existingSecret is required" $.Values.credentials.existingSecret }}
+                  key: {{ $key }}
+            {{- end }}
+          ports: [{containerPort: 8000}]
+          startupProbe:
+            httpGet: {path: /readyz, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8000}
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8000}
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: models, mountPath: /models, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        {{- include "chitti.volumes" . | nindent 8 }}

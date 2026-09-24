@@ -1,0 +1,3772 @@
+{
+  "version": "ontology-v2",
+  "passages": [
+    {
+      "id": "governance.read_only.chitti_read_request",
+      "source": "governance",
+      "content": "Chitti is read-only. It can request only fixed Register GET resources under the delegated caller identity. Create, update, approve, delete, restore, import, and other mutations are OUT_OF_SCOPE and must produce no Register request.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance"
+        ],
+        "sources": [
+          "plans/architecture.md",
+          "packages/evam-backend-core/evam_backend_core/service_policy.py"
+        ],
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.missing_data.complete_caller_visible",
+      "source": "governance",
+      "content": "A complete caller-visible zero result, a null field, an unavailable field, an authorization denial, a partial traversal, and a Register dependency failure are different outcomes. Do not infer missing facts from remarks, sectors, external knowledge, record order, or a prior assistant answer. The Ledger has promoter_group_code but no authoritative promoter-person field.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance"
+        ],
+        "sources": [
+          "plans/architecture.md",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.unsupported_dimensions.requested_monetary_split",
+      "source": "governance",
+      "content": "A requested monetary split needs the dimension on the amount-bearing resource or an explicitly governed relationship that authorizes transferring it. LendingTracker and SyndicationTracker do not expose a climate lens. Lead, Deal or Entity lens must not be substituted for own-book or off-book monetary exposure merely because entity_id or an optional deal_id exists. Without an authoritative amount-bearing Lens relationship, a Mitigation-versus-Adaptation exposure split is unavailable and OUT_OF_SCOPE. Likewise, company-group exposure requires caller-visible Entity.promoter_group_code membership; names, remarks and workbook-only disclosures never authorize a group combination. If that authoritative membership is absent, the group total is unavailable and OUT_OF_SCOPE rather than a request for an internal identifier.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/register/app/models/registry.py",
+          "services/register/app/models/deals.py"
+        ],
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.overview.ledger_work_represented",
+      "source": "books",
+      "content": "Ledger work is represented by four distinct business books: the commercial origination funnel in Deal, Evam own-book lending in LendingTracker, off-book/platform financing in SyndicationTracker, and asset sale/advisory work in AssetMonetisation.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.overview.user_explicitly_names",
+      "source": "books",
+      "content": "When the user explicitly names books, the ordinary unit is each named book's own record; deduplicate by client Entity or follow links to commercial Deal records only when requested. Lead is separate pre-deal intake, not another deal book; an unconverted Lead has not reached status Converted and remains a separate Lead result.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.overview.master_resources_entity",
+      "source": "books",
+      "content": "Master resources such as Entity, Person and Counterparty describe parties and staff rather than work books.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.boundaries.business_book_own",
+      "source": "books",
+      "content": "Each business book has its own resource, lifecycle field and measures. Deal.stage belongs only to the commercial funnel; LendingTracker.stage belongs only to own-book credit; SyndicationTracker.status belongs only to off-book/platform financing; AssetMonetisation.status belongs only to asset sale/advisory.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "lifecycle",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.boundaries.deal_product_flags",
+      "source": "books",
+      "content": "Deal product flags and optional deal_id links relate records but do not merge these books or make one lifecycle valid for another.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "lifecycle",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.partner.partner_book_off",
+      "source": "books",
+      "content": "Partner book, off-book and platform financing refer to SyndicationTracker rather than LendingTracker. Partnership is a classification within that book when SyndicationTracker.line records Partnership; it is not a fifth business book. Do not invent a group, lender or partnership relationship from a company name or example.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "book_scope",
+          "resource",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.ambiguity.unqualified_work_nouns",
+      "source": "books",
+      "content": "Unqualified work nouns such as deal, case, book, pipeline or workload do not by themselves select one business book when more than one book remains materially plausible. A lifecycle adjective such as active also has no cross-book status family.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "plans/architecture.md",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.ambiguity.preserve_supported_book",
+      "source": "books",
+      "content": "Preserve the supported book alternatives and ask the user which book they mean instead of silently choosing or combining books.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "plans/architecture.md",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.qualifiers.explicit_book_qualifiers",
+      "source": "books",
+      "content": "Explicit book qualifiers resolve otherwise generic work language: commercial, origination or deal funnel selects Deal; own-book, balance-sheet or lending selects LendingTracker; partner, off-book, platform or syndication selects SyndicationTracker; asset sale, asset advisory or asset monetisation selects AssetMonetisation. Lead or pre-deal selects Lead.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.qualifiers.explicit_qualifier_scopes",
+      "source": "books",
+      "content": "An explicit qualifier scopes lifecycle, relationship, assignment and metric terms throughout the same question to the selected resource; a lifecycle word used in another book does not remain an alternative after that scope is established.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "books.qualifiers.qualifier_authorize_values",
+      "source": "books",
+      "content": "A qualifier does not authorize values absent from the selected resource's ontology passage or change the named book's record grain.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "book_scope",
+          "vocabulary"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Leads/PushToDealsDialog.tsx"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.entities.entity_company_client",
+      "source": "entities",
+      "content": "Entity is the company/client master at Register GET resource entities. A null entities.sector value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+      "metadata": {
+        "planning": true,
+        "resource": "entities",
+        "field": "sector",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.entities.null_entities_state",
+      "source": "entities",
+      "content": "A null entities.state value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+      "metadata": {
+        "planning": true,
+        "resource": "entities",
+        "field": "state",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.people.person_employee_directory",
+      "source": "people",
+      "content": "Person is the employee directory at Register GET resource people. Tracker rm and analyst values use the canonical People.name handle; People.full_name is display text. geography, sectors, started_on and reports_to describe the employee, not a deal geography or lifecycle.",
+      "metadata": {
+        "planning": true,
+        "resource": "people",
+        "semantic_facets": [
+          "resource",
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/employeesService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.counterparties.counterparty_lender_investor",
+      "source": "counterparties",
+      "content": "Counterparty is the lender, investor, offtaker or partner directory at Register GET resource counterparties. Actual lender submissions and allocations are syndication_lenders rows. ticket_min_cr and ticket_max_cr are directory preferences, not actual deal exposure.",
+      "metadata": {
+        "planning": true,
+        "resource": "counterparties",
+        "semantic_facets": [
+          "resource",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.leads.unconverted_lead_pre",
+      "source": "leads",
+      "content": "An unconverted Lead is a pre-deal opportunity at Register GET resource leads whose status is not Converted; it remains a Lead result rather than a Deal record. Active means a current pre-deal lead. Converted means the lead continued into a Deal, with converted_deal_id as the governed conversion link. A count of leads currently marked Converted is not by itself a lead-to-deal conversion-rate denominator. A conversion rate requires an authoritative cohort definition and denominator for the requested period; without them, report the supported converted count but state that the derived rate is unavailable.",
+      "metadata": {
+        "planning": true,
+        "resource": "leads",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.leads.unconverted_lead_cohort",
+      "source": "leads",
+      "content": "An unconverted-lead cohort does not silently treat Dropped as Active; retain status when reporting that cohort. last_interaction_date supports stale-lead ageing; null dates remain unageable. A null leads.sector value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero. status is the Lead lifecycle Active, Converted or Dropped; temperature Hot, Warm or Cold is separate.",
+      "metadata": {
+        "planning": true,
+        "resource": "leads",
+        "field": "sector",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.deals.deal_commercial_origination",
+      "source": "deals",
+      "content": "Deal is the commercial origination funnel at Register GET resource deals.",
+      "metadata": {
+        "planning": true,
+        "resource": "deals",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/dealsService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.deals.commercial_origination_deal",
+      "source": "deals",
+      "content": "Commercial, origination or deal-funnel wording selects it; the generic word deal alone does not select it when another business book remains plausible. rm is the commercial relationship manager responsible for the Deal, while analyst is a separate assignment. One deal may have several product flags.",
+      "metadata": {
+        "planning": true,
+        "resource": "deals",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/dealsService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.deals.deal_funnel_stages",
+      "source": "deals",
+      "content": "The Deal funnel stages New Inquiry, In Screening, In Pipeline, On Hold, Screened Out, Closed Won, Closed Lost and Dropped are not Lending or Syndication statuses.",
+      "metadata": {
+        "planning": true,
+        "resource": "deals",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/dealsService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.deals.desk_questions_explicitly",
+      "source": "deals",
+      "content": "For desk questions explicitly asking for live commercial deals, live Deal funnel rows are New Inquiry, In Screening, In Pipeline and On Hold. Screened Out, Closed Won, Closed Lost and Dropped are terminal/excluded. This definition applies only to commercial Deal.stage and must not be reused for product trackers.",
+      "metadata": {
+        "planning": true,
+        "resource": "deals",
+        "field": "stage",
+        "semantic_facets": [
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.lending.lendingtracker_evam_own",
+      "source": "lending",
+      "content": "LendingTracker is Evam own-book lending at Register GET resource lending. Rows carry entity_id but no company name, so list-back uses an entities join on lending.entity_id=entities.id and entities.legal_name is the canonical company label.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.lending.human_readable_lending",
+      "source": "lending",
+      "content": "A human-readable Lending case list retains tracker_no, stage and pending_with alongside the company label so that identity, lifecycle and the requested pending-party predicate remain visible. lending.rm is the relationship-manager assignment and lending.analyst is the assigned analyst. Both fields store canonical People.name values, but they represent different business relationships and are not interchangeable. pending_with records the party with whom the current action is pending; pending with the client refers to pending_with=Client rather than a stage containing the word Pending. A null lending.amount_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero. stage_updated_at supports comparisons against the recorded stage date; missing dates cannot be aged. Register may backfill this date from updated_at or created_at and does not expose that provenance in the row. Do not describe elapsed time from this field as a verified duration in stage or invent a date when it is missing.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "field": "amount_cr",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.lending.lending_stages_distinct",
+      "source": "lending",
+      "content": "Lending stages are a distinct credit lifecycle. Disbursed and Rejected are terminal stage labels. CP/CS Completed records settlement of conditions subsequent and can occur before or after disbursement; it does not by itself establish whether the facility is funded or active. Use recorded disbursement_date, disbursed_amount and stage_history as supporting evidence for a CP/CS Completed row; if they do not establish the requested cohort, disclose it as unassessable rather than assigning it to active or terminal business.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "field": "stage",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.lending.sanctioned_family",
+      "source": "lending",
+      "content": "The sanctioned own-book family includes LendingTracker stages Sanctioned, Ready for Disbursement, CP/CS Completed and Disbursed, including the imported compatibility value Disbursement Pending. Sanctioned exposure is distinct from actual disbursed amount and from generic Deal statuses.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "field": "stage",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "services/register/app/seed/refdata.py",
+          "services/register/app/seed/from_xlsx.py",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.lending.current_ordinary_active",
+      "source": "lending",
+      "content": "The ordinary active stage family is Data Awaited, Diligence, Note Circulated, Sanctioned, Ready for Disbursement, Disbursement Pending and On Hold when present. CP/CS Completed needs separate assessment from recorded disbursement evidence; it must not be included automatically in active facilities. Sanctioned exposure uses the separately defined sanctioned family and never a generic deal status.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "field": "stage",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "qualitative.lending_remarks.exact_caller_visible",
+      "source": "lending",
+      "content": "For an exact caller-visible LendingTracker cohort, lending.remarks is authorized qualitative evidence for the case's recorded explanation or note. Remarks are attributed statements, not independently verified facts. Predicates that require interpreting those remarks are qualitative meanings over evidence, not stored classifications.",
+      "metadata": {
+        "planning": false,
+        "resource": "lending",
+        "field": "remarks",
+        "qualitative": true,
+        "semantic_facets": [
+          "resource",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding"
+        ]
+      }
+    },
+    {
+      "id": "qualitative.lending_remarks.recurring_themes_analytical",
+      "source": "lending",
+      "content": "Recurring themes are analytical groupings rather than stored classifications. Missing or blank remarks, pending or WIP text, contradictory notes, and bare terminal labels remain explicit in coverage and caveats.",
+      "metadata": {
+        "planning": false,
+        "resource": "lending",
+        "field": "remarks",
+        "qualitative": true,
+        "semantic_facets": [
+          "resource",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding"
+        ]
+      }
+    },
+    {
+      "id": "qualitative.lending_remarks.qualitative_meanings_analyzed",
+      "source": "lending",
+      "content": "Qualitative meanings must be analyzed across the exact cohort rather than converted to literal substring filters; support counts and coverage are computed by host code from validated record citations.",
+      "metadata": {
+        "planning": false,
+        "resource": "lending",
+        "field": "remarks",
+        "qualitative": true,
+        "semantic_facets": [
+          "resource",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding"
+        ]
+      }
+    },
+    {
+      "id": "metrics.cross_book_clients.work_assignment_resource",
+      "source": "relationships",
+      "content": "Work assignment is resource- and role-specific. Commercial Deal relationship-manager work uses Deal.rm; explicitly requested commercial analyst work uses Deal.analyst. Own-book lending, syndication and asset-monetisation analyst work uses each tracker's analyst field.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "metric",
+          "book_scope"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/referenceService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.cross_book_clients.staff_identity_role",
+      "source": "relationships",
+      "content": "A staff identity, role or matching assignment does not itself select a business book when the question leaves the book unqualified. A distinct-client question unions qualifying entity_id values across the requested books and counts each Entity once; a product-assignment question keeps tracker rows separate. Staff handles ground through People.name.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "metric",
+          "book_scope"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/referenceService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.cross_book_clients.equate_relationship_manager",
+      "source": "relationships",
+      "content": "Do not equate relationship-manager and analyst assignments, and include commercial Deal assignments only when the user requests that funnel.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "metric",
+          "book_scope"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/referenceService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lending_sanctioned.own_book_sanctioned",
+      "source": "lending",
+      "content": "Own-book sanctioned exposure uses the separately defined sanctioned LendingTracker family and counts facilities whose amount_cr is available. Count facilities and sum amount_cr with host operations. Operational Register reads exclude reconciliation-required rows; null amounts stay null and are reported rather than invented.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "field": "stage",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/lendingService.ts",
+          "services/register/app/api/crud_router.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication.syndicationtracker_platform_off",
+      "source": "syndication",
+      "content": "SyndicationTracker is platform, off-book and partner financing at Register GET resource syndication. An unqualified syndication row, syndication ticket or syndication ask refers to this parent tracker.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication.rows_carry_entity",
+      "source": "syndication",
+      "content": "Rows carry entity_id but no company name, so a human-readable list left joins entities on syndication.entity_id=entities.id and uses entities.legal_name as the canonical company label while preserving unmatched parent rows. line distinguishes Partnership when recorded.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication.row_embed_lenders",
+      "source": "syndication",
+      "content": "Each row may embed lenders, while the flat syndication_lenders resource supports explicitly requested individual lender-row analysis. A null syndication.amount_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "field": "amount_cr",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.syndication.syndication_status_distinct",
+      "source": "syndication",
+      "content": "Syndication status is distinct from Deal and Lending lifecycles. SyndicationTracker.status defines the parent syndication lifecycle. A live parent row has a populated SyndicationTracker.status other than Dropped, Withdrawn, Rejected, Sanctioned or Disbursed. Dropped, Withdrawn and Rejected are terminal lost statuses. Sanctioned and Disbursed are closed/won statuses. Other populated proposal statuses form the live platform pipeline.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "field": "status",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.syndication.known_value_totals",
+      "source": "syndication",
+      "content": "Known-value totals must disclose null amount_cr rows and cannot claim a complete monetary total when amounts are missing.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "field": "status",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "semantics.syndication_mandate.syndicationtracker_mandate_status",
+      "source": "syndication",
+      "content": "SyndicationTracker.mandate_status is a composite recorded value that may encode sent, signed, syndication and partnership information. Preserve its stored value and do not normalize it to an invented Executed status.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "field": "mandate_status",
+        "semantic_facets": [
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "semantics.syndication_mandate.lender_outreach_progress",
+      "source": "syndication",
+      "content": "Lender outreach or progress is established by related named SyndicationLender rows joined through syndication_id, not by assuming the parent composite mandate value proves outreach. Readiness criteria are supplied by the request; Chitti does not impose a permanent readiness rule.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "field": "mandate_status",
+        "semantic_facets": [
+          "lifecycle",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.caller_visible_scope.phrases_records_visible",
+      "source": "governance",
+      "content": "Phrases such as all records visible to me, visible to this desk, or in my current view select the existing caller-authorized Register view. They do not assert that records are owned by or assigned to a named employee or desk, and they require no identity lookup. By contrast, explicitly assigned to, owned by, or managed by wording requests a governed assignment relationship and must bind the relevant person or stored assignment value.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "book_scope",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/api/crud_router.py",
+          "packages/evam-register-client/evam_register_client/client.py"
+        ],
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication_lenders.syndicationlender_individual_lender",
+      "source": "syndication_lenders",
+      "content": "SyndicationLender is an individual lender submission/allocation at read-only Register GET resource syndication_lenders. It is selected when the question explicitly asks for lender rows, submissions, allocations or individual lender progression, not merely because a parent SyndicationTracker row may contain lenders. amount_cr is the lender-row amount, not the parent syndication ticket/ask amount. since, response_date and chased_date are different dates.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "semantic_facets": [
+          "resource",
+          "relationship",
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication_lenders.lender_row_joins",
+      "source": "syndication_lenders",
+      "content": "A lender row joins its parent through syndication_id.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "semantic_facets": [
+          "resource",
+          "relationship",
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.syndication_lenders.individual_lender_progression",
+      "source": "syndication_lenders",
+      "content": "Individual lender progression includes Identified, IM Under Preparation, IM Circulated or legacy Docs Pending, Queries Received, IP Received, Sanctioned and Disbursed. On Hold pauses a live submission; Declined and Dropped are terminal lost outcomes, and Sanctioned can progress to Disbursed or Dropped. SyndicationLender.status is the progression of one lender submission and is never the parent mandate lifecycle. It is separate from the parent SyndicationTracker.status. Missing lender names, dates or amounts remain missing and must not be converted into zero activity or elapsed time without an explicit definition.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/register/app/schemas/resources.py",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.auxiliary_and_bottleneck_evidence.structural_bottleneck_live",
+      "source": "governance",
+      "content": "A structural bottleneck such as a live parent syndication row with no related named SyndicationLender outreach is itself a supported main answer and may be reported deterministically.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "relationship",
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.auxiliary_and_bottleneck_evidence.if_lender_since",
+      "source": "governance",
+      "content": "If lender since or response dates are missing, elapsed-time ordering is an unavailable auxiliary measure: preserve the structural bottleneck answer, disclose the missing dates, and do not invent an elapsed ranking.",
+      "metadata": {
+        "planning": true,
+        "governance": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "relationship",
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_activity.lender_activity_measured",
+      "source": "syndication_lenders",
+      "content": "Lender activity is measured from individual named SyndicationLender submission rows, not parent asks or Counterparty preferences. The governed lender register counts each named row with is_existing=false as pursued; is_existing=true rows remain recorded but are outside that bank-engagement metric unless the user explicitly includes existing lenders.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/seed/ledger_xlsx.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_activity.sanctioned_approved_won",
+      "source": "syndication_lenders",
+      "content": "Sanctioned and Disbursed are approved/won lender outcomes. Declined and Dropped are distinct terminal lost outcomes. Active submissions have status Identified, IM Under Preparation, IM Circulated, Docs Pending, Queries Received, IP Received or On Hold; On Hold remains open but paused. Unknown or blank statuses are unassessable, never implicitly active. Approved, sanctioned or declined lender questions bind to SyndicationLender.status on individual lender submissions; SyndicationTracker.status must not substitute for an individual lender decision. Most or least active is ambiguous until the user selects submissions, allocations, amount or another measure.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/seed/ledger_xlsx.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_activity.submissions_selected_rank",
+      "source": "syndication_lenders",
+      "content": "After submissions are selected, rank the count of qualifying named rows by lender, preserve every tie, and do not ask the user to choose internal status values. A cohort with no qualifying submission rows has no meaningful least-active lender.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/seed/ledger_xlsx.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_decisions.explicitly_named_lender",
+      "source": "syndication_lenders",
+      "content": "For an explicitly named lender, approved business includes its individual SyndicationLender submission rows with status=Sanctioned or status=Disbursed. An explicit current Sanctioned status filter means only status=Sanctioned, disbursed means status=Disbursed, and declined means status=Declined. Dropped is a separate lost outcome, not a synonym for Declined; do not introduce own-book LendingTracker as an alternative unless the user explicitly requests own-book lending.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "relationship": true,
+        "semantic_facets": [
+          "metric",
+          "lifecycle",
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/register/app/schemas/resources.py",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_decisions.question_asking_lender",
+      "source": "syndication_lenders",
+      "content": "A question asking which lender approved or declined the most ranks lenders by submission-row count and preserves ties; a decline rate or proportion is a different metric that must be requested explicitly.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "relationship": true,
+        "semantic_facets": [
+          "metric",
+          "lifecycle",
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_decisions.apply_company_sector",
+      "source": "syndication_lenders",
+      "content": "To apply company sector, geography or another client attribute, join the lender row to its parent SyndicationTracker by syndication_id=id and then the parent to Entity by entity_id=id.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "relationship": true,
+        "semantic_facets": [
+          "metric",
+          "lifecycle",
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_approach.lender_been_approached",
+      "source": "syndication_lenders",
+      "content": "A lender has been approached when a caller-visible SyndicationLender submission row records that lender by lender_name, including imported rows whose counterparty_id is missing. Lenders never approached are the set of caller-visible active Counterparty lender-directory names minus the distinct recorded lender_name values.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "relationship": true,
+        "semantic_facets": [
+          "metric",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/register/app/seed/ledger_xlsx.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_approach.submission_different_active",
+      "source": "syndication_lenders",
+      "content": "No submission is different from no active submission: Sanctioned, Disbursed, Declined and Dropped rows still prove an approach.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "relationship": true,
+        "semantic_facets": [
+          "metric",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/register/app/seed/ledger_xlsx.py",
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_im_response.lender_sitting_im",
+      "source": "syndication_lenders",
+      "content": "A lender sitting on an IM with no response is an individual SyndicationLender row whose current status is IM Circulated and whose response_date is null. since is the date the current lender status began and is the available IM-age date for that cohort; missing since values cannot be aged. since, response_date and chased_date are different dates.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/register/app/repositories/interactions.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "metrics.lender_im_response.report_qualifying_row",
+      "source": "syndication_lenders",
+      "content": "Report the qualifying row count and, when age or waiting completeness is material, the counts with and without since. Free-text notes are not interpreted as lifecycle transitions.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "status",
+        "semantic_facets": [
+          "metric",
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts",
+          "services/register/app/repositories/interactions.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.asset_monetisation.assetmonetisation_asset_sale",
+      "source": "asset_monetisation",
+      "content": "AssetMonetisation is the asset sale/advisory tracker at Register GET resource asset_monetisation.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.asset_monetisation.asset_monetisation_asset",
+      "source": "asset_monetisation",
+      "content": "Asset monetisation, asset monetisation deal and asset monetisation deals are canonical phrases for this tracker; the word deals inside the compound phrase does not independently request the commercial deals resource or an is_asset_mon flag filter.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.asset_monetisation.rows_carry_entity",
+      "source": "asset_monetisation",
+      "content": "Rows carry entity_id but no company name, so display lists left join entities on entity_id, use entities.legal_name as the canonical company label, and preserve rows whose optional links are missing. A null asset_monetisation.state value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "field": "state",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.asset_monetisation.null_asset_monetisation",
+      "source": "asset_monetisation",
+      "content": "A null asset_monetisation.indicative_value_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "field": "indicative_value_cr",
+        "missing_policy": "report_unassessable",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "lifecycle.asset_monetisation.asset_monetisation_progresses",
+      "source": "asset_monetisation",
+      "content": "Asset monetisation progresses through Teaser Prepared, Teaser Shared, In Discussion, NBO Received, BO Received and SPA / Documentation. Closed and Dropped are terminal.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "field": "status",
+        "semantic_facets": [
+          "lifecycle"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.entity_lines.lead_deal_lendingtracker",
+      "source": "relationships",
+      "content": "Lead, Deal, LendingTracker, SyndicationTracker and AssetMonetisation rows join to Entity by entity_id=id. Lending, Syndication and AssetMonetisation may also join to Deal by deal_id=id when populated. A converted Lead joins Deal by converted_deal_id=id. Missing links stay missing.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/conversionService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.entity_lines.left_join_relationship",
+      "source": "relationships",
+      "content": "Use a left join when a relationship only adds display details to an already qualified primary cohort, so rows with missing optional links remain in the answer. Use an inner join only when the relationship is itself required by the question. These relationships pass named results; they do not authorize unseen rows.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/conversionService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.entity_dimensions.sector_climate_lens",
+      "source": "relationships",
+      "content": "Sector, climate lens and client geography are Entity attributes. A question that names a state, region or other geographic place uses the related Entity state unless the primary resource carries its own governed geography field or the question explicitly requests another geography.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.entity_dimensions.deal_lendingtracker_syndicationtracker",
+      "source": "relationships",
+      "content": "When a Deal, LendingTracker or SyndicationTracker question filters by company sector or state, join the primary row to Entity on entity_id=id and apply the predicate to entities.sector or entities.state. Never invent sector or state fields on Deal, LendingTracker or SyndicationTracker.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.entity_dimensions.missing_entity_link",
+      "source": "relationships",
+      "content": "A missing entity link or null Entity attribute is unassessable, not a match and not zero; retain and count that missing population when an exhaustive answer depends on it.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.live_book_overlap.company_live_own",
+      "source": "relationships",
+      "content": "A company live in both own-book lending and syndication is the intersection of distinct entity_id values from live LendingTracker rows and live parent SyndicationTracker rows. The ordinary live own-book family is Data Awaited, Diligence, Note Circulated, Sanctioned, Ready for Disbursement, compatibility value Disbursement Pending, and On Hold. Assess CP/CS Completed separately using recorded disbursement evidence and disclose unresolved rows; the stage alone does not establish a live facility.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts",
+          "packages/evam-backend-core/evam_backend_core/lifecycle.py",
+          "services/register/app/api/custom.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.live_book_overlap.live_parent_syndication",
+      "source": "relationships",
+      "content": "A live parent syndication row has a populated status other than Dropped, Withdrawn, Rejected, Sanctioned or Disbursed. This lifecycle family belongs specifically to SyndicationTracker.status. Apply each book's own family before intersecting, then join the resulting entity ids to Entity for canonical company names.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "resource": "syndication",
+        "field": "status",
+        "semantic_facets": [
+          "relationship",
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.live_book_overlap.transfer_deal_stages",
+      "source": "relationships",
+      "content": "Do not transfer Deal stages between these books and do not count multiple tracker rows for one Entity as multiple companies.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "lifecycle",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/pages/Dashboard/compute.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "relationships.lenders.syndicationlender_joins_parent",
+      "source": "relationships",
+      "content": "SyndicationLender joins its parent SyndicationTracker by syndication_id=id and may join Counterparty by counterparty_id=id. lender_name is retained for imported rows whose counterparty_id is absent. Never multiply a parent ticket amount by the number of lender rows when calculating client exposure.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "semantic_facets": [
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "terms.solar.solar_sector_family",
+      "source": "reference_vocabulary",
+      "content": "Solar is a sector-family term, not one fixed stored value or an ontology alias list. Ground it only to caller-visible Register Sector reference values whose authoritative label denotes the Solar family.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "vocabulary",
+          "dimension",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "GET /v1/ref"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "terms.solar.sector_belongs_entity",
+      "source": "reference_vocabulary",
+      "content": "Sector belongs to Entity; when another business-book record is primary, apply the sector predicate through its related Entity rather than inventing a sector field on that record. Do not invent a stored value or infer solar from remarks when a recorded sector is absent.",
+      "metadata": {
+        "planning": true,
+        "vocabulary": true,
+        "semantic_facets": [
+          "vocabulary",
+          "dimension",
+          "relationship"
+        ],
+        "sources": [
+          "services/register/app/core/enums.py",
+          "GET /v1/ref"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "execution.register_limits.register_list_reads",
+      "source": "register_contract",
+      "content": "Register list reads use opaque keyset cursors. Only declared equality filters may be pushed down. q performs resource-specific substring search. Register has no field projection. Numeric thresholds, date ranges, status families, negation, null handling, grouping, sorting and limiting execute over bounded caller-visible rows in deterministic host operations.",
+      "metadata": {
+        "planning": true,
+        "execution": true,
+        "semantic_facets": [
+          "execution"
+        ],
+        "sources": [
+          "services/register/app/api/crud_router.py",
+          "packages/evam-register-client/evam_register_client/client.py"
+        ],
+        "role": "invariant",
+        "audience": [
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "execution.dependent_reads.named_entities_search",
+      "source": "register_contract",
+      "content": "A named entities q search may resolve one company row, and a later read may use $company.id in an equality filter such as entity_id. The dependency must resolve to exactly one caller-visible row. Zero candidates produce VALUE_NOT_FOUND and multiple materially plausible candidates require clarification rather than an arbitrary selection.",
+      "metadata": {
+        "planning": true,
+        "execution": true,
+        "semantic_facets": [
+          "execution",
+          "relationship"
+        ],
+        "sources": [
+          "plans/architecture.md",
+          "plans/implementation.md"
+        ],
+        "role": "invariant",
+        "audience": [
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "governance.missing_data.primary_measure.nullable_selector_measure",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "A nullable selector or measure used as a predicate or aggregand has a population that is neither matching nor non-matching; count and disclose that unassessable population rather than dropping it, whether the field belongs to the primary resource or a joined resource.",
+      "metadata": {
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance",
+          "metric"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "governance.attribute_precedence.primary_resource_carries",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "When a primary resource carries its own governed attribute and a related Entity carries the same attribute, the primary resource field is the subject attribute when the question addresses that resource; use the related Entity attribute only when the question addresses the client or when the primary resource has no governed field.",
+      "metadata": {
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance",
+          "dimension",
+          "relationship"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "governance.lifecycle_default.lifecycle_family_narrows",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "A lifecycle family narrows a cohort when the user asks for that lifecycle or its live/terminal meaning; without such a request, include every caller-visible row of the selected book, including terminal and null statuses.",
+      "metadata": {
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance",
+          "lifecycle"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "governance.unavailable_business_criterion.request_defined_criterion",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "A request-defined criterion for which Register holds no field is unavailable, qualifies an otherwise answerable result, and is never treated as passed, failed, clear, or zero.",
+      "metadata": {
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "governance.existence_separate_from_measure.named_resolved_record",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "When a named, resolved record cohort can be counted but a requested measure is unavailable, answer the existence cohort separately and qualify the unavailable measure instead of discarding the cohort.",
+      "metadata": {
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance",
+          "metric"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "governance.client_choice_clarification.ask_clarification_unresolved",
+      "source": "plans/iteration-02/wave-02.md",
+      "content": "Ask for clarification only when unresolved meaning leaves a material business choice the client can answer naturally; authoritative data absence without such a choice is out of scope.",
+      "metadata": {
+        "role": "invariant",
+        "audience": [
+          "grounding",
+          "planning"
+        ],
+        "planning": true,
+        "governance": true,
+        "semantic_facets": [
+          "governance"
+        ],
+        "sources": [
+          "plans/iteration-02/wave-02.md"
+        ]
+      }
+    },
+    {
+      "id": "resources.entities.canonical_names",
+      "source": "entities",
+      "content": "Entity legal_name is the canonical company name while display_name is optional desk display text. State and location are separate geography fields. Promoter_group_code describes a group relationship but does not identify a promoter person. Entity.promoter_group_code represents company-group membership only. Register has no authoritative promoter-person field or governed promoter relationship between Entity and People. A request for a promoter person is therefore OUT_OF_SCOPE; Entity must not be joined to People to infer one.",
+      "metadata": {
+        "planning": true,
+        "relationship": true,
+        "governance": true,
+        "resource": "entities",
+        "semantic_facets": [
+          "resource",
+          "dimension",
+          "relationship",
+          "governance"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/entitiesService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.lending.amount_measure",
+      "source": "lending",
+      "content": "lending.amount_cr is the requested facility amount.",
+      "metadata": {
+        "planning": true,
+        "resource": "lending",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/lendingService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.syndication.parent_ticket_value",
+      "source": "syndication",
+      "content": "syndication.amount_cr is the parent ticket or ask value and may be null; a complete threshold answer discloses the caller-visible null-amount population separately.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/syndicationService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "resources.asset_monetisation.value_measure",
+      "source": "asset_monetisation",
+      "content": "asset_monetisation.indicative_value_cr is the desk indicative value in crore. Size_mw is a separate measure.",
+      "metadata": {
+        "planning": true,
+        "resource": "asset_monetisation",
+        "semantic_facets": [
+          "resource",
+          "book_scope",
+          "relationship",
+          "metric"
+        ],
+        "sources": [
+          "services/register/app/api/resources.py",
+          "services/register/app/schemas/resources.py",
+          "services/atlas/ui/src/services/assetMonService.ts"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "qualitative.syndication_lenders_last_chase_note.snapshot",
+      "source": "syndication_lenders",
+      "content": "syndication_lenders.last_chase_note is authorized qualitative evidence from the latest outbound chase, paired with chased_date. It is an attributed conversation snapshot, not the complete interaction history or independently verified fact. A note-less interaction clears the snapshot; blank text does not prove no contact. The separate note field is a manual remark, not a substitute for this snapshot. Select the cohort using structured fields, then analyze the authorized text with exact record citations and explicit missing coverage; never use substring filters as a proxy for qualitative meaning.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "last_chase_note",
+        "qualitative": true,
+        "semantic_facets": [
+          "resource",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/repositories/interactions.py",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    },
+    {
+      "id": "qualitative.syndication_lenders_last_reply_note.snapshot",
+      "source": "syndication_lenders",
+      "content": "syndication_lenders.last_reply_note is authorized qualitative evidence from the latest inbound lender reply, paired with response_date. It is an attributed conversation snapshot, not the complete interaction history or independently verified fact. A note-less interaction clears the snapshot; blank text does not prove no contact. The separate note field is a manual remark, not a substitute for this snapshot. Select the cohort using structured fields, then analyze the authorized text with exact record citations and explicit missing coverage; never use substring filters as a proxy for qualitative meaning.",
+      "metadata": {
+        "planning": true,
+        "resource": "syndication_lenders",
+        "field": "last_reply_note",
+        "qualitative": true,
+        "semantic_facets": [
+          "resource",
+          "dimension"
+        ],
+        "sources": [
+          "services/register/app/repositories/interactions.py",
+          "services/register/app/schemas/resources.py"
+        ],
+        "role": "semantic",
+        "audience": [
+          "grounding",
+          "planning"
+        ]
+      }
+    }
+  ],
+  "claims_manifest": {
+    "source_version": "ontology-v1",
+    "id_scheme": "parent-derived semantic child ids",
+    "invariant_granularity": "The six original system-wide invariant parents and the five Wave 2 cross-resource governance rules remain grouped as invariant blobs because they bypass ranking; splitting them would add no retrieval precision and would increase unconditional prompt payload without changing reach.",
+    "removals": [
+      {
+        "source_parent": "resources.entities",
+        "source_text": "q searches legal_name, code, display_name and CIN by substring.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.entities",
+        "source_text": "Equality filters are sector, lens, register_status, entity_type, state, promoter_group_code and code.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.people",
+        "source_text": "q searches name, full_name and email.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.people",
+        "source_text": "Equality filters are role and inactive.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.counterparties",
+        "source_text": "q searches name and short_name.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.counterparties",
+        "source_text": "Equality filters are counterparty_type and is_active.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.leads",
+        "source_text": "q searches company, contact, rm and notes.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.leads",
+        "source_text": "Equality filters are status, temperature, sector, rm, source, entity_id and converted_deal_id.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.deals",
+        "source_text": "q searches code, rm, analyst and remarks.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.deals",
+        "source_text": "Equality filters are product_type, stage, temperature, is_lending, is_syndication, is_asset_mon, entity_id, rm and code.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "q searches tracker_no, rm and remarks.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "Equality filters are stage, pending_with, entity_id, deal_id and rm.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "amount_cr is requested facility amount.",
+        "reason": "Superseded by the restored durable amount_cr meaning claim."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "analyst is the assigned analyst.",
+        "reason": "Business meaning was not retained in the current split; requires a future claim review."
+      },
+      {
+        "source_parent": "resources.syndication",
+        "source_text": "q searches tracker_no, remarks and toi.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.syndication",
+        "source_text": "Equality filters are status, priority, entity_id, deal_id, rm and pending_with.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.syndication_lenders",
+        "source_text": "q searches lender_name and note.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.syndication_lenders",
+        "source_text": "Equality filters are status, syndication_id, counterparty_id and is_existing.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "governance.auxiliary_and_bottleneck_evidence",
+        "source_text": "Register does not expose an AEGIS or adverse-media clearance field for a syndication readiness check.",
+        "reason": "Case-shaped AEGIS wording deliberately generalized to the durable unavailable-business-criterion invariant."
+      },
+      {
+        "source_parent": "resources.asset_monetisation",
+        "source_text": "q searches investor and notes.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.asset_monetisation",
+        "source_text": "Equality filters are status, nature, entity_id, deal_id and state.",
+        "reason": "Read-mechanics contract retired from ontology; enforced by generated resource contracts."
+      },
+      {
+        "source_parent": "resources.asset_monetisation",
+        "source_text": "indicative_value_cr is the desk's indicative value in crore and numeric thresholds run in host code.",
+        "reason": "Host execution mechanics retired from ontology; durable measure meaning remains."
+      },
+      {
+        "source_parent": "lifecycle.asset_monetisation",
+        "source_text": "Unless the user explicitly requests live-only pipeline, a threshold or geography question includes every caller-visible asset row and preserves terminal and null statuses.",
+        "reason": "Scenario-shaped asset-specific inclusion wording replaced by the cross-book lifecycle default invariant."
+      },
+      {
+        "source_parent": "relationships.entity_dimensions",
+        "source_text": "A question that names a state, region or other geographic place uses the related Entity state unless it explicitly requests another geography.",
+        "reason": "Contradictory precedence rule replaced by the primary-resource-governed-attribute invariant."
+      },
+      {
+        "source_parent": "governance.auxiliary_and_bottleneck_evidence",
+        "source_text": "A request-defined criterion for which Register holds no field is unavailable, qualifies an otherwise answerable result, and is never treated as clear or failed.",
+        "reason": "Duplicate removed; the general unavailable_business_criterion passage is canonical."
+      },
+      {
+        "source_parent": "governance.auxiliary_and_bottleneck_evidence",
+        "source_text": "When request-defined readiness criteria are otherwise answerable, that auxiliary clearance remains unavailable and qualifies the main answer rather than invalidating it; unavailable never means clear or failed.",
+        "reason": "Duplicate removed; the general unavailable_business_criterion passage is canonical."
+      },
+      {
+        "source_parent": "metrics.lending_sanctioned",
+        "source_text": "Own-book sanctioned exposure includes LendingTracker stages Sanctioned, Documentation and Disbursed for compatibility with governed imported vocabulary.",
+        "reason": "The family was restored as the canonical lifecycle.lending.sanctioned_family passage; the metric now refers to that definition."
+      },
+      {
+        "source_parent": "resources.deals",
+        "source_text": "The Deal funnel stages New Inquiry, In Screening, In Pipeline, On Hold, Screened Out, Closed Won and Closed Lost are not Lending or Syndication statuses.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "lifecycle.deals",
+        "source_text": "Screened Out, Closed Won and Closed Lost are terminal/excluded.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "stage_updated_at supports stage-ageing; missing dates cannot be aged.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "lifecycle.lending",
+        "source_text": "Terminal own-book facilities are Disbursed, Rejected and Dropped-like imported terminal values.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "lifecycle.lending",
+        "source_text": "Non-terminal own-book facilities are the complement of that terminal family among caller-visible LendingTracker rows.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "lifecycle.lending",
+        "source_text": "The current ordinary active set is Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, Disbursement Pending and On Hold when present.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "lifecycle.syndication_lenders",
+        "source_text": "Individual lender progression is Identified, IM Circulated or legacy Docs Pending, Queries Received, IP Received, then Sanctioned or Declined.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "metrics.lender_activity",
+        "source_text": "Sanctioned is approved/won, Declined is declined/lost, and every other populated lender progression status is active.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "metrics.lender_decisions",
+        "source_text": "For an explicitly named lender, approved or sanctioned business means that lender's individual SyndicationLender submission rows with status=Sanctioned, and declined means status=Declined; do not introduce own-book LendingTracker as an alternative unless the user explicitly requests own-book lending.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "metrics.lender_approach",
+        "source_text": "No submission is different from no active submission: Sanctioned and Declined rows still prove an approach.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "relationships.live_book_overlap",
+        "source_text": "The live own-book family is Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, compatibility value Disbursement Pending, and On Hold.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      },
+      {
+        "source_parent": "resources.lending",
+        "source_text": "pending_with records the party with whom the current action is pending; a phrase such as pending with the client refers to pending_with=Client rather than a stage containing the word Pending.",
+        "reason": "Superseded by the current Register lifecycle and recorded-date contracts."
+      }
+    ],
+    "parents": {
+      "governance.read_only": [
+        {
+          "child_id": "governance.read_only.chitti_read_request",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.read_only:claim-1",
+              "text": "Chitti is read-only.",
+              "claim_key": "governance.read_only.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:governance.read_only:claim-2",
+              "text": "It can request only fixed Register GET resources under the delegated caller identity.",
+              "claim_key": "governance.read_only.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:governance.read_only:claim-3",
+              "text": "Create, update, approve, delete, restore, import, and other mutations are OUT_OF_SCOPE and must produce no Register request.",
+              "claim_key": "governance.read_only.claim_3"
+            }
+          ],
+          "origin_parent": "governance.read_only"
+        }
+      ],
+      "governance.missing_data": [
+        {
+          "child_id": "governance.missing_data.complete_caller_visible",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.missing_data:claim-1",
+              "text": "A complete caller-visible zero result, a null field, an unavailable field, an authorization denial, a partial traversal, and a Register dependency failure are different outcomes.",
+              "claim_key": "governance.missing_data.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:governance.missing_data:claim-2",
+              "text": "Do not infer missing facts from remarks, sectors, external knowledge, record order, or a prior assistant answer.",
+              "claim_key": "governance.missing_data.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:governance.missing_data:claim-3",
+              "text": "The Ledger has promoter_group_code but no authoritative promoter-person field.",
+              "claim_key": "governance.missing_data.claim_3"
+            }
+          ],
+          "origin_parent": "governance.missing_data"
+        }
+      ],
+      "governance.unsupported_dimensions": [
+        {
+          "child_id": "governance.unsupported_dimensions.requested_monetary_split",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-1",
+              "text": "A requested monetary split needs the dimension on the amount-bearing resource or an explicitly governed relationship that authorizes transferring it.",
+              "claim_key": "governance.unsupported_dimensions.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-2",
+              "text": "LendingTracker and SyndicationTracker do not expose a climate lens.",
+              "claim_key": "governance.unsupported_dimensions.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-3",
+              "text": "Lead, Deal or Entity lens must not be substituted for own-book or off-book monetary exposure merely because entity_id or an optional deal_id exists.",
+              "claim_key": "governance.unsupported_dimensions.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-4",
+              "text": "Without an authoritative amount-bearing Lens relationship, a Mitigation-versus-Adaptation exposure split is unavailable and OUT_OF_SCOPE.",
+              "claim_key": "governance.unsupported_dimensions.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-5",
+              "text": "Likewise, company-group exposure requires caller-visible Entity.promoter_group_code membership; names, remarks and workbook-only disclosures never authorize a group combination.",
+              "claim_key": "governance.unsupported_dimensions.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:governance.unsupported_dimensions:claim-6",
+              "text": "If that authoritative membership is absent, the group total is unavailable and OUT_OF_SCOPE rather than a request for an internal identifier.",
+              "claim_key": "governance.unsupported_dimensions.claim_6"
+            }
+          ],
+          "origin_parent": "governance.unsupported_dimensions"
+        }
+      ],
+      "books.overview": [
+        {
+          "child_id": "books.overview.ledger_work_represented",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.overview:claim-1",
+              "text": "Ledger work is represented by four distinct business books: the commercial origination funnel in Deal, Evam own-book lending in LendingTracker, off-book/platform financing in SyndicationTracker, and asset sale/advisory work in AssetMonetisation.",
+              "claim_key": "books.overview.claim_1"
+            }
+          ],
+          "origin_parent": "books.overview"
+        },
+        {
+          "child_id": "books.overview.user_explicitly_names",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.overview:claim-2",
+              "text": "When the user explicitly names books, the ordinary unit is each named book's own record; deduplicate by client Entity or follow links to commercial Deal records only when requested.",
+              "claim_key": "books.overview.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:books.overview:claim-3",
+              "text": "Lead is separate pre-deal intake, not another deal book; an unconverted Lead has not reached status Converted and remains a separate Lead result.",
+              "claim_key": "books.overview.claim_3"
+            }
+          ],
+          "origin_parent": "books.overview"
+        },
+        {
+          "child_id": "books.overview.master_resources_entity",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.overview:claim-4",
+              "text": "Master resources such as Entity, Person and Counterparty describe parties and staff rather than work books.",
+              "claim_key": "books.overview.claim_4"
+            }
+          ],
+          "origin_parent": "books.overview"
+        }
+      ],
+      "books.boundaries": [
+        {
+          "child_id": "books.boundaries.business_book_own",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.boundaries:claim-1",
+              "text": "Each business book has its own resource, lifecycle field and measures.",
+              "claim_key": "books.boundaries.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:books.boundaries:claim-2",
+              "text": "Deal.stage belongs only to the commercial funnel; LendingTracker.stage belongs only to own-book credit; SyndicationTracker.status belongs only to off-book/platform financing; AssetMonetisation.status belongs only to asset sale/advisory.",
+              "claim_key": "books.boundaries.claim_2"
+            }
+          ],
+          "origin_parent": "books.boundaries"
+        },
+        {
+          "child_id": "books.boundaries.deal_product_flags",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.boundaries:claim-3",
+              "text": "Deal product flags and optional deal_id links relate records but do not merge these books or make one lifecycle valid for another.",
+              "claim_key": "books.boundaries.claim_3"
+            }
+          ],
+          "origin_parent": "books.boundaries"
+        }
+      ],
+      "books.partner": [
+        {
+          "child_id": "books.partner.partner_book_off",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.partner:claim-1",
+              "text": "Partner book, off-book and platform financing refer to SyndicationTracker rather than LendingTracker.",
+              "claim_key": "books.partner.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:books.partner:claim-2",
+              "text": "Partnership is a classification within that book when SyndicationTracker.line records Partnership; it is not a fifth business book.",
+              "claim_key": "books.partner.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:books.partner:claim-3",
+              "text": "Do not invent a group, lender or partnership relationship from a company name or example.",
+              "claim_key": "books.partner.claim_3"
+            }
+          ],
+          "origin_parent": "books.partner"
+        }
+      ],
+      "books.ambiguity": [
+        {
+          "child_id": "books.ambiguity.unqualified_work_nouns",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.ambiguity:claim-1",
+              "text": "Unqualified work nouns such as deal, case, book, pipeline or workload do not by themselves select one business book when more than one book remains materially plausible.",
+              "claim_key": "books.ambiguity.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:books.ambiguity:claim-2",
+              "text": "A lifecycle adjective such as active also has no cross-book status family.",
+              "claim_key": "books.ambiguity.claim_2"
+            }
+          ],
+          "origin_parent": "books.ambiguity"
+        },
+        {
+          "child_id": "books.ambiguity.preserve_supported_book",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.ambiguity:claim-3",
+              "text": "Preserve the supported book alternatives and ask the user which book they mean instead of silently choosing or combining books.",
+              "claim_key": "books.ambiguity.claim_3"
+            }
+          ],
+          "origin_parent": "books.ambiguity"
+        }
+      ],
+      "books.qualifiers": [
+        {
+          "child_id": "books.qualifiers.explicit_book_qualifiers",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.qualifiers:claim-1",
+              "text": "Explicit book qualifiers resolve otherwise generic work language: commercial, origination or deal funnel selects Deal; own-book, balance-sheet or lending selects LendingTracker; partner, off-book, platform or syndication selects SyndicationTracker; asset sale, asset advisory or asset monetisation selects AssetMonetisation.",
+              "claim_key": "books.qualifiers.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:books.qualifiers:claim-2",
+              "text": "Lead or pre-deal selects Lead.",
+              "claim_key": "books.qualifiers.claim_2"
+            }
+          ],
+          "origin_parent": "books.qualifiers"
+        },
+        {
+          "child_id": "books.qualifiers.explicit_qualifier_scopes",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.qualifiers:claim-3",
+              "text": "An explicit qualifier scopes lifecycle, relationship, assignment and metric terms throughout the same question to the selected resource; a lifecycle word used in another book does not remain an alternative after that scope is established.",
+              "claim_key": "books.qualifiers.claim_3"
+            }
+          ],
+          "origin_parent": "books.qualifiers"
+        },
+        {
+          "child_id": "books.qualifiers.qualifier_authorize_values",
+          "claims": [
+            {
+              "source_id": "ontology-v1:books.qualifiers:claim-4",
+              "text": "A qualifier does not authorize values absent from the selected resource's ontology passage or change the named book's record grain.",
+              "claim_key": "books.qualifiers.claim_4"
+            }
+          ],
+          "origin_parent": "books.qualifiers"
+        }
+      ],
+      "resources.entities": [
+        {
+          "child_id": "resources.entities.entity_company_client",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.entities:claim-1",
+              "text": "Entity is the company/client master at Register GET resource entities.",
+              "claim_key": "resources.entities.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.entities:claim-2",
+              "text": "A null entities.sector value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.entities.claim_2"
+            }
+          ],
+          "origin_parent": "resources.entities"
+        },
+        {
+          "child_id": "resources.entities.null_entities_state",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.entities:claim-3",
+              "text": "A null entities.state value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.entities.claim_3"
+            }
+          ],
+          "origin_parent": "resources.entities"
+        }
+      ],
+      "resources.people": [
+        {
+          "child_id": "resources.people.person_employee_directory",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.people:claim-1",
+              "text": "Person is the employee directory at Register GET resource people.",
+              "claim_key": "resources.people.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.people:claim-2",
+              "text": "Tracker rm and analyst values use the canonical People.name handle; People.full_name is display text. geography, sectors, started_on and reports_to describe the employee, not a deal geography or lifecycle.",
+              "claim_key": "resources.people.claim_2"
+            }
+          ],
+          "origin_parent": "resources.people"
+        }
+      ],
+      "resources.counterparties": [
+        {
+          "child_id": "resources.counterparties.counterparty_lender_investor",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.counterparties:claim-1",
+              "text": "Counterparty is the lender, investor, offtaker or partner directory at Register GET resource counterparties.",
+              "claim_key": "resources.counterparties.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.counterparties:claim-2",
+              "text": "Actual lender submissions and allocations are syndication_lenders rows.",
+              "claim_key": "resources.counterparties.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:resources.counterparties:claim-3",
+              "text": "ticket_min_cr and ticket_max_cr are directory preferences, not actual deal exposure.",
+              "claim_key": "resources.counterparties.claim_3"
+            }
+          ],
+          "origin_parent": "resources.counterparties"
+        }
+      ],
+      "resources.leads": [
+        {
+          "child_id": "resources.leads.unconverted_lead_pre",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.leads:claim-1",
+              "text": "An unconverted Lead is a pre-deal opportunity at Register GET resource leads whose status is not Converted; it remains a Lead result rather than a Deal record.",
+              "claim_key": "resources.leads.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.leads:claim-2",
+              "text": "Active means a current pre-deal lead.",
+              "claim_key": "resources.leads.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:resources.leads:claim-3",
+              "text": "Converted means the lead continued into a Deal, with converted_deal_id as the governed conversion link.",
+              "claim_key": "resources.leads.claim_3"
+            }
+          ],
+          "origin_parent": "resources.leads"
+        },
+        {
+          "child_id": "resources.leads.unconverted_lead_cohort",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.leads:claim-4",
+              "text": "An unconverted-lead cohort does not silently treat Dropped as Active; retain status when reporting that cohort. last_interaction_date supports stale-lead ageing; null dates remain unageable.",
+              "claim_key": "resources.leads.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:resources.leads:claim-5",
+              "text": "A null leads.sector value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.leads.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:resources.leads:claim-6",
+              "text": "status is the Lead lifecycle Active, Converted or Dropped; temperature Hot, Warm or Cold is separate.",
+              "claim_key": "resources.leads.claim_6"
+            }
+          ],
+          "origin_parent": "resources.leads"
+        }
+      ],
+      "resources.deals": [
+        {
+          "child_id": "resources.deals.deal_commercial_origination",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.deals:claim-1",
+              "text": "Deal is the commercial origination funnel at Register GET resource deals.",
+              "claim_key": "resources.deals.claim_1"
+            }
+          ],
+          "origin_parent": "resources.deals"
+        },
+        {
+          "child_id": "resources.deals.commercial_origination_deal",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.deals:claim-2",
+              "text": "Commercial, origination or deal-funnel wording selects it; the generic word deal alone does not select it when another business book remains plausible. rm is the commercial relationship manager responsible for the Deal, while analyst is a separate assignment.",
+              "claim_key": "resources.deals.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:resources.deals:claim-3",
+              "text": "One deal may have several product flags.",
+              "claim_key": "resources.deals.claim_3"
+            }
+          ],
+          "origin_parent": "resources.deals"
+        },
+        {
+          "child_id": "resources.deals.deal_funnel_stages",
+          "claims": [
+            {
+              "source_id": "register-current:resources.deals.deal_funnel_stages",
+              "claim_key": "resources.deals.deal_funnel_stages.current_contract",
+              "text": "The Deal funnel stages New Inquiry, In Screening, In Pipeline, On Hold, Screened Out, Closed Won, Closed Lost and Dropped are not Lending or Syndication statuses."
+            }
+          ],
+          "origin_parent": "resources.deals"
+        }
+      ],
+      "lifecycle.deals": [
+        {
+          "child_id": "lifecycle.deals.desk_questions_explicitly",
+          "claims": [
+            {
+              "source_id": "register-current:lifecycle.deals.desk_questions_explicitly",
+              "claim_key": "lifecycle.deals.desk_questions_explicitly.current_contract",
+              "text": "For desk questions explicitly asking for live commercial deals, live Deal funnel rows are New Inquiry, In Screening, In Pipeline and On Hold. Screened Out, Closed Won, Closed Lost and Dropped are terminal/excluded. This definition applies only to commercial Deal.stage and must not be reused for product trackers."
+            }
+          ],
+          "origin_parent": "lifecycle.deals"
+        }
+      ],
+      "resources.lending": [
+        {
+          "child_id": "resources.lending.lendingtracker_evam_own",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.lending:claim-1",
+              "text": "LendingTracker is Evam own-book lending at Register GET resource lending.",
+              "claim_key": "resources.lending.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.lending:claim-2",
+              "text": "Rows carry entity_id but no company name, so list-back uses an entities join on lending.entity_id=entities.id and entities.legal_name is the canonical company label.",
+              "claim_key": "resources.lending.claim_2"
+            }
+          ],
+          "origin_parent": "resources.lending"
+        },
+        {
+          "child_id": "resources.lending.human_readable_lending",
+          "claims": [
+            {
+              "source_id": "register-current:resources.lending.human_readable_lending",
+              "claim_key": "resources.lending.human_readable_lending.current_contract",
+              "text": "A human-readable Lending case list retains tracker_no, stage and pending_with alongside the company label so that identity, lifecycle and the requested pending-party predicate remain visible. lending.rm is the relationship-manager assignment and lending.analyst is the assigned analyst. Both fields store canonical People.name values, but they represent different business relationships and are not interchangeable. pending_with records the party with whom the current action is pending; pending with the client refers to pending_with=Client rather than a stage containing the word Pending. A null lending.amount_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero. stage_updated_at supports comparisons against the recorded stage date; missing dates cannot be aged. Register may backfill this date from updated_at or created_at and does not expose that provenance in the row. Do not describe elapsed time from this field as a verified duration in stage or invent a date when it is missing."
+            }
+          ],
+          "origin_parent": "resources.lending"
+        }
+      ],
+      "lifecycle.lending": [
+        {
+          "child_id": "lifecycle.lending.lending_stages_distinct",
+          "claims": [
+            {
+              "source_id": "register-current:lifecycle.lending.lending_stages_distinct",
+              "claim_key": "lifecycle.lending.lending_stages_distinct.current_contract",
+              "text": "Lending stages are a distinct credit lifecycle. Disbursed and Rejected are terminal stage labels. CP/CS Completed records settlement of conditions subsequent and can occur before or after disbursement; it does not by itself establish whether the facility is funded or active. Use recorded disbursement_date, disbursed_amount and stage_history as supporting evidence for a CP/CS Completed row; if they do not establish the requested cohort, disclose it as unassessable rather than assigning it to active or terminal business."
+            }
+          ],
+          "origin_parent": "lifecycle.lending"
+        },
+        {
+          "child_id": "lifecycle.lending.sanctioned_family",
+          "claims": [
+            {
+              "source_id": "register-current:lifecycle.lending.sanctioned_family",
+              "claim_key": "lifecycle.lending.sanctioned_family.current_contract",
+              "text": "The sanctioned own-book family includes LendingTracker stages Sanctioned, Ready for Disbursement, CP/CS Completed and Disbursed, including the imported compatibility value Disbursement Pending. Sanctioned exposure is distinct from actual disbursed amount and from generic Deal statuses."
+            }
+          ],
+          "origin_parent": "lifecycle.lending"
+        },
+        {
+          "child_id": "lifecycle.lending.current_ordinary_active",
+          "claims": [
+            {
+              "source_id": "register-current:lifecycle.lending.current_ordinary_active",
+              "claim_key": "lifecycle.lending.current_ordinary_active.current_contract",
+              "text": "The ordinary active stage family is Data Awaited, Diligence, Note Circulated, Sanctioned, Ready for Disbursement, Disbursement Pending and On Hold when present. CP/CS Completed needs separate assessment from recorded disbursement evidence; it must not be included automatically in active facilities. Sanctioned exposure uses the separately defined sanctioned family and never a generic deal status."
+            }
+          ],
+          "origin_parent": "lifecycle.lending"
+        }
+      ],
+      "qualitative.lending_remarks": [
+        {
+          "child_id": "qualitative.lending_remarks.exact_caller_visible",
+          "claims": [
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-1",
+              "text": "For an exact caller-visible LendingTracker cohort, lending.remarks is authorized qualitative evidence for the case's recorded explanation or note.",
+              "claim_key": "qualitative.lending_remarks.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-2",
+              "text": "Remarks are attributed statements, not independently verified facts.",
+              "claim_key": "qualitative.lending_remarks.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-3",
+              "text": "Predicates that require interpreting those remarks are qualitative meanings over evidence, not stored classifications.",
+              "claim_key": "qualitative.lending_remarks.claim_3"
+            }
+          ],
+          "origin_parent": "qualitative.lending_remarks"
+        },
+        {
+          "child_id": "qualitative.lending_remarks.recurring_themes_analytical",
+          "claims": [
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-4",
+              "text": "Recurring themes are analytical groupings rather than stored classifications.",
+              "claim_key": "qualitative.lending_remarks.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-5",
+              "text": "Missing or blank remarks, pending or WIP text, contradictory notes, and bare terminal labels remain explicit in coverage and caveats.",
+              "claim_key": "qualitative.lending_remarks.claim_5"
+            }
+          ],
+          "origin_parent": "qualitative.lending_remarks"
+        },
+        {
+          "child_id": "qualitative.lending_remarks.qualitative_meanings_analyzed",
+          "claims": [
+            {
+              "source_id": "ontology-v1:qualitative.lending_remarks:claim-6",
+              "text": "Qualitative meanings must be analyzed across the exact cohort rather than converted to literal substring filters; support counts and coverage are computed by host code from validated record citations.",
+              "claim_key": "qualitative.lending_remarks.claim_6"
+            }
+          ],
+          "origin_parent": "qualitative.lending_remarks"
+        }
+      ],
+      "metrics.cross_book_clients": [
+        {
+          "child_id": "metrics.cross_book_clients.work_assignment_resource",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-1",
+              "text": "Work assignment is resource- and role-specific.",
+              "claim_key": "metrics.cross_book_clients.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-2",
+              "text": "Commercial Deal relationship-manager work uses Deal.rm; explicitly requested commercial analyst work uses Deal.analyst.",
+              "claim_key": "metrics.cross_book_clients.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-3",
+              "text": "Own-book lending, syndication and asset-monetisation analyst work uses each tracker's analyst field.",
+              "claim_key": "metrics.cross_book_clients.claim_3"
+            }
+          ],
+          "origin_parent": "metrics.cross_book_clients"
+        },
+        {
+          "child_id": "metrics.cross_book_clients.staff_identity_role",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-4",
+              "text": "A staff identity, role or matching assignment does not itself select a business book when the question leaves the book unqualified.",
+              "claim_key": "metrics.cross_book_clients.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-5",
+              "text": "A distinct-client question unions qualifying entity_id values across the requested books and counts each Entity once; a product-assignment question keeps tracker rows separate.",
+              "claim_key": "metrics.cross_book_clients.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-6",
+              "text": "Staff handles ground through People.name.",
+              "claim_key": "metrics.cross_book_clients.claim_6"
+            }
+          ],
+          "origin_parent": "metrics.cross_book_clients"
+        },
+        {
+          "child_id": "metrics.cross_book_clients.equate_relationship_manager",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.cross_book_clients:claim-7",
+              "text": "Do not equate relationship-manager and analyst assignments, and include commercial Deal assignments only when the user requests that funnel.",
+              "claim_key": "metrics.cross_book_clients.claim_7"
+            }
+          ],
+          "origin_parent": "metrics.cross_book_clients"
+        }
+      ],
+      "metrics.lending_sanctioned": [
+        {
+          "child_id": "metrics.lending_sanctioned.own_book_sanctioned",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lending_sanctioned:claim-1",
+              "text": "Own-book sanctioned exposure uses the separately defined sanctioned LendingTracker family and counts facilities whose amount_cr is available.",
+              "claim_key": "metrics.lending_sanctioned.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lending_sanctioned:claim-2",
+              "text": "Count facilities and sum amount_cr with host operations.",
+              "claim_key": "metrics.lending_sanctioned.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lending_sanctioned:claim-3",
+              "text": "Operational Register reads exclude reconciliation-required rows; null amounts stay null and are reported rather than invented.",
+              "claim_key": "metrics.lending_sanctioned.claim_3"
+            }
+          ],
+          "origin_parent": "metrics.lending_sanctioned"
+        }
+      ],
+      "resources.syndication": [
+        {
+          "child_id": "resources.syndication.syndicationtracker_platform_off",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-1",
+              "text": "SyndicationTracker is platform, off-book and partner financing at Register GET resource syndication.",
+              "claim_key": "resources.syndication.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-2",
+              "text": "An unqualified syndication row, syndication ticket or syndication ask refers to this parent tracker.",
+              "claim_key": "resources.syndication.claim_2"
+            }
+          ],
+          "origin_parent": "resources.syndication"
+        },
+        {
+          "child_id": "resources.syndication.rows_carry_entity",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-3",
+              "text": "Rows carry entity_id but no company name, so a human-readable list left joins entities on syndication.entity_id=entities.id and uses entities.legal_name as the canonical company label while preserving unmatched parent rows. line distinguishes Partnership when recorded.",
+              "claim_key": "resources.syndication.claim_3"
+            }
+          ],
+          "origin_parent": "resources.syndication"
+        },
+        {
+          "child_id": "resources.syndication.row_embed_lenders",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-4",
+              "text": "Each row may embed lenders, while the flat syndication_lenders resource supports explicitly requested individual lender-row analysis.",
+              "claim_key": "resources.syndication.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-5",
+              "text": "A null syndication.amount_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.syndication.claim_5"
+            }
+          ],
+          "origin_parent": "resources.syndication"
+        }
+      ],
+      "lifecycle.syndication": [
+        {
+          "child_id": "lifecycle.syndication.syndication_status_distinct",
+          "claims": [
+            {
+              "source_id": "ontology-v1:lifecycle.syndication:claim-1",
+              "text": "Syndication status is distinct from Deal and Lending lifecycles.",
+              "claim_key": "lifecycle.syndication.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:lifecycle.syndication:claim-2",
+              "text": "Dropped, Withdrawn and Rejected are terminal lost statuses.",
+              "claim_key": "lifecycle.syndication.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:lifecycle.syndication:claim-3",
+              "text": "Sanctioned and Disbursed are closed/won statuses.",
+              "claim_key": "lifecycle.syndication.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:lifecycle.syndication:claim-4",
+              "text": "Other populated proposal statuses form the live platform pipeline.",
+              "claim_key": "lifecycle.syndication.claim_4"
+            }
+          ],
+          "origin_parent": "lifecycle.syndication"
+        },
+        {
+          "child_id": "lifecycle.syndication.known_value_totals",
+          "claims": [
+            {
+              "source_id": "ontology-v1:lifecycle.syndication:claim-5",
+              "text": "Known-value totals must disclose null amount_cr rows and cannot claim a complete monetary total when amounts are missing.",
+              "claim_key": "lifecycle.syndication.claim_5"
+            }
+          ],
+          "origin_parent": "lifecycle.syndication"
+        }
+      ],
+      "semantics.syndication_mandate": [
+        {
+          "child_id": "semantics.syndication_mandate.syndicationtracker_mandate_status",
+          "claims": [
+            {
+              "source_id": "ontology-v1:semantics.syndication_mandate:claim-1",
+              "text": "SyndicationTracker.mandate_status is a composite recorded value that may encode sent, signed, syndication and partnership information.",
+              "claim_key": "semantics.syndication_mandate.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:semantics.syndication_mandate:claim-2",
+              "text": "Preserve its stored value and do not normalize it to an invented Executed status.",
+              "claim_key": "semantics.syndication_mandate.claim_2"
+            }
+          ],
+          "origin_parent": "semantics.syndication_mandate"
+        },
+        {
+          "child_id": "semantics.syndication_mandate.lender_outreach_progress",
+          "claims": [
+            {
+              "source_id": "ontology-v1:semantics.syndication_mandate:claim-3",
+              "text": "Lender outreach or progress is established by related named SyndicationLender rows joined through syndication_id, not by assuming the parent composite mandate value proves outreach.",
+              "claim_key": "semantics.syndication_mandate.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:semantics.syndication_mandate:claim-4",
+              "text": "Readiness criteria are supplied by the request; Chitti does not impose a permanent readiness rule.",
+              "claim_key": "semantics.syndication_mandate.claim_4"
+            }
+          ],
+          "origin_parent": "semantics.syndication_mandate"
+        }
+      ],
+      "governance.caller_visible_scope": [
+        {
+          "child_id": "governance.caller_visible_scope.phrases_records_visible",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.caller_visible_scope:claim-1",
+              "text": "Phrases such as all records visible to me, visible to this desk, or in my current view select the existing caller-authorized Register view.",
+              "claim_key": "governance.caller_visible_scope.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:governance.caller_visible_scope:claim-2",
+              "text": "They do not assert that records are owned by or assigned to a named employee or desk, and they require no identity lookup.",
+              "claim_key": "governance.caller_visible_scope.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:governance.caller_visible_scope:claim-3",
+              "text": "By contrast, explicitly assigned to, owned by, or managed by wording requests a governed assignment relationship and must bind the relevant person or stored assignment value.",
+              "claim_key": "governance.caller_visible_scope.claim_3"
+            }
+          ],
+          "origin_parent": "governance.caller_visible_scope"
+        }
+      ],
+      "resources.syndication_lenders": [
+        {
+          "child_id": "resources.syndication_lenders.syndicationlender_individual_lender",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication_lenders:claim-1",
+              "text": "SyndicationLender is an individual lender submission/allocation at read-only Register GET resource syndication_lenders.",
+              "claim_key": "resources.syndication_lenders.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:resources.syndication_lenders:claim-2",
+              "text": "It is selected when the question explicitly asks for lender rows, submissions, allocations or individual lender progression, not merely because a parent SyndicationTracker row may contain lenders.",
+              "claim_key": "resources.syndication_lenders.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:resources.syndication_lenders:claim-4",
+              "text": "amount_cr is the lender-row amount, not the parent syndication ticket/ask amount.",
+              "claim_key": "resources.syndication_lenders.claim_4"
+            },
+            {
+              "source_id": "ontology-v1:resources.syndication_lenders:claim-5",
+              "text": "since, response_date and chased_date are different dates.",
+              "claim_key": "resources.syndication_lenders.claim_5"
+            }
+          ],
+          "origin_parent": "resources.syndication_lenders"
+        },
+        {
+          "child_id": "resources.syndication_lenders.lender_row_joins",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication_lenders:claim-3",
+              "text": "A lender row joins its parent through syndication_id.",
+              "claim_key": "resources.syndication_lenders.claim_3"
+            }
+          ],
+          "origin_parent": "resources.syndication_lenders"
+        }
+      ],
+      "lifecycle.syndication_lenders": [
+        {
+          "child_id": "lifecycle.syndication_lenders.individual_lender_progression",
+          "claims": [
+            {
+              "source_id": "register-current:lifecycle.syndication_lenders.individual_lender_progression",
+              "claim_key": "lifecycle.syndication_lenders.individual_lender_progression.current_contract",
+              "text": "Individual lender progression includes Identified, IM Under Preparation, IM Circulated or legacy Docs Pending, Queries Received, IP Received, Sanctioned and Disbursed. On Hold pauses a live submission; Declined and Dropped are terminal lost outcomes, and Sanctioned can progress to Disbursed or Dropped. SyndicationLender.status is the progression of one lender submission and is never the parent mandate lifecycle. It is separate from the parent SyndicationTracker.status. Missing lender names, dates or amounts remain missing and must not be converted into zero activity or elapsed time without an explicit definition."
+            }
+          ],
+          "origin_parent": "lifecycle.syndication_lenders"
+        }
+      ],
+      "governance.auxiliary_and_bottleneck_evidence": [
+        {
+          "child_id": "governance.auxiliary_and_bottleneck_evidence.structural_bottleneck_live",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.auxiliary_and_bottleneck_evidence:claim-3",
+              "text": "A structural bottleneck such as a live parent syndication row with no related named SyndicationLender outreach is itself a supported main answer and may be reported deterministically.",
+              "claim_key": "governance.auxiliary_and_bottleneck_evidence.claim_3"
+            }
+          ],
+          "origin_parent": "governance.auxiliary_and_bottleneck_evidence"
+        },
+        {
+          "child_id": "governance.auxiliary_and_bottleneck_evidence.if_lender_since",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.auxiliary_and_bottleneck_evidence:claim-4",
+              "text": "If lender since or response dates are missing, elapsed-time ordering is an unavailable auxiliary measure: preserve the structural bottleneck answer, disclose the missing dates, and do not invent an elapsed ranking.",
+              "claim_key": "governance.auxiliary_and_bottleneck_evidence.claim_4"
+            }
+          ],
+          "origin_parent": "governance.auxiliary_and_bottleneck_evidence"
+        }
+      ],
+      "metrics.lender_activity": [
+        {
+          "child_id": "metrics.lender_activity.lender_activity_measured",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_activity:claim-1",
+              "text": "Lender activity is measured from individual named SyndicationLender submission rows, not parent asks or Counterparty preferences.",
+              "claim_key": "metrics.lender_activity.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lender_activity:claim-2",
+              "text": "The governed lender register counts each named row with is_existing=false as pursued; is_existing=true rows remain recorded but are outside that bank-engagement metric unless the user explicitly includes existing lenders.",
+              "claim_key": "metrics.lender_activity.claim_2"
+            }
+          ],
+          "origin_parent": "metrics.lender_activity"
+        },
+        {
+          "child_id": "metrics.lender_activity.sanctioned_approved_won",
+          "claims": [
+            {
+              "source_id": "register-current:metrics.lender_activity.sanctioned_approved_won",
+              "claim_key": "metrics.lender_activity.sanctioned_approved_won.current_contract",
+              "text": "Sanctioned and Disbursed are approved/won lender outcomes. Declined and Dropped are distinct terminal lost outcomes. Active submissions have status Identified, IM Under Preparation, IM Circulated, Docs Pending, Queries Received, IP Received or On Hold; On Hold remains open but paused. Unknown or blank statuses are unassessable, never implicitly active. Approved, sanctioned or declined lender questions bind to SyndicationLender.status on individual lender submissions; SyndicationTracker.status must not substitute for an individual lender decision. Most or least active is ambiguous until the user selects submissions, allocations, amount or another measure."
+            }
+          ],
+          "origin_parent": "metrics.lender_activity"
+        },
+        {
+          "child_id": "metrics.lender_activity.submissions_selected_rank",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_activity:claim-5",
+              "text": "After submissions are selected, rank the count of qualifying named rows by lender, preserve every tie, and do not ask the user to choose internal status values.",
+              "claim_key": "metrics.lender_activity.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lender_activity:claim-6",
+              "text": "A cohort with no qualifying submission rows has no meaningful least-active lender.",
+              "claim_key": "metrics.lender_activity.claim_6"
+            }
+          ],
+          "origin_parent": "metrics.lender_activity"
+        }
+      ],
+      "metrics.lender_decisions": [
+        {
+          "child_id": "metrics.lender_decisions.explicitly_named_lender",
+          "claims": [
+            {
+              "source_id": "register-current:metrics.lender_decisions.explicitly_named_lender",
+              "claim_key": "metrics.lender_decisions.explicitly_named_lender.current_contract",
+              "text": "For an explicitly named lender, approved business includes its individual SyndicationLender submission rows with status=Sanctioned or status=Disbursed. An explicit current Sanctioned status filter means only status=Sanctioned, disbursed means status=Disbursed, and declined means status=Declined. Dropped is a separate lost outcome, not a synonym for Declined; do not introduce own-book LendingTracker as an alternative unless the user explicitly requests own-book lending."
+            }
+          ],
+          "origin_parent": "metrics.lender_decisions"
+        },
+        {
+          "child_id": "metrics.lender_decisions.question_asking_lender",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_decisions:claim-2",
+              "text": "A question asking which lender approved or declined the most ranks lenders by submission-row count and preserves ties; a decline rate or proportion is a different metric that must be requested explicitly.",
+              "claim_key": "metrics.lender_decisions.claim_2"
+            }
+          ],
+          "origin_parent": "metrics.lender_decisions"
+        },
+        {
+          "child_id": "metrics.lender_decisions.apply_company_sector",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_decisions:claim-3",
+              "text": "To apply company sector, geography or another client attribute, join the lender row to its parent SyndicationTracker by syndication_id=id and then the parent to Entity by entity_id=id.",
+              "claim_key": "metrics.lender_decisions.claim_3"
+            }
+          ],
+          "origin_parent": "metrics.lender_decisions"
+        }
+      ],
+      "metrics.lender_approach": [
+        {
+          "child_id": "metrics.lender_approach.lender_been_approached",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_approach:claim-1",
+              "text": "A lender has been approached when a caller-visible SyndicationLender submission row records that lender by lender_name, including imported rows whose counterparty_id is missing.",
+              "claim_key": "metrics.lender_approach.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lender_approach:claim-2",
+              "text": "Lenders never approached are the set of caller-visible active Counterparty lender-directory names minus the distinct recorded lender_name values.",
+              "claim_key": "metrics.lender_approach.claim_2"
+            }
+          ],
+          "origin_parent": "metrics.lender_approach"
+        },
+        {
+          "child_id": "metrics.lender_approach.submission_different_active",
+          "claims": [
+            {
+              "source_id": "register-current:metrics.lender_approach.submission_different_active",
+              "claim_key": "metrics.lender_approach.submission_different_active.current_contract",
+              "text": "No submission is different from no active submission: Sanctioned, Disbursed, Declined and Dropped rows still prove an approach."
+            }
+          ],
+          "origin_parent": "metrics.lender_approach"
+        }
+      ],
+      "metrics.lender_im_response": [
+        {
+          "child_id": "metrics.lender_im_response.lender_sitting_im",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_im_response:claim-1",
+              "text": "A lender sitting on an IM with no response is an individual SyndicationLender row whose current status is IM Circulated and whose response_date is null. since is the date the current lender status began and is the available IM-age date for that cohort; missing since values cannot be aged.",
+              "claim_key": "metrics.lender_im_response.claim_1"
+            }
+          ],
+          "origin_parent": "metrics.lender_im_response"
+        },
+        {
+          "child_id": "metrics.lender_im_response.report_qualifying_row",
+          "claims": [
+            {
+              "source_id": "ontology-v1:metrics.lender_im_response:claim-2",
+              "text": "Report the qualifying row count and, when age or waiting completeness is material, the counts with and without since.",
+              "claim_key": "metrics.lender_im_response.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:metrics.lender_im_response:claim-3",
+              "text": "Free-text notes are not interpreted as lifecycle transitions.",
+              "claim_key": "metrics.lender_im_response.claim_3"
+            }
+          ],
+          "origin_parent": "metrics.lender_im_response"
+        }
+      ],
+      "resources.asset_monetisation": [
+        {
+          "child_id": "resources.asset_monetisation.assetmonetisation_asset_sale",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-1",
+              "text": "AssetMonetisation is the asset sale/advisory tracker at Register GET resource asset_monetisation.",
+              "claim_key": "resources.asset_monetisation.claim_1"
+            }
+          ],
+          "origin_parent": "resources.asset_monetisation"
+        },
+        {
+          "child_id": "resources.asset_monetisation.asset_monetisation_asset",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-2",
+              "text": "Asset monetisation, asset monetisation deal and asset monetisation deals are canonical phrases for this tracker; the word deals inside the compound phrase does not independently request the commercial deals resource or an is_asset_mon flag filter.",
+              "claim_key": "resources.asset_monetisation.claim_2"
+            }
+          ],
+          "origin_parent": "resources.asset_monetisation"
+        },
+        {
+          "child_id": "resources.asset_monetisation.rows_carry_entity",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-3",
+              "text": "Rows carry entity_id but no company name, so display lists left join entities on entity_id, use entities.legal_name as the canonical company label, and preserve rows whose optional links are missing.",
+              "claim_key": "resources.asset_monetisation.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-4",
+              "text": "A null asset_monetisation.state value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.asset_monetisation.claim_4"
+            }
+          ],
+          "origin_parent": "resources.asset_monetisation"
+        },
+        {
+          "child_id": "resources.asset_monetisation.null_asset_monetisation",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-5",
+              "text": "A null asset_monetisation.indicative_value_cr value is unassessable when used as a predicate or aggregand; count and disclose it rather than treating it as a match or zero.",
+              "claim_key": "resources.asset_monetisation.claim_5"
+            }
+          ],
+          "origin_parent": "resources.asset_monetisation"
+        }
+      ],
+      "lifecycle.asset_monetisation": [
+        {
+          "child_id": "lifecycle.asset_monetisation.asset_monetisation_progresses",
+          "claims": [
+            {
+              "source_id": "ontology-v1:lifecycle.asset_monetisation:claim-1",
+              "text": "Asset monetisation progresses through Teaser Prepared, Teaser Shared, In Discussion, NBO Received, BO Received and SPA / Documentation.",
+              "claim_key": "lifecycle.asset_monetisation.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:lifecycle.asset_monetisation:claim-2",
+              "text": "Closed and Dropped are terminal.",
+              "claim_key": "lifecycle.asset_monetisation.claim_2"
+            }
+          ],
+          "origin_parent": "lifecycle.asset_monetisation"
+        }
+      ],
+      "relationships.entity_lines": [
+        {
+          "child_id": "relationships.entity_lines.lead_deal_lendingtracker",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-1",
+              "text": "Lead, Deal, LendingTracker, SyndicationTracker and AssetMonetisation rows join to Entity by entity_id=id.",
+              "claim_key": "relationships.entity_lines.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-2",
+              "text": "Lending, Syndication and AssetMonetisation may also join to Deal by deal_id=id when populated.",
+              "claim_key": "relationships.entity_lines.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-3",
+              "text": "A converted Lead joins Deal by converted_deal_id=id.",
+              "claim_key": "relationships.entity_lines.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-4",
+              "text": "Missing links stay missing.",
+              "claim_key": "relationships.entity_lines.claim_4"
+            }
+          ],
+          "origin_parent": "relationships.entity_lines"
+        },
+        {
+          "child_id": "relationships.entity_lines.left_join_relationship",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-5",
+              "text": "Use a left join when a relationship only adds display details to an already qualified primary cohort, so rows with missing optional links remain in the answer.",
+              "claim_key": "relationships.entity_lines.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-6",
+              "text": "Use an inner join only when the relationship is itself required by the question.",
+              "claim_key": "relationships.entity_lines.claim_6"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_lines:claim-7",
+              "text": "These relationships pass named results; they do not authorize unseen rows.",
+              "claim_key": "relationships.entity_lines.claim_7"
+            }
+          ],
+          "origin_parent": "relationships.entity_lines"
+        }
+      ],
+      "relationships.entity_dimensions": [
+        {
+          "child_id": "relationships.entity_dimensions.sector_climate_lens",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.entity_dimensions:claim-1",
+              "text": "Sector, climate lens and client geography are Entity attributes.",
+              "claim_key": "relationships.entity_dimensions.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_dimensions:claim-2",
+              "text": "A question that names a state, region or other geographic place uses the related Entity state unless the primary resource carries its own governed geography field or the question explicitly requests another geography.",
+              "claim_key": "relationships.entity_dimensions.claim_2"
+            }
+          ],
+          "origin_parent": "relationships.entity_dimensions"
+        },
+        {
+          "child_id": "relationships.entity_dimensions.deal_lendingtracker_syndicationtracker",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.entity_dimensions:claim-3",
+              "text": "When a Deal, LendingTracker or SyndicationTracker question filters by company sector or state, join the primary row to Entity on entity_id=id and apply the predicate to entities.sector or entities.state.",
+              "claim_key": "relationships.entity_dimensions.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:relationships.entity_dimensions:claim-4",
+              "text": "Never invent sector or state fields on Deal, LendingTracker or SyndicationTracker.",
+              "claim_key": "relationships.entity_dimensions.claim_4"
+            }
+          ],
+          "origin_parent": "relationships.entity_dimensions"
+        },
+        {
+          "child_id": "relationships.entity_dimensions.missing_entity_link",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.entity_dimensions:claim-5",
+              "text": "A missing entity link or null Entity attribute is unassessable, not a match and not zero; retain and count that missing population when an exhaustive answer depends on it.",
+              "claim_key": "relationships.entity_dimensions.claim_5"
+            }
+          ],
+          "origin_parent": "relationships.entity_dimensions"
+        }
+      ],
+      "relationships.live_book_overlap": [
+        {
+          "child_id": "relationships.live_book_overlap.company_live_own",
+          "claims": [
+            {
+              "source_id": "register-current:relationships.live_book_overlap.company_live_own",
+              "claim_key": "relationships.live_book_overlap.company_live_own.current_contract",
+              "text": "A company live in both own-book lending and syndication is the intersection of distinct entity_id values from live LendingTracker rows and live parent SyndicationTracker rows. The ordinary live own-book family is Data Awaited, Diligence, Note Circulated, Sanctioned, Ready for Disbursement, compatibility value Disbursement Pending, and On Hold. Assess CP/CS Completed separately using recorded disbursement evidence and disclose unresolved rows; the stage alone does not establish a live facility."
+            }
+          ],
+          "origin_parent": "relationships.live_book_overlap"
+        },
+        {
+          "child_id": "relationships.live_book_overlap.live_parent_syndication",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.live_book_overlap:claim-3",
+              "text": "A live parent syndication row has a populated status other than Dropped, Withdrawn, Rejected, Sanctioned or Disbursed.",
+              "claim_key": "relationships.live_book_overlap.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:relationships.live_book_overlap:claim-4",
+              "text": "Apply each book's own family before intersecting, then join the resulting entity ids to Entity for canonical company names.",
+              "claim_key": "relationships.live_book_overlap.claim_4"
+            }
+          ],
+          "origin_parent": "relationships.live_book_overlap"
+        },
+        {
+          "child_id": "relationships.live_book_overlap.transfer_deal_stages",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.live_book_overlap:claim-5",
+              "text": "Do not transfer Deal stages between these books and do not count multiple tracker rows for one Entity as multiple companies.",
+              "claim_key": "relationships.live_book_overlap.claim_5"
+            }
+          ],
+          "origin_parent": "relationships.live_book_overlap"
+        }
+      ],
+      "relationships.lenders": [
+        {
+          "child_id": "relationships.lenders.syndicationlender_joins_parent",
+          "claims": [
+            {
+              "source_id": "ontology-v1:relationships.lenders:claim-1",
+              "text": "SyndicationLender joins its parent SyndicationTracker by syndication_id=id and may join Counterparty by counterparty_id=id. lender_name is retained for imported rows whose counterparty_id is absent.",
+              "claim_key": "relationships.lenders.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:relationships.lenders:claim-2",
+              "text": "Never multiply a parent ticket amount by the number of lender rows when calculating client exposure.",
+              "claim_key": "relationships.lenders.claim_2"
+            }
+          ],
+          "origin_parent": "relationships.lenders"
+        }
+      ],
+      "terms.solar": [
+        {
+          "child_id": "terms.solar.solar_sector_family",
+          "claims": [
+            {
+              "source_id": "ontology-v1:terms.solar:claim-1",
+              "text": "Solar is a sector-family term, not one fixed stored value or an ontology alias list.",
+              "claim_key": "terms.solar.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:terms.solar:claim-2",
+              "text": "Ground it only to caller-visible Register Sector reference values whose authoritative label denotes the Solar family.",
+              "claim_key": "terms.solar.claim_2"
+            }
+          ],
+          "origin_parent": "terms.solar"
+        },
+        {
+          "child_id": "terms.solar.sector_belongs_entity",
+          "claims": [
+            {
+              "source_id": "ontology-v1:terms.solar:claim-3",
+              "text": "Sector belongs to Entity; when another business-book record is primary, apply the sector predicate through its related Entity rather than inventing a sector field on that record.",
+              "claim_key": "terms.solar.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:terms.solar:claim-4",
+              "text": "Do not invent a stored value or infer solar from remarks when a recorded sector is absent.",
+              "claim_key": "terms.solar.claim_4"
+            }
+          ],
+          "origin_parent": "terms.solar"
+        }
+      ],
+      "execution.register_limits": [
+        {
+          "child_id": "execution.register_limits.register_list_reads",
+          "claims": [
+            {
+              "source_id": "ontology-v1:execution.register_limits:claim-1",
+              "text": "Register list reads use opaque keyset cursors.",
+              "claim_key": "execution.register_limits.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:execution.register_limits:claim-2",
+              "text": "Only declared equality filters may be pushed down. q performs resource-specific substring search.",
+              "claim_key": "execution.register_limits.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:execution.register_limits:claim-3",
+              "text": "Register has no field projection.",
+              "claim_key": "execution.register_limits.claim_3"
+            },
+            {
+              "source_id": "ontology-v1:execution.register_limits:claim-4",
+              "text": "Numeric thresholds, date ranges, status families, negation, null handling, grouping, sorting and limiting execute over bounded caller-visible rows in deterministic host operations.",
+              "claim_key": "execution.register_limits.claim_4"
+            }
+          ],
+          "origin_parent": "execution.register_limits"
+        }
+      ],
+      "execution.dependent_reads": [
+        {
+          "child_id": "execution.dependent_reads.named_entities_search",
+          "claims": [
+            {
+              "source_id": "ontology-v1:execution.dependent_reads:claim-1",
+              "text": "A named entities q search may resolve one company row, and a later read may use $company.id in an equality filter such as entity_id.",
+              "claim_key": "execution.dependent_reads.claim_1"
+            },
+            {
+              "source_id": "ontology-v1:execution.dependent_reads:claim-2",
+              "text": "The dependency must resolve to exactly one caller-visible row.",
+              "claim_key": "execution.dependent_reads.claim_2"
+            },
+            {
+              "source_id": "ontology-v1:execution.dependent_reads:claim-3",
+              "text": "Zero candidates produce VALUE_NOT_FOUND and multiple materially plausible candidates require clarification rather than an arbitrary selection.",
+              "claim_key": "execution.dependent_reads.claim_3"
+            }
+          ],
+          "origin_parent": "execution.dependent_reads"
+        }
+      ],
+      "governance.missing_data.primary_measure": [
+        {
+          "child_id": "governance.missing_data.primary_measure.nullable_selector_measure",
+          "claims": [
+            {
+              "source_id": "ontology-v1:governance.missing_data.primary_measure:claim-1",
+              "text": "A nullable selector or measure used as a predicate or aggregand has a population that is neither matching nor non-matching; count and disclose that unassessable population rather than dropping it, whether the field belongs to the primary resource or a joined resource.",
+              "claim_key": "governance.missing_data.primary_measure.claim_1"
+            }
+          ],
+          "origin_parent": "governance.missing_data.primary_measure"
+        }
+      ],
+      "governance.attribute_precedence": [
+        {
+          "child_id": "governance.attribute_precedence.primary_resource_carries",
+          "claims": [
+            {
+              "source_id": "wave2:governance.attribute_precedence",
+              "text": "When a primary resource carries its own governed attribute and a related Entity carries the same attribute, the primary resource field is the subject attribute when the question addresses that resource; use the related Entity attribute only when the question addresses the client or when the primary resource has no governed field.",
+              "claim_key": "governance.attribute_precedence"
+            }
+          ],
+          "origin_parent": "wave2"
+        }
+      ],
+      "governance.lifecycle_default": [
+        {
+          "child_id": "governance.lifecycle_default.lifecycle_family_narrows",
+          "claims": [
+            {
+              "source_id": "wave2:governance.lifecycle_default",
+              "text": "A lifecycle family narrows a cohort when the user asks for that lifecycle or its live/terminal meaning; without such a request, include every caller-visible row of the selected book, including terminal and null statuses.",
+              "claim_key": "governance.lifecycle_default"
+            }
+          ],
+          "origin_parent": "wave2"
+        }
+      ],
+      "governance.unavailable_business_criterion": [
+        {
+          "child_id": "governance.unavailable_business_criterion.request_defined_criterion",
+          "claims": [
+            {
+              "source_id": "wave2:governance.unavailable_business_criterion",
+              "text": "A request-defined criterion for which Register holds no field is unavailable, qualifies an otherwise answerable result, and is never treated as passed, failed, clear, or zero.",
+              "claim_key": "governance.unavailable_business_criterion"
+            }
+          ],
+          "origin_parent": "wave2"
+        }
+      ],
+      "governance.existence_separate_from_measure": [
+        {
+          "child_id": "governance.existence_separate_from_measure.named_resolved_record",
+          "claims": [
+            {
+              "source_id": "wave2:governance.existence_separate_from_measure",
+              "text": "When a named, resolved record cohort can be counted but a requested measure is unavailable, answer the existence cohort separately and qualify the unavailable measure instead of discarding the cohort.",
+              "claim_key": "governance.existence_separate_from_measure"
+            }
+          ],
+          "origin_parent": "wave2"
+        }
+      ],
+      "governance.client_choice_clarification": [
+        {
+          "child_id": "governance.client_choice_clarification.ask_clarification_unresolved",
+          "claims": [
+            {
+              "source_id": "wave2:governance.client_choice_clarification",
+              "text": "Ask for clarification only when unresolved meaning leaves a material business choice the client can answer naturally; authoritative data absence without such a choice is out of scope.",
+              "claim_key": "governance.client_choice_clarification"
+            }
+          ],
+          "origin_parent": "wave2"
+        }
+      ],
+      "resources.entities.canonical_names": [
+        {
+          "child_id": "resources.entities.canonical_names",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.entities:claim-4",
+              "text": "Entity legal_name is the canonical company name while display_name is optional desk display text.",
+              "claim_key": "resources.entities.claim_4",
+              "source_text": "legal_name is the canonical company name; display_name is optional desk display text."
+            },
+            {
+              "source_id": "ontology-v1:resources.entities:claim-5",
+              "text": "State and location are separate geography fields.",
+              "claim_key": "resources.entities.claim_5",
+              "source_text": "state and location are separate geography fields."
+            },
+            {
+              "source_id": "ontology-v1:resources.entities:claim-6",
+              "text": "Promoter_group_code describes a group relationship but does not identify a promoter person.",
+              "claim_key": "resources.entities.claim_6",
+              "source_text": "promoter_group_code describes a group relationship but does not identify a promoter person."
+            }
+          ],
+          "origin_parent": "resources.entities"
+        }
+      ],
+      "resources.lending.amount_measure": [
+        {
+          "child_id": "resources.lending.amount_measure",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.lending:claim-1",
+              "text": "lending.amount_cr is the requested facility amount.",
+              "claim_key": "resources.lending.claim_1"
+            }
+          ],
+          "origin_parent": "resources.lending"
+        }
+      ],
+      "resources.syndication.parent_ticket_value": [
+        {
+          "child_id": "resources.syndication.parent_ticket_value",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.syndication:claim-1",
+              "text": "syndication.amount_cr is the parent ticket or ask value and may be null; a complete threshold answer discloses the caller-visible null-amount population separately.",
+              "claim_key": "resources.syndication.claim_1",
+              "source_text": "amount_cr is the parent ticket/ask value and may be null; a numeric threshold cannot assess null amounts, so a complete threshold answer discloses the caller-visible null-amount population separately."
+            }
+          ],
+          "origin_parent": "resources.syndication"
+        }
+      ],
+      "resources.asset_monetisation.value_measure": [
+        {
+          "child_id": "resources.asset_monetisation.value_measure",
+          "claims": [
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-5",
+              "text": "asset_monetisation.indicative_value_cr is the desk indicative value in crore.",
+              "claim_key": "resources.asset_monetisation.claim_5"
+            },
+            {
+              "source_id": "ontology-v1:resources.asset_monetisation:claim-6",
+              "text": "Size_mw is a separate measure.",
+              "claim_key": "resources.asset_monetisation.claim_6",
+              "source_text": "size_mw is separate."
+            }
+          ],
+          "origin_parent": "resources.asset_monetisation"
+        }
+      ],
+      "qualitative.syndication_lenders_last_chase_note": [
+        {
+          "child_id": "qualitative.syndication_lenders_last_chase_note.snapshot",
+          "origin_parent": "qualitative.syndication_lenders_last_chase_note",
+          "claims": [
+            {
+              "source_id": "register-current:qualitative.syndication_lenders_last_chase_note",
+              "claim_key": "qualitative.syndication_lenders_last_chase_note.snapshot",
+              "text": "syndication_lenders.last_chase_note is authorized qualitative evidence from the latest outbound chase, paired with chased_date. It is an attributed conversation snapshot, not the complete interaction history or independently verified fact. A note-less interaction clears the snapshot; blank text does not prove no contact. The separate note field is a manual remark, not a substitute for this snapshot. Select the cohort using structured fields, then analyze the authorized text with exact record citations and explicit missing coverage; never use substring filters as a proxy for qualitative meaning."
+            }
+          ]
+        }
+      ],
+      "qualitative.syndication_lenders_last_reply_note": [
+        {
+          "child_id": "qualitative.syndication_lenders_last_reply_note.snapshot",
+          "origin_parent": "qualitative.syndication_lenders_last_reply_note",
+          "claims": [
+            {
+              "source_id": "register-current:qualitative.syndication_lenders_last_reply_note",
+              "claim_key": "qualitative.syndication_lenders_last_reply_note.snapshot",
+              "text": "syndication_lenders.last_reply_note is authorized qualitative evidence from the latest inbound lender reply, paired with response_date. It is an attributed conversation snapshot, not the complete interaction history or independently verified fact. A note-less interaction clears the snapshot; blank text does not prove no contact. The separate note field is a manual remark, not a substitute for this snapshot. Select the cohort using structured fields, then analyze the authorized text with exact record citations and explicit missing coverage; never use substring filters as a proxy for qualitative meaning."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

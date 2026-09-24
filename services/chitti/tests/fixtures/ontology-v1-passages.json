@@ -1,0 +1,162 @@
+{
+  "version": "ontology-v1",
+  "source_commit": "b8e027c",
+  "passages": [
+    {
+      "id": "governance.read_only",
+      "content": "Chitti is read-only. It can request only fixed Register GET resources under the delegated caller identity. Create, update, approve, delete, restore, import, and other mutations are OUT_OF_SCOPE and must produce no Register request."
+    },
+    {
+      "id": "governance.missing_data",
+      "content": "A complete caller-visible zero result, a null field, an unavailable field, an authorization denial, a partial traversal, and a Register dependency failure are different outcomes. Do not infer missing facts from remarks, sectors, external knowledge, record order, or a prior assistant answer. The Ledger has promoter_group_code but no authoritative promoter-person field."
+    },
+    {
+      "id": "governance.unsupported_dimensions",
+      "content": "A requested monetary split needs the dimension on the amount-bearing resource or an explicitly governed relationship that authorizes transferring it. LendingTracker and SyndicationTracker do not expose a climate lens. Lead, Deal or Entity lens must not be substituted for own-book or off-book monetary exposure merely because entity_id or an optional deal_id exists. Without an authoritative amount-bearing Lens relationship, a Mitigation-versus-Adaptation exposure split is unavailable and OUT_OF_SCOPE. Likewise, company-group exposure requires caller-visible Entity.promoter_group_code membership; names, remarks and workbook-only disclosures never authorize a group combination. If that authoritative membership is absent, the group total is unavailable and OUT_OF_SCOPE rather than a request for an internal identifier."
+    },
+    {
+      "id": "books.overview",
+      "content": "Ledger work is represented by four distinct business books: the commercial origination funnel in Deal, Evam own-book lending in LendingTracker, off-book/platform financing in SyndicationTracker, and asset sale/advisory work in AssetMonetisation. When the user explicitly names books, the ordinary unit is each named book's own record; deduplicate by client Entity or follow links to commercial Deal records only when requested. Lead is separate pre-deal intake, not another deal book; an unconverted Lead has not reached status Converted and remains a separate Lead result. Master resources such as Entity, Person and Counterparty describe parties and staff rather than work books."
+    },
+    {
+      "id": "books.boundaries",
+      "content": "Each business book has its own resource, lifecycle field and measures. Deal.stage belongs only to the commercial funnel; LendingTracker.stage belongs only to own-book credit; SyndicationTracker.status belongs only to off-book/platform financing; AssetMonetisation.status belongs only to asset sale/advisory. Deal product flags and optional deal_id links relate records but do not merge these books or make one lifecycle valid for another."
+    },
+    {
+      "id": "books.partner",
+      "content": "Partner book, off-book and platform financing refer to SyndicationTracker rather than LendingTracker. Partnership is a classification within that book when SyndicationTracker.line records Partnership; it is not a fifth business book. Do not invent a group, lender or partnership relationship from a company name or example."
+    },
+    {
+      "id": "books.ambiguity",
+      "content": "Unqualified work nouns such as deal, case, book, pipeline or workload do not by themselves select one business book when more than one book remains materially plausible. A lifecycle adjective such as active also has no cross-book status family. Preserve the supported book alternatives and ask the user which book they mean instead of silently choosing or combining books."
+    },
+    {
+      "id": "books.qualifiers",
+      "content": "Explicit book qualifiers resolve otherwise generic work language: commercial, origination or deal funnel selects Deal; own-book, balance-sheet or lending selects LendingTracker; partner, off-book, platform or syndication selects SyndicationTracker; asset sale, asset advisory or asset monetisation selects AssetMonetisation. Lead or pre-deal selects Lead. An explicit qualifier scopes lifecycle, relationship, assignment and metric terms throughout the same question to the selected resource; a lifecycle word used in another book does not remain an alternative after that scope is established. A qualifier does not authorize values absent from the selected resource's ontology passage or change the named book's record grain."
+    },
+    {
+      "id": "resources.entities",
+      "content": "Entity is the company/client master at Register GET resource entities. q searches legal_name, code, display_name and CIN by substring. Equality filters are sector, lens, register_status, entity_type, state, promoter_group_code and code. legal_name is the canonical company name; display_name is optional desk display text. state and location are separate geography fields. promoter_group_code describes a group relationship but does not identify a promoter person."
+    },
+    {
+      "id": "resources.people",
+      "content": "Person is the employee directory at Register GET resource people. q searches name, full_name and email. Equality filters are role and inactive. Tracker rm and analyst values use the canonical People.name handle; People.full_name is display text. geography, sectors, started_on and reports_to describe the employee, not a deal geography or lifecycle."
+    },
+    {
+      "id": "resources.counterparties",
+      "content": "Counterparty is the lender, investor, offtaker or partner directory at Register GET resource counterparties. q searches name and short_name. Equality filters are counterparty_type and is_active. ticket_min_cr and ticket_max_cr are directory preferences, not actual deal exposure. Actual lender submissions and allocations are syndication_lenders rows."
+    },
+    {
+      "id": "resources.leads",
+      "content": "An unconverted Lead is a pre-deal opportunity at Register GET resource leads whose status is not Converted; it remains a Lead result rather than a Deal record. q searches company, contact, rm and notes. Equality filters are status, temperature, sector, rm, source, entity_id and converted_deal_id. status is the Lead lifecycle Active, Converted or Dropped; temperature Hot, Warm or Cold is separate. Active means a current pre-deal lead. Converted means the lead continued into a Deal, with converted_deal_id as the governed conversion link. An unconverted-lead cohort does not silently treat Dropped as Active; retain status when reporting that cohort. last_interaction_date supports stale-lead ageing; null dates remain unageable."
+    },
+    {
+      "id": "resources.deals",
+      "content": "Deal is the commercial origination funnel at Register GET resource deals. Commercial, origination or deal-funnel wording selects it; the generic word deal alone does not select it when another business book remains plausible. rm is the commercial relationship manager responsible for the Deal, while analyst is a separate assignment. q searches code, rm, analyst and remarks. Equality filters are product_type, stage, temperature, is_lending, is_syndication, is_asset_mon, entity_id, rm and code. One deal may have several product flags. The Deal funnel stages New Inquiry, In Screening, In Pipeline, On Hold, Screened Out, Closed Won and Closed Lost are not Lending or Syndication statuses."
+    },
+    {
+      "id": "lifecycle.deals",
+      "content": "For desk questions explicitly asking for live commercial deals, live Deal funnel rows are New Inquiry, In Screening, In Pipeline and On Hold. Screened Out, Closed Won and Closed Lost are terminal/excluded. This definition applies only to commercial Deal.stage and must not be reused for product trackers."
+    },
+    {
+      "id": "resources.lending",
+      "content": "LendingTracker is Evam own-book lending at Register GET resource lending. q searches tracker_no, rm and remarks. Equality filters are stage, pending_with, entity_id, deal_id and rm. pending_with records the party with whom the current action is pending; a phrase such as pending with the client refers to pending_with=Client rather than a stage containing the word Pending. amount_cr is requested facility amount. analyst is the assigned analyst. stage_updated_at supports stage-ageing; missing dates cannot be aged. Rows carry entity_id but no company name, so list-back uses an entities join on lending.entity_id=entities.id and entities.legal_name is the canonical company label. A human-readable Lending case list retains tracker_no, stage and pending_with alongside the company label so that identity, lifecycle and the requested pending-party predicate remain visible."
+    },
+    {
+      "id": "lifecycle.lending",
+      "content": "Lending stages are a distinct credit lifecycle. Terminal own-book facilities are Disbursed, Rejected and Dropped-like imported terminal values. Non-terminal own-book facilities are the complement of that terminal family among caller-visible LendingTracker rows. The current ordinary active set is Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, Disbursement Pending and On Hold when present. Sanctioned exposure uses the separately defined sanctioned family and never a generic deal status."
+    },
+    {
+      "id": "qualitative.lending_remarks",
+      "content": "For an exact caller-visible LendingTracker cohort, lending.remarks is authorized qualitative evidence for the case's recorded explanation or note. Remarks are attributed statements, not independently verified facts. Predicates that require interpreting those remarks are qualitative meanings over evidence, not stored classifications. Recurring themes are analytical groupings rather than stored classifications. Missing or blank remarks, pending or WIP text, contradictory notes, and bare terminal labels remain explicit in coverage and caveats. Qualitative meanings must be analyzed across the exact cohort rather than converted to literal substring filters; support counts and coverage are computed by host code from validated record citations."
+    },
+    {
+      "id": "metrics.cross_book_clients",
+      "content": "Work assignment is resource- and role-specific. Commercial Deal relationship-manager work uses Deal.rm; explicitly requested commercial analyst work uses Deal.analyst. Own-book lending, syndication and asset-monetisation analyst work uses each tracker's analyst field. A staff identity, role or matching assignment does not itself select a business book when the question leaves the book unqualified. A distinct-client question unions qualifying entity_id values across the requested books and counts each Entity once; a product-assignment question keeps tracker rows separate. Staff handles ground through People.name. Do not equate relationship-manager and analyst assignments, and include commercial Deal assignments only when the user requests that funnel."
+    },
+    {
+      "id": "metrics.lending_sanctioned",
+      "content": "Own-book sanctioned exposure includes LendingTracker stages Sanctioned, Documentation and Disbursed for compatibility with governed imported vocabulary. Count facilities and sum amount_cr with host operations. Operational Register reads exclude reconciliation-required rows; null amounts stay null and are reported rather than invented."
+    },
+    {
+      "id": "resources.syndication",
+      "content": "SyndicationTracker is platform, off-book and partner financing at Register GET resource syndication. An unqualified syndication row, syndication ticket or syndication ask refers to this parent tracker. q searches tracker_no, remarks and toi. Equality filters are status, priority, entity_id, deal_id, rm and pending_with. amount_cr is the parent ticket/ask value and may be null; a numeric threshold cannot assess null amounts, so a complete threshold answer discloses the caller-visible null-amount population separately. Rows carry entity_id but no company name, so a human-readable list left joins entities on syndication.entity_id=entities.id and uses entities.legal_name as the canonical company label while preserving unmatched parent rows. line distinguishes Partnership when recorded. Each row may embed lenders, while the flat syndication_lenders resource supports explicitly requested individual lender-row analysis."
+    },
+    {
+      "id": "lifecycle.syndication",
+      "content": "Syndication status is distinct from Deal and Lending lifecycles. Dropped, Withdrawn and Rejected are terminal lost statuses. Sanctioned and Disbursed are closed/won statuses. Other populated proposal statuses form the live platform pipeline. Known-value totals must disclose null amount_cr rows and cannot claim a complete monetary total when amounts are missing."
+    },
+    {
+      "id": "semantics.syndication_mandate",
+      "content": "SyndicationTracker.mandate_status is a composite recorded value that may encode sent, signed, syndication and partnership information. Preserve its stored value and do not normalize it to an invented Executed status. Lender outreach or progress is established by related named SyndicationLender rows joined through syndication_id, not by assuming the parent composite mandate value proves outreach. Readiness criteria are supplied by the request; Chitti does not impose a permanent readiness rule."
+    },
+    {
+      "id": "governance.caller_visible_scope",
+      "content": "Phrases such as all records visible to me, visible to this desk, or in my current view select the existing caller-authorized Register view. They do not assert that records are owned by or assigned to a named employee or desk, and they require no identity lookup. By contrast, explicitly assigned to, owned by, or managed by wording requests a governed assignment relationship and must bind the relevant person or stored assignment value."
+    },
+    {
+      "id": "resources.syndication_lenders",
+      "content": "SyndicationLender is an individual lender submission/allocation at read-only Register GET resource syndication_lenders. It is selected when the question explicitly asks for lender rows, submissions, allocations or individual lender progression, not merely because a parent SyndicationTracker row may contain lenders. q searches lender_name and note. Equality filters are status, syndication_id, counterparty_id and is_existing. amount_cr is the lender-row amount, not the parent syndication ticket/ask amount. since, response_date and chased_date are different dates. A lender row joins its parent through syndication_id."
+    },
+    {
+      "id": "lifecycle.syndication_lenders",
+      "content": "Individual lender progression is Identified, IM Circulated or legacy Docs Pending, Queries Received, IP Received, then Sanctioned or Declined. It is separate from the parent SyndicationTracker.status. Missing lender names, dates or amounts remain missing and must not be converted into zero activity or elapsed time without an explicit definition."
+    },
+    {
+      "id": "governance.auxiliary_and_bottleneck_evidence",
+      "content": "Register does not expose an AEGIS or adverse-media clearance field for a syndication readiness check. When request-defined readiness criteria are otherwise answerable, that auxiliary clearance remains unavailable and qualifies the main answer rather than invalidating it; unavailable never means clear or failed. A structural bottleneck such as a live parent syndication row with no related named SyndicationLender outreach is itself a supported main answer and may be reported deterministically. If lender since or response dates are missing, elapsed-time ordering is an unavailable auxiliary measure: preserve the structural bottleneck answer, disclose the missing dates, and do not invent an elapsed ranking."
+    },
+    {
+      "id": "metrics.lender_activity",
+      "content": "Lender activity is measured from individual named SyndicationLender submission rows, not parent asks or Counterparty preferences. The governed lender register counts each named row with is_existing=false as pursued; is_existing=true rows remain recorded but are outside that bank-engagement metric unless the user explicitly includes existing lenders. Sanctioned is approved/won, Declined is declined/lost, and every other populated lender progression status is active. Most or least active is ambiguous until the user selects submissions, allocations, amount or another measure. After submissions are selected, rank the count of qualifying named rows by lender, preserve every tie, and do not ask the user to choose internal status values. A cohort with no qualifying submission rows has no meaningful least-active lender."
+    },
+    {
+      "id": "metrics.lender_decisions",
+      "content": "For an explicitly named lender, approved or sanctioned business means that lender's individual SyndicationLender submission rows with status=Sanctioned, and declined means status=Declined; do not introduce own-book LendingTracker as an alternative unless the user explicitly requests own-book lending. A question asking which lender approved or declined the most ranks lenders by submission-row count and preserves ties; a decline rate or proportion is a different metric that must be requested explicitly. To apply company sector, geography or another client attribute, join the lender row to its parent SyndicationTracker by syndication_id=id and then the parent to Entity by entity_id=id."
+    },
+    {
+      "id": "metrics.lender_approach",
+      "content": "A lender has been approached when a caller-visible SyndicationLender submission row records that lender by lender_name, including imported rows whose counterparty_id is missing. Lenders never approached are the set of caller-visible active Counterparty lender-directory names minus the distinct recorded lender_name values. No submission is different from no active submission: Sanctioned and Declined rows still prove an approach."
+    },
+    {
+      "id": "metrics.lender_im_response",
+      "content": "A lender sitting on an IM with no response is an individual SyndicationLender row whose current status is IM Circulated and whose response_date is null. since is the date the current lender status began and is the available IM-age date for that cohort; missing since values cannot be aged. Report the qualifying row count and, when age or waiting completeness is material, the counts with and without since. Free-text notes are not interpreted as lifecycle transitions."
+    },
+    {
+      "id": "resources.asset_monetisation",
+      "content": "AssetMonetisation is the asset sale/advisory tracker at Register GET resource asset_monetisation. Asset monetisation, asset monetisation deal and asset monetisation deals are canonical phrases for this tracker; the word deals inside the compound phrase does not independently request the commercial deals resource or an is_asset_mon flag filter. q searches investor and notes. Equality filters are status, nature, entity_id, deal_id and state. indicative_value_cr is the desk's indicative value in crore and numeric thresholds run in host code. size_mw is separate. Rows carry entity_id but no company name, so display lists left join entities on entity_id, use entities.legal_name as the canonical company label, and preserve rows whose optional links are missing."
+    },
+    {
+      "id": "lifecycle.asset_monetisation",
+      "content": "Asset monetisation progresses through Teaser Prepared, Teaser Shared, In Discussion, NBO Received, BO Received and SPA / Documentation. Closed and Dropped are terminal. Unless the user explicitly requests live-only pipeline, a threshold or geography question includes every caller-visible asset row and preserves terminal and null statuses."
+    },
+    {
+      "id": "relationships.entity_lines",
+      "content": "Lead, Deal, LendingTracker, SyndicationTracker and AssetMonetisation rows join to Entity by entity_id=id. Lending, Syndication and AssetMonetisation may also join to Deal by deal_id=id when populated. A converted Lead joins Deal by converted_deal_id=id. Missing links stay missing. Use a left join when a relationship only adds display details to an already qualified primary cohort, so rows with missing optional links remain in the answer. Use an inner join only when the relationship is itself required by the question. These relationships pass named results; they do not authorize unseen rows."
+    },
+    {
+      "id": "relationships.entity_dimensions",
+      "content": "Sector, climate lens and client geography are Entity attributes. A question that names a state, region or other geographic place uses the related Entity state unless it explicitly requests another geography. When a Deal, LendingTracker or SyndicationTracker question filters by company sector or state, join the primary row to Entity on entity_id=id and apply the predicate to entities.sector or entities.state. Never invent sector or state fields on Deal, LendingTracker or SyndicationTracker. A missing entity link or null Entity attribute is unassessable, not a match and not zero; retain and count that missing population when an exhaustive answer depends on it."
+    },
+    {
+      "id": "relationships.live_book_overlap",
+      "content": "A company live in both own-book lending and syndication is the intersection of distinct entity_id values from live LendingTracker rows and live parent SyndicationTracker rows. The live own-book family is Data Awaited, Diligence, Note Circulated, Sanctioned, CP/CS Completed, Ready for Disbursement, compatibility value Disbursement Pending, and On Hold. A live parent syndication row has a populated status other than Dropped, Withdrawn, Rejected, Sanctioned or Disbursed. Apply each book's own family before intersecting, then join the resulting entity ids to Entity for canonical company names. Do not transfer Deal stages between these books and do not count multiple tracker rows for one Entity as multiple companies."
+    },
+    {
+      "id": "relationships.lenders",
+      "content": "SyndicationLender joins its parent SyndicationTracker by syndication_id=id and may join Counterparty by counterparty_id=id. lender_name is retained for imported rows whose counterparty_id is absent. Never multiply a parent ticket amount by the number of lender rows when calculating client exposure."
+    },
+    {
+      "id": "terms.solar",
+      "content": "Solar is a sector-family term, not one fixed stored value or an ontology alias list. Ground it only to caller-visible Register Sector reference values whose authoritative label denotes the Solar family. Sector belongs to Entity; when another business-book record is primary, apply the sector predicate through its related Entity rather than inventing a sector field on that record. Do not invent a stored value or infer solar from remarks when a recorded sector is absent."
+    },
+    {
+      "id": "execution.register_limits",
+      "content": "Register list reads use opaque keyset cursors. Only declared equality filters may be pushed down. q performs resource-specific substring search. Register has no field projection. Numeric thresholds, date ranges, status families, negation, null handling, grouping, sorting and limiting execute over bounded caller-visible rows in deterministic host operations."
+    },
+    {
+      "id": "execution.dependent_reads",
+      "content": "A named entities q search may resolve one company row, and a later read may use $company.id in an equality filter such as entity_id. The dependency must resolve to exactly one caller-visible row. Zero candidates produce VALUE_NOT_FOUND and multiple materially plausible candidates require clarification rather than an arbitrary selection."
+    }
+  ]
+}

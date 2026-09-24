@@ -1,0 +1,51 @@
+# artifactId identifies immutable image/model/ontology bytes; use a new ID for upgrades.
+fullnameOverride: prism-chitti
+artifactId: ''
+replicaCount: 1
+image:
+  repository: ghcr.io/evam/prism-chitti
+  tag: 0.3.0
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+credentials:
+  existingSecret: ''
+  gatewayKey: gateway-api-key
+  registerKey: register-api-key
+  signingKey: internal-signing-secret
+  providerKey: provider-api-key
+registerUrl: http://prism-register
+provider:
+  baseUrl: ''
+  model: ''
+  maxCompletionTokens: 32768
+  timeoutSeconds: 60
+  maxRetries: 2
+requestTimeoutSeconds: 240
+storage:
+  className: ''
+  accessModes:
+  - ReadWriteMany
+  modelSize: 4Gi
+  qdrantSize: 4Gi
+qdrant:
+  image: qdrant/qdrant:v1.18.2-unprivileged@sha256:9f7a04503dbdc17531752927bf0f822b5e71a3b713db547eab92c22210430fc8
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 2Gi
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: '2'
+    memory: 4Gi
+networkPolicy:
+  enabled: true
+  gatewayPodLabels:
+    app.kubernetes.io/name: gateway
+nodeSelector: {}
+tolerations: []

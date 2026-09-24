@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1720" viewBox="0 0 1600 1720">
+<title>Chitti — request flow</title>
+<rect width="100%" height="100%" fill="white"/>
+<text x="800.0" y="35" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#172b4d">Chitti — request flow</text>
+<text x="800.0" y="74" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Logical calls; Nginx proxies omitted; provider calls and paginated reads condensed</text>
+<rect x="18" y="110" width="224" height="60" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="130.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Browser</text>
+<polyline points="130,175 130,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<rect x="268" y="110" width="224" height="60" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="380.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Gateway / Access</text>
+<polyline points="380,175 380,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<rect x="538" y="110" width="224" height="60" rx="10" fill="#deebff" stroke="#8993a4"/>
+<text x="650.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Chitti</text>
+<polyline points="650,175 650,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<rect x="808" y="110" width="224" height="60" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="920.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Register</text>
+<polyline points="920,175 920,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<rect x="1058" y="110" width="224" height="60" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="1170.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Qdrant</text>
+<polyline points="1170,175 1170,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<rect x="1338" y="110" width="224" height="60" rx="10" fill="#fff3d6" stroke="#8993a4"/>
+<text x="1450.0" y="140.0" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#172b4d">Model provider</text>
+<polyline points="1450,175 1450,1570" fill="none" stroke="#c1c7d0" stroke-width="2" stroke-dasharray="6 6"/>
+<polyline points="130,225 380,225" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="380,225 369.1946347717679,230.21958640933477 369.1946347717679,219.78041359066523" fill="#526581"/>
+<rect x="159.2578125" y="190" width="191.484375" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="255.0" y="204" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Chat + bearer token</text>
+<rect x="45" y="248" width="1510" height="47" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<text x="800.0" y="271.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Gateway authenticates the user and resolves permissions through Access</text>
+<polyline points="380,337 650,337" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,337 639.1946347717678,342.21958640933474 639.1946347717678,331.78041359066526" fill="#526581"/>
+<rect x="397.4140625" y="302" width="235.171875" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="515.0" y="316" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Signed call; Chitti verifies</text>
+<polyline points="650,395 1450,395" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1450,395 1439.1946347717678,400.21958640933474 1439.1946347717678,389.78041359066526" fill="#526581"/>
+<rect x="831.96875" y="360" width="436.0625" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="374" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">1–2. Resolve conversation and interpret question</text>
+<polyline points="650,453 1170,453" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1170,453 1159.1946347717678,458.21958640933474 1159.1946347717678,447.78041359066526" fill="#526581"/>
+<rect x="701.125" y="418" width="417.75" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="910.0" y="432" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">3. Search ontology using local retrieval models</text>
+<polyline points="1170,511 650,511" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,511 660.8053652282322,505.78041359066526 660.8053652282322,516.2195864093347" fill="#526581"/>
+<rect x="720.1875" y="476" width="379.625" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="910.0" y="490" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Ontology candidates; Chitti reranks locally</text>
+<polyline points="650,569 920,569" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="920,569 909.1946347717678,574.2195864093347 909.1946347717678,563.7804135906653" fill="#526581"/>
+<rect x="664.625" y="534" width="240.75" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="785.0" y="548" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">4. Read visible candidates</text>
+<polyline points="920,627 650,627" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,627 660.8053652282322,621.7804135906653 660.8053652282322,632.2195864093347" fill="#526581"/>
+<rect x="644.6484375" y="592" width="280.703125" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="785.0" y="606" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Candidates + reference values</text>
+<polyline points="650,685 1450,685" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1450,685 1439.1946347717678,690.2195864093347 1439.1946347717678,679.7804135906653" fill="#526581"/>
+<rect x="849.8828125" y="650" width="400.234375" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="664" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">4–5. Ground values and assess answerability</text>
+<rect x="45" y="711" width="1510" height="47" rx="10" fill="#fff3d6" stroke="#8993a4"/>
+<text x="800.0" y="734.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">EARLY EXIT: clarification required or out of scope → return via Gateway; skip stages 6–10</text>
+<polyline points="650,802 1450,802" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1450,802 1439.1946347717678,807.2195864093347 1439.1946347717678,796.7804135906653" fill="#526581"/>
+<rect x="814.0390625" y="767" width="471.921875" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="781" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">6. For answerable requests: generate structured plan</text>
+<rect x="45" y="825" width="1510" height="47" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<text x="800.0" y="848.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Chitti validates all planned resources, filters, operations, and dependencies before execution reads</text>
+<polyline points="650,915 920,915" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="920,915 909.1946347717678,920.2195864093347 909.1946347717678,909.7804135906653" fill="#526581"/>
+<rect x="656.1328125" y="880" width="257.734375" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="785.0" y="894" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">7. Authorized bounded GETs</text>
+<polyline points="920,973 650,973" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,973 660.8053652282322,967.7804135906653 660.8053652282322,978.2195864093347" fill="#526581"/>
+<rect x="642.984375" y="938" width="284.03125" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="785.0" y="952" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Records; Chitti tracks coverage</text>
+<rect x="45" y="997" width="1510" height="47" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<text x="800.0" y="1020.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Chitti executes deterministic Python operations and tracks row lineage and completeness</text>
+<rect x="45" y="1058" width="1510" height="47" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="800.0" y="1081.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">OPTIONAL STAGE 8: only for qualitative requests; otherwise continue to evidence construction</text>
+<polyline points="650,1151 1450,1151" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1450,1151 1439.1946347717678,1156.2195864093349 1439.1946347717678,1145.7804135906651" fill="#526581"/>
+<rect x="837.15625" y="1116" width="425.6875" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="1130" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Analyze bounded authorized source-text corpus</text>
+<polyline points="1450,1209 650,1209" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,1209 660.8053652282322,1203.7804135906651 660.8053652282322,1214.2195864093349" fill="#526581"/>
+<rect x="829.6171875" y="1174" width="440.765625" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="1188" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Findings → Chitti validates citations and coverage</text>
+<rect x="45" y="1233" width="1510" height="47" rx="10" fill="#f4f5f7" stroke="#8993a4"/>
+<text x="800.0" y="1256.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">9. Chitti constructs evidence: facts, rows, contributing records, missing values, and caveats</text>
+<polyline points="650,1328 1450,1328" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="1450,1328 1439.1946347717678,1333.2195864093349 1439.1946347717678,1322.7804135906651" fill="#526581"/>
+<rect x="895.1015625" y="1293" width="309.796875" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="1307" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">10. Generate prose from evidence</text>
+<polyline points="1450,1386 650,1386" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="650,1386 660.8053652282322,1380.7804135906651 660.8053652282322,1391.2195864093349" fill="#526581"/>
+<rect x="819.9609375" y="1351" width="460.078125" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="1050.0" y="1365" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Answer → Chitti applies public presentation controls</text>
+<polyline points="650,1452 380,1452" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="380,1452 390.8053652282321,1446.7804135906651 390.8053652282321,1457.2195864093349" fill="#526581"/>
+<rect x="399.2578125" y="1417" width="231.484375" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="515.0" y="1431" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Final answer + metadata</text>
+<polyline points="380,1513 130,1513" fill="none" stroke="#526581" stroke-width="2"/>
+<polygon points="130,1513 140.80536522823212,1507.7804135906651 140.80536522823212,1518.2195864093349" fill="#526581"/>
+<rect x="125.140625" y="1478" width="259.71875" height="27" rx="10" fill="white" stroke="#8993a4"/>
+<text x="255.0" y="1492" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">Answer + evidence + tables</text>
+<rect x="45" y="1545" width="1510" height="47" rx="10" fill="#e3f5f1" stroke="#8993a4"/>
+<text x="800.0" y="1568.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">SSE: progress during execution; completed answer, outcome metadata, and [DONE] at completion</text>
+<rect x="45" y="1605" width="1510" height="47" rx="10" fill="#fff3d6" stroke="#8993a4"/>
+<text x="800.0" y="1628.5" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">FAILURES: invalid identity denies access; stage errors/timeouts return failures via Gateway when connected</text>
+<text x="800" y="1681" text-anchor="middle" dominant-baseline="middle" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#172b4d">An internal answer-generation fallback is withheld by Gateway business presentation; the public outcome is FAILED.</text>
+</svg>

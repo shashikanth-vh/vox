@@ -1,0 +1,17 @@
+{{- range $kind, $size := dict "models" .Values.storage.modelSize "qdrant" .Values.storage.qdrantSize }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "chitti.name" $ }}-{{ $kind }}{{ if eq $kind "models" }}-{{ include "chitti.artifact" $ }}{{ end }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: {{ if eq $kind "models" }}{{ $.Values.storage.accessModes | toJson }}{{ else }}[ReadWriteOnce]{{ end }}
+  {{- if $.Values.storage.className }}
+  storageClassName: {{ $.Values.storage.className | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $size }}
+{{- end }}

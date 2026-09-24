@@ -1,0 +1,36 @@
+{
+  "positive_pre_wave": [
+    {
+      "id": "calibration.aegis",
+      "content": "For the AEGIS adverse-media check, if Register has no field, preserve the readiness answer and say AEGIS is unavailable."
+    },
+    {
+      "id": "calibration.readiness",
+      "content": "A syndication is ready when its lender response is pending and the AEGIS clause is clear."
+    },
+    {
+      "id": "calibration.caveat",
+      "content": "A cohort with no qualifying submission rows has no meaningful least-active lender."
+    }
+  ],
+  "negative_post_wave": [
+    {
+      "id": "governance.unavailable_business_criterion",
+      "content": "A request-defined criterion for which Register holds no field is unavailable, qualifies an otherwise answerable result, and is never treated as passed, failed, clear, or zero."
+    },
+    {
+      "id": "execution.register_limits",
+      "content": "Register list reads use opaque keyset cursors and execute bounded operations over caller-visible rows."
+    }
+  ],
+  "negative_never_case": [
+    {
+      "id": "execution.never_case_shaped",
+      "content": "Register list reads are bounded, caller-visible operations with opaque keyset cursors."
+    },
+    {
+      "id": "governance.never_case_shaped",
+      "content": "A null governed value is reported as unassessable rather than silently converted to a match or zero."
+    }
+  ]
+}

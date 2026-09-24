@@ -1,0 +1,16 @@
+# Render-only Chitti production fixture; contains no deployed credentials.
+chitti:
+  enabled: true
+  artifactId: fixture
+  credentials:
+    existingSecret: fixture-chitti-credentials
+  provider:
+    baseUrl: https://provider.invalid/v1
+    model: fixture
+gateway:
+  upstreams:
+    chittiUrl: http://prism-chitti
+  chittiCredential:
+    existingSecret: fixture-chitti-credentials
+register:
+  serviceApiKeys: svc_atlas:real-a,svc_vox:real-v,svc_pulse:real-p,svc_workflows:real-w,svc_gateway:real-g,svc_chitti:fixture-chitti-key

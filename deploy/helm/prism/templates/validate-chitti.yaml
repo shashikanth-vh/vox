@@ -1,0 +1,14 @@
+{{- if and .Values.chitti.enabled .Values.global.requireRealSecrets }}
+{{- if not (and .Values.gateway.enabled .Values.gateway.oidc.requireAuth .Values.gateway.upstreams.chittiUrl) }}
+{{- fail "Production Chitti requires authenticated Gateway routing" }}
+{{- end }}
+{{- if not (and .Values.register.enforceRbac .Values.register.config.enforceRls (eq .Values.register.database.user "register_app") .Values.register.database.migrationUser) }}
+{{- fail "Production Chitti requires Register RBAC/RLS and separate register_app runtime/migration roles" }}
+{{- end }}
+{{- if not (regexMatch "(^|,)svc_chitti:[^,]+" .Values.register.serviceApiKeys) }}
+{{- fail "Add svc_chitti and its credential to register.serviceApiKeys" }}
+{{- end }}
+{{- if not .Values.gateway.internalSigningSecret }}
+{{- fail "Production Chitti requires Gateway internal signing material" }}
+{{- end }}
+{{- end }}
