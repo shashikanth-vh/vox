@@ -628,6 +628,28 @@ cmd_fresh() {
   command -v openssl >/dev/null || die "openssl is required to generate the first-boot secrets"
   [[ ! -e "$LIVE" ]] && [[ ! -e "$ROOT/deploy/compose/docker-compose.yml" ]] ||
     die "a PRISM tree already exists under $ROOT — this machine is deployed; use: $0 upgrade $(basename "$archive")"
+  # A PREVIOUS stack's volumes are a trap, not a convenience: this install is about to
+  # generate NEW secrets, and Postgres applies its password only when initialising an
+  # EMPTY volume — new credentials against an old database is a guaranteed crash loop
+  # of every migration container (seen live, 24 Sep). Containers left behind by an
+  # earlier attempt (other profiles included) would shadow the new stack the same way.
+  local leftovers
+  leftovers="$(docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | head -8)"
+  local leftover_containers
+  leftover_containers="$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | head -1)"
+  if [[ -n "$leftovers" || -n "$leftover_containers" ]]; then
+    say "${c_red}✗ docker already holds pieces of a '$PROJECT' stack on this machine:${c_off}"
+    [[ -n "$leftover_containers" ]] && say "    containers: $(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}} ({{.Status}})' | head -6 | paste -sd ', ' -)"
+    [[ -n "$leftovers" ]] && say "    volumes   : $(printf '%s\n' "$leftovers" | paste -sd ', ' -)"
+    say ""
+    say "  A fresh install generates NEW secrets and cannot own that stack's OLD data."
+    say "  If this machine's previous attempt holds nothing you need, clear it (THIS"
+    say "  DESTROYS THAT STACK'S DATA — never do this on a production box):"
+    say "      docker compose -p $PROJECT down -v --remove-orphans"
+    say "  …or keep both stacks by picking a new project name for this one:"
+    say "      sudo PRISM_PROJECT=prism2 $0 fresh $(basename "$archive")"
+    die "refusing to plant new credentials over an existing stack"
+  fi
   local free_gb
   free_gb="$(df -BG --output=avail "$ROOT" | tail -1 | tr -dc '0-9')"
   (( free_gb >= MIN_FREE_GB )) ||
