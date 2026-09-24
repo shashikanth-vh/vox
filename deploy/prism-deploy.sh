@@ -2,6 +2,9 @@
 #
 # PRISM — upgrade / rollback for a Docker Compose deployment on one VM.
 #
+#   ./prism-deploy.sh fresh    ~/prism-9bdda8b.zip   # FIRST install on an empty machine:
+#                                                    # generates .env secrets + self-signed
+#                                                    # TLS, builds, starts, health-checks
 #   ./prism-deploy.sh upgrade  ~/prism-9bdda8b.zip   # backup → build → swap → verify
 #                                                    # .tar / .tar.gz / .tgz also accepted
 #   ./prism-deploy.sh rollback                       # back to the previous release
@@ -561,6 +564,132 @@ cmd_upgrade() {
   say "  Hard-refresh the browser (Ctrl+Shift+R) — the UI is a cached bundle."
 }
 
+# ── fresh install ────────────────────────────────────────────────────────────
+# The FIRST deployment on an empty machine — a laptop, a new VM. Everything `upgrade`
+# assumes already exists (a live tree, a .env, certs) is created here instead:
+#
+#   * .env is materialised from deploy/compose/.env.example — every core secret
+#     (<REPLACE_…>) becomes a fresh `openssl rand -hex 24`; every OTHER placeholder line
+#     (SSO client ids, SMTP, Anthropic keys, the remote-Chitti block) is COMMENTED OUT,
+#     which keeps the Chitti services overlay off until the box is really pointed at a
+#     Chitti VM. The generated file is chmod 600.
+#   * The edge gets a self-signed localhost certificate so nginx can serve TLS at all;
+#     replace it with a real one for anything internet-facing.
+#   * Profiles default to NONE here (override with PRISM_PROFILES): without `sso` the
+#     gateway runs its documented local walkthrough posture, so the stack is usable
+#     the moment it is healthy; `backup` needs offsite configuration first.
+#
+# It REFUSES to run where a tree already exists — that box is deployed, and the path
+# for deployed boxes is `upgrade`, with its backups and its rollback.
+
+_FRESH_GENERATED_KEYS=(PRISM_DB_PASSWORD MINIO_ROOT_PASSWORD INTERNAL_SIGNING_SECRET
+  SVC_ATLAS_KEY SVC_VOX_KEY SVC_PULSE_KEY SVC_WORKFLOWS_KEY SVC_GATEWAY_KEY
+  SVC_ADVAYA_KEY PULSE_API_KEYS WORKFLOWS_API_KEYS VOCX_FRONT_KEY STT_API_KEY)
+
+materialise_env() {         # $1: example file  $2: destination .env
+  local src="$1" dst="$2" line key
+  : > "$dst"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="${line%%=*}"
+    if [[ "$line" == *"<REPLACE_"* && " ${_FRESH_GENERATED_KEYS[*]} " == *" $key "* ]]; then
+      printf '%s=%s\n' "$key" "$(openssl rand -hex 24)" >> "$dst"
+    elif [[ "$line" == *"<"*">"* && "$line" != \#* ]]; then
+      # A placeholder this script cannot invent (an SSO client id, an SMTP account, a
+      # model API key, the remote Chitti endpoint) — parked as a comment, not shipped
+      # as a live line with a fake value.
+      printf '# set when needed: %s\n' "$line" >> "$dst"
+    else
+      printf '%s\n' "$line" >> "$dst"
+    fi
+  done < "$src"
+  chmod 600 "$dst"
+}
+
+cmd_fresh() {
+  local archive="${1:-}"
+  [[ -n "$archive" ]] || die "usage: $0 fresh <release archive: .zip | .tar | .tar.gz | .tgz>"
+  [[ -f "$archive" ]] || die "no such file: $archive"
+  mkdir -p "$BACKUPS" "$RELEASES" 2>/dev/null ||
+    die "cannot create $BACKUPS / $RELEASES as $(id -un) — run with sudo, or fix ownership of $ROOT"
+
+  step "Preflight (fresh install)"
+  command -v docker >/dev/null || die "docker is not installed"
+  docker compose version >/dev/null 2>&1 || die "the docker compose plugin is missing"
+  docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon (permissions? service down?)"
+  command -v openssl >/dev/null || die "openssl is required to generate the first-boot secrets"
+  [[ ! -e "$LIVE" ]] && [[ ! -e "$ROOT/deploy/compose/docker-compose.yml" ]] ||
+    die "a PRISM tree already exists under $ROOT — this machine is deployed; use: $0 upgrade $(basename "$archive")"
+  local free_gb
+  free_gb="$(df -BG --output=avail "$ROOT" | tail -1 | tr -dc '0-9')"
+  (( free_gb >= MIN_FREE_GB )) ||
+    die "only ${free_gb}G free under $ROOT; need ${MIN_FREE_GB}G to build the images safely"
+  # No live .env yet, so the profile default is decided HERE: none. `sso` without a real
+  # IdP would lock everyone out of a box that has no users yet, and `backup` ships data
+  # offsite it has no credentials for. PRISM_PROFILES overrides for whoever knows better.
+  PROFILES="${PRISM_PROFILES:-}"
+  say "  project=$PROJECT  profiles='${PROFILES:-none}'  free=${free_gb}G"
+
+  local kind; kind="$(archive_kind "$archive")"
+  step "Unpacking $(basename "$archive") ($kind) → $LIVE"
+  local staging="$ROOT/.fresh-$STAMP.tmp"
+  rm -rf "$staging"; mkdir -p "$staging"
+  unpack "$archive" "$staging"
+  local inner; inner="$(find "$staging" -maxdepth 4 -name docker-compose.yml -path '*/deploy/compose/*' | head -1)"
+  [[ -n "$inner" ]] || { rm -rf "$staging"; die "that archive has no deploy/compose/docker-compose.yml — wrong file?"; }
+  local newtree; newtree="$(cd "$(dirname "$inner")/../.." && pwd)"
+  mv "$newtree" "$LIVE"; rm -rf "$staging"
+
+  step "Creating the first-boot secrets"
+  local envf="$LIVE/deploy/compose/.env"
+  if [[ -f "$envf" ]]; then
+    warn "the archive carried a deploy/compose/.env — keeping it untouched"
+  else
+    [[ -f "$LIVE/deploy/compose/.env.example" ]] ||
+      die "no deploy/compose/.env.example in this release — cannot materialise a .env"
+    materialise_env "$LIVE/deploy/compose/.env.example" "$envf"
+    say "  generated core secrets in deploy/compose/.env (chmod 600)"
+    say "  optional integrations are parked as '# set when needed:' lines in that file"
+  fi
+  mkdir -p "$LIVE/deploy/vocx-secrets"
+  if [[ ! -f "$LIVE/deploy/nginx/certs/tls.crt" ]]; then
+    mkdir -p "$LIVE/deploy/nginx/certs"
+    run openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+      -keyout "$LIVE/deploy/nginx/certs/tls.key" \
+      -out "$LIVE/deploy/nginx/certs/tls.crt" \
+      -subj "/CN=localhost" \
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+    chmod 600 "$LIVE/deploy/nginx/certs/tls.key"
+    say "  self-signed TLS certificate for localhost — replace for any real hostname"
+  fi
+
+  step "Building the images (first build downloads base layers — this takes a while)"
+  if ! dc "$LIVE" build; then
+    warn "build failed — nothing was started; the unpacked tree is kept for inspection"
+    die "fix the cause (full log: $LOG) and re-run: $0 fresh $(basename "$archive") — after removing $LIVE"
+  fi
+
+  step "Starting the stack"
+  dc "$LIVE" up -d || die "compose up failed — full log: $LOG"
+
+  if ! wait_healthy; then
+    say "  There is nothing to roll back on a fresh install. Inspect with:"
+    say "      docker compose -p $PROJECT -f $LIVE/deploy/compose/docker-compose.yml ps"
+    say "      docker logs <container>"
+    die "the stack did not become healthy — full log: $LOG"
+  fi
+
+  local port; port="$(edge_http_port)"
+  step "${c_grn}Fresh install complete${c_off}"
+  say "  open      : http://localhost:${port}/ui/   (self-signed TLS on the HTTPS port)"
+  say "  tree      : $LIVE"
+  say "  secrets   : $envf   — generated; parked lines start with '# set when needed:'"
+  say "  sign-in   : no sso profile → the gateway's local walkthrough posture."
+  say "              Bundled Dex users exist too (see deploy/compose/dex/config.yaml)."
+  say "  AI keys   : ANTHROPIC_API_KEY / SARVAM_API_KEY are parked — VOX falls back to"
+  say "              its offline stub until you set one and run: docker compose up -d"
+  say "  upgrades  : $0 upgrade <next-release.zip>   (backups + rollback from now on)"
+}
+
 do_rollback() {             # $1: "--with-db" to restore the pre-upgrade dump as well
   local with_db="${1:-}"
   local prev; prev="$(readlink -f "$RELEASES/.previous" 2>/dev/null || true)"
@@ -960,6 +1089,7 @@ flock -n 9 || die "another deploy is running (lock: $LOCK)"
 trap 'say "${c_red}✗ aborted at line $LINENO${c_off} — log: $LOG"' ERR
 
 case "${1:-}" in
+  fresh)      shift; cmd_fresh "$@" ;;
   upgrade)    shift; cmd_upgrade "$@" ;;
   rollback)   shift; preflight; do_rollback "${1:-}" ;;
   restore-db) shift; cmd_restore_db "$@" ;;
@@ -974,5 +1104,5 @@ case "${1:-}" in
               say "${c_grn}backup complete${c_off} → $BACKUPS" ;;
   status)     cmd_status ;;
   verify)     cmd_verify ;;
-  *) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 1 ;;
+  *) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 1 ;;
 esac
