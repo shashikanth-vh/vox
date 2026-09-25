@@ -61,13 +61,13 @@ export default function ToolsPage() {
         <ExportBar onCsv={() => newsService.exportCsv(user.full)} />
       </Box>
 
-      {/* TWO COLUMNS, ALWAYS — including on a phone, where an auto-fill track list
-          dropped to one and the two cards stacked into a tall header the desk had to
-          scroll past to reach the radar. Two tiles side by side stay legible at 160px
-          each, and `minmax(0,1fr)` lets them shrink rather than overflow. The row is
-          capped so they keep their size on a wide screen instead of becoming banners. */}
-      <Box sx={{ display: 'grid', gap: 1.2, mb: 1.8, maxWidth: 600,
-        gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+      {/* ONE ROW, ALWAYS. With a third card the two-column grid wrapped Prospects
+          under the radar tile and grew the header the desk scrolls past. A
+          horizontal rail keeps every tool on one line at any width: each card keeps
+          a real size (190px) and the row scrolls sideways on a phone, while a
+          desktop shows all of them without scrolling. */}
+      <Box sx={{ display: 'flex', gap: 1.2, mb: 1.8, overflowX: 'auto', pb: 0.5,
+        '& > *': { flex: '0 0 auto', width: 190 } }}>
         {/* The radar is this page's content, so its card is the one shown as current —
             and it now DOES something (it used to have no click handler at all): it
             takes you to the radar, which matters once the page has scrolled. */}
