@@ -15,6 +15,13 @@ import { apiErr } from '../../api/http';
 import { tokens } from '../../theme';
 import { prospectsService, type ProspectRow } from '../../services/prospectsService';
 
+// The grid's view-model: applyQuery and the column funnels read row FIELDS by
+// column id, so the derived columns (joined sector tags, lead count, the status
+// label) are materialised onto each row instead of living only in accessorFns —
+// an accessorFn can feed a funnel's option list but the filter match reads
+// r[column id], which an accessorFn-only column doesn't have.
+type Row = ProspectRow & { sectors: string; leads: number; status_label: string };
+
 /**
  * Masters → Prospects — the curated market universe, chips first, columns second.
  *
@@ -110,6 +117,12 @@ export default function ProspectsPage() {
     () => (statuses.length
       ? afterSubs.filter((r) => statuses.includes(r.status)) : afterSubs),
     [afterSubs, statuses]);
+  const displayRows = useMemo<Row[]>(() => filtered.map((r) => ({
+    ...r,
+    sectors: [...(r.verticals || []), ...(r.sub_sectors || [])].join(', '),
+    leads: (r.lead_ids || []).length,
+    status_label: STATUS_LABEL[r.status] || r.status,
+  })), [filtered]);
   const statusCounts = useMemo(() => {
     const c = new Map<string, number>();
     afterSubs.forEach((r) => c.set(r.status, (c.get(r.status) || 0) + 1));
@@ -150,8 +163,16 @@ export default function ProspectsPage() {
     catch (e: any) { setDel(null); setErr(apiErr(e, 'delete the prospect')); }
   };
 
-  const columns = useMemo<MRT_ColumnDef<ProspectRow>[]>(() => [
-    { accessorKey: 'prospect_no', header: 'Code', size: 90 },
+  // Every column carries a funnel. The categorical ones (localFilter) offer the
+  // book's distinct values as checkboxes — Sectors' joined cell is comma-split
+  // into one option per tag, and matched back token-wise, so ticking "Rooftop
+  // EPC" finds every row that carries it. Remarks is prose, so it filters by
+  // CONTAINS (textFilter) rather than offering 609 one-off sentences. Status
+  // reads the materialised label field so the funnel says "Lead created", not
+  // the wire's lead_created.
+  const columns = useMemo<MRT_ColumnDef<Row>[]>(() => [
+    { accessorKey: 'prospect_no', header: 'Code', size: 90,
+      meta: { localFilter: true } },
     { accessorKey: 'name', header: 'Company', size: 240, meta: { localFilter: true },
       Cell: ({ row }) => (
         <Box>
@@ -161,8 +182,8 @@ export default function ProspectsPage() {
           </Typography>
         </Box>),
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal' } } },
-    { id: 'sectors', header: 'Sectors', size: 200,
-      accessorFn: (r) => [...(r.verticals || []), ...(r.sub_sectors || [])].join(', '),
+    { accessorKey: 'sectors', header: 'Sectors', size: 200,
+      meta: { localFilter: true },
       Cell: ({ row }) => (
         <Box sx={{ display: 'flex', gap: 0.4, flexWrap: 'wrap' }}>
           {(row.original.verticals || []).map((v) => (
@@ -174,31 +195,38 @@ export default function ProspectsPage() {
         </Box>) },
     { accessorKey: 'state', header: 'State', size: 110, meta: { localFilter: true } },
     { accessorKey: 'revenue_cr', header: 'Rev ₹ Cr', size: 90,
+      meta: { localFilter: true },
       Cell: ({ cell }) => {
         const v = cell.getValue<number | null>();
         return v == null ? '' : Number(v).toLocaleString('en-IN',
           { maximumFractionDigits: 1 });
       } },
-    { accessorKey: 'founded_year', header: 'Founded', size: 80 },
-    { accessorKey: 'status', header: 'Status', size: 120, meta: { localFilter: true },
-      Cell: ({ cell }) => {
-        const s = cell.getValue<string>();
+    { accessorKey: 'founded_year', header: 'Founded', size: 80,
+      meta: { localFilter: true } },
+    { accessorKey: 'status_label', header: 'Status', size: 120,
+      meta: { localFilter: true },
+      Cell: ({ row }) => {
+        const s = row.original.status;
         return <Chip size="small" color={STATUS_COLOR[s] || 'default'}
           label={STATUS_LABEL[s] || s} sx={{ fontSize: 10.8, height: 21 }} />;
       } },
-    { id: 'leads', header: 'Leads', size: 70,
-      accessorFn: (r) => (r.lead_ids || []).length || '',
-      Cell: ({ row }) => {
-        const n = (row.original.lead_ids || []).length;
-        return n ? <b>{n}</b> : <span style={{ color: tokens.muted }}>—</span>;
-      } },
+    // Remarks sits BESIDE Status, not last: defined after Leads it lived under
+    // the pinned Actions column, scrolled out of sight, and the desk thought the
+    // remark only existed inside the edit dialog.
     { accessorKey: 'remarks', header: 'Remarks', size: 260,
+      meta: { textFilter: true },
       Cell: ({ cell }) => {
         const s = cell.getValue<string>() || '';
         return <span title={s} style={{ display: '-webkit-box', WebkitLineClamp: 3,
           WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{s}</span>;
       },
       muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 160, maxWidth: 260 } } },
+    { accessorKey: 'leads', header: 'Leads', size: 70,
+      meta: { localFilter: true },
+      Cell: ({ row }) => {
+        const n = (row.original.lead_ids || []).length;
+        return n ? <b>{n}</b> : <span style={{ color: tokens.muted }}>—</span>;
+      } },
   ], []);
 
   const canLead = can(user.roles, 'addLead');
@@ -220,10 +248,10 @@ export default function ProspectsPage() {
           }} />
       </Box>
 
-      <CommonTable<ProspectRow>
+      <CommonTable<Row>
         queryKey={['prospects', verticals, subs, statuses,
           universe.length] as unknown[]}
-        fetcher={async (q) => applyQuery(filtered,
+        fetcher={async (q) => applyQuery(displayRows,
           { ...q, searchFields: ['prospect_no', 'name', 'cin', 'domain', 'remarks'] })}
         columns={columns}
         csvName="atlas_prospects"
