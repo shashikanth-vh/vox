@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, MenuItem, Snackbar, TextField, Tooltip, Typography,
+  DialogTitle, Snackbar, TextField, Tooltip, Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
@@ -15,6 +15,8 @@ import { applyQuery } from '../../api/queryEngine';
 import { apiErr } from '../../api/http';
 import { tokens } from '../../theme';
 import { prospectsService, type ProspectRow } from '../../services/prospectsService';
+import ProspectDrawer, { MONEY_FIELDS, STATUSES, STATUS_COLOR, STATUS_LABEL,
+  splitList } from './ProspectDrawer';
 
 // The grid's view-model: applyQuery and the column funnels read row FIELDS by
 // column id, so the derived columns (joined sector tags, lead count, the status
@@ -41,17 +43,6 @@ type Row = ProspectRow & {
  * import/export tool's territory (Admin/Management), which the server enforces
  * field by field.
  */
-
-const STATUSES = ['uncontacted', 'contacted', 'interested', 'lead_created',
-  'not_relevant'] as const;
-const STATUS_LABEL: Record<string, string> = {
-  uncontacted: 'Uncontacted', contacted: 'Contacted', interested: 'Interested',
-  lead_created: 'Lead created', not_relevant: 'Not relevant',
-};
-const STATUS_COLOR: Record<string, 'default' | 'primary' | 'warning' | 'success'> = {
-  uncontacted: 'default', contacted: 'primary', interested: 'warning',
-  lead_created: 'success', not_relevant: 'default',
-};
 
 // One renderer for every ₹ Cr money column (revenue, PAT, EBITDA, fundings,
 // valuation) — Indian grouping, one decimal, blank for absent.
@@ -89,24 +80,12 @@ function ChipRow({ label, items, selected, onToggle }: {
   );
 }
 
-// The six ₹ Cr money fields, one list so the form and the save build agree.
-const MONEY_FIELDS: [keyof ProspectRow & string, string][] = [
-  ['revenue_cr', 'Revenue ₹ Cr'], ['net_profit_cr', 'Net profit (PAT) ₹ Cr'],
-  ['ebitda_cr', 'EBITDA ₹ Cr'], ['total_funding_cr', 'Total funding ₹ Cr'],
-  ['latest_funding_cr', 'Latest round ₹ Cr'],
-  ['latest_valuation_cr', 'Latest valuation ₹ Cr'],
-];
-
-const splitList = (s: string) =>
-  s.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
-
 /**
- * The curated master form — one dialog for both halves of manage_prospects:
- * ADD (prospect null) posts a new company and the register assigns the next
- * P-code; EDIT (prospect set) patches every master field, including clearing
- * one (a blanked field is sent as null — that is the difference from the
- * import, which by policy never overwrites and never clears). The parent
- * remounts this by key, so the form state always starts from the row given.
+ * The Add-prospect form. Row EDITING lives in the drawer (ProspectDrawer, the
+ * company-drawer pattern); this dialog only handles birth, where a compact
+ * form fits: the register assigns the next P-code and refuses a duplicate CIN
+ * naming its holder. `prospect` stays supported for completeness but the page
+ * no longer opens it that way.
  */
 function MasterDialog({ open, prospect, tagOptions, busy, onClose, onSave }: {
   open: boolean; prospect: ProspectRow | null;
@@ -186,8 +165,8 @@ function MasterDialog({ open, prospect, tagOptions, busy, onClose, onSave }: {
         </Box>
         <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap' }}>
           {MONEY_FIELDS.map(([k, label]) => (
-            <TextField key={k} size="small" label={label} type="number" sx={half}
-              {...txt(k)} />))}
+            <TextField key={k} size="small" label={`${label} ₹ Cr`} type="number"
+              sx={half} {...txt(k)} />))}
           <TextField size="small" label="Latest funded date" type="date" sx={half}
             InputLabelProps={{ shrink: true }} {...txt('latest_funded_on')} />
         </Box>
@@ -221,14 +200,13 @@ export default function ProspectsPage() {
   const [verticals, setVerticals] = useState<string[]>([]);
   const [subs, setSubs] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
-  const [work, setWork] = useState<ProspectRow | null>(null);
-  const [status, setStatus] = useState('uncontacted');
-  const [remarks, setRemarks] = useState('');
+  // The drawer follows the ROW ID, not a row snapshot: after a save refreshes
+  // the universe, the drawer re-reads the fresh row instead of a stale copy.
+  const [drawerId, setDrawerId] = useState<string | null>(null);
   const [lead, setLead] = useState<ProspectRow | null>(null);
   const [leadNote, setLeadNote] = useState('');
   const [del, setDel] = useState<ProspectRow | null>(null);
-  // Master form: closed (null), Add ({ p: null }) or Edit ({ p: row }).
-  const [master, setMaster] = useState<{ p: ProspectRow | null } | null>(null);
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -273,19 +251,6 @@ export default function ProspectsPage() {
       [string, number][];
   }, [afterSubs]);
 
-  const openWork = (r: ProspectRow) => {
-    setWork(r); setStatus(r.status); setRemarks(r.remarks || '');
-  };
-  const saveWork = async () => {
-    if (!work) return;
-    setBusy(true);
-    try {
-      await prospectsService.update(work.id, { status, remarks });
-      setWork(null); refresh();
-    } catch (e: any) { setErr(apiErr(e, 'update the prospect')); }
-    finally { setBusy(false); }
-  };
-
   const runCreateLead = async () => {
     if (!lead) return;
     setBusy(true);
@@ -306,21 +271,15 @@ export default function ProspectsPage() {
     catch (e: any) { setDel(null); setErr(apiErr(e, 'delete the prospect')); }
   };
 
-  const saveMaster = async (body: Record<string, unknown>) => {
-    if (!master) return;
+  const saveAdd = async (body: Record<string, unknown>) => {
     setBusy(true);
     try {
-      if (master.p) {
-        await prospectsService.updateMaster(master.p.id, body);
-        setMsg(`${body.name} updated.`);
-      } else {
-        const r = await prospectsService.create(body);
-        setMsg(`${r.name} added as ${r.prospect_no || 'a prospect'}.`);
-      }
-      setMaster(null); refresh();
-    } catch (e: any) {
-      setErr(apiErr(e, master.p ? 'save the master data' : 'add the prospect'));
-    } finally { setBusy(false); }
+      const r = await prospectsService.create(body);
+      setMsg(`${r.name} added as ${r.prospect_no || 'a prospect'}.`);
+      setAdding(false); refresh();
+      setDrawerId(r.id);  // land in the new row's drawer, ready to keep working
+    } catch (e: any) { setErr(apiErr(e, 'add the prospect')); }
+    finally { setBusy(false); }
   };
 
   // Every column carries a funnel. The categorical ones (localFilter) offer the
@@ -458,10 +417,10 @@ export default function ProspectsPage() {
         csvName="atlas_prospects"
         toolbarLeft={canManage ? (
           <Button variant="contained" size="small" startIcon={<AddIcon />}
-            onClick={() => setMaster({ p: null })}>Add prospect</Button>
+            onClick={() => setAdding(true)}>Add prospect</Button>
         ) : undefined}
-        onEdit={openWork}
-        onRowClick={openWork}
+        onEdit={(r) => setDrawerId(r.id)}
+        onRowClick={(r) => setDrawerId(r.id)}
         onDelete={can(user.roles, 'deleteRow') ? (r) => setDel(r) : undefined}
         extraActions={canLead ? (r) => (
           <Tooltip title="Create lead">
@@ -477,39 +436,21 @@ export default function ProspectsPage() {
         }}
       />
 
-      {/* The desk verbs: status + remarks. Master data lives with the curators. */}
-      <Dialog open={!!work} onClose={() => !busy && setWork(null)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontSize: 15.5 }}>{work?.name}</DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.6, pt: '8px !important' }}>
-          <TextField select size="small" label="Status" value={status}
-            onChange={(e) => setStatus(e.target.value)}>
-            {STATUSES.map((s) => (
-              <MenuItem key={s} value={s}>{STATUS_LABEL[s]}</MenuItem>))}
-          </TextField>
-          <TextField size="small" label="Remarks" value={remarks} multiline minRows={3}
-            onChange={(e) => setRemarks(e.target.value)}
-            placeholder="Met at REI Expo; CFO open to a WC discussion after Diwali…" />
-          <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
-            {canManage
-              ? 'Company, sector and financial fields live under “Edit master data”.'
-              : 'Company, sector and financial fields are curated data — maintained '
-                + 'by Management/Admin (master edit, or Tools → Prospects import).'}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          {canManage && (
-            <Button sx={{ mr: 'auto' }} disabled={busy}
-              onClick={() => { const p = work; setWork(null); setMaster({ p }); }}>
-              Edit master data…</Button>)}
-          <Button onClick={() => setWork(null)} disabled={busy}>Cancel</Button>
-          <Button variant="contained" onClick={saveWork} disabled={busy}>Save</Button>
-        </DialogActions>
-      </Dialog>
+      {/* The row's record, edited where it is read — the company-drawer pattern.
+          Status + remarks stay open to every desk role; the master sections are
+          editable in place for Admin/Management and read-only otherwise. */}
+      <ProspectDrawer
+        prospect={universe.find((r) => r.id === drawerId) || null}
+        canManage={canManage} canLead={canLead} tagOptions={tagOptions}
+        onClose={() => setDrawerId(null)}
+        onSaved={(m) => { setMsg(m); refresh(); }}
+        onCreateLead={(p) => setLead(p)}
+        onDelete={can(user.roles, 'deleteRow') ? (p) => setDel(p) : undefined} />
 
-      {/* Add / master edit — the manage_prospects half of the row's CRUD. */}
-      <MasterDialog key={master?.p?.id ?? (master ? 'new' : 'closed')}
-        open={!!master} prospect={master?.p ?? null} tagOptions={tagOptions}
-        busy={busy} onClose={() => setMaster(null)} onSave={saveMaster} />
+      {/* Add — the manage_prospects birth form. */}
+      <MasterDialog key={adding ? 'new' : 'closed'}
+        open={adding} prospect={null} tagOptions={tagOptions}
+        busy={busy} onClose={() => setAdding(false)} onSave={saveAdd} />
 
       {/* Create lead — repeatable by design: one company, many asks over time. */}
       <Dialog open={!!lead} onClose={() => !busy && setLead(null)} maxWidth="xs" fullWidth>
