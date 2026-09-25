@@ -56,6 +56,36 @@ async def prospect_pre_write(ctx: Any, body: dict, obj_id: Any = None) -> None:
 
         enforce_operation(ctx.user, "manage_prospects")
 
+    # The canonical dedupe key follows the name wherever the name is written —
+    # the import engine sets it on its own path, and this hook covers the manual
+    # create/edit path, so a hand-entered company still deduplicates against the
+    # next Excel drop instead of silently forking.
+    if body.get("name"):
+        from evam_backend_core.company_identity import canonical_name
+
+        body["name_key"] = canonical_name(str(body["name"]))
+
+    # One live prospect per CIN is a partial unique index; pre-checking here turns
+    # the raw constraint error into a refusal that names the row already holding
+    # it — the same courtesy person_pre_write extends for a duplicate mailbox.
+    cin = (str(body.get("cin") or "")).strip()
+    if cin:
+        from sqlalchemy import select
+
+        from app.models import Prospect
+
+        conds = [Prospect.tenant_id == ctx.tenant_id,
+                 Prospect.deleted_at.is_(None), Prospect.cin == cin]
+        if obj_id is not None:
+            conds.append(Prospect.id != obj_id)
+        holder = (await ctx.session.execute(
+            select(Prospect.prospect_no, Prospect.name)
+            .where(*conds).limit(1))).first()
+        if holder is not None:
+            raise ValidationAppError(
+                f"{holder[1]} ({holder[0] or 'no code'}) already carries CIN {cin} — "
+                f"one live prospect per CIN. Edit that row instead of adding a second.")
+
 
 def _require_view(ctx: RequestContext) -> None:
     from app.authz import Access

@@ -94,7 +94,9 @@ class ResourceSpec:
         self.write_operation = write_operation
         # An async (ctx, body, obj_id|None) -> None hook run immediately before a create
         # or update lands, for the invariants a column constraint cannot express — see
-        # app.api.people_rules. It raises; it never edits the body.
+        # app.api.people_rules. It refuses by raising, and it may settle SERVER-OWNED
+        # derived fields on the body (a prospect's canonical name_key follows its name);
+        # it never rewrites what the caller asked for.
         self.pre_write = pre_write
         # An async (ctx, body) -> None hook run on CREATE ONLY, immediately after the
         # body is built and BEFORE any RBAC/policy check reads it — the one hook that

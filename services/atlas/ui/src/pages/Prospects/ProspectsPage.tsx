@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  MenuItem, Snackbar, TextField, Tooltip, Typography,
+  Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent,
+  DialogTitle, MenuItem, Snackbar, TextField, Tooltip, Typography,
 } from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
@@ -88,6 +89,132 @@ function ChipRow({ label, items, selected, onToggle }: {
   );
 }
 
+// The six ₹ Cr money fields, one list so the form and the save build agree.
+const MONEY_FIELDS: [keyof ProspectRow & string, string][] = [
+  ['revenue_cr', 'Revenue ₹ Cr'], ['net_profit_cr', 'Net profit (PAT) ₹ Cr'],
+  ['ebitda_cr', 'EBITDA ₹ Cr'], ['total_funding_cr', 'Total funding ₹ Cr'],
+  ['latest_funding_cr', 'Latest round ₹ Cr'],
+  ['latest_valuation_cr', 'Latest valuation ₹ Cr'],
+];
+
+const splitList = (s: string) =>
+  s.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+
+/**
+ * The curated master form — one dialog for both halves of manage_prospects:
+ * ADD (prospect null) posts a new company and the register assigns the next
+ * P-code; EDIT (prospect set) patches every master field, including clearing
+ * one (a blanked field is sent as null — that is the difference from the
+ * import, which by policy never overwrites and never clears). The parent
+ * remounts this by key, so the form state always starts from the row given.
+ */
+function MasterDialog({ open, prospect, tagOptions, busy, onClose, onSave }: {
+  open: boolean; prospect: ProspectRow | null;
+  tagOptions: { verticals: string[]; subs: string[] };
+  busy: boolean; onClose: () => void;
+  onSave: (body: Record<string, unknown>) => void;
+}) {
+  const [f, setF] = useState<Record<string, string>>(() => {
+    const p = prospect;
+    const out: Record<string, string> = {
+      name: p?.name || '', domain: p?.domain || '', cin: p?.cin || '',
+      state: p?.state || '', city: p?.city || '', country: p?.country || '',
+      founded_year: p?.founded_year != null ? String(p.founded_year) : '',
+      latest_funded_on: p?.latest_funded_on || '',
+      emails: (p?.emails || []).join(', '), phones: (p?.phones || []).join(', '),
+      overview: p?.overview || '', remarks: p?.remarks || '',
+    };
+    MONEY_FIELDS.forEach(([k]) => {
+      const v = p?.[k]; out[k] = v != null ? String(v) : '';
+    });
+    return out;
+  });
+  const [verts, setVerts] = useState<string[]>(prospect?.verticals || []);
+  const [subs, setSubs] = useState<string[]>(prospect?.sub_sectors || []);
+
+  const set = (k: string) => (e: { target: { value: string } }) =>
+    setF((prev) => ({ ...prev, [k]: e.target.value }));
+  const txt = (k: string) => ({ value: f[k], onChange: set(k) });
+
+  const save = () => {
+    const s = (k: string) => f[k].trim() || null;
+    const n = (k: string) => {
+      const t = f[k].trim();
+      return t === '' || Number.isNaN(Number(t)) ? null : Number(t);
+    };
+    const body: Record<string, unknown> = {
+      name: f.name.trim(), domain: s('domain'), cin: s('cin'),
+      verticals: verts, sub_sectors: subs,
+      state: s('state'), city: s('city'), country: s('country'),
+      founded_year: n('founded_year'), latest_funded_on: s('latest_funded_on'),
+      emails: splitList(f.emails), phones: splitList(f.phones),
+      overview: s('overview'), remarks: s('remarks'),
+    };
+    MONEY_FIELDS.forEach(([k]) => { body[k] = n(k); });
+    onSave(body);
+  };
+
+  const half = { flex: '1 1 46%', minWidth: 150 };
+  return (
+    <Dialog open={open} onClose={() => !busy && onClose()} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontSize: 15.5 }}>
+        {prospect ? `Edit master data — ${prospect.name}` : 'Add prospect'}
+      </DialogTitle>
+      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5,
+        pt: '10px !important' }}>
+        <TextField size="small" label="Company name" required {...txt('name')} />
+        <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap' }}>
+          <TextField size="small" label="Domain (website)" sx={half}
+            placeholder="acmesolar.in" {...txt('domain')} />
+          <TextField size="small" label="CIN" sx={half}
+            placeholder="U40100MH2015PTC123456" {...txt('cin')} />
+        </Box>
+        <Autocomplete multiple freeSolo size="small" options={tagOptions.verticals}
+          value={verts} onChange={(_, v) => setVerts(v as string[])}
+          renderInput={(p) => (
+            <TextField {...p} label="Verticals" placeholder="Solar, EV, ESS…" />)} />
+        <Autocomplete multiple freeSolo size="small" options={tagOptions.subs}
+          value={subs} onChange={(_, v) => setSubs(v as string[])}
+          renderInput={(p) => (
+            <TextField {...p} label="Sub-sectors" placeholder="OEM, EPC, Developer…" />)} />
+        <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap' }}>
+          <TextField size="small" label="State" sx={half} {...txt('state')} />
+          <TextField size="small" label="City" sx={half} {...txt('city')} />
+          <TextField size="small" label="Country" sx={half} {...txt('country')} />
+          <TextField size="small" label="Founded year" type="number" sx={half}
+            {...txt('founded_year')} />
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap' }}>
+          {MONEY_FIELDS.map(([k, label]) => (
+            <TextField key={k} size="small" label={label} type="number" sx={half}
+              {...txt(k)} />))}
+          <TextField size="small" label="Latest funded date" type="date" sx={half}
+            InputLabelProps={{ shrink: true }} {...txt('latest_funded_on')} />
+        </Box>
+        <TextField size="small" label="Emails (comma-separated)" multiline
+          {...txt('emails')} />
+        <TextField size="small" label="Phones (comma-separated)" multiline
+          {...txt('phones')} />
+        <TextField size="small" label="Overview" multiline minRows={2}
+          {...txt('overview')} />
+        <TextField size="small" label="Remarks" multiline minRows={2}
+          {...txt('remarks')} />
+        {!prospect && (
+          <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
+            The register assigns the next free P-code and checks the CIN against the
+            book — a duplicate is refused naming the row that already carries it.
+          </Typography>)}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="contained" onClick={save}
+          disabled={busy || !f.name.trim()}>
+          {prospect ? 'Save master data' : 'Add prospect'}</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 export default function ProspectsPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -100,6 +227,8 @@ export default function ProspectsPage() {
   const [lead, setLead] = useState<ProspectRow | null>(null);
   const [leadNote, setLeadNote] = useState('');
   const [del, setDel] = useState<ProspectRow | null>(null);
+  // Master form: closed (null), Add ({ p: null }) or Edit ({ p: row }).
+  const [master, setMaster] = useState<{ p: ProspectRow | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -175,6 +304,23 @@ export default function ProspectsPage() {
     if (!del) return;
     try { await prospectsService.remove(del.id); setDel(null); refresh(); }
     catch (e: any) { setDel(null); setErr(apiErr(e, 'delete the prospect')); }
+  };
+
+  const saveMaster = async (body: Record<string, unknown>) => {
+    if (!master) return;
+    setBusy(true);
+    try {
+      if (master.p) {
+        await prospectsService.updateMaster(master.p.id, body);
+        setMsg(`${body.name} updated.`);
+      } else {
+        const r = await prospectsService.create(body);
+        setMsg(`${r.name} added as ${r.prospect_no || 'a prospect'}.`);
+      }
+      setMaster(null); refresh();
+    } catch (e: any) {
+      setErr(apiErr(e, master.p ? 'save the master data' : 'add the prospect'));
+    } finally { setBusy(false); }
   };
 
   // Every column carries a funnel. The categorical ones (localFilter) offer the
@@ -278,6 +424,11 @@ export default function ProspectsPage() {
   }), []);
 
   const canLead = can(user.roles, 'addLead');
+  const canManage = can(user.roles, 'manageProspects');
+  const tagOptions = useMemo(() => ({
+    verticals: countTags(universe, 'verticals').map(([v]) => v),
+    subs: countTags(universe, 'sub_sectors').map(([v]) => v),
+  }), [universe]);
 
   return (
     <>
@@ -305,6 +456,10 @@ export default function ProspectsPage() {
         initialColumnVisibility={hiddenByDefault}
         columns={columns}
         csvName="atlas_prospects"
+        toolbarLeft={canManage ? (
+          <Button variant="contained" size="small" startIcon={<AddIcon />}
+            onClick={() => setMaster({ p: null })}>Add prospect</Button>
+        ) : undefined}
         onEdit={openWork}
         onRowClick={openWork}
         onDelete={can(user.roles, 'deleteRow') ? (r) => setDel(r) : undefined}
@@ -335,15 +490,26 @@ export default function ProspectsPage() {
             onChange={(e) => setRemarks(e.target.value)}
             placeholder="Met at REI Expo; CFO open to a WC discussion after Diwali…" />
           <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
-            Company, sector and financial fields are curated data — maintained through
-            Tools → Prospects (import/export) by Management/Admin.
+            {canManage
+              ? 'Company, sector and financial fields live under “Edit master data”.'
+              : 'Company, sector and financial fields are curated data — maintained '
+                + 'by Management/Admin (master edit, or Tools → Prospects import).'}
           </Typography>
         </DialogContent>
         <DialogActions>
+          {canManage && (
+            <Button sx={{ mr: 'auto' }} disabled={busy}
+              onClick={() => { const p = work; setWork(null); setMaster({ p }); }}>
+              Edit master data…</Button>)}
           <Button onClick={() => setWork(null)} disabled={busy}>Cancel</Button>
           <Button variant="contained" onClick={saveWork} disabled={busy}>Save</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Add / master edit — the manage_prospects half of the row's CRUD. */}
+      <MasterDialog key={master?.p?.id ?? (master ? 'new' : 'closed')}
+        open={!!master} prospect={master?.p ?? null} tagOptions={tagOptions}
+        busy={busy} onClose={() => setMaster(null)} onSave={saveMaster} />
 
       {/* Create lead — repeatable by design: one company, many asks over time. */}
       <Dialog open={!!lead} onClose={() => !busy && setLead(null)} maxWidth="xs" fullWidth>

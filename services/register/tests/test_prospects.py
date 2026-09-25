@@ -281,3 +281,57 @@ async def test_chips_filter_facets_and_export_round_trip(reg: AsyncClient):
     assert body["counts"]["new"] == 0
     assert body["counts"]["merged"] == 0
     assert body["counts"]["conflicts"] == 0
+
+
+async def test_manual_create_and_master_edit_carry_the_imports_invariants(reg: AsyncClient):
+    """The Add-prospect form's contract: RBAC'd create, register-assigned P-code,
+    a canonical name_key that keeps the row visible to the import's dedupe, a
+    CIN refusal that names the holder, and a rename that moves the key along."""
+    # Creation is curated-data territory: the desk is refused, Admin lands.
+    denied = await reg.post("/v1/prospects", headers=RM,
+                            json={"name": "Acme Solar Private Limited"})
+    assert denied.status_code == 403
+    r = await reg.post("/v1/prospects", headers=ADMIN, json={
+        "name": "Acme Solar Private Limited", "domain": "acmesolar.in",
+        "cin": "U40100MH2015PTC999999", "verticals": ["Solar"],
+        "sub_sectors": ["EPC"], "state": "Maharashtra", "revenue_cr": 12.5})
+    assert r.status_code == 201, r.text
+    made = r.json()
+    assert made["prospect_no"].startswith("P-")
+
+    # The dedupe key was settled server-side, not left NULL like a naive create
+    # would — so the next Excel drop MERGES into this row instead of forking it.
+    sm = get_sessionmaker()
+    from app.models import Prospect
+    async with sm() as session:
+        key = (await session.execute(
+            select(Prospect.name_key).where(Prospect.id == made["id"]))).scalar()
+    assert key  # canonical, non-empty
+    book = _book({"Eligible Solar": [
+        ["Company Name", "Domain Name", "EVAM SECTOR",
+         "Annual Revenue (INR Cr)", "City"],
+        ["Acme Solar Pvt Ltd", "acmesolar.in", "Developer", 12.5, "Pune"],
+    ]})
+    preview = (await reg.post("/v1/prospects/import?mode=preview", headers=ADMIN,
+                              files=[_upload("solar.xlsx", book)])).json()
+    assert preview["counts"]["new"] == 0
+    assert preview["counts"]["merged"] == 1
+
+    # A second row for the same CIN is refused BY NAME, not with a raw 500.
+    dup = await reg.post("/v1/prospects", headers=ADMIN, json={
+        "name": "Acme Solar (duplicate)", "cin": "U40100MH2015PTC999999"})
+    assert dup.status_code == 422
+    assert made["prospect_no"] in dup.json()["error"]["detail"]
+
+    # A rename moves the canonical key with it; delete is the standard soft-delete.
+    ren = await reg.patch(f"/v1/prospects/{made['id']}", headers=ADMIN,
+                          json={"name": "Zenith Solar Private Limited"})
+    assert ren.status_code == 200, ren.text
+    async with sm() as session:
+        key2 = (await session.execute(
+            select(Prospect.name_key).where(Prospect.id == made["id"]))).scalar()
+    assert key2 and key2 != key
+    gone = await reg.delete(f"/v1/prospects/{made['id']}", headers=ADMIN)
+    assert gone.status_code == 204
+    listing = (await reg.get("/v1/prospects?with_total=true", headers=ADMIN)).json()
+    assert all(p["id"] != made["id"] for p in listing["items"])

@@ -66,6 +66,12 @@ export const prospectsService = {
     return api.patch<ProspectRow>(`/prospects/${id}`, patch);
   },
 
+  /** Manual single-company create (manageProspects on the server); the register
+   *  assigns the next free P-code and the canonical dedupe key itself. */
+  create(body: Record<string, unknown>): Promise<ProspectRow> {
+    return api.post<ProspectRow>('/prospects', body);
+  },
+
   remove(id: string): Promise<unknown> {
     return api.del(`/prospects/${id}`);
   },
