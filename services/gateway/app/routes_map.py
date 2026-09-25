@@ -32,6 +32,13 @@ _RAW: list[tuple[str, str, str]] = [
     ("PATCH",  r"^/v1/syndication/[^/]+$", "edit_syndication_line"),
     ("PATCH",  r"^/v1/asset-monetisation/[^/]+$", "edit_am_record"),
     ("POST",   r"^/v1/syndication/[^/]+/lenders$", "add_lender_to_mandate"),
+    # Prospects (the curated market universe). Import and manual create are
+    # curated-data territory; a row PATCH is the desk verb; promotion creates a
+    # Lead so the lead gate decides. DELETE rides the blanket delete_row rule.
+    ("POST",   r"^/v1/prospects/import$", "manage_prospects"),
+    ("POST",   r"^/v1/prospects$", "manage_prospects"),
+    ("PATCH",  r"^/v1/prospects/[^/]+$", "work_prospect"),
+    ("POST",   r"^/v1/prospects/[^/]+/create-lead$", "add_lead"),
     # Interactions (timeline + nested).
     ("POST",   r"^/v1/interactions$", "log_interaction"),
     ("POST",   r"^/v1/[^/]+/[^/]+/interactions$", "log_interaction"),

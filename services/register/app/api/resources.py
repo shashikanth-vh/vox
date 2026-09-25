@@ -9,6 +9,7 @@ from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.lead_rules import lead_company_to_master as _lead_company_to_master
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
+from app.api.prospect_rules import prospect_pre_write
 from app.api.tracker_rules import lending_pre_write
 from app.models import (
     AssetMonetisation,
@@ -25,6 +26,7 @@ from app.models import (
     LendingTracker,
     MonitoringReporting,
     Person,
+    Prospect,
     SyndicationLender,
     SyndicationTracker,
 )
@@ -65,6 +67,28 @@ _SPECS: list[ResourceSpec] = [
         read_schema=s.CounterpartyRead, filterable=["counterparty_type", "is_active"],
         # Bank/counterparty directory: broad read (tools view), mutation restricted.
         view_name="tools", write_operation="manage_counterparty",
+    ),
+    ResourceSpec(
+        # The prospect universe (Masters → Prospects): curated market lists, one step
+        # upstream of a lead. Read is desk-wide; PATCH goes through work_prospect,
+        # with the field-level split (status/remarks vs curated master data) in
+        # prospect_pre_write. Creation by hand is manage_prospects territory too —
+        # the pre_write hook sees every non-desk field a create carries.
+        name="prospect", prefix="/v1/prospects", tags=["Prospects"],
+        repo=CRUDRepository(Prospect,
+                            searchable=["name", "cin", "domain", "remarks", "overview",
+                                        "prospect_no"],
+                            filterable=["status", "state", "city", "cin", "country",
+                                        "founded_year", "entity_id", "prospect_no",
+                                        "revenue_cr", "import_batch"],
+                            jsonb_membership=["verticals", "sub_sectors"]),
+        create_schema=s.ProspectCreate, update_schema=s.ProspectUpdate,
+        read_schema=s.ProspectRead,
+        filterable=["status", "state", "city", "cin", "country", "founded_year",
+                    "entity_id", "prospect_no", "revenue_cr", "import_batch",
+                    "verticals", "sub_sectors"],
+        view_name="prospects", write_operation="work_prospect",
+        pre_write=prospect_pre_write,
     ),
     ResourceSpec(
         name="lead", prefix="/v1/leads", tags=["Leads"],

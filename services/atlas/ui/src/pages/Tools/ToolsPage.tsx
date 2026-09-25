@@ -7,6 +7,7 @@ import { newsService } from '../../services/newsService';
 import ExportBar from '../../components/common/ExportBar';
 import NewsRadar from './NewsRadar';
 import LedgerDialog from './LedgerDialog';
+import ProspectsDialog from './ProspectsDialog';
 
 /**
  * Tools — two cards, both of them real.
@@ -45,10 +46,14 @@ function ToolCard({ icon, title, sub, on, onClick }: {
 export default function ToolsPage() {
   const { user } = useAuth();
   const [ledger, setLedger] = useState(false);
+  const [prospects, setProspects] = useState(false);
   const radarRef = useRef<HTMLDivElement>(null);
   // The Excel ledger is Admin-only in both directions — the server enforces it too, so
   // hiding it here only spares a non-Admin a refusal they could not act on.
   const canLedger = can(user.roles, 'backupRestore');
+  // Prospect imports are curated-data territory (Management/Admin) — same rule:
+  // the server enforces it; the card only spares everyone else a refusal.
+  const canProspects = can(user.roles, 'manageProspects');
 
   return (
     <>
@@ -74,11 +79,17 @@ export default function ToolsPage() {
             sub="export the book · import a ledger file"
             onClick={() => setLedger(true)} />
         )}
+        {canProspects && (
+          <ToolCard icon="🧭" title="Prospects"
+            sub="import market lists · export the universe"
+            onClick={() => setProspects(true)} />
+        )}
       </Box>
 
       <Box ref={radarRef}><NewsRadar /></Box>
 
       <LedgerDialog open={ledger} onClose={() => setLedger(false)} />
+      <ProspectsDialog open={prospects} onClose={() => setProspects(false)} />
     </>
   );
 }

@@ -6,6 +6,7 @@ import SubTabs, { type SubTab } from '../../components/common/SubTabs';
 import ClientsPage from '../Clients/ClientsPage';
 import FIMasterPage from '../FIMaster/FIMasterPage';
 import EmployeesPage from '../Employees/EmployeesPage';
+import ProspectsPage from '../Prospects/ProspectsPage';
 import ReconciliationPage from './ReconciliationPage';
 import { useAuth } from '../../auth/AuthContext';
 import { canSee } from '../../auth/rbac';
@@ -16,6 +17,8 @@ const SUBS: (SubTab & { tab: string })[] = [
   { id: 'clients', label: 'Clients', icon: '👥', tab: 'clients' },
   { id: 'fi', label: 'FI Master', icon: '🏦', tab: 'fi' },
   { id: 'emp', label: 'Employees', icon: '🧑‍💼', tab: 'emp' },
+  // The prospect universe — curated market lists, one step upstream of a lead.
+  { id: 'prospects', label: 'Prospects', icon: '🧭', tab: 'prospects' },
   // Import reconciliation. NOT in the view matrix: the register restricts these
   // endpoints to an Admin or Management identity, so the tab mirrors that rule exactly
   // rather than inventing a view row a role could be granted independently — a tab that
@@ -48,6 +51,7 @@ export default function MastersPage() {
       {active === 'clients' && <ClientsPage />}
       {active === 'fi' && <FIMasterPage mode={mode} onModeChange={setMode} />}
       {active === 'emp' && <EmployeesPage mode={mode} onModeChange={setMode} />}
+      {active === 'prospects' && <ProspectsPage />}
       {active === 'recon' && <ReconciliationPage />}
     </>
   );

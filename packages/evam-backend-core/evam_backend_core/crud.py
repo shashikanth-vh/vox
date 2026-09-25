@@ -129,12 +129,19 @@ class CRUDRepository(Generic[M]):
         *,
         searchable: list[str] | None = None,
         filterable: list[str] | None = None,
+        jsonb_membership: list[str] | None = None,
     ) -> None:
         self.model = model
         self.resource = model.__tablename__
         self.searchable = searchable or []
         # Columns clients may filter by equality on; defaults to declared filterables.
         self.filterable = set(filterable or [])
+        # JSONB LIST columns clients may filter by MEMBERSHIP (`?verticals=Solar`
+        # matches rows whose list contains "Solar"; a comma value is ANY-of, matching
+        # the grids' multi-select chips). Opt-in per resource — equality on a JSONB
+        # list is never what a grid means, so these columns are kept out of the
+        # equality whitelist and get containment instead.
+        self.jsonb_membership = set(jsonb_membership or [])
 
     # ---- helpers ---------------------------------------------------------
     def _col(self, name: str) -> InstrumentedAttribute:
@@ -280,6 +287,13 @@ class CRUDRepository(Generic[M]):
 
         for key, value in (filters or {}).items():
             if value is None:
+                continue
+            if key in self.jsonb_membership:
+                # Membership on a JSONB list column; comma = ANY of the values.
+                parts = ([p for p in value.split(",") if p != ""]
+                         if isinstance(value, str) else [value])
+                if parts:
+                    conds.append(or_(*[self._col(key).contains([p]) for p in parts]))
                 continue
             # RANGE filters: '<column>__gte' / '<column>__lte' bound the column from
             # either side (the grids' date-range pickers). The BASE column must be

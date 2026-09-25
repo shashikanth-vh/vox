@@ -1138,6 +1138,94 @@ class SettingsRead(BaseModel):
     settings: dict[str, Any]
 
 
+# --------------------------------------------------------------------------- #
+# Prospects — the curated market universe (Masters → Prospects)
+# --------------------------------------------------------------------------- #
+_PROSPECT_STATUS = "^(uncontacted|contacted|interested|lead_created|not_relevant)$"
+
+
+class ProspectCreate(CreateModel):
+    prospect_no: str | None = Field(
+        default=None, max_length=20,
+        description="Omit it and the register assigns the next free P-0001, P-0002, …")
+    name: str = Field(max_length=300)
+    domain: str | None = Field(default=None, max_length=200)
+    cin: str | None = Field(default=None, max_length=40)
+    overview: str | None = None
+    verticals: list[str] | None = None
+    sub_sectors: list[str] | None = None
+    emails: list[str] | None = None
+    phones: list[str] | None = None
+    founded_year: int | None = Field(default=None, ge=1800, le=2100)
+    state: str | None = Field(default=None, max_length=60)
+    city: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=60)
+    revenue_cr: float | None = None
+    net_profit_cr: float | None = None
+    ebitda_cr: float | None = None
+    total_funding_cr: float | None = None
+    latest_funding_cr: float | None = None
+    latest_valuation_cr: float | None = None
+    latest_funded_on: date | None = None
+    status: str = Field(default="uncontacted", pattern=_PROSPECT_STATUS)
+    remarks: str | None = None
+    source: str | None = Field(default=None, max_length=300)
+
+
+class ProspectUpdate(UpdateModel):
+    name: str | None = Field(default=None, max_length=300)
+    domain: str | None = Field(default=None, max_length=200)
+    cin: str | None = Field(default=None, max_length=40)
+    overview: str | None = None
+    verticals: list[str] | None = None
+    sub_sectors: list[str] | None = None
+    emails: list[str] | None = None
+    phones: list[str] | None = None
+    founded_year: int | None = Field(default=None, ge=1800, le=2100)
+    state: str | None = Field(default=None, max_length=60)
+    city: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=60)
+    revenue_cr: float | None = None
+    net_profit_cr: float | None = None
+    ebitda_cr: float | None = None
+    total_funding_cr: float | None = None
+    latest_funding_cr: float | None = None
+    latest_valuation_cr: float | None = None
+    latest_funded_on: date | None = None
+    status: str | None = Field(default=None, pattern=_PROSPECT_STATUS)
+    remarks: str | None = None
+    source: str | None = Field(default=None, max_length=300)
+
+
+class ProspectRead(ReadModel):
+    prospect_no: str | None
+    name: str
+    domain: str | None
+    cin: str | None
+    overview: str | None
+    verticals: list[str] | None
+    sub_sectors: list[str] | None
+    emails: list[str] | None
+    phones: list[str] | None
+    founded_year: int | None
+    state: str | None
+    city: str | None
+    country: str | None
+    revenue_cr: float | None
+    net_profit_cr: float | None
+    ebitda_cr: float | None
+    total_funding_cr: float | None
+    latest_valuation_cr: float | None
+    latest_funding_cr: float | None
+    latest_funded_on: date | None
+    status: str
+    remarks: str | None
+    source: str | None
+    import_batch: str | None
+    lead_ids: list[str] | None
+    entity_id: uuid.UUID | None
+
+
 # Resolve the forward reference in SyndicationRead.lenders now that
 # SyndicationLenderRead is defined above.
 SyndicationRead.model_rebuild()

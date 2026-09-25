@@ -51,6 +51,10 @@ const VIEW_ROWS: Record<string, Access[]> = {
   // the join source for every grid's company names.
   clients:  [F, F, R, R, R, R, R, R, R, R, R, R],
   emp:      [F, F, R, R, R, R, R, R, R, R, R, R],
+  // The prospect universe (Masters → Prospects): every desk refers to it; the
+  // write verbs are the operations below (workProspect / manageProspects), so the
+  // view row stays read — mirroring the server's v3.9 "prospects" row.
+  prospects: [F, F, R, R, R, R, R, R, R, R, N, N],
   audit:    [F, N, N, N, N, N, N, N, N, N, N, N],
   activity: [F, N, N, N, N, N, N, N, N, N, N, N],
   tools:    [F, R, R, R, R, R, R, R, R, R, R, R],
@@ -63,7 +67,7 @@ export const VIEW_ACCESS: Record<string, Record<Role, Access>> = Object.fromEntr
 );
 
 // Grouped nav tabs bundle several leaf views.
-const GROUP: Record<string, string[]> = { masters: ['clients', 'fi', 'emp'], act: ['audit', 'activity'] };
+const GROUP: Record<string, string[]> = { masters: ['clients', 'fi', 'emp', 'prospects'], act: ['audit', 'activity'] };
 
 // ---------------------------------------------------------------------------
 // Role STACKING: a user may hold several roles at once. Every check below takes
@@ -134,7 +138,8 @@ export type Op =
   | 'editFI' | 'editEmployee' | 'addEmployee' | 'uploadDocs' | 'snoozeToday'
   | 'deleteRow' | 'requestStageChange' | 'approveRequest'
   | 'exportCsv' | 'backupRestore' | 'newsScan'
-  | 'lmsOperate' | 'lmsAuthorize';
+  | 'lmsOperate' | 'lmsAuthorize'
+  | 'workProspect' | 'manageProspects';
 
 const ALL: Role[] = [...ROLES];
 
@@ -171,6 +176,11 @@ const OPS: Record<Op, Role[]> = {
   exportCsv:          ALL,
   backupRestore:      ['Admin'],
   newsScan:           ALL,
+  // Prospect universe (v3.9): every desk WORKS a prospect row (status, remarks,
+  // create lead); only the curators own the master data itself and the import door.
+  workProspect:       ['Admin', 'Management', 'BD Head', 'BDRM', 'Credit Head',
+                       'Deal Analyst', 'Syn Head', 'Syn RM', 'AM Head', 'AM RM'],
+  manageProspects:    ['Admin', 'Management'],
   lmsOperate:         ['Admin', 'Management', 'Credit Head', 'Deal Analyst', 'LMS Operator', 'LMS Management'],
   // v3.8: booking approval is the SERVICING desk's check — the credit desk records
   // the attestation but never settles it (Admin/Management keep the override).

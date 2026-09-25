@@ -18,7 +18,9 @@ from enum import IntEnum
 # The approved ATLAS RBAC policy version this package transcribes. Propagated into every
 # signed authorization context (claim: policy_version) and stamped on seeds and drift
 # reports, so an authorization decision can always answer "under which policy?".
-POLICY_VERSION = "3.8"
+# 3.9 adds the prospect universe: the "prospects" view and the work_prospect /
+# manage_prospects operations (see rbac.py for the split's rationale).
+POLICY_VERSION = "3.9"
 
 
 

@@ -83,6 +83,10 @@ VIEW_ACCESS: dict[str, dict[str, Access]] = {
     "fi_master":          _row("F F F R S S F S R R - -"),
     "clients":            _row("F F F S R R S S S S R R"),
     "employees":          _row("F F R R R R R R R R - -"),
+    # The prospect universe (Masters → Prospects): curated market lists every desk
+    # refers to before a company ever becomes a lead. Broad read; all mutation is
+    # gated by the work_prospect / manage_prospects operations below.
+    "prospects":          _row("F F R R R R R R R R - -"),
     "audit":              _row("F - - - - - - - - - - -"),
     "activity_log":       _row("F - - - - - - - - - - -"),
     "tools":              _row("F R R R R R R R R R - -"),
@@ -128,6 +132,14 @@ OPERATIONS: dict[str, dict[str, Access]] = {
     # config). Read is broad (see the tools view); mutation is restricted here.
     "manage_counterparty":            _row("F F - - F - F - - - - -"),
     "manage_checklist":               _row("F F - - - - - - - - - -"),
+    # Prospect universe (v3.9). work_prospect is the desk verbs on a prospect row —
+    # status, remarks, creating a lead from it — open to every desk role, because a
+    # field RM updating prospecting hygiene must never be blocked. manage_prospects
+    # is the curated MASTER DATA itself (imports; identity, sector and financial
+    # fields): Admin/Management only, so an accidental edit cannot silently corrupt
+    # a list the whole desk works from. Deletion stays the global delete_row.
+    "work_prospect":                  _row("F F F F F F F F F F - -"),
+    "manage_prospects":               _row("F F - - - - - - - - - -"),
     "upload_remove_documents":        _row("F F F S F S S S S S - -"),
     "snooze_today_item":              _row("F F F S S S S S S S - -"),
     "delete_row":                     _row("F - - - - - - - - - - -"),

@@ -21,6 +21,7 @@ from app.models.prism import (
     Financial,
     MonitoringReporting,
 )
+from app.models.prospects import Prospect
 from app.models.reconciliation import ImportReconciliationItem
 from app.models.registry import Counterparty, Entity, Person
 from app.models.series import NumberSeries
@@ -49,6 +50,7 @@ __all__ = [
     "IdempotencyKey",
     "Entity",
     "Person",
+    "Prospect",
     "Counterparty",
     "Lead",
     "Deal",
