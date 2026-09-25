@@ -28,6 +28,7 @@ export interface ProspectRow {
   total_funding_cr: number | null;
   latest_funding_cr: number | null;
   latest_valuation_cr: number | null;
+  latest_funded_on: string | null;
   status: 'uncontacted' | 'contacted' | 'interested' | 'lead_created' | 'not_relevant';
   remarks: string | null;
   lead_ids: string[] | null;

@@ -17,10 +17,14 @@ import { prospectsService, type ProspectRow } from '../../services/prospectsServ
 
 // The grid's view-model: applyQuery and the column funnels read row FIELDS by
 // column id, so the derived columns (joined sector tags, lead count, the status
-// label) are materialised onto each row instead of living only in accessorFns —
-// an accessorFn can feed a funnel's option list but the filter match reads
-// r[column id], which an accessorFn-only column doesn't have.
-type Row = ProspectRow & { sectors: string; leads: number; status_label: string };
+// label, the flattened contact lists) are materialised onto each row instead of
+// living only in accessorFns — an accessorFn can feed a funnel's option list
+// but the filter match reads r[column id], which an accessorFn-only column
+// doesn't have (and an array-valued field is skipped by the funnel entirely).
+type Row = ProspectRow & {
+  sectors: string; leads: number; status_label: string;
+  emails_s: string; phones_s: string;
+};
 
 /**
  * Masters → Prospects — the curated market universe, chips first, columns second.
@@ -46,6 +50,14 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_COLOR: Record<string, 'default' | 'primary' | 'warning' | 'success'> = {
   uncontacted: 'default', contacted: 'primary', interested: 'warning',
   lead_created: 'success', not_relevant: 'default',
+};
+
+// One renderer for every ₹ Cr money column (revenue, PAT, EBITDA, fundings,
+// valuation) — Indian grouping, one decimal, blank for absent.
+const crCell = ({ cell }: { cell: { getValue: () => unknown } }) => {
+  const v = cell.getValue();
+  return v == null || v === '' ? '' : Number(v).toLocaleString('en-IN',
+    { maximumFractionDigits: 1 });
 };
 
 function countTags(rows: ProspectRow[], field: 'verticals' | 'sub_sectors'):
@@ -122,6 +134,8 @@ export default function ProspectsPage() {
     sectors: [...(r.verticals || []), ...(r.sub_sectors || [])].join(', '),
     leads: (r.lead_ids || []).length,
     status_label: STATUS_LABEL[r.status] || r.status,
+    emails_s: (r.emails || []).join(', '),
+    phones_s: (r.phones || []).join(', '),
   })), [filtered]);
   const statusCounts = useMemo(() => {
     const c = new Map<string, number>();
@@ -194,13 +208,23 @@ export default function ProspectsPage() {
               sx={{ fontSize: 10.6, height: 20 }} />))}
         </Box>) },
     { accessorKey: 'state', header: 'State', size: 110, meta: { localFilter: true } },
+    { accessorKey: 'city', header: 'City', size: 110, meta: { localFilter: true } },
+    { accessorKey: 'country', header: 'Country', size: 100,
+      meta: { localFilter: true } },
     { accessorKey: 'revenue_cr', header: 'Rev ₹ Cr', size: 90,
-      meta: { localFilter: true },
-      Cell: ({ cell }) => {
-        const v = cell.getValue<number | null>();
-        return v == null ? '' : Number(v).toLocaleString('en-IN',
-          { maximumFractionDigits: 1 });
-      } },
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'net_profit_cr', header: 'PAT ₹ Cr', size: 90,
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'ebitda_cr', header: 'EBITDA ₹ Cr', size: 100,
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'total_funding_cr', header: 'Funding ₹ Cr', size: 105,
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'latest_funding_cr', header: 'Latest Rnd ₹ Cr', size: 115,
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'latest_valuation_cr', header: 'Valuation ₹ Cr', size: 110,
+      meta: { localFilter: true }, Cell: crCell },
+    { accessorKey: 'latest_funded_on', header: 'Funded On', size: 100,
+      meta: { dateFilter: true } },
     { accessorKey: 'founded_year', header: 'Founded', size: 80,
       meta: { localFilter: true } },
     { accessorKey: 'status_label', header: 'Status', size: 120,
@@ -227,7 +251,31 @@ export default function ProspectsPage() {
         const n = (row.original.lead_ids || []).length;
         return n ? <b>{n}</b> : <span style={{ color: tokens.muted }}>—</span>;
       } },
+    { accessorKey: 'emails_s', header: 'Emails', size: 200,
+      meta: { textFilter: true },
+      muiTableBodyCellProps: { sx: { whiteSpace: 'normal' } } },
+    { accessorKey: 'phones_s', header: 'Phones', size: 160,
+      meta: { textFilter: true },
+      muiTableBodyCellProps: { sx: { whiteSpace: 'normal' } } },
+    { accessorKey: 'overview', header: 'Overview', size: 280,
+      meta: { textFilter: true },
+      Cell: ({ cell }) => {
+        const s = cell.getValue<string>() || '';
+        return <span title={s} style={{ display: '-webkit-box', WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{s}</span>;
+      },
+      muiTableBodyCellProps: { sx: { whiteSpace: 'normal', minWidth: 180, maxWidth: 280 } } },
   ], []);
+
+  // Every Excel field is a column, but nineteen visible at once is a wall — the
+  // working set shows and the rest start hidden behind the toolbar's show/hide
+  // columns button. Hidden is visibility only: their funnels, search and CSV
+  // export still work the moment they're switched on.
+  const hiddenByDefault = useMemo(() => ({
+    city: false, country: false, net_profit_cr: false, ebitda_cr: false,
+    total_funding_cr: false, latest_funding_cr: false, latest_valuation_cr: false,
+    latest_funded_on: false, emails_s: false, phones_s: false, overview: false,
+  }), []);
 
   const canLead = can(user.roles, 'addLead');
 
@@ -252,7 +300,9 @@ export default function ProspectsPage() {
         queryKey={['prospects', verticals, subs, statuses,
           universe.length] as unknown[]}
         fetcher={async (q) => applyQuery(displayRows,
-          { ...q, searchFields: ['prospect_no', 'name', 'cin', 'domain', 'remarks'] })}
+          { ...q, searchFields: ['prospect_no', 'name', 'cin', 'domain', 'remarks',
+            'city', 'overview', 'emails_s', 'phones_s'] })}
+        initialColumnVisibility={hiddenByDefault}
         columns={columns}
         csvName="atlas_prospects"
         onEdit={openWork}

@@ -576,6 +576,14 @@ interface CommonTableProps<T extends Record<string, any>> extends RowAction<T> {
   rowSx?: (row: T) => object; // per-row cell styling (v12 gray/rowok/rowbad states)
   extraActions?: (row: T) => React.ReactNode; // extra icon(s) in the action column
   /**
+   * Which columns start hidden ({ id: false }): a wide book (Prospects carries a
+   * whole Excel of fields) shows its working set and parks the long tail behind
+   * the toolbar's show/hide-columns button, instead of dropping the data or
+   * forcing a twenty-column scroll. Visibility only — the columns stay defined,
+   * so their filters and CSV export still know them.
+   */
+  initialColumnVisibility?: Record<string, boolean>;
+  /**
    * What heads this table's card on a phone. Below 760px the grid is replaced by a list
    * of cards, each carrying every column; this only names the one or two fields promoted
    * to the card's title line. Desktop ignores it, and omitting it just falls back to the
@@ -604,6 +612,7 @@ export default function CommonTable<T extends Record<string, any>>(
     rowSx,
     extraActions,
     mobileCard,
+    initialColumnVisibility,
   } = props;
 
   // Phone gets the card list; every width above 760px is the grid, untouched.
@@ -1361,6 +1370,8 @@ export default function CommonTable<T extends Record<string, any>>(
     initialState: {
       density: "compact",
       showColumnFilters: false,
+      ...(initialColumnVisibility
+        ? { columnVisibility: initialColumnVisibility } : {}),
       // Action column is pinned (sticky) to the right. Its MRT opaque cover would hide
       // the zebra stripe, so the body-row sx below repaints every cell background with
       // !important — that reaches the pinned cell too, so it stays striped and uniform.
