@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from app.config import Settings
 from app.evidence import Completeness
 from app.model_stages import (
@@ -803,7 +802,10 @@ async def test_each_reasoning_stage_uses_its_own_call_and_model():
     assert "ledger_resource_catalog" not in interpretation_payload
     assert "canonical_resource_phrases" not in interpretation_payload
     assert "Preserve the user's wording" in interpretation_payload
-    assert "Do not select or name Ledger resources" in completions.calls[1]["messages"][0]["content"]
+    assert (
+        "Do not translate surface wording into canonical Ledger resources"
+        in completions.calls[1]["messages"][0]["content"]
+    )
     planning_payload = completions.calls[4]["messages"][1]["content"]
     assert "relationship_required=true" in planning_payload
     assert '"operation_contracts"' not in planning_payload

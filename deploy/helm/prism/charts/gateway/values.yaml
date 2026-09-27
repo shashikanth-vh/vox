@@ -20,6 +20,7 @@ upstreams:
   atlasUrl: ""
   vocxUrl: ""
   pulseUrl: ""
+  docragUrl: ""
   orchestratorUrl: ""
 
 # API key the gateway itself uses against the Access service.
@@ -37,6 +38,7 @@ serviceCredentials:
   atlasApiKey: ""
   vocxApiKey: ""
   pulseApiKey: ""
+  docragApiKey: ""
   orchestratorApiKey: ""
   # Tenant-administration credential the gateway injects on tenant-admin routes for a
   # verified Admin — so the browser never holds it. Must equal register.adminApiKeys.
@@ -124,6 +126,7 @@ ingress:
   slowPaths:
     - /vocx/v1/capture
     - /orchestrator/v1/cam
+    - /docrag/v1/query        # a generative answer waits on the Sarvam chat model
   # Keep this at or above the gateway's own slowUpstreamTimeout (600s) so the EDGE is
   # never the hop that gives up on an answer the platform was still producing.
   slowTimeoutSeconds: 625
@@ -149,3 +152,8 @@ oidc:
 # no CORS headers; a UI served behind the same ingress needs none. Bearer-header auth
 # means no cookies — an allowed origin still needs a valid token on every request.
 corsOrigins: ""
+
+# Swagger UI for every routed API at /docs (a service picker; "Try it out" goes through
+# this gateway with the caller's own token). It grants no access but publishes the route
+# catalogue — values-prod.yaml turns it off.
+docsEnabled: true

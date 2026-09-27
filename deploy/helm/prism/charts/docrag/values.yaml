@@ -1,0 +1,108 @@
+# PRISM DocRAG. The document registry and ingestion queue live in the process and on
+# the volume below, so it runs as ONE replica with ONE worker; vectors live in Qdrant.
+fullnameOverride: ""       # umbrella sets prism-docrag
+nameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/evam/prism-docrag
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+config:
+  logLevel: INFO
+  logJson: true
+  # DocRAG's front door. Empty = open; ALWAYS set in production (the gateway injects it as
+  # gateway.serviceCredentials.docragApiKey).
+  apiKeys: ""
+  defaultTenant: EVAM
+  ingestWorkers: 2
+  maxUploadBytes: 52428800
+  devUi: false
+
+# Sarvam: OCR for scanned pages (Doc AI) + the generative answer mode. Empty = both off
+# (text-layer PDFs, XLSX and extractive answers still work; scans carry a warning).
+sarvam:
+  apiKey:
+    existingSecret: ""
+    existingSecretKey: sarvam-api-key
+    value: ""
+
+# DocRAG's OWN vector store (not shared with other modules). Vectors are derived: if
+# this volume is lost DocRAG rebuilds the collection from its saved chunks at startup.
+qdrant:
+  enabled: true             # false = use an external/managed Qdrant at `url`
+  url: ""                   # only when enabled=false, e.g. https://qdrant.internal:6333
+  image: "qdrant/qdrant:v1.18.2-unprivileged@sha256:b79aaa49ce7a7e5b7e9cf3fe76be400c911457084b4b7af47487c1c9ae5962e5"
+  apiKey:
+    existingSecret: ""
+    existingSecretKey: qdrant-api-key
+    value: "change-me-in-prod"
+  persistence:
+    size: 10Gi
+    storageClass: ""
+    existingClaim: ""
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "1", memory: 2Gi }
+  networkPolicy:
+    enabled: true           # only DocRAG's pods may reach it
+
+# Originals + reconstructed knowledge + chunks: the source of truth. Back it up.
+persistence:
+  size: 10Gi
+  storageClass: ""          # "" = the cluster default
+  existingClaim: ""
+
+# Only for a STANDALONE deployment (DocRAG without the PRISM gateway in front). Inside the
+# umbrella, leave this off: the gateway ingress is the single front door.
+ingress:
+  enabled: false
+  className: ""
+  annotations:
+    # Uploads up to config.maxUploadBytes, and a generative answer can take ~2 minutes.
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "305"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "305"
+  hosts:
+    - host: docrag.internal.evamfinance.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Browser origins allowed to call the API cross-origin (comma-separated). Only needed when
+# a UI on another origin calls DocRAG directly (standalone); empty = no CORS headers.
+corsOrigins: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Ingestion (layout analysis + embedding) is CPU-bound; the ONNX models are small (~65 MB)
+# but OpenDataLoader's JVM and large PDFs need headroom.
+resources:
+  requests: { cpu: 500m, memory: 768Mi }
+  limits: { cpu: "2", memory: 2Gi }
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

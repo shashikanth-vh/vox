@@ -1223,6 +1223,9 @@ def create_app() -> FastAPI:
             settings.temporal_address, namespace=settings.temporal_namespace,
             data_converter=build_data_converter(settings.payload_encryption_key))
         app.state.http = httpx.AsyncClient(timeout=10.0)
+        # DocRAG behind another host's private-CA edge gets its own client (its own trust).
+        app.state.docrag_http = (httpx.AsyncClient(timeout=10.0, verify=settings.docrag_verify())
+                                 if settings.docrag_ca_file else None)
         app.state.oidc = (
             build_verifier(
                 app.state.http, issuer=settings.oidc_issuer,
@@ -1234,6 +1237,8 @@ def create_app() -> FastAPI:
                                                 "task_queue": settings.task_queue})
         yield
         await app.state.http.aclose()
+        if app.state.docrag_http is not None:
+            await app.state.docrag_http.aclose()
 
     app = FastAPI(title="PRISM Orchestrator", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,

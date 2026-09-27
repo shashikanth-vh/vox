@@ -40,6 +40,9 @@ dependencies:
   - name: pulse
     version: "0.1.0"
     condition: pulse.enabled
+  - name: docrag
+    version: "0.2.0"
+    condition: docrag.enabled
   - name: atlas
     version: "0.1.0"
     condition: atlas.enabled

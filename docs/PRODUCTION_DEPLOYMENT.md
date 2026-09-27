@@ -85,6 +85,9 @@ your deploy ritual backs it up and restores it). New knobs join the existing one
 | `EDGE_HTTP_PORT` / `EDGE_HTTPS_PORT` | Host ports the edge publishes | `80` / `443` |
 | `PGBACKUP_KEEP` | Days of nightly DB dumps to keep | `14` |
 | `GOOGLE_SSO_CLIENT_ID`, `UI_DEX_URL`, service keys, signing secrets… | as before — see the comments in `docker-compose.prod-posture.yml` | |
+| `DOCRAG_FRONT_KEY` / `DOCRAG_QDRANT_API_KEY` | DocRAG's inbound key (gateway-injected) and its own Qdrant's key | `compose-docrag-*` — **override** |
+| `SARVAM_API_KEY` | DocRAG: OCR for scanned pages + generative answers (documents leave the VM for Sarvam). Also what makes scanned CAM documents readable. | empty = off |
+| `WORKFLOWS_CAM_LLM_API_KEY` | CAM workbench engine key — AWS Bedrock, model `WORKFLOWS_CAM_ENGINE` (default `bedrock:zai.glm-5`) | empty = offline stub drafts |
 
 Changing `PRISM_DB_PASSWORD` on an **existing** database: Postgres only reads
 `POSTGRES_PASSWORD` at first init, so also run
@@ -103,6 +106,8 @@ they are destroyed only by an explicit `docker compose down -v`):
 | `vocx_state` | VocX capture state | in-flight voice notes |
 | `dexdata` | Dex signing keys + sessions (new) | everyone re-logs-in once |
 | `pgbackups` | Nightly database dumps (new) | your safety net |
+| `docragdata` | DocRAG: uploaded originals, reconstructed knowledge, chunks | DocRAG's documents — backed up with MinIO (below) |
+| `docrag_qdrant` | DocRAG's vectors | nothing: rebuilt from `docragdata` at startup |
 
 Every service now carries `restart: unless-stopped` (postgres included), so the whole
 stack self-heals after a VM reboot: `docker compose … up -d` once, then it stays up.
@@ -147,7 +152,11 @@ bytes) and `vocx_state` (per-RM Google tokens) are not rolled back with it, so f
 uploaded after the chosen backup survive as orphans with no row pointing at them.
 Harmless, but they are still on disk.
 
-Documents: `miniodata` is plain files — back the volume up the same way. The in-app
+Documents: `miniodata` is plain files — back the volume up the same way. DocRAG's
+`docragdata` rides along: `filebackup` writes `docrag-<ts>.tar.gz` next to the MinIO
+archive nightly, and the live-backup mirror syncs it to `s3://…/docrag-live/` every 60 s.
+Restore = put the files back into the volume and restart `docrag`; its Qdrant index is
+rebuilt from them automatically. The in-app
 **Admin → Tools → Export ledger / Backup** flows add a business-level export on top.
 
 ## 5b. Container logs — bounded, so a chatty service can't fill the disk

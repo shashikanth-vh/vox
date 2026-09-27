@@ -71,6 +71,18 @@ helm upgrade --install register deploy/helm/prism/charts/register \
   -f deploy/helm/prism/charts/register/values-local.yaml --namespace prism
 ```
 
+DocRAG needs nothing else from the platform (no database, no Register): the subchart
+brings its own Qdrant, so it deploys alone with its own ingress and keys — see
+`services/docrag/README.md` → Deployment:
+
+```bash
+helm upgrade --install docrag deploy/helm/prism/charts/docrag -n docrag --create-namespace \
+  --set fullnameOverride=docrag --set config.apiKeys=<key> \
+  --set qdrant.apiKey.value=<another-key> --set ingress.enabled=true
+# a managed Qdrant instead of the bundled one:
+#   --set qdrant.enabled=false --set qdrant.url=https://<qdrant>:6333 --set qdrant.apiKey.existingSecret=<secret>
+```
+
 ## Adding a module later
 
 1. Drop its chart under `charts/<module>/`.

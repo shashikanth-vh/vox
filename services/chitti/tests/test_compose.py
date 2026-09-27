@@ -11,9 +11,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 CHITTI_SERVICES = {'chitti', 'qdrant', 'chitti-model-preload', 'chitti-semantic-index', 'chitti-nginx'}
+# DocRAG rides the Chitti split: it runs on the Chitti host, never beside a split platform.
+DOCRAG_SERVICES = {'docrag', 'docrag-qdrant'}
 STANDALONE_REQUIRED = ['CHITTI_BIND_IP', 'CHITTI_REGISTER_BASE_URL', 'CHITTI_GATEWAY_KEY',
                        'SVC_CHITTI_KEY', 'INTERNAL_SIGNING_SECRET', 'CHITTI_LLM_API_KEY',
-                       'CHITTI_TLS_CERT_FILE', 'CHITTI_TLS_KEY_FILE']
+                       'CHITTI_TLS_CERT_FILE', 'CHITTI_TLS_KEY_FILE',
+                       'DOCRAG_FRONT_KEY', 'DOCRAG_QDRANT_API_KEY']
 REMOTE_REQUIRED = ['CHITTI_GATEWAY_KEY', 'GATEWAY_CHITTI_CA_FILE', 'GATEWAY_CHITTI_URL']
 
 
@@ -54,8 +57,9 @@ def test_chitti_project_runtime_artifacts_and_preparation_graph():
     config = json.loads(result.stdout)
     assert config['name'] == 'chitti'
     services = config['services']
-    assert set(services) == CHITTI_SERVICES
-    assert set(config['volumes']) == {'chitti_model_cache', 'chitti_qdrant_data'}
+    assert set(services) == CHITTI_SERVICES | DOCRAG_SERVICES
+    assert set(config['volumes']) == {'chitti_model_cache', 'chitti_qdrant_data',
+                                      'docrag_data', 'docrag_qdrant_data'}
     chat = services['chitti']
     env = chat['environment']
     assert env['CHITTI_ENVIRONMENT'] == 'production'
@@ -71,6 +75,14 @@ def test_chitti_project_runtime_artifacts_and_preparation_graph():
     assert ca['read_only'] and not ca['bind'].get('create_host_path', False)
     edge = services['chitti-nginx']
     assert edge['depends_on']['chitti']['condition'] == 'service_started'
+    assert edge['depends_on']['docrag']['condition'] == 'service_started'
+    docrag = services['docrag']
+    assert docrag['depends_on']['docrag-qdrant']['condition'] == 'service_healthy'
+    assert docrag['environment']['DOCRAG_API_KEYS'] == 'fixture-docrag_front_key-32-characters-value'
+    assert docrag['environment']['DOCRAG_QDRANT_API_KEY'] == (
+        services['docrag-qdrant']['environment']['QDRANT__SERVICE__API_KEY'])
+    assert docrag['environment']['DOCRAG_DEV_UI'] == 'false'
+    assert next(v for v in docrag['volumes'] if v['target'] == '/data/docrag')['source'] == 'docrag_data'
     assert {'/etc/nginx/certs/tls.crt', '/etc/nginx/certs/tls.key'} <= {
         v['target'] for v in edge['volumes'] if v['read_only']
     }
@@ -135,7 +147,9 @@ def test_remote_sets_chitti_tls_and_removes_register_ports(settings):
     result = split_config(False, remote=False, identity=settings)
     assert result.returncode == 0, result.stderr
     baseline = json.loads(result.stdout)['services']
-    assert services.keys() == baseline.keys()
+    # The split platform is the single-host platform minus its local DocRAG.
+    assert DOCRAG_SERVICES <= baseline.keys()
+    assert services.keys() == baseline.keys() - DOCRAG_SERVICES
     assert not CHITTI_SERVICES.intersection(services)
     assert 'register-migrate' not in services
     for name, service in services.items():
@@ -146,6 +160,13 @@ def test_remote_sets_chitti_tls_and_removes_register_ports(settings):
                 'fixture-chitti_gateway_key-32-characters-value'
             )
             expected['environment']['GATEWAY_UPSTREAM_CA_FILE'] = '/etc/prism/chitti-ca.crt'
+            assert service['volumes'][-1]['target'] == '/etc/prism/chitti-ca.crt'
+            assert service['volumes'][-1]['read_only'] is True
+            expected['volumes'] = service['volumes']
+            expected['environment']['GATEWAY_DOCRAG_URL'] = 'https://chitti.example.test:8443/docrag'
+        elif name == 'orchestrator':
+            expected['environment']['WORKFLOWS_DOCRAG_URL'] = 'https://chitti.example.test:8443/docrag'
+            expected['environment']['WORKFLOWS_DOCRAG_CA_FILE'] = '/etc/prism/chitti-ca.crt'
             assert service['volumes'][-1]['target'] == '/etc/prism/chitti-ca.crt'
             assert service['volumes'][-1]['read_only'] is True
             expected['volumes'] = service['volumes']
@@ -220,7 +241,8 @@ def test_remote_preserves_existing_sign_in_and_workflow_identity(identity):
 def test_projects_connect_through_published_ports_on_one_or_two_hosts(chitti_ip, services_ip):
     chitti_port = 9443 if chitti_ip == services_ip else 8443
     shared = {'CHITTI_GATEWAY_KEY': 'shared-gateway-key', 'SVC_CHITTI_KEY': 'shared-register-key',
-              'INTERNAL_SIGNING_SECRET': 'shared-signing-secret-32-characters'}
+              'INTERNAL_SIGNING_SECRET': 'shared-signing-secret-32-characters',
+              'DOCRAG_FRONT_KEY': 'shared-docrag-key'}
     chitti = split_config(True, identity={
         **shared, 'CHITTI_BIND_IP': chitti_ip, 'CHITTI_HTTPS_PORT': str(chitti_port),
         'CHITTI_REGISTER_BASE_URL': f'https://{services_ip}:8443/machine',
@@ -243,9 +265,27 @@ def test_projects_connect_through_published_ports_on_one_or_two_hosts(chitti_ip,
     assert gateway['GATEWAY_INTERNAL_SIGNING_SECRET'] == chat['CHITTI_INTERNAL_SIGNING_SECRET']
     assert gateway['GATEWAY_CHITTI_URL'] == f'https://{chitti_ip}:{chitti_port}'
     assert chat['CHITTI_REGISTER_BASE_URL'] == f'https://{services_ip}:8443/machine'
+    docrag = chat_config['services']['docrag']['environment']
+    orchestrator = services['orchestrator']['environment']
+    assert gateway['GATEWAY_DOCRAG_API_KEY'] == docrag['DOCRAG_API_KEYS']
+    assert orchestrator['WORKFLOWS_DOCRAG_API_KEY'] == docrag['DOCRAG_API_KEYS']
+    assert gateway['GATEWAY_DOCRAG_URL'] == orchestrator['WORKFLOWS_DOCRAG_URL'] == (
+        f'https://{chitti_ip}:{chitti_port}/docrag')
     bindings = []
     for config in (chat_config, platform_config):
         for service in config['services'].values():
             bindings.extend((p['host_ip'], p['published'], p['protocol']) for p in service.get('ports', [])
                             if p.get('host_ip'))
     assert len(bindings) == len(set(bindings))
+
+
+def test_chitti_edge_routes_docrag_with_room_for_whole_documents():
+    conf = (ROOT / 'deploy' / 'nginx' / 'chitti.conf').read_text()
+    block = conf[conf.index('location /docrag/'):]
+    block = block[:block.index('}')]
+    assert 'rewrite ^/docrag/(.*)$ /$1 break;' in block
+    assert 'proxy_pass $docrag_upstream;' in block
+    # DocRAG accepts 50 MB uploads; the edge must not refuse them first.
+    assert int(block.split('client_max_body_size ')[1].split('m;')[0]) >= 50
+    assert int(block.split('proxy_read_timeout ')[1].split('s;')[0]) >= 600
+    assert 'set $docrag_upstream http://docrag:8000;' in conf

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: docrag
+description: >-
+  PRISM DocRAG — document → knowledge → hybrid retrieval with cited answers. Upload a
+  PDF/XLSX, it is reconstructed (OpenDataLoader + PyMuPDF, Sarvam Doc AI for scans),
+  chunked, embedded (FastEmbed, models baked into the image) and indexed in its own
+  Qdrant (dense + BM25 hybrid, tenant-partitioned).
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+maintainers:
+  - name: Evam Finance

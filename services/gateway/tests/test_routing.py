@@ -16,6 +16,7 @@ def _settings() -> Settings:
         atlas_url="http://atlas:8000", atlas_api_key="atlas-key",
         vocx_url="http://vocx:8000", vocx_api_key="vocx-key",
         pulse_url="http://pulse:8000", pulse_api_key="pulse-key",
+        docrag_url="http://docrag:8000", docrag_api_key="docrag-key",
         orchestrator_url="http://orch:8000", orchestrator_api_key="orch-key",
     )
 
@@ -28,6 +29,20 @@ def test_prefix_routes_strip_and_inject_scoped_key():
     assert _route(s, "/vocx/v1/capture") == ("http://vocx:8000", "vocx-key", "/v1/capture")
     assert _route(s, "/orchestrator/v1/start") == (
         "http://orch:8000", "orch-key", "/v1/start")
+    assert _route(s, "/docrag/v1/query") == ("http://docrag:8000", "docrag-key", "/v1/query")
+
+
+def test_docrag_routes_need_the_document_grant():
+    """Uploaded documents carry KYC/credit data, and a query returns their text — so
+    reads and queries are gated like uploads, not left to fall through ungated."""
+    for method, path in [("POST", "/docrag/v1/documents"),
+                         ("GET", "/docrag/v1/documents"),
+                         ("GET", "/docrag/v1/documents/abc/chunks"),
+                         ("DELETE", "/docrag/v1/documents/abc"),
+                         ("POST", "/docrag/v1/query")]:
+        assert operation_for(method, path) == "upload_remove_documents", (method, path)
+    # Deployment introspection and the dev console stay ungated (no document data).
+    assert operation_for("GET", "/docrag/v1/status") is None
 
 
 def test_bare_prefix_maps_to_root():
@@ -149,6 +164,10 @@ def test_a_speech_capture_gets_the_long_upstream_window():
     # Minutes of real work, and abandoning it halfway throws away a scan that was
     # succeeding — the same bargain as a capture, for the same reason.
     assert _timeout_for(s, "/pulse/v1/news/sweep") == 300.0
+    # A generative DocRAG answer waits on the Sarvam chat model.
+    assert _timeout_for(s, "/docrag/v1/query") == 300.0
+    # Uploads return at once (ingestion is asynchronous) — they keep the short budget.
+    assert _timeout_for(s, "/docrag/v1/documents") == 60.0
     # Everything else keeps the short one — including the rest of VocX and of PULSE.
     assert _timeout_for(s, "/v1/leads") == 60.0
     assert _timeout_for(s, "/vocx/v1/reports") == 60.0

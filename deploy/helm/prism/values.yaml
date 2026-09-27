@@ -149,6 +149,16 @@ stt:
   enabled: true
   fullnameOverride: prism-stt
 
+# ---- DocRAG — document → knowledge → cited retrieval (individually deployable) ---
+docrag:
+  enabled: true
+  fullnameOverride: prism-docrag
+  config:
+    apiKeys: ""                   # SET in production — DocRAG's own front door
+  sarvam:
+    apiKey:
+      value: ""                   # optional: OCR for scans + generative answers
+
 # ---- PULSE — news / adverse-media radar (individually deployable) ---------------
 pulse:
   enabled: true
@@ -243,6 +253,11 @@ workflows:
     # chart Secret (key: orchestrator-api-keys), injected via secretKeyRef — not plaintext
     # env. OVERRIDE per environment, or supply your own via register.existingSecret.
     apiKeys: "prism-workflows-key"
+    # The CAM workbench reads documents through DocRAG (OpenDataLoader + Sarvam OCR).
+    # Engine: bedrock:zai.glm-5 by default — give it the Bedrock key via
+    # cam.llmApiKey.existingSecret (or .value); without one the offline stub drafts.
+    cam:
+      docragUrl: http://prism-docrag
     # requireAuth makes approver/requester identity MANDATORY and token-derived: with it on
     # the Orchestrator refuses any approve/reject/convert-request that is not backed by a
     # verified OIDC token. Turn it on together with oidcIssuer for production.

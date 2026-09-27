@@ -1139,6 +1139,18 @@
             "title": "Markdown",
             "type": "string"
           },
+          "template_doc_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Doc Id"
+          },
           "title": {
             "anyOf": [
               {
@@ -1479,6 +1491,17 @@
               }
             ],
             "title": "Company Name"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
           },
           "industry": {
             "anyOf": [
@@ -1996,6 +2019,78 @@
           "instruction"
         ],
         "title": "RefineIn",
+        "type": "object"
+      },
+      "StagedDraftIn": {
+        "additionalProperties": false,
+        "description": "Generate CAM, staged: the analyst's documents + the master prompt \u2192 a full CAM.",
+        "properties": {
+          "doc_titles": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 200,
+            "title": "Doc Titles",
+            "type": "object"
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction"
+          },
+          "prompt_doc_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Doc Id"
+          },
+          "prompt_text": {
+            "anyOf": [
+              {
+                "maxLength": 200000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Text"
+          },
+          "source_doc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 60,
+            "title": "Source Doc Ids",
+            "type": "array"
+          },
+          "template_doc_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Doc Id"
+          }
+        },
+        "title": "StagedDraftIn",
         "type": "object"
       },
       "SyndicationDecisionIn": {
@@ -2593,6 +2688,101 @@
         ]
       }
     },
+    "/v1/cam/jobs/{job_id}": {
+      "get": {
+        "operationId": "cam_job_v1_cam_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Job V1 Cam Jobs  Job Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Progress and result of a staged CAM draft",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
+    "/v1/cam/{lending_id}/draft": {
+      "post": {
+        "description": "Starts the staged drafter and answers at once with a job id; poll\n``GET /v1/cam/jobs/{job_id}`` for progress and the draft. With the credit\nteam's sectioned master prompt the CAM is written section by section from\nper-document fact sheets and a locked financial dataset; any other prompt is\ndrafted in one call.",
+        "operationId": "cam_draft_v1_cam__lending_id__draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lending_id",
+            "required": true,
+            "schema": {
+              "title": "Lending Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagedDraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cam Draft V1 Cam  Lending Id  Draft Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate the CAM in stages (digest \u2192 dataset \u2192 sections) as a job",
+        "tags": [
+          "CAM"
+        ]
+      }
+    },
     "/v1/cam/{lending_id}/draft-letter": {
       "post": {
         "description": "The engine FILLS the sanction-letter template \u2014 its structure and wording,\nthe CAM's + credit note's + typed terms' figures \u2014 and the result comes back\nas a .docx to review and hand-edit in Word. Nothing is filed: the analyst\nuploads the finished, signed letter through the normal lane.",
@@ -2648,7 +2838,7 @@
     },
     "/v1/cam/{lending_id}/export-docx": {
       "post": {
-        "description": "The box content, as a Word document. Pure rendering \u2014 nothing is filed,\nno engine is called; the analyst reviews the file in Word and uploads it\nthrough the normal 'completed CAM' lane.",
+        "description": "The box content, as a Word document. Pure rendering \u2014 nothing is filed,\nno engine is called; the analyst reviews the file in Word and uploads it\nthrough the normal 'completed CAM' lane. With ``template_doc_id`` the draft is\nwritten into the CAM TEMPLATE's own package (its styles and letterhead); an\nunreadable template falls back to the plain document rather than failing.",
         "operationId": "cam_export_docx_v1_cam__lending_id__export_docx_post",
         "parameters": [
           {

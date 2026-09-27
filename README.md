@@ -20,6 +20,7 @@ it is live here.**
 | **PULSE** | Continuous news / adverse-media intelligence; 7 AM portfolio digest. | ✅ **in this repo** (`services/pulse/`) |
 | **VocX** | Voice-based field touchpoint capture → structured into the Register (formerly "VOX"). | ✅ **in this repo** (`services/vocx/`) |
 | **ATLAS** | Live management dashboard across Lending / Syndication / Asset Monetisation. | ✅ **service in this repo** (`services/atlas/`, UI planned) |
+| **DocRAG** | Document → knowledge → cited answers: PDF/XLSX reconstruction (OpenDataLoader, Sarvam OCR) + hybrid retrieval. | ✅ **in this repo** (`services/docrag/`) |
 | SCRIBE | Standardised documents & operations engine. | Phase 2 |
 
 ## The Register
@@ -64,6 +65,8 @@ services/
                        files RED/AMBER/GREEN intel idempotently; stateless
   atlas/               ATLAS — management dashboard service (read-side BFF):
                        /v1/dashboard, /v1/today, /v1/pipeline; view-level RBAC
+  docrag/              DocRAG — upload PDF/XLSX → reconstructed knowledge → hybrid
+                       (vector + BM25) retrieval with cited answers; per-tenant index
   workflows/           Temporal worker — durable orchestration; activities write the
                        Register via the client SDK (the Workflows ring, realized)
 packages/
@@ -88,11 +91,6 @@ See **[`BACKEND_STANDARDS.md`](BACKEND_STANDARDS.md)** and **[`CONTRIBUTING.md`]
 
 ## Quality & onboarding
 
-- **The handbook:** [`docs/handbook/`](docs/handbook/) — fifteen documents covering the
-  architecture, deployment, module interaction, running flows, Temporal workflows, the code
-  map, RBAC, the Register, backup, upgrade, ATLAS usage, VocX, operations, configuration and
-  the data model. Start at [`docs/handbook/README.md`](docs/handbook/README.md), which lists
-  a reading path per role.
 - **New here?** [`CONTRIBUTING.md`](CONTRIBUTING.md) — zero-to-productive setup + how-to.
 - **Why it's built this way?** [`docs/adr/`](docs/adr/) — architecture decision records.
 - **Gate:** `make ci` runs `ruff` (lint) + `mypy` (types, green) + `pytest` (63 tests, real
@@ -214,6 +212,22 @@ Details: [`deploy/helm/prism/README.md`](deploy/helm/prism/README.md) (managed-D
 single-module variants), [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md),
 [`docs/POSTMAN.md`](docs/POSTMAN.md) §11–11b (running the E2E journey in either posture,
 and the one-time Google consent flow for Postman).
+
+## API documentation (Swagger)
+
+Every API behind the front door is browsable and callable at **`https://<host>:8443/docs`**
+(served by the gateway). Pick a service in the top-right selector — Register, Access,
+Orchestrator, ATLAS, VocX, PULSE, DocRAG, Chitti, or the gateway's own composition endpoints. Paths
+are shown as the edge sees them (`/docrag/v1/query`, `/atlas/v1/dashboard`, …), and
+"Try it out" goes through the gateway exactly like a real client: open **Authorize** and
+enter a bearer token plus `X-Tenant` (dev posture: `X-User-Email` instead of a token).
+
+- On by default in dev (`GATEWAY_DOCS_ENABLED`); **off in the production postures** (compose
+  prod overlay, `values-prod.yaml`) because it publishes the route catalogue — set
+  `GATEWAY_DOCS_ENABLED=true` / `gateway.docsEnabled=true` to open it on a given host.
+- Each service still serves its own `/docs` on its direct dev port (e.g. Register
+  `http://localhost:8000/docs`), and DocRAG deployed on its own at `http://<host>:8010/docs`.
+- Frozen contracts for codegen: `docs/openapi/*.json`.
 
 ## Testing it independently
 

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     atlas_url: str = ""
     vocx_url: str = ""
     pulse_url: str = ""
+    docrag_url: str = ""
     orchestrator_url: str = ""
     chitti_url: str = ""
     upstream_ca_file: str = ""
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     atlas_api_key: str = ""
     vocx_api_key: str = ""
     pulse_api_key: str = ""
+    docrag_api_key: str = ""
     orchestrator_api_key: str = ""
     chitti_api_key: str = ""
 
@@ -52,6 +54,11 @@ class Settings(BaseSettings):
     chitti_max_request_bytes: int = Field(default=131072, ge=1024, le=1048576)
     # Above Chitti's maximum 300s pipeline budget; the edge allows 325s.
     chitti_timeout_s: float = Field(default=310.0, gt=0, le=320)
+
+    # Unified Swagger UI at /docs (every routed service's API, rewritten to edge paths).
+    # It exposes the route catalogue, not access: every call still needs identity. Turn
+    # it off where even the catalogue should not be public.
+    docs_enabled: bool = True
 
     # The API key + tenant the gateway uses when calling the ACCESS service itself.
     access_api_key: str = "dev-local-key"

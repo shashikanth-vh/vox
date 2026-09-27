@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocRAG console</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e2e2dc;
+          --accent:#1f5f8b; --warn:#9a5b00; --bad:#a3262a; --ok:#2d6a3e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --panel:#1f1f1d; --ink:#ececea; --muted:#9d9d97; --line:#33332f;
+            --accent:#6fb0dd; --warn:#e0a54a; --bad:#ec7a7e; --ok:#7cc48f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px;
+           align-items:center; justify-content:space-between; }
+  h1 { font-size:18px; margin:0; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  input[type=text], input[type=password], select, textarea {
+    font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line);
+    border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; min-height:60px; }
+  button { font:inherit; border:1px solid var(--accent); background:var(--accent); color:#fff;
+           border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); }
+  nav { display:flex; gap:4px; margin:16px 0; border-bottom:1px solid var(--line); }
+  nav button { background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent;
+               border-radius:0; }
+  nav button.on { color:var(--ink); border-bottom-color:var(--accent); }
+  section[hidden] { display:none; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px;
+          margin:8px 0; overflow-wrap:anywhere; }
+  .muted { color:var(--muted); }
+  .pill { display:inline-block; font-size:12px; padding:0 8px; border-radius:10px;
+          border:1px solid var(--line); }
+  .ready { color:var(--ok); } .failed { color:var(--bad); } .queued, .processing { color:var(--warn); }
+  .warn { color:var(--warn); }
+  .err { color:var(--bad); white-space:pre-wrap; }
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; margin:6px 0 0; }
+  table { border-collapse:collapse; font-size:12px; display:block; overflow-x:auto; }
+  td, th { border:1px solid var(--line); padding:3px 6px; text-align:left; vertical-align:top; }
+  details > summary { cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DocRAG console <span class="muted" style="font-weight:400">— dev only</span></h1>
+  <div class="row">
+    <label>Tenant <input type="text" id="tenant" value="EVAM" size="8"></label>
+    <label>Bearer <input type="password" id="token" placeholder="(optional)" size="14"></label>
+  </div>
+</header>
+<main>
+  <div id="status" class="muted">Loading…</div>
+  <nav>
+    <button class="on" data-tab="upload">1. Upload &amp; process</button>
+    <button data-tab="explore">2. Explore knowledge</button>
+    <button data-tab="query">3. Query</button>
+  </nav>
+
+  <section id="tab-upload">
+    <div class="card">
+      <div class="row">
+        <input type="file" id="file" accept=".pdf,.xlsx">
+        <label><input type="checkbox" id="sarvam" checked> Route scanned pages to Sarvam Doc AI</label>
+        <button id="send">Upload</button>
+      </div>
+      <div id="upload-msg"></div>
+    </div>
+    <div class="row" style="justify-content:space-between">
+      <h3>Documents</h3><button class="ghost" id="refresh">Refresh</button>
+    </div>
+    <div id="docs"></div>
+  </section>
+
+  <section id="tab-explore" hidden>
+    <div class="row"><select id="doc-pick"></select></div>
+    <div id="explore"></div>
+  </section>
+
+  <section id="tab-query" hidden>
+    <div class="card">
+      <textarea id="q" placeholder="Ask a question about the processed documents"></textarea>
+      <div class="row">
+        <label><input type="radio" name="mode" value="extractive" checked> Extractive (no LLM)</label>
+        <label><input type="radio" name="mode" value="generative"> Generative (Sarvam)</label>
+        <label>Top k <input type="text" id="topk" value="5" size="2"></label>
+        <button id="ask">Ask</button>
+      </div>
+    </div>
+    <div id="answer"></div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) n.append(k);
+  return n;
+};
+
+function headers(extra = {}) {
+  const h = { "X-Tenant": $("tenant").value.trim() || "EVAM", ...extra };
+  const t = $("token").value.trim();
+  if (t) h["Authorization"] = "Bearer " + t;
+  return h;
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: headers(opts.headers || {}) });
+  const text = await r.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  if (!r.ok) {
+    const detail = body && body.error ? body.error.detail || body.error.title : text;
+    throw new Error(`HTTP ${r.status}: ${detail}`);
+  }
+  return body;
+}
+
+// Relative paths: works directly (/v1/dev-ui) and through the gateway (/docrag/v1/dev-ui).
+const base = location.pathname.replace(/dev-ui\/?$/, "");
+
+async function loadStatus() {
+  try {
+    const s = await api(base + "status");
+    $("status").textContent =
+      `${s.documents_ready}/${s.documents} documents ready · ${s.chunks_indexed} chunks indexed · ` +
+      `index: ${s.vector_index.engine} (${s.vector_index.dense_model} + ${s.vector_index.sparse_model}) · ` +
+      `OpenDataLoader: ${s.opendataloader ? "on" : "off"} · ` +
+      `Sarvam: ${s.sarvam_configured ? "configured" : "not configured"}`;
+    $("sarvam").disabled = !s.sarvam_configured;
+    document.querySelector('input[value=generative]').disabled = !s.sarvam_configured;
+  } catch (e) { $("status").textContent = e.message; $("status").className = "err"; }
+}
+
+let docs = [];
+let polling = null;
+
+async function loadDocs() {
+  const box = $("docs");
+  try {
+    docs = (await api(base + "documents")).items;
+  } catch (e) { box.replaceChildren(el("div", { class: "err", text: e.message })); return; }
+  box.replaceChildren(...(docs.length ? docs.map(docCard) :
+    [el("div", { class: "muted", text: "No documents yet." })]));
+  const pick = $("doc-pick");
+  const keep = pick.value;
+  pick.replaceChildren(...docs.filter(d => d.status === "ready")
+    .map(d => el("option", { value: d.id, text: d.filename })));
+  if (keep) pick.value = keep;
+  const pending = docs.some(d => d.status === "queued" || d.status === "processing");
+  clearTimeout(polling);
+  if (pending) polling = setTimeout(() => { loadDocs(); loadStatus(); }, 1500);
+}
+
+function docCard(d) {
+  const warn = d.warnings && d.warnings.length ? el("details", {},
+    el("summary", { class: "warn", text: `${d.warnings.length} warning(s)` }),
+    el("ul", {}, ...d.warnings.map(w => el("li", { text: w })))) : null;
+  const del = el("button", { class: "ghost", text: "Delete" });
+  del.onclick = async () => {
+    if (!confirm(`Delete ${d.filename}?`)) return;
+    try { await api(base + "documents/" + d.id, { method: "DELETE" }); } catch (e) { alert(e.message); }
+    loadDocs(); loadStatus();
+  };
+  return el("div", { class: "card" },
+    el("div", { class: "row", style: "justify-content:space-between" },
+      el("strong", { text: d.filename }), del),
+    el("div", { class: "muted" },
+      el("span", { class: "pill " + d.status, text: d.status }), " ",
+      `${d.doc_type || "—"} · ${d.page_count ?? "?"} page(s) · ${d.chunk_count} chunks · ` +
+      `${(d.extraction_engines || []).join(", ") || "—"}` + (d.elapsed_s != null ? ` · ${d.elapsed_s}s` : "")),
+    d.error ? el("div", { class: "err", text: d.error }) : null, warn);
+}
+
+$("send").onclick = async () => {
+  const f = $("file").files[0];
+  const msg = $("upload-msg");
+  if (!f) { msg.textContent = "Choose a PDF or XLSX first."; return; }
+  const form = new FormData();
+  form.append("file", f);
+  form.append("use_sarvam", $("sarvam").checked && !$("sarvam").disabled ? "true" : "false");
+  msg.textContent = "Uploading…"; msg.className = "muted";
+  try {
+    const d = await api(base + "documents", { method: "POST", body: form });
+    msg.textContent = d.duplicate ? `Already indexed as ${d.filename}.` : `Queued ${d.filename}; processing…`;
+  } catch (e) { msg.textContent = e.message; msg.className = "err"; }
+  loadDocs(); loadStatus();
+};
+$("refresh").onclick = () => { loadDocs(); loadStatus(); };
+
+function tableEl(cols, rows) {
+  const all = (cols && cols.length ? [cols] : []).concat(rows || []);
+  return el("table", {}, ...all.slice(0, 15).map((r, i) =>
+    el("tr", {}, ...r.map(c => el(i === 0 && cols && cols.length ? "th" : "td", { text: c })))));
+}
+
+async function explore() {
+  const id = $("doc-pick").value;
+  const box = $("explore");
+  if (!id) { box.replaceChildren(el("div", { class: "muted", text: "Process a document first." })); return; }
+  box.replaceChildren(el("div", { class: "muted", text: "Loading…" }));
+  try {
+    const [d, ch] = await Promise.all([api(`${base}documents/${id}?include=knowledge`),
+                                       api(`${base}documents/${id}/chunks`)]);
+    const k = d.knowledge;
+    const sections = k.sections.map(s => el("details", { class: "card" },
+      el("summary", { text: `${s.title} (${s.elements.length} elements)` }),
+      ...s.elements.map(e => el("div", {},
+        el("div", { class: "muted", text: `${e.type} · p.${e.source.page} · ${e.source.extraction_engine}` }),
+        e.type === "table" && e.table ? tableEl(e.table.columns, e.table.rows) : el("pre", { text: e.text.slice(0, 600) })))));
+    const chunks = ch.items.map(c => el("details", { class: "card" },
+      el("summary", { text: `[${c.chunk_id}] ${c.section_path} — ${c.element_types.join(", ")} · ` +
+                            `${c.char_count} chars${c.page_has_unextracted_image ? " · image on page" : ""}` }),
+      el("pre", { text: JSON.stringify(c, null, 2) })));
+    box.replaceChildren(
+      el("div", { class: "card" },
+        el("div", { text: `${k.metadata.doc_type} · ${k.metadata.page_count} page(s) · ` +
+                          `${k.sections.length} sections · ${ch.total} chunks · ${k.metadata.images.length} image(s) not text-extracted` }),
+        el("div", { class: "muted", text: "Entities: " + (k.entities.slice(0, 40).join(", ") || "none detected") })),
+      el("h3", { text: "Section tree" }), ...sections,
+      el("h3", { text: "Knowledge chunks" }), ...chunks);
+  } catch (e) { box.replaceChildren(el("div", { class: "err", text: e.message })); }
+}
+$("doc-pick").onchange = explore;
+
+$("ask").onclick = async () => {
+  const q = $("q").value.trim();
+  const box = $("answer");
+  if (!q) return;
+  box.replaceChildren(el("div", { class: "muted", text: "Searching…" }));
+  const mode = document.querySelector("input[name=mode]:checked").value;
+  try {
+    const r = await api(base + "query", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, mode, top_k: parseInt($("topk").value, 10) || 5 }) });
+    const evidence = r.results.map(x => el("div", { class: "card" },
+      el("strong", { text: `[${x.rank}] ${x.chunk.doc} — ${x.chunk.section_path}` }),
+      el("div", { class: "muted", text: `p.${x.chunk.pages.join(",")} · fused ${x.fused_score.toFixed(4)} · ` +
+                                        `vec_rank=${x.vector_rank} · bm25_rank=${x.bm25_rank}` }),
+      el("pre", { text: x.chunk.text.slice(0, 600) })));
+    box.replaceChildren(
+      el("h3", { text: "Answer (" + r.mode + ")" }), el("div", { class: "card" }, el("pre", { text: r.answer })),
+      el("h3", { text: "Retrieved evidence" }),
+      ...(evidence.length ? evidence : [el("div", { class: "muted", text: "No matching chunks." })]));
+  } catch (e) { box.replaceChildren(el("div", { class: "err", text: e.message })); }
+};
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  for (const t of ["upload", "explore", "query"]) $("tab-" + t).hidden = t !== b.dataset.tab;
+  if (b.dataset.tab === "explore") explore();
+});
+$("tenant").onchange = () => { loadDocs(); loadStatus(); };
+
+loadStatus();
+loadDocs();
+</script>
+</body>
+</html>

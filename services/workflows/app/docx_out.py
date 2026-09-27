@@ -149,6 +149,11 @@ _TBL_BORDER = ('<w:tblBorders>'
 # TEMPLATE (its own band fills, else its Heading1 color) so a re-branded template
 # restyles the output with no code change; this navy is only the last resort.
 _NAVY = '1F4D78'
+# The EVAM CAM master prompt's Block C (C4 table design): dark-navy header band with white
+# bold text and light-blue zebra rows; C6: every major section starts on a new page.
+_CAM_HEAD = '1F3864'
+_CAM_ZEBRA = 'D6E4F0'
+_PAGE_BREAK = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
 
 
 def _is_dark(hex6: str) -> bool:
@@ -171,7 +176,7 @@ def _template_accent(doc_xml: str, styles_xml: str) -> str:
 
 
 def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
-           accent: str = _NAVY) -> str:
+           accent: str = _NAVY, cam: bool = False) -> str:
     xml = ['<w:tbl><w:tblPr>'
            '<w:tblW w:w="0" w:type="auto"/>' + _TBL_BORDER
            + '<w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
@@ -179,8 +184,16 @@ def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
     for r, cells in enumerate(rows):
         is_head = header and r == 0
         xml.append('<w:tr>')
+        body_row = r - (1 if header else 0)
         for c, cell in enumerate(cells):
-            if is_head and letterhead:
+            if is_head and cam:
+                shade = f'<w:shd w:val="clear" w:fill="{_CAM_HEAD}"/>'
+                para = _p(cell, bold=True, color='FFFFFF')
+            elif cam:
+                shade = (f'<w:shd w:val="clear" w:fill="{_CAM_ZEBRA}"/>'
+                         if body_row % 2 == 1 else '')
+                para = _p(cell)
+            elif is_head and letterhead:
                 shade = f'<w:shd w:val="clear" w:fill="{accent}"/>'
                 para = _p(cell, bold=True, color='FFFFFF')
             elif is_head:
@@ -217,16 +230,19 @@ def _is_separator(line: str) -> bool:
 
 
 def _render_body(md: str, title: str | None = None, *,
-                 letterhead: bool = False, accent: str = _NAVY) -> str:
+                 letterhead: bool = False, accent: str = _NAVY, cam: bool = False) -> str:
     """Markdown → the <w:body> INNER XML (no sectPr) — shared by the standalone
     package and the render-into-template path. ``letterhead`` switches on the
     sanction-letter visual language: ## headings become full-width navy banner
-    bars and tables get the navy header band + navy bold label column."""
+    bars and tables get the navy header band + navy bold label column. ``cam``
+    applies the EVAM CAM spec: navy header rows, zebra body rows, and a page break
+    before every major (##) section after the first."""
     body: list[str] = []
     # A blank Markdown line is a BLOCK BREAK. Letter templates set Normal spacing
     # to zero (address blocks must stack tight), so in letterhead mode the break
     # must become a real empty paragraph — otherwise every block butts together.
     gap = False
+    sections_seen = 0
 
     def emit(x: str) -> None:
         nonlocal gap
@@ -264,7 +280,7 @@ def _render_body(md: str, title: str | None = None, *,
             if rows:
                 width = max(len(r) for r in rows)
                 emit(_table([r + [''] * (width - len(r)) for r in rows], header,
-                            letterhead=letterhead, accent=accent))
+                            letterhead=letterhead, accent=accent, cam=cam))
             continue
 
         if not line.strip():
@@ -279,6 +295,10 @@ def _render_body(md: str, title: str | None = None, *,
         if (m := _HEADING.match(line)):
             level = min(len(m.group(1)), 3)
             text = m.group(2).strip().strip('#').strip()
+            if cam and level == 2:
+                sections_seen += 1
+                if sections_seen > 1:
+                    body.append(_PAGE_BREAK)
             if letterhead and level == 2:
                 # The letterhead's section bars: full-width accent band, white bold.
                 emit(_p(text, bold=True, color='FFFFFF', fill=accent))
@@ -322,11 +342,11 @@ def _notice_p(text: str) -> str:
 
 
 def markdown_to_docx(md: str, title: str | None = None, *,
-                     letterhead: bool = False) -> bytes:
+                     letterhead: bool = False, cam: bool = False) -> bytes:
     """Render workbench Markdown into a complete standalone .docx."""
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<w:document {_W}><w:body>' + _render_body(md, title, letterhead=letterhead)
+        f'<w:document {_W}><w:body>' + _render_body(md, title, letterhead=letterhead, cam=cam)
         + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
           '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>'
           '</w:sectPr></w:body></w:document>')
@@ -387,7 +407,7 @@ def _letterhead_prefix(body_xml: str, cap: int = 10) -> str:
 def markdown_into_template(md: str, template_blob: bytes,
                            title: str | None = None, *,
                            letterhead: bool = False,
-                           notice: str | None = None) -> bytes:
+                           notice: str | None = None, cam: bool = False) -> bytes:
     """Render Markdown INSIDE the template's own package: its styles, theme,
     fonts, numbering, images and section setup all survive, so the output looks
     like the credit team's letterhead — only the letter text is replaced. Heading
@@ -399,9 +419,9 @@ def markdown_into_template(md: str, template_blob: bytes,
         doc = parts['word/document.xml'].decode('utf-8', 'ignore')
         m = re.search(r'(<w:body(?: [^>]*)?>)(.*)(</w:body>)', doc, re.S)
         if m is None:
-            return markdown_to_docx(md, title, letterhead=letterhead)
+            return markdown_to_docx(md, title, letterhead=letterhead, cam=cam)
     except (zipfile.BadZipFile, KeyError, OSError):
-        return markdown_to_docx(md, title, letterhead=letterhead)
+        return markdown_to_docx(md, title, letterhead=letterhead, cam=cam)
     inner = m.group(2)
     sect = re.search(r'<w:sectPr(?: [^>]*)?>[\s\S]*?</w:sectPr>|<w:sectPr(?: [^>]*)?/>',
                      inner)
@@ -413,7 +433,7 @@ def markdown_into_template(md: str, template_blob: bytes,
         if letterhead else _NAVY
     new_inner = (_letterhead_prefix(inner)
                  + (_notice_p(notice) if notice else '')
-                 + _render_body(md, title, letterhead=letterhead, accent=accent)
+                 + _render_body(md, title, letterhead=letterhead, accent=accent, cam=cam)
                  + sect_xml)
     parts['word/document.xml'] = (
         doc[:m.start(2)] + new_inner + doc[m.end(2):]).encode('utf-8')

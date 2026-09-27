@@ -6,6 +6,136 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **DocRAG joins the Chitti split.** The Chitti host becomes the AI host: its Compose
+  project (`docker-compose.chitti.yml`) now also runs `docrag` and `docrag-qdrant`, and
+  `chitti.conf` serves DocRAG at `/docrag/` on the same HTTPS port and certificate
+  (51 MB bodies, 620 s timeouts — whole documents, long OCR). A services host that turns
+  the split on (`GATEWAY_CHITTI_URL` set) now also sends its gateway's and orchestrator's
+  DocRAG calls to `${GATEWAY_CHITTI_URL}/docrag`, trusts the same CA for them
+  (`WORKFLOWS_DOCRAG_CA_FILE`, new), and no longer runs a local DocRAG. No new variable,
+  port or security-group rule: the existing split switch carries it. The UI is unchanged
+  — it only ever calls the gateway. Hosts without the split keep DocRAG locally, as before.
+  Operator steps: add `DOCRAG_FRONT_KEY` (same value on both hosts), `DOCRAG_QDRANT_API_KEY`
+  and `SARVAM_API_KEY` to `.env.chitti`; upgrade the Chitti host first, then the services
+  host; then `docker compose stop docrag docrag-qdrant` there.
+
+- **Every CAM draft says what it spent.** Each model call records its tokens, time and
+  outcome by stage (fact sheets, dataset, public checks, sections, final sections); each
+  document read records its format, reader, pages, OCR pages, Sarvam jobs and cache hit.
+  A draft job returns the totals (`usage`), the screen shows them when it finishes and a
+  running token count while it works, and the logs carry one line per call, per
+  document, per Sarvam job and per draft (`cam_llm_call`, `cam_document`,
+  `sarvam_digitise`, `cam_draft_usage`) — numbers in the message for a terminal, as
+  fields for CloudWatch. Bedrock is asked for usage on streamed replies; a call that
+  reports none is flagged, not counted as free.
+- **Scans and images reach the CAM again.** Sarvam Doc AI started rejecting
+  `output_format=markdown` and now returns pages as layout blocks, so every scanned PDF
+  was silently skipped. Fixed; and JPG/PNG/TIFF/BMP documents are now read by OCR
+  (DocRAG wraps them into a PDF for Sarvam) instead of being skipped.
+- **`prism-deploy.sh` knows DocRAG.** `fresh` generates `DOCRAG_FRONT_KEY` and
+  `DOCRAG_QDRANT_API_KEY`, checks every pulled image before the long build (MinIO's
+  registries now refuse anonymous pulls — `MINIO_IMAGE` overrides the image), and names
+  the CAM (`WORKFLOWS_CAM_LLM_API_KEY`) and OCR (`SARVAM_API_KEY`) keys; `upgrade` and
+  `backup` archive DocRAG's data, and `restore-docrag` puts it back.
+
+- **Generate CAM runs the master prompt's own workflow, in stages.** One request
+  holding the prompt, 13 documents and a ~40k-token CAM overflowed the context and spread
+  the model's attention thin. Now (`POST /v1/cam/{lending_id}/draft`, a job the screen
+  polls via `GET /v1/cam/jobs/{id}`):
+  * each document (split at page boundaries when large) → a source-tagged **fact sheet**,
+    in parallel, cached per document;
+  * all fact sheets → the **locked financial dataset workpaper** (Steps 1 & 4: tables,
+    locked-formula ratios, triangulation, stress tests), plus the public checks the
+    prompt requires, listed as NOT PERFORMED;
+  * every section written in parallel from Block A, the fact sheets, the locked dataset
+    and **its own specification**; Executive Summary and Recommendations written last
+    from the finished body; assembled in the prompt's order;
+  * a document manifest leads every call, context comes before instructions, the
+    longest context is clipped first against a per-call budget, a failed section is
+    marked rather than failing the CAM.
+  The screen shows the stage ("Writing sections 6/14…") and offers the financial
+  workpaper for verification. A prompt without SECTION/ANNEXURE specifications is
+  drafted in one call, as before.
+
+- **CAM workbench drafts with GLM, reading documents through DocRAG.**
+  * New engine `bedrock:<model>` (any OpenAI-compatible endpoint; AWS Bedrock ap-south-1
+    by default) — `WORKFLOWS_CAM_ENGINE=bedrock:zai.glm-5`, key `WORKFLOWS_CAM_LLM_API_KEY`.
+    Streams when the endpoint does, accepts a plain reply otherwise, drops a reasoning
+    model's `reasoning_content`, and names provider refusals.
+  * PDFs and spreadsheets on the deal are read by DocRAG's new `POST /v1/extract`
+    (OpenDataLoader structure, tables as Markdown, `[page N]` markers, Sarvam OCR for
+    scans) instead of the flat `pypdf` pass; cached per file so turns don't re-run OCR.
+    Word/text files stay in-process; if DocRAG is down the basic pass runs and each
+    document says so. Documents are read concurrently, and a per-request budget
+    (`WORKFLOWS_CAM_MAX_TOTAL_DOC_CHARS`) keeps 13 documents inside the model's context.
+  * Generate CAM now fills the EVAM CAM template itself (its styles, letterhead, page
+    setup) with a "verify before filing" notice, the way the sanction-letter draft does.
+  * DocRAG can run extraction-only (`DOCRAG_INDEX_ENABLED=false`: no models, no Qdrant).
+
+- **DocRAG: production-readiness for AWS.**
+  * Its documents are now **backed up**: `docragdata` joins the 60 s S3 live mirror
+    (`objship.sh`) and the nightly verified `filebackup` tar. (Qdrant is rebuilt from it.)
+  * Qdrant pinned to the **multi-arch** image index (amd64 + arm64) — the previous digest
+    was the amd64-only manifest and would not start on Graviton instances.
+  * Models baked at their exact pinned commit into `/opt/models/{dense,sparse}` and served
+    from there: an upstream model update can no longer change the vectors or fail the
+    stack's `up --build`.
+  * OpenDataLoader's JVM capped (`JAVA_TOOL_OPTIONS=-Xmx1g`); it otherwise sized its heap
+    from the host's RAM, per run, per ingest thread.
+  * `.env.example` and the production guide list the DocRAG keys and volumes.
+
+- **DocRAG vectors move to its own Qdrant (0.2.0).** The in-memory numpy index and
+  `rank-bm25` are replaced by a dedicated Qdrant: one tenant-partitioned collection with
+  dense (FastEmbed `bge-small-en-v1.5`) and sparse (`Qdrant/bm25`, IDF) vectors; fusion and
+  the entity boost are unchanged, and so is the API. Extraction (OpenDataLoader, PyMuPDF,
+  Sarvam) is untouched.
+  * The index is derived: every ready document is reconciled at startup and re-embedded
+    from its saved chunks if its points are missing (lost volume, new Qdrant, model change).
+  * Models are pinned by revision and baked into the image — the build refuses a moved
+    upstream; the collection name carries the model identity so vectors never mix.
+  * The image drops torch/sentence-transformers (~65 MB of ONNX models instead). Startup
+    waits for Qdrant; `/readyz` reports `index_unavailable` when it is down.
+  * Deploy: `docrag-qdrant` in the Compose stack and in the standalone
+    `docker-compose.docrag.yml` (hardened, unpublished, API-key protected); the Helm
+    subchart bundles Qdrant (PVC, NetworkPolicy allowing only DocRAG) or takes an external
+    `qdrant.url`. New secret `docrag.qdrant.apiKey`, covered by the production guard.
+
+- **Swagger UI for every API at `/docs` (gateway).** The services' own `/docs` pages did
+  not work through the edge — each page fetched `/openapi.json` from the root (the gateway's
+  proxy spec) and "Try it out" called paths without their `/atlas`, `/docrag`… prefix. The
+  gateway now serves one Swagger UI with a service picker: specs are fetched server-side
+  (cached 60s, an unreachable service fails only its own entry), rewritten to edge paths,
+  and declare the credentials the edge actually takes (bearer, `X-Tenant`, dev
+  `X-User-Email`). On in dev; off in the production postures (`GATEWAY_DOCS_ENABLED`).
+- **DocRAG front door accepts the key in either header.** Behind the gateway in the OIDC
+  posture the user's token travels in `Authorization` and DocRAG's key in `X-API-Key`; the
+  bearer was checked first and every signed-in request would have been refused.
+
+- **New service: DocRAG (`services/docrag/`) — document → knowledge → cited answers.**
+  Upload a PDF or XLSX
+  (`POST /docrag/v1/documents` → 202); a background worker reconstructs it
+  (OpenDataLoader + PyMuPDF, Sarvam Doc AI for scanned pages), chunks it with section
+  paths, entities and page provenance, embeds it and adds it to the tenant's index. Then
+  `POST /docrag/v1/query` answers with hybrid retrieval (vector + BM25, rank-fused),
+  extractively or — with a Sarvam key — generatively, always with citations.
+  * Per-tenant, persisted on a volume, reloaded on restart; an identical re-upload returns
+    the existing document instead of duplicating it.
+  * Gateway: `/docrag` prefix; every data route (upload, read, delete, query) needs
+    `upload_remove_documents` — the documents are KYC/credit material.
+  * Embedding model baked into the image (served offline, like STT); JRE included for
+    OpenDataLoader. Compose, Helm subchart, CI and a dev console (`/docrag/v1/dev-ui`,
+    off in prod posture).
+  * Deployable as a separate service: no database or Register dependency;
+    `deploy/compose/docker-compose.docrag.yml` (API key mandatory) or the subchart alone with
+    its own ingress; optional `DOCRAG_CORS_ORIGINS`.
+  * APIs: frozen contract `docs/openapi/docrag.openapi.json`; Postman
+    `PRISM_DocRAG.postman_collection.json` (full flow with assertions, edge or standalone,
+    synthetic sample PDF) and a DocRAG folder in the All-APIs collection (the generator now
+    emits multipart upload bodies).
+  * Provenance is per element: a PyMuPDF-fallback or Sarvam-recovered page is cited with
+    the engine that actually produced it; retrieval keys on document id, not filename; a
+    malformed Sarvam response degrades to local extraction with a warning.
+
 - **The CP/CS screen opens on the NEXT version, instead of always 1.** A checklist is
   keyed on (lending, version), so a client that defaults to 1 lets the user fill in the
   whole form and only then answers `A CP/CS checklist v1 already exists — open a new

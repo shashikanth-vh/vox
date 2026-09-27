@@ -9,6 +9,10 @@ codegen clients and review diffs in PRs.
 | `register.openapi.json` | Register (system of record) | `/` (or `/register/…` fronted) | full CRUD + governance (evidence, decisions, CP/CS checklists, handover packages) |
 | `orchestrator.openapi.json` | Workflows orchestrator | `/orchestrator/…` | starts/decides workflows (qualification, structuring, document collection, **Advaya handover prepare + approve**) |
 | `gateway.openapi.json` | Gateway | `/` | a transparent authz proxy (single catch-all route); the real shapes are the two specs above |
+| `docrag.openapi.json` | DocRAG | `/docrag/…` (or the service's own URL when deployed on its own) | upload PDF/XLSX (multipart, async), document status / knowledge / chunks, cited query |
+
+Live, interactive versions of every routed service's spec (not just these frozen ones) are
+served by the gateway's Swagger UI at `https://<host>:8443/docs` — see the top-level README.
 
 ## Key handover / CP/CS operations (this milestone)
 
@@ -31,6 +35,7 @@ they always match what the frontend codegens against:
 |------|--------|
 | `postman/Register.postman_collection.json` | every Register endpoint (186) — CRUD + evidence, decisions, CP/CS checklists, handover packages |
 | `postman/Orchestrator.postman_collection.json` | every workflow-plane endpoint (14) — start/decide workflows incl. **CP/CS checklist** and **Advaya handover prepare + approve** |
+| `postman/PRISM_DocRAG.postman_collection.json` | DocRAG flow with assertions (upload → wait → explore → query → delete); `{{docragUrl}}` targets the edge or a standalone DocRAG |
 | `postman/PRISM.postman_environment.json` | shared vars (`baseUrl` → Register, `orchestratorUrl` → gateway `/orchestrator`, api key, tenant, ids) |
 
 Import both collections + the environment. Register requests carry `X-API-Key/X-Tenant/X-Actor`;

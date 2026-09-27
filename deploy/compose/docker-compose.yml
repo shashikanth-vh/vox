@@ -20,8 +20,9 @@
 #
 # Published ports — Edge (NGINX): :8443 https / :8080 http-redirect · Gateway: :8001 (dev)
 # Register: :8000 (dev) · Access: :8002 (dev) · Dex: :5556 · Temporal UI: :8088
-# ATLAS / PULSE / VocX / Orchestrator / UI publish NO host port: they are reachable only
-# through the edge → gateway (https://<host>:8443/atlas, /pulse, /vocx, /orchestrator, /ui).
+# ATLAS / PULSE / VocX / DocRAG / Orchestrator / UI publish NO host port: they are reachable
+# only through the edge → gateway (https://<host>:8443/atlas, /pulse, /vocx, /docrag,
+# /orchestrator, /ui).
 # Document bytes go to MinIO (S3): API http://localhost:9000 · console http://localhost:9001
 # Temporal Web UI: http://localhost:8088
 # The API waits for a healthy DB, runs migrations, then serves with an EMPTY database.
@@ -83,7 +84,9 @@ services:
     # Hub in 2025 (the hub API now answers "object not found" for the whole repo).
     # Boxes that pulled before that keep serving from their local image cache; any
     # fresh machine can only pull from quay. Same image, same tag, same digest line.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # MINIO_IMAGE overrides it for a machine that cannot pull from quay (MinIO stopped
+    # serving anonymous pulls there too); prism-deploy.sh fresh checks this first.
+    image: "${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z}"
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-prism}"
@@ -223,6 +226,7 @@ services:
       GATEWAY_ATLAS_URL: "http://atlas:8000"
       GATEWAY_VOCX_URL: "http://vocx:8000"
       GATEWAY_PULSE_URL: "http://pulse:8000"
+      GATEWAY_DOCRAG_URL: "http://docrag:8000"
       GATEWAY_ORCHESTRATOR_URL: "http://orchestrator:8000"
       # Per-upstream service credential the gateway INJECTS (client key already stripped).
       # Each must equal that service's inbound key; svc_gateway carries no own authority.
@@ -230,6 +234,7 @@ services:
       GATEWAY_ATLAS_API_KEY: "${SVC_ATLAS_KEY:-compose-svc-atlas}"
       GATEWAY_VOCX_API_KEY: "${VOCX_FRONT_KEY:-compose-vocx-front}"
       GATEWAY_PULSE_API_KEY: "${PULSE_API_KEYS:-compose-pulse-key}"
+      GATEWAY_DOCRAG_API_KEY: "${DOCRAG_FRONT_KEY:-compose-docrag-front}"
       GATEWAY_ORCHESTRATOR_API_KEY: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       GATEWAY_GATEWAY_SHARED_SECRET: "compose-gateway-secret"
       # Mint the SIGNED internal context the Register verifies (production identity
@@ -247,6 +252,9 @@ services:
       # hosted elsewhere or a local dev server.
       GATEWAY_CORS_ORIGINS: "${GATEWAY_CORS_ORIGINS:-}"
       GATEWAY_REQUIRE_AUTH: "${GATEWAY_REQUIRE_AUTH:-false}"
+      # Swagger UI for every API at https://<host>:8443/docs (service picker, calls go
+      # through the edge). The prod-posture overlay turns it off unless asked for.
+      GATEWAY_DOCS_ENABLED: "${GATEWAY_DOCS_ENABLED:-true}"
       GATEWAY_LOG_JSON: "true"
     ports:
       - "${DEV_PORTS_BIND:-127.0.0.1}:8001:8000"   # direct gateway access for dev
@@ -427,6 +435,66 @@ services:
     # No host port: PULSE is reachable ONLY through the gateway (edge → /pulse/...).
     restart: unless-stopped
 
+  # DocRAG's vector store — its OWN Qdrant (not shared with any other module). Holds only
+  # derived vectors: DocRAG rebuilds the collection from its saved chunks if this volume
+  # is lost. Not published to the host; API-key protected even inside the network.
+  docrag-qdrant:
+    logging: *default-logging
+    image: qdrant/qdrant:v1.18.2-unprivileged@sha256:b79aaa49ce7a7e5b7e9cf3fe76be400c911457084b4b7af47487c1c9ae5962e5
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /qdrant/snapshots:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000
+    environment:
+      QDRANT__SERVICE__API_KEY: "${DOCRAG_QDRANT_API_KEY:-compose-docrag-qdrant-key}"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - docrag_qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # DocRAG — document → knowledge → hybrid retrieval with cited answers. Upload a PDF/XLSX
+  # (POST /docrag/v1/documents → 202; processed in the background), then ask questions
+  # (POST /docrag/v1/query). Extraction: OpenDataLoader (Java, in the image) + PyMuPDF;
+  # scanned pages go to Sarvam Doc AI when SARVAM_API_KEY is set in .env, otherwise they
+  # are flagged with a warning. Vectors (dense + BM25) in docrag-qdrant; the pinned
+  # embedding models are baked into the image (offline).
+  # Dev console: https://<host>:8443/docrag/v1/dev-ui
+  docrag:
+    logging: *default-logging
+    build:
+      context: ../..
+      dockerfile: services/docrag/Dockerfile
+    depends_on:
+      docrag-qdrant:
+        condition: service_healthy
+    environment:
+      DOCRAG_QDRANT_URL: "http://docrag-qdrant:6333"
+      DOCRAG_QDRANT_API_KEY: "${DOCRAG_QDRANT_API_KEY:-compose-docrag-qdrant-key}"
+      # DocRAG's OWN front door: only the gateway's injected key is accepted.
+      DOCRAG_API_KEYS: "${DOCRAG_FRONT_KEY:-compose-docrag-front}"
+      DOCRAG_DEFAULT_TENANT: "EVAM"
+      # Sarvam (optional): OCR for scanned pages + the "generative" answer mode. Blank =
+      # both off; text-layer PDFs, XLSX and extractive answers work without it.
+      DOCRAG_SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
+      DOCRAG_INGEST_WORKERS: "${DOCRAG_INGEST_WORKERS:-2}"
+      # TEMPORARY dev console. Dev default ON; the prod-posture overlay pins it OFF.
+      DOCRAG_DEV_UI: "${DOCRAG_DEV_UI:-true}"
+      DOCRAG_LOG_JSON: "true"
+    volumes:
+      # Uploaded originals + reconstructed knowledge + chunks — the source of truth
+      # (the Qdrant index is rebuilt from it). Back this volume up.
+      - docragdata:/data/docrag
+    # No host port: DocRAG is reachable ONLY through the gateway (edge → /docrag/...).
+    restart: unless-stopped
+
   # ATLAS — the live management dashboard service (read-side BFF). Composes
   # /v1/dashboard, /v1/today and /v1/pipeline/{vertical} from the Register; gates each
   # view through the Access service's admin-editable view matrix.
@@ -585,14 +653,17 @@ services:
       # Named service principal (svc_workflows allowlist) — least privilege.
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
       WORKFLOWS_REGISTER_TENANT: EVAM
-      # The CAM workbench engine. Set WORKFLOWS_ANTHROPIC_API_KEY in deploy/compose/.env
-      # (never in this file) — without it the deterministic stub engine runs, which
-      # exercises the whole lifecycle but drafts a placeholder instead of a real CAM.
+      # The CAM workbench engine: GLM on AWS Bedrock (bedrock:<model>, key in
+      # WORKFLOWS_CAM_LLM_API_KEY — set it in deploy/compose/.env, never in this file), or
+      # anthropic:<model> with WORKFLOWS_ANTHROPIC_API_KEY. Without the key the
+      # deterministic stub runs: the lifecycle works, the draft is a placeholder.
       # Approval policy: false = every gate needs its human (conversion decision,
       # credit committee, CP/CS checker); true = those gates auto-approve under the
       # recorded "auto-approval (policy)" identity, with all verifications intact.
       WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
-      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-bedrock:zai.glm-5}"
+      WORKFLOWS_CAM_LLM_BASE_URL: "${WORKFLOWS_CAM_LLM_BASE_URL:-https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1}"
+      WORKFLOWS_CAM_LLM_API_KEY: "${WORKFLOWS_CAM_LLM_API_KEY:-}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
       # Re-mint the caller's signed context so a conversion writes as the human, not the key.
       WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
@@ -693,8 +764,14 @@ services:
       # credit committee, CP/CS checker); true = those gates auto-approve under the
       # recorded "auto-approval (policy)" identity, with all verifications intact.
       WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
-      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-anthropic:claude-haiku-4-5}"
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-bedrock:zai.glm-5}"
+      WORKFLOWS_CAM_LLM_BASE_URL: "${WORKFLOWS_CAM_LLM_BASE_URL:-https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1}"
+      WORKFLOWS_CAM_LLM_API_KEY: "${WORKFLOWS_CAM_LLM_API_KEY:-}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
+      # CAM documents are read by DocRAG (OpenDataLoader + Sarvam OCR for scans). If DocRAG
+      # is down the workbench falls back to its basic text pass and says so per document.
+      WORKFLOWS_DOCRAG_URL: "http://docrag:8000"
+      WORKFLOWS_DOCRAG_API_KEY: "${DOCRAG_FRONT_KEY:-compose-docrag-front}"
       # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
       WORKFLOWS_API_KEYS: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
@@ -783,6 +860,7 @@ services:
       AWS_DEFAULT_REGION: "${LIVEBACKUP_AWS_REGION:-ap-south-1}"
     volumes:
       - miniodata:/data/minio:ro
+      - docragdata:/data/docrag:ro
       - vocx_state:/state/vocx:ro
       - pulsedata:/state/pulse:ro
       - dexdata:/state/dex:ro
@@ -849,6 +927,7 @@ services:
       KEEP_DAYS: "${PGBACKUP_KEEP:-14}"
     volumes:
       - miniodata:/data:ro
+      - docragdata:/docrag:ro
       - pgbackups:/backups
     entrypoint: ["/bin/sh", "-c"]
     # Same verified-or-nothing discipline as pgbackup: archive to a .partial,
@@ -870,6 +949,17 @@ services:
             echo "[filebackup] ARCHIVE FAILED — nothing kept (see /backups/FILEBACKUP_FAILED)"
           fi
           find /backups -name 'minio-*.tar.gz' -mtime "+$$KEEP_DAYS" -delete
+          # DocRAG's documents (originals + knowledge + chunks), same discipline.
+          dtmp="/backups/.docrag-$$ts.partial"
+          if tar -czf "$$dtmp" -C /docrag . && gzip -t "$$dtmp"; then
+            mv "$$dtmp" "/backups/docrag-$$ts.tar.gz"
+            echo "[filebackup] wrote /backups/docrag-$$ts.tar.gz (verified)"
+          else
+            rm -f "$$dtmp"
+            echo "$$ts docrag archive failed" >> /backups/FILEBACKUP_FAILED
+            echo "[filebackup] DOCRAG ARCHIVE FAILED — nothing kept"
+          fi
+          find /backups -name 'docrag-*.tar.gz' -mtime "+$$KEEP_DAYS" -delete
           sleep 86400
         done
     restart: unless-stopped
@@ -886,3 +976,7 @@ volumes:
   # Recurring news digests. Small, but losing it silently stops every scheduled
   # report — the desk would only notice by the absence of an email.
   pulsedata:
+  # DocRAG's documents, knowledge objects and chunks (source of truth — back it up).
+  docragdata:
+  # DocRAG's Qdrant storage (derived; rebuilt from docragdata if lost).
+  docrag_qdrant:

@@ -24,11 +24,15 @@ Extraction lives in ``extract_text``; adding a format is one branch there.
 from __future__ import annotations
 
 import re
+import time as _time
 from typing import Any
 
 from fastapi import Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.cam_pipeline import DigestCache, SourceDoc, draft_staged, parse_master_prompt
+from app.cam_telemetry import UsageMeter, metered, record_document, record_llm_call, stage
+from app.cam_telemetry import log as _tlog
 from app.docx_out import markdown_into_template, markdown_to_docx
 
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/csv")
@@ -72,23 +76,80 @@ def extract_text(ctype: str, blob: bytes) -> tuple[str, str | None]:
         if text.strip():
             return text, None
         return "", _SCANNED_PDF
+    if image_suffix(ctype, blob):
+        return "", ("an image — reading it needs OCR: configure DocRAG with Sarvam "
+                    "(WORKFLOWS_DOCRAG_URL + SARVAM_API_KEY)")
     return "", f"binary content ({ctype or 'unknown type'}) — no extractor for this format"
+
+
+# Images DocRAG reads by OCR, by content type and by their leading bytes.
+_IMAGE_KINDS = ((("image/jpeg", "image/jpg", "image/pjpeg"), (b"\xff\xd8\xff",), ".jpg"),
+                (("image/png",), (b"\x89PNG",), ".png"),
+                (("image/tiff",), (b"II*\x00", b"MM\x00*"), ".tif"),
+                (("image/bmp", "image/x-ms-bmp"), (b"BM",), ".bmp"))
+
+
+def image_suffix(ctype: str, blob: bytes) -> str | None:
+    ctype = (ctype or "").lower()
+    if any(ctype.startswith(t) for t in _TEXT_TYPES):
+        return None
+    for mimes, magics, suffix in _IMAGE_KINDS:
+        if ctype.startswith(mimes) or any(blob.startswith(m) for m in magics):
+            return suffix
+    return None
+
+
+def doc_format(ctype: str, blob: bytes) -> str:
+    """A short, stable label for telemetry: pdf, xlsx, docx, text, jpg, png, ..."""
+    ctype = (ctype or "").lower()
+    if is_pdf(ctype, blob):
+        return "pdf"
+    if "spreadsheetml" in ctype or (blob[:2] == b"PK" and b"xl/" in blob[:4096]):
+        return "xlsx"
+    if ctype.startswith(_DOCX_TYPE) or (blob[:2] == b"PK" and b"word/" in blob[:4096]):
+        return "docx"
+    if (suffix := image_suffix(ctype, blob)) is not None:
+        return suffix.lstrip(".")
+    if any(ctype.startswith(t) for t in _TEXT_TYPES):
+        return "text"
+    return ctype.split(";")[0] or "unknown"
 
 
 # The marker reason for a PDF with no text layer — a SCAN. Not a dead end: an engine
 # that reads documents visually (Anthropic's PDF support) is handed the file itself.
 _SCANNED_PDF = "the PDF has no text layer (a scan)"
+_SCANNED_IMAGE = "the image produced no text"
 _PDF_ATTACH_MAX_BYTES = 10 * 1024 * 1024   # Anthropic's request cap is 32MB total
 _PDF_ATTACH_MAX_DOCS = 4                   # …and ~100 pages across attached PDFs
 
 
 def is_pdf(ctype: str, blob: bytes) -> bool:
     return (ctype or "").lower().startswith("application/pdf") or blob[:5] == b"%PDF-"
+# The credit team's master prompt was written for an agent WITH tools (it asks for
+# workpapers on disk, public web checks, a generated .docx and a programmatic QA pass).
+# The workbench runs it as ONE text response, so this note tells the engine how to honour
+# each instruction here — without editing the credit team's prompt, and without ever
+# letting a check that did not happen read as done.
+_ENVIRONMENT = (
+    "OPERATING ENVIRONMENT: you are answering as a single text response inside PRISM's "
+    "CAM workbench. You have NO file system, NO web or public-registry access and NO code "
+    "execution. Where the prompt document asks for any of these: (1) do the extraction, "
+    "ratio, triangulation and stress-test work yourself and show the results where the "
+    "CAM needs them, with formulas and [source: document, page] tags — do not output "
+    "separate workpaper files; (2) NEVER state or imply that a public check, registry "
+    "search or web lookup was performed — list each required check in a table marked "
+    "'NOT PERFORMED — to be completed by the analyst'; (3) ignore .docx generation, "
+    "formatting (fonts, colours, page setup) and machine-QA instructions — PRISM renders "
+    "your Markdown into the EVAM CAM template with that styling; (4) output ONLY the CAM "
+    "itself in Markdown: '#' for the title, '##' for each Section and Annexure, '###' for "
+    "sub-sections, and Markdown tables with a header row."
+)
+
 _SYSTEM = (
     "You are drafting a Credit Assessment Memo (CAM) for a climate-finance lender. "
     "Work ONLY from the supplied documents and the analyst's prompt document; where a "
     "figure is not in the documents, say 'not on record' rather than inventing one. "
-    "Answer in clean Markdown."
+    "Answer in clean Markdown.\n\n" + _ENVIRONMENT
 )
 
 # The ASK lane is the analyst's open conversation — questions, pasted text, requests of
@@ -104,7 +165,8 @@ _ASK_SYSTEM = (
     "record'. If a supplied document is itself a prompt or instruction sheet (the "
     "credit team's CAM prompt, a drafting guide), FOLLOW it as instructions for this "
     "answer rather than treating it as facts. General knowledge questions are fine to "
-    "answer from your own knowledge. Answer in clean Markdown."
+    "answer from your own knowledge. You have no file system, web or code access: never "
+    "claim to have run a public check or written a file. Answer in clean Markdown."
 )
 
 
@@ -135,9 +197,12 @@ class StubEngine(CamEngine):
     name = "stub:offline"
 
     async def generate(self, http: Any, system: str, turns: list[dict[str, str]]) -> str:
+        record_llm_call(engine=self.name, ok=True, started=_time.monotonic(),
+                        usage={"input_tokens": 0, "output_tokens": 0}, finish="stub")
         asked = sum(1 for t in turns if t["role"] == "user")
         return ("# CAM (offline stub)\n\n"
-                "No LLM engine is configured (set WORKFLOWS_ANTHROPIC_API_KEY). This "
+                "No LLM engine is configured (set WORKFLOWS_CAM_LLM_API_KEY for "
+                "bedrock:<model>, or WORKFLOWS_ANTHROPIC_API_KEY). This "
                 f"placeholder proves the workbench lifecycle only. Turns so far: {asked}.")
 
 
@@ -154,6 +219,20 @@ class AnthropicEngine(CamEngine):
         # thousands of tokens. Non-streaming requests that long hit idle-connection
         # timeouts; with SSE the read timeout is per-chunk, and 64000 is the model
         # family's output ceiling, so a full CAM never truncates mid-sentence.
+        started = _time.monotonic()
+        usage: dict[str, Any] = {}
+        try:
+            text = await self._request(http, system, turns, usage)
+        except Exception as exc:
+            record_llm_call(engine=self.name, ok=False, started=started, usage=usage,
+                            error=str(exc))
+            raise
+        record_llm_call(engine=self.name, ok=True, started=started, usage=usage,
+                        finish=usage.pop("_stop", ""))
+        return text
+
+    async def _request(self, http: Any, system: str, turns: list[dict[str, Any]],
+                       usage: dict[str, Any]) -> str:
         import json as _json
 
         import httpx
@@ -185,6 +264,12 @@ class AnthropicEngine(CamEngine):
                     delta = event.get("delta") or {}
                     if delta.get("type") == "text_delta":
                         text_parts.append(delta.get("text", ""))
+                elif event.get("type") == "message_start":
+                    # Input tokens arrive up front; output tokens with message_delta.
+                    usage.update(((event.get("message") or {}).get("usage")) or {})
+                elif event.get("type") == "message_delta":
+                    usage.update(event.get("usage") or {})
+                    usage["_stop"] = (event.get("delta") or {}).get("stop_reason") or ""
                 elif event.get("type") == "error":
                     msg = (event.get("error") or {}).get("message") or "stream error"
                     raise RuntimeError(f"The drafting engine failed mid-answer: {msg}")
@@ -194,10 +279,148 @@ class AnthropicEngine(CamEngine):
         return text
 
 
+class OpenAICompatEngine(CamEngine):
+    """Any OpenAI-compatible chat endpoint — AWS Bedrock's by default (the GLM models
+    Chitti also uses). Text only: scans reach it as OCR text from DocRAG, never as
+    images. Requests a stream (a full CAM can take minutes, and SSE keeps the
+    connection alive chunk by chunk) but also accepts a plain JSON reply. A reasoning
+    model's separate ``reasoning_content`` is ignored — only the answer is kept."""
+
+    supports_documents = False
+
+    def __init__(self, model: str, base_url: str, api_key: str, *,
+                 max_tokens: int = 32768, timeout_s: float = 540.0,
+                 provider: str = "bedrock") -> None:
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.max_tokens = max_tokens
+        self.timeout_s = timeout_s
+        self.name = f"{provider}:{model}"
+
+    # A full CAM can run past one response's output limit. When the engine stops for
+    # length, it is asked to continue from where it stopped (bounded), and the pieces
+    # are joined — a CAM missing its last sections is worse than one that took longer.
+    max_continuations = 3
+    _CONTINUE = ("Continue exactly where you stopped, mid-sentence if needed. Do not repeat "
+                 "anything already written and do not add a preamble.")
+
+    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]]) -> str:
+        messages = [{"role": "system", "content": system},
+                    *({"role": t["role"], "content": _as_text(t["content"])} for t in turns)]
+        pieces: list[str] = []
+        for _ in range(self.max_continuations + 1):
+            piece, finish = await self._complete(http, messages)
+            pieces.append(piece)
+            if finish != "length":
+                break
+            messages = [*messages, {"role": "assistant", "content": piece},
+                        {"role": "user", "content": self._CONTINUE}]
+        text = "".join(pieces)
+        if not text.strip():
+            raise RuntimeError("The drafting engine returned no text.")
+        return text
+
+    async def _complete(self, http: Any, messages: list[dict[str, Any]]) -> tuple[str, str]:
+        """One request: (text, finish_reason). Every request is recorded with the token
+        usage the provider reports — failures too, since they cost time if not tokens."""
+        started = _time.monotonic()
+        usage: dict[str, Any] | None = None
+        finish = ""
+        try:
+            text, finish, usage = await self._request(http, messages)
+        except Exception as exc:
+            record_llm_call(engine=self.name, ok=False, started=started, usage=usage,
+                            error=str(exc))
+            raise
+        record_llm_call(engine=self.name, ok=True, started=started, usage=usage,
+                        finish=finish)
+        return text, finish
+
+    async def _request(self, http: Any, messages: list[dict[str, Any]],
+                       ) -> tuple[str, str, dict[str, Any] | None]:
+        import json as _json
+
+        import httpx
+        text_parts: list[str] = []
+        finish = ""
+        usage: dict[str, Any] | None = None
+        async with http.stream(
+            "POST", f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": self.model, "messages": messages, "stream": True,
+                  # The final stream event then carries the token counts.
+                  "stream_options": {"include_usage": True},
+                  "max_completion_tokens": self.max_tokens},
+            timeout=httpx.Timeout(self.timeout_s, connect=15.0),
+        ) as r:
+            if r.status_code >= 300:
+                body = (await r.aread()).decode("utf-8", "ignore")
+                detail = ""
+                try:
+                    err = (_json.loads(body) or {}).get("error") or {}
+                    detail = str(err.get("message") or "") if isinstance(err, dict) else str(err)
+                except ValueError:
+                    detail = body[:300]
+                raise RuntimeError(f"The drafting engine refused (HTTP {r.status_code})"
+                                   + (f": {detail}" if detail else "."))
+            if "text/event-stream" not in (r.headers.get("content-type") or ""):
+                data = _json.loads((await r.aread()).decode("utf-8", "ignore") or "{}")
+                choice = (data.get("choices") or [{}])[0]
+                text_parts.append(((choice.get("message") or {}).get("content")) or "")
+                finish = choice.get("finish_reason") or ""
+                usage = data.get("usage") or None
+            else:
+                async for line in r.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        event = _json.loads(payload)
+                    except ValueError:
+                        continue
+                    if event.get("error"):
+                        raise RuntimeError("The drafting engine failed mid-answer: "
+                                           f"{event['error']}")
+                    if event.get("usage"):
+                        usage = event["usage"]
+                    for choice in event.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        if delta.get("content"):
+                            text_parts.append(delta["content"])
+                        if choice.get("finish_reason"):
+                            finish = choice["finish_reason"]
+        return "".join(text_parts), finish, usage
+
+
+def _as_text(content: Any) -> str:
+    """A turn's content as plain text (block lists only arise for Anthropic scans)."""
+    if isinstance(content, str):
+        return content
+    return "\n\n".join(b.get("text", "") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text")
+
+
 def build_engine(settings: Any) -> CamEngine:
     spec = (getattr(settings, "cam_engine", "") or "anthropic:claude-haiku-4-5").strip()
     provider, _, model = spec.partition(":")
-    key = (getattr(settings, "anthropic_api_key", "") or "").strip()
+    anthropic_key = (getattr(settings, "anthropic_api_key", "") or "").strip()
+    if provider in ("bedrock", "openai"):
+        key = (getattr(settings, "cam_llm_api_key", "") or "").strip()
+        if key and model:
+            return OpenAICompatEngine(
+                model, settings.cam_llm_base_url, key,
+                max_tokens=int(getattr(settings, "cam_max_completion_tokens", 32768)),
+                timeout_s=float(getattr(settings, "cam_llm_timeout_s", 540.0)),
+                provider=provider)
+        # A deployment configured before GLM (only the Anthropic key set) keeps a real
+        # engine instead of silently dropping to the stub when the default changed.
+        if anthropic_key:
+            return AnthropicEngine("claude-haiku-4-5", anthropic_key)
+        return StubEngine()
+    key = anthropic_key
     if provider == "anthropic" and key:
         return AnthropicEngine(model or "claude-haiku-4-5", key)
     return StubEngine()
@@ -241,6 +464,9 @@ class ExportDocxIn(BaseModel):
     # The box content — the engine's answer (Markdown) after the analyst's edits.
     markdown: str = Field(min_length=1, max_length=400_000)
     title: str | None = Field(default=None, max_length=200)
+    # The CAM template (a Data Register .docx). When given, the draft is rendered INSIDE
+    # that package — the credit team's styles, fonts, letterhead and page setup.
+    template_doc_id: str | None = Field(default=None, max_length=64)
 
 
 class DraftLetterIn(BaseModel):
@@ -254,6 +480,23 @@ class DraftLetterIn(BaseModel):
     # Whatever the analyst has ALREADY typed into the terms form — these override the
     # documents (the human's figures win).
     terms: dict[str, Any] | None = None
+
+
+class StagedDraftIn(BaseModel):
+    """Generate CAM, staged: the analyst's documents + the master prompt → a full CAM."""
+    model_config = ConfigDict(extra="forbid")
+    # Documents ticked for this generation. Documents sent earlier in the conversation
+    # are included automatically (the transcript records them).
+    source_doc_ids: list[str] = Field(default_factory=list, max_length=60)
+    prompt_doc_id: str | None = Field(default=None, max_length=64)
+    prompt_text: str | None = Field(default=None, max_length=200_000)
+    # The CAM template (rendering only) — never sent to the engine as a source.
+    template_doc_id: str | None = Field(default=None, max_length=64)
+    # Anything typed but not yet sent — rides as an extra instruction.
+    instruction: str | None = Field(default=None, max_length=20_000)
+    # Human names for the documents (the UI has them): used in the manifest and in
+    # [source: …] tags instead of raw ids.
+    doc_titles: dict[str, str] = Field(default_factory=dict, max_length=200)
 
 
 class FinaliseIn(BaseModel):
@@ -273,6 +516,8 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
     engine = build_engine(settings)
     base = settings.register_base_url.rstrip("/")
     max_doc_chars = int(getattr(settings, "cam_max_doc_chars", 60_000))
+    total_budget = int(getattr(settings, "cam_max_total_doc_chars", 450_000))
+    docrag_url = (getattr(settings, "docrag_url", "") or "").rstrip("/")
 
     def _reg_headers(request: Request, caller: Any, who: str,
                      method: str, path: str) -> dict[str, str]:
@@ -314,16 +559,120 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return None, "", f"register refused the read (HTTP {r.status_code})"
         return r.content, r.headers.get("content-type") or "", None
 
+    def _docrag_suffix(ctype: str, blob: bytes) -> str | None:
+        """The DocRAG-readable kind of this file, or None (read locally)."""
+        if not docrag_url:
+            return None
+        if is_pdf(ctype, blob):
+            return ".pdf"
+        if "spreadsheetml" in (ctype or "") or (blob[:2] == b"PK" and b"xl/" in blob[:4096]):
+            return ".xlsx"
+        return image_suffix(ctype, blob)
+
+    async def _extract(request: Request, doc_id: str, blob: bytes,
+                       ctype: str) -> tuple[str, str | None, dict[str, Any]]:
+        """(text, skip_reason, info). PDFs and spreadsheets go to DocRAG when it is
+        configured — OpenDataLoader structure, tables as Markdown, Sarvam OCR for
+        scanned pages — everything else (and everything, when DocRAG is down) takes
+        the basic in-process pass. ``info`` says which ran and carries DocRAG's
+        warnings, so the analyst sees e.g. that a scan had no OCR."""
+        suffix = _docrag_suffix(ctype, blob)
+        if suffix is None:
+            text, reason = extract_text(ctype, blob)
+            return text, reason, {"via": "basic"}
+        import httpx
+        http = getattr(request.app.state, "docrag_http", None) or request.app.state.http
+        try:
+            r = await http.post(
+                f"{docrag_url}/v1/extract",
+                files={"file": (f"{doc_id}{suffix}", blob)},
+                headers={"X-API-Key": settings.docrag_api_key,
+                         "X-Tenant": request.headers.get("X-Tenant", settings.register_tenant)},
+                timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
+            failure = None if r.status_code < 300 else f"HTTP {r.status_code}"
+        except httpx.HTTPError as exc:
+            r, failure = None, type(exc).__name__
+        if r is not None and failure is None:
+            body = r.json() or {}
+            md = body.get("markdown") or ""
+            info = {"via": "docrag", "engines": body.get("extraction_engines") or [],
+                    "warnings": body.get("warnings") or [],
+                    "doc_type": body.get("doc_type") or "", "pages": body.get("page_count"),
+                    "telemetry": body.get("telemetry") or {"cached": body.get("cached")}}
+            if md.strip():
+                return md, None, info
+            if suffix == ".pdf":
+                return "", _SCANNED_PDF, info
+            if suffix not in (".xlsx",):
+                return "", _SCANNED_IMAGE, info
+            return "", "no text extracted", info
+        text, reason = extract_text(ctype, blob)
+        return text, reason, {"via": "basic",
+                              "note": f"DocRAG unavailable ({failure}); basic extraction used"}
+
+    async def _read_docs(request: Request, caller: Any, who: str,
+                         doc_ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch + extract several documents CONCURRENTLY (bounded), in input order.
+        Each row: doc_id, blob, ctype, text, reason (skip reason or None), info."""
+        import asyncio as _asyncio
+
+        gate = _asyncio.Semaphore(4)
+
+        async def one(doc_id: str) -> dict[str, Any]:
+            async with gate:
+                blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
+                if err is not None:
+                    return {"doc_id": doc_id, "blob": None, "ctype": "", "text": "",
+                            "reason": err, "info": {}}
+                text, reason, info = await _extract(request, doc_id, blob or b"", ctype)
+                info["figures"] = record_document(
+                    doc_id=doc_id, fmt=doc_format(ctype, blob or b""),
+                    via=info.get("via", "basic"), ok=bool(text.strip()),
+                    telemetry=info.get("telemetry"), reason=reason or "")
+                return {"doc_id": doc_id, "blob": blob, "ctype": ctype, "text": text,
+                        "reason": reason, "info": info}
+
+        return list(await _asyncio.gather(*(one(d) for d in doc_ids)))
+
+    def _budgeted(text: str, used: int) -> tuple[str, str | None]:
+        """Apply the per-document and per-request limits; (text, note)."""
+        note = None
+        if len(text) > max_doc_chars:
+            text, note = text[:max_doc_chars], f"truncated to {max_doc_chars} characters"
+        room = total_budget - used
+        if len(text) > room:
+            text = text[:max(room, 0)]
+            note = ("over this request's total document budget — "
+                    + ("truncated" if text else "left out") + f" ({total_budget} characters)")
+        return text, note
+
+    def _scan_reason(info: dict[str, Any], what: str = "scanned PDF") -> str:
+        if info.get("via") == "docrag":
+            detail = "; ".join(w for w in info.get("warnings") or [] if "Sarvam" in w)
+            return (f"{what} — OCR produced no text"
+                    + (f" ({detail})" if detail else
+                       " (set SARVAM_API_KEY on DocRAG to read scans)"))
+        return ("scanned PDF — " + (
+            "over the attachment limits for one draft" if engine.supports_documents else
+            "this engine cannot read scans; configure DocRAG with Sarvam OCR "
+            "(WORKFLOWS_DOCRAG_URL + SARVAM_API_KEY)"))
+
+    def _why(reason: str | None, info: dict[str, Any]) -> str | None:
+        """A skip reason the analyst can act on."""
+        if reason == _SCANNED_PDF:
+            return _scan_reason(info)
+        if reason == _SCANNED_IMAGE:
+            return _scan_reason(info, "image")
+        return reason
+
     async def _doc_text(request: Request, caller: Any, who: str,
                         doc_id: str) -> tuple[str, str | None]:
         """(text, skip_reason). Text-like content comes back whole (bounded);
         formats with no extractor are skipped WITH the reason."""
-        blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
-        if err is not None:
-            return "", err
-        text, reason = extract_text(ctype, blob or b"")
+        [row] = await _read_docs(request, caller, who, [doc_id])
+        text, reason = row["text"], row["reason"]
         if reason is not None:
-            return "", reason
+            return "", _why(reason, row["info"])
         if len(text) > max_doc_chars:
             return text[:max_doc_chars], f"truncated to {max_doc_chars} characters"
         return text, None
@@ -396,13 +745,20 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         blob, ctype, fetch_err = await _doc_fetch(request, caller, who, doc_id)
         if fetch_err is not None:
             return problem(404, "Not found", f"Document {doc_id!r}: {fetch_err}")
-        text, reason = extract_text(ctype, blob or b"")
+        text, reason, info = await _extract(request, doc_id, blob or b"", ctype)
         truncated = len(text) > max_doc_chars
         out: dict[str, Any] = {"doc_id": doc_id, "content_type": ctype,
-                               "text": text[:max_doc_chars], "truncated": truncated}
+                               "text": text[:max_doc_chars], "truncated": truncated,
+                               "via": info.get("via", "basic")}
+        if info.get("warnings"):
+            out["warnings"] = info["warnings"]
+        if info.get("note"):
+            out["note"] = info["note"]
         if reason is not None:
-            out["reason"] = reason
-            out["attachable"] = (reason == _SCANNED_PDF and engine.supports_documents)
+            attachable = reason == _SCANNED_PDF and engine.supports_documents
+            out["reason"] = (reason if attachable or reason != _SCANNED_PDF
+                             else _scan_reason(info))
+            out["attachable"] = attachable
         return out
 
     # A filed letter is IMMUTABLE, so its extraction is too: the first read (the
@@ -453,7 +809,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             if not fut.done():
                 fut.set_exception(RuntimeError(str(fetch_err)))
             return problem(404, "Not found", f"Document {payload.doc_id!r}: {fetch_err}")
-        text, reason = extract_text(ctype, blob or b"")
+        text, reason, _info = await _extract(request, payload.doc_id, blob or b"", ctype)
         content: Any
         instruction = (
             "Read the sanction letter above (and the credit note, when given) and "
@@ -504,8 +860,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             _extract_inflight.pop(cache_key, None)
             if not fut.done():
                 fut.set_exception(RuntimeError("unreadable letter"))
+            why = _why(reason, _info)
             return problem(422, "Validation failed",
-                           f"The letter could not be read{f' ({reason})' if reason else ''} "
+                           f"The letter could not be read{f' ({why})' if why else ''} "
                            "— enter the conditions by hand.")
         _SYSTEM = ("You extract structured data from credit documents. You answer with "
                    "JSON only — no commentary, no code fences.")
@@ -643,22 +1000,28 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                            "Pick a prompt document or type the drafting brief — the "
                            "workbench drafts only from the credit team's own prompts.")
 
-        included: list[dict[str, str]] = []
-        skipped: list[dict[str, str]] = []
+        included: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
         parts: list[str] = []
         attachments: list[dict[str, Any]] = []
-        for doc_id in payload.source_doc_ids:
-            blob, ctype, err = await _doc_fetch(request, caller, who, doc_id)
-            if err is not None:
-                skipped.append({"doc_id": doc_id, "reason": err})
+        used = 0
+        for row in await _read_docs(request, caller, who, payload.source_doc_ids):
+            doc_id, blob, reason, info = row["doc_id"], row["blob"], row["reason"], row["info"]
+            if blob is None:
+                skipped.append({"doc_id": doc_id, "reason": reason})
                 continue
-            text, reason = extract_text(ctype, blob or b"")
+            text = row["text"]
             if text.strip():
-                note = None
-                if len(text) > max_doc_chars:
-                    text = text[:max_doc_chars]
-                    note = f"truncated to {max_doc_chars} characters"
-                included.append({"doc_id": doc_id, **({"note": note} if note else {})})
+                text, note = _budgeted(text, used)
+                if not text:
+                    skipped.append({"doc_id": doc_id, "reason": note})
+                    continue
+                used += len(text)
+                notes = [n for n in (note, info.get("note")) if n]
+                included.append({"doc_id": doc_id, "via": info.get("via", "basic"),
+                                 **({"note": "; ".join(notes)} if notes else {}),
+                                 **({"warnings": info["warnings"]}
+                                    if info.get("warnings") else {})})
                 parts.append(f"\n\n===== DOCUMENT {doc_id} =====\n{text}")
                 continue
             # A SCAN has no text layer — but an engine with visual PDF support reads
@@ -670,13 +1033,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 included.append({"doc_id": doc_id,
                                  "note": "scanned PDF — attached for the engine to read"})
                 continue
-            if reason == _SCANNED_PDF:
-                reason = ("scanned PDF — " + (
-                    "over the attachment limits for one draft"
-                    if engine.supports_documents else
-                    "the offline stub engine cannot read scans; configure the "
-                    "Anthropic engine (WORKFLOWS_ANTHROPIC_API_KEY) to include it"))
-            skipped.append({"doc_id": doc_id, "reason": reason or "empty"})
+            skipped.append({"doc_id": doc_id, "reason": _why(reason, info) or "empty"})
         if not included:
             return problem(422, "Validation failed",
                            "None of the selected documents could be read — "
@@ -708,8 +1065,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                                f"documents: {', '.join(d['doc_id'] for d in included)}"
                                + (f"; {len(attachments)} scanned PDF(s) attached"
                                   if attachments else ""))
-            draft = await engine.generate(request.app.state.http, _SYSTEM,
-                                          [{"role": "user", "content": content}])
+            with metered() as meter:
+                draft = await engine.generate(request.app.state.http, _SYSTEM,
+                                              [{"role": "user", "content": content}])
             await _record_turn(request, caller, who, report["id"], "assistant",
                                draft, draft=draft)
         except RuntimeError as exc:
@@ -717,7 +1075,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                            "retry the generation; nothing was filed.")
         return {"report_id": report["id"], "report_version": report["report_version"],
                 "engine": engine.name, "draft_md": draft,
-                "included": included, "skipped": skipped}
+                "included": included, "skipped": skipped, "usage": meter.summary()["llm"]}
 
     @app.post("/v1/cam/{lending_id}/refine", tags=["CAM"],
               summary="Rework the current CAM draft with a further instruction")
@@ -751,24 +1109,35 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         # anything unreadable named in the response — same honesty as generate.
         extra_parts: list[str] = []
         turn_attachments: list[dict[str, Any]] = []
-        doc_notes: list[dict[str, str]] = []
-        for doc_id in payload.source_doc_ids:
-            blob, ctype, fetch_err = await _doc_fetch(request, caller, who, doc_id)
-            if fetch_err is not None:
-                doc_notes.append({"doc_id": doc_id, "reason": fetch_err})
+        doc_notes: list[dict[str, Any]] = []
+        used = 0
+        for row in await _read_docs(request, caller, who, payload.source_doc_ids):
+            doc_id, blob, reason, info = row["doc_id"], row["blob"], row["reason"], row["info"]
+            if blob is None:
+                doc_notes.append({"doc_id": doc_id, "reason": reason})
                 continue
-            text, reason = extract_text(ctype, blob or b"")
+            text = row["text"]
             if text.strip():
-                extra_parts.append(f"\n\n===== DOCUMENT {doc_id} =====\n"
-                                   + text[:max_doc_chars])
-                doc_notes.append({"doc_id": doc_id, "included": "text"})
+                text, note = _budgeted(text, used)
+                if not text:
+                    doc_notes.append({"doc_id": doc_id, "reason": note})
+                    continue
+                used += len(text)
+                extra_parts.append(f"\n\n===== DOCUMENT {doc_id} =====\n{text}")
+                notes = [n for n in (note, info.get("note")) if n]
+                doc_notes.append({"doc_id": doc_id, "included": "text",
+                                  "via": info.get("via", "basic"),
+                                  **({"note": "; ".join(notes)} if notes else {}),
+                                  **({"warnings": info["warnings"]}
+                                     if info.get("warnings") else {})})
             elif (reason == _SCANNED_PDF and engine.supports_documents and blob
                     and len(blob) <= _PDF_ATTACH_MAX_BYTES
                     and len(turn_attachments) < _PDF_ATTACH_MAX_DOCS):
                 turn_attachments.append(_pdf_block(blob))
                 doc_notes.append({"doc_id": doc_id, "included": "attached"})
             else:
-                doc_notes.append({"doc_id": doc_id, "reason": reason or "empty"})
+                doc_notes.append({"doc_id": doc_id, "reason": (
+                    _why(reason, info) or "empty")})
         ask_text = payload.instruction + "".join(extra_parts)
         # The transcript stores text only, so the ORIGINAL scanned sources are
         # RE-ATTACHED on each turn — the engine keeps seeing the same pages.
@@ -785,9 +1154,10 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             await _record_turn(request, caller, who, report["id"], "user",
                                payload.instruction
                                + (f"\n[documents sent: {', '.join(sent)}]" if sent else ""))
-            reply = await engine.generate(
-                request.app.state.http,
-                _SYSTEM if payload.update_draft else _ASK_SYSTEM, turns)
+            with metered() as meter, stage("ask" if not payload.update_draft else "update"):
+                reply = await engine.generate(
+                    request.app.state.http,
+                    _SYSTEM if payload.update_draft else _ASK_SYSTEM, turns)
             # An ASK records the exchange (the transcript stays the audit answer to
             # "where did this figure come from?") but leaves draft_md alone.
             await _record_turn(request, caller, who, report["id"], "assistant",
@@ -796,7 +1166,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return problem(502, "Drafting failed", str(exc))
         return {"report_id": report["id"], "report_version": report["report_version"],
                 "engine": engine.name, "draft_md": reply,
-                "updated_draft": payload.update_draft,
+                "updated_draft": payload.update_draft, "usage": meter.summary()["llm"],
                 **({"documents": doc_notes} if payload.source_doc_ids else {})}
 
     @app.post("/v1/cam/{lending_id}/export-docx", tags=["CAM"],
@@ -805,13 +1175,26 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                               request: Request) -> Any:
         """The box content, as a Word document. Pure rendering — nothing is filed,
         no engine is called; the analyst reviews the file in Word and uploads it
-        through the normal 'completed CAM' lane."""
+        through the normal 'completed CAM' lane. With ``template_doc_id`` the draft is
+        written into the CAM TEMPLATE's own package (its styles and letterhead); an
+        unreadable template falls back to the plain document rather than failing."""
         if (resp := denied(request.headers.get("X-API-Key"))) is not None:
             return resp
         who, err = await verified_email(request, "")
         if err is not None:
             return err
-        blob = markdown_to_docx(payload.markdown, payload.title or None)
+        tmpl_blob = None
+        if payload.template_doc_id:
+            caller, _ = caller_context(request, who)
+            tmpl_blob, _t, _e = await _doc_fetch(request, caller, who, payload.template_doc_id)
+        if tmpl_blob:
+            blob = markdown_into_template(
+                payload.markdown, tmpl_blob, payload.title or None, cam=True,
+                notice=("DRAFT — generated by PRISM from the CAM prompt and the deal's "
+                        "documents. Verify every figure against the source documents "
+                        "before filing, and delete this notice from the final CAM."))
+        else:
+            blob = markdown_to_docx(payload.markdown, payload.title or None, cam=True)
         safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", payload.title or "CAM").strip() or "CAM"
         return Response(
             content=blob, media_type=_DOCX_TYPE,
@@ -901,6 +1284,244 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             content=blob, media_type=_DOCX_TYPE,
             headers={"Content-Disposition":
                      'attachment; filename="Sanction letter - draft.docx"'})
+
+    # ------------------------------------------------------------------ staged drafting
+    # Generate CAM runs as a JOB: tens of engine calls take minutes, far past what a
+    # proxied request should hold open. The job lives in this process (like the terms
+    # cache) — a restart loses it and the analyst simply generates again.
+    import asyncio as _aio
+    import re as _re
+    import time as _t
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    _jobs: dict[str, dict[str, Any]] = {}
+    _job_tasks: set[Any] = set()
+    _digests = DigestCache()
+    _SENT = _re.compile(r"\[documents sent: ([^\]]+)\]")
+
+    def _owner(request: Request, who: str) -> str:
+        """Whose job this is: the verified identity, or — in the dev posture, where
+        there is none — the e-mail the gateway forwards."""
+        return (who or request.headers.get("X-User-Email") or "").strip().lower()
+
+    def _job_view(job: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in job.items() if not k.startswith("_")}
+
+    def _conversation_notes(turns: list[dict[str, Any]], limit: int = 40_000) -> str:
+        """The analyst's questions and the answers they got — context for the writers.
+        Long assistant turns (earlier drafts) are clipped; the most recent part wins."""
+        lines = []
+        for t in turns:
+            text = _SENT.sub("", str(t.get("content") or "")).strip()
+            if not text or text.startswith("[generate"):
+                continue
+            who_ = "Analyst" if t.get("role") == "user" else "Assistant"
+            lines.append(f"{who_}: {text if who_ == 'Analyst' else text[:4000]}")
+        joined = "\n\n".join(lines)
+        return joined[-limit:]
+
+    async def _run_staged(job: dict[str, Any], ctx: Any, caller: Any, who: str,
+                          report: dict[str, Any], prompt_text: str, doc_ids: list[str],
+                          titles: dict[str, str], turns: list[dict[str, Any]],
+                          instruction: str, template_id: str | None = None) -> None:
+        meter = UsageMeter()
+
+        def progress(stage: str, done: int, total: int) -> None:
+            job.update(stage=stage, done=done, total=total, updated=_t.time(),
+                       usage=meter.summary())
+
+        with metered(meter):
+            await _staged_body(job, ctx, caller, who, report, prompt_text, doc_ids, titles,
+                               turns, instruction, template_id, progress)
+        job["usage"] = meter.summary()
+        u = job["usage"]
+        _tlog.info(
+            "cam_draft_usage job=%s status=%s engine=%s llm_calls=%d failed=%d "
+            "input_tokens=%d output_tokens=%d documents_read=%d skipped=%d "
+            "sarvam_jobs=%d sarvam_pages=%d ocr_pages=%d seconds=%.0f",
+            job["job_id"], job.get("status"), job.get("engine") or engine.name,
+            u["llm"]["calls"], u["llm"]["failed"], u["llm"]["input_tokens"],
+            u["llm"]["output_tokens"], u["documents"]["read"], u["documents"]["skipped"],
+            u["documents"]["sarvam_jobs"], u["documents"]["sarvam_pages_submitted"],
+            u["documents"]["ocr_pages"], (job.get("finished") or _t.time()) - job["started"],
+            extra={"event": "cam_draft_usage", "job_id": job["job_id"],
+                   "lending_id": job.get("lending_id"), "status": job.get("status"),
+                   "usage": u})
+
+    async def _staged_body(job: dict[str, Any], ctx: Any, caller: Any, who: str,
+                           report: dict[str, Any], prompt_text: str, doc_ids: list[str],
+                           titles: dict[str, str], turns: list[dict[str, Any]],
+                           instruction: str, template_id: str | None, progress: Any) -> None:
+        try:
+            progress("Reading documents", 0, len(doc_ids))
+            rows = await _read_docs(ctx, caller, who, doc_ids)
+            docs: list[SourceDoc] = []
+            notes: list[dict[str, Any]] = []
+            for row in rows:
+                name = titles.get(row["doc_id"]) or row["doc_id"]
+                info = row["info"]
+                blob = row["blob"]
+                if row["text"].strip():
+                    docs.append(SourceDoc(row["doc_id"], name, row["text"],
+                                          info.get("doc_type") or "", info.get("pages")))
+                    notes.append({"doc_id": row["doc_id"], "document": name,
+                                  "via": info.get("via", "basic"),
+                                  **info.get("figures", {}),
+                                  **({"note": info["note"]} if info.get("note") else {}),
+                                  **({"warnings": info["warnings"]}
+                                     if info.get("warnings") else {})})
+                elif (row["reason"] == _SCANNED_PDF and engine.supports_documents and blob
+                      and len(blob) <= _PDF_ATTACH_MAX_BYTES):
+                    # An engine that reads PDFs itself (Anthropic) gets the scan, as the
+                    # single-call workbench always did.
+                    docs.append(SourceDoc(row["doc_id"], name, "", "", None,
+                                          blocks=[_pdf_block(blob)]))
+                    notes.append({"doc_id": row["doc_id"], "document": name,
+                                  "via": "attached scan"})
+                else:
+                    reason = row["reason"]
+                    notes.append({"doc_id": row["doc_id"], "document": name,
+                                  "reason": _why(reason, info) or "empty",
+                                  **{k: v for k, v in info.get("figures", {}).items()
+                                     if k != "via"}})
+            if not docs:
+                raise RuntimeError("None of the documents could be read — "
+                                   + "; ".join(f"{n['document']}: {n.get('reason')}"
+                                               for n in notes))
+            analyst = _conversation_notes(turns)
+            if instruction:
+                analyst = f"{analyst}\n\nAnalyst's instruction for this draft: {instruction}"
+            master = parse_master_prompt(prompt_text)
+            http = ctx.app.state.http
+            template_text = ""
+            if master is None and template_id:
+                template_text, _skip = await _doc_text(ctx, caller, who, template_id)
+            if master is None:
+                # Not a sectioned master prompt: one call, as the workbench always did.
+                job.update(mode="single")
+                progress("Drafting", 0, 1)
+                used, parts = 0, []
+                for d in docs:
+                    text, _note = _budgeted(d.text, used)
+                    used += len(text)
+                    if text:
+                        parts.append(f"\n\n===== DOCUMENT: {d.name} =====\n{text}")
+                if template_text:
+                    parts.insert(0, "\n\n===== CAM TEMPLATE (reproduce its structure: the "
+                                    "same sections, order and headings) =====\n"
+                                    + template_text[:max_doc_chars])
+                ask = (f"{prompt_text.strip()}\n\n{analyst}".strip() + "".join(parts)
+                       + "\n\nPrepare the complete CAM report now, following the prompt "
+                       "document's instructions exactly.")
+                scans = [b for d in docs for b in (d.blocks or [])]
+                content: Any = ([*scans, {"type": "text", "text": ask}] if scans else ask)
+                with stage("single_draft"):
+                    draft = await engine.generate(http, _SYSTEM,
+                                                  [{"role": "user", "content": content}])
+                workpaper, calls = "", 1
+            else:
+                job.update(mode="staged", sections=len(master.sections))
+                result = await draft_staged(
+                    generate=lambda sys, t: engine.generate(http, sys, t),
+                    system=_SYSTEM, prompt=master, docs=docs, analyst_notes=analyst,
+                    cache=_digests, model_id=engine.name, progress=progress,
+                    concurrency=int(getattr(settings, "cam_pipeline_concurrency", 4)),
+                    call_budget=int(getattr(settings, "cam_call_budget_chars", 360_000)),
+                    digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)))
+                draft, workpaper, calls = result.draft_md, result.workpaper_md, result.calls
+                notes.extend(result.notes)
+            await _record_turn(ctx, caller, who, report["id"], "user",
+                               f"[generate — {job.get('mode')}] documents: "
+                               + ", ".join(d.name for d in docs))
+            await _record_turn(ctx, caller, who, report["id"], "assistant", draft, draft=draft)
+            job.update(status="done", stage="Done", draft_md=draft, workpaper_md=workpaper,
+                       documents=notes, calls=calls, engine=engine.name,
+                       finished=_t.time())
+        except Exception as exc:  # noqa: BLE001 — the job reports it; nothing half-filed
+            job.update(status="failed", error=str(exc), finished=_t.time())
+
+    @app.post("/v1/cam/{lending_id}/draft", status_code=202, tags=["CAM"],
+              summary="Generate the CAM in stages (digest → dataset → sections) as a job")
+    async def cam_draft(lending_id: str, payload: StagedDraftIn, request: Request) -> Any:
+        """Starts the staged drafter and answers at once with a job id; poll
+        ``GET /v1/cam/jobs/{job_id}`` for progress and the draft. With the credit
+        team's sectioned master prompt the CAM is written section by section from
+        per-document fact sheets and a locked financial dataset; any other prompt is
+        drafted in one call."""
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        caller, _ = caller_context(request, who)
+        if payload.prompt_text and payload.prompt_text.strip():
+            prompt_text = payload.prompt_text
+        elif payload.prompt_doc_id:
+            prompt_text, skip = await _doc_text(request, caller, who, payload.prompt_doc_id)
+            if not prompt_text.strip():
+                return problem(422, "Validation failed",
+                               f"The prompt document could not be read"
+                               f"{f' ({skip})' if skip else ''}.")
+        else:
+            return problem(422, "Validation failed",
+                           "Pick a prompt document or type the drafting brief.")
+        report = await _open_report(request, caller, who, lending_id)
+        if report is None:
+            open_path = "/v1/internal/cam-reports"
+            opened = await request.app.state.http.post(
+                f"{base}{open_path}", json={"lending_id": lending_id, "engine": engine.name},
+                headers=_reg_headers(request, caller, who, "POST", open_path))
+            if opened.status_code >= 300:
+                return problem(opened.status_code if opened.status_code in (403, 404, 409)
+                               else 502, "CAM not opened", opened.text[:500])
+            report = opened.json()
+        path = f"/v1/internal/cam-reports/{report['id']}"
+        full = await request.app.state.http.get(
+            f"{base}{path}", headers=_reg_headers(request, caller, who, "GET", path))
+        turns = (full.json().get("turns") or []) if full.status_code < 300 else []
+        # Every document the analyst has put in front of the engine on this CAM.
+        ids: list[str] = []
+        for doc_id in [*payload.source_doc_ids, *(report.get("source_doc_ids") or []),
+                       *(i.strip() for t in turns for m in _SENT.finditer(str(t.get("content")))
+                         for i in m.group(1).split(","))]:
+            if doc_id and doc_id not in ids and doc_id not in (payload.prompt_doc_id,
+                                                               payload.template_doc_id):
+                ids.append(doc_id)
+        if not ids:
+            return problem(422, "Validation failed",
+                           "Tick the deal documents the CAM should be drafted from.")
+        job_id = _uuid.uuid4().hex
+        job = {"job_id": job_id, "lending_id": lending_id, "report_id": report["id"],
+               "report_version": report.get("report_version"), "status": "running",
+               "stage": "Starting", "done": 0, "total": 0, "documents_requested": len(ids),
+               "started": _t.time(), "_who": _owner(request, who)}
+        # Keep the finished ones for a while (the UI polls); cap the table.
+        for old in sorted(_jobs.values(), key=lambda j: j["started"])[:-100]:
+            _jobs.pop(old["job_id"], None)
+        _jobs[job_id] = job
+        ctx = SimpleNamespace(headers=dict(request.headers), app=request.app)
+        task = _aio.create_task(_run_staged(job, ctx, caller, who, report, prompt_text, ids,
+                                            dict(payload.doc_titles), turns,
+                                            (payload.instruction or "").strip(),
+                                            payload.template_doc_id))
+        _job_tasks.add(task)
+        task.add_done_callback(_job_tasks.discard)
+        return _job_view(job)
+
+    @app.get("/v1/cam/jobs/{job_id}", tags=["CAM"],
+             summary="Progress and result of a staged CAM draft")
+    async def cam_job(job_id: str, request: Request) -> Any:
+        if (resp := denied(request.headers.get("X-API-Key"))) is not None:
+            return resp
+        who, err = await verified_email(request, "")
+        if err is not None:
+            return err
+        job = _jobs.get(job_id)
+        if job is None or job.get("_who") != _owner(request, who):
+            return problem(404, "Not found", "No such drafting job (it may have expired "
+                           "after a restart — generate again).")
+        return _job_view(job)
 
     @app.post("/v1/cam/{lending_id}/finalise", tags=["CAM"],
               summary="File the draft to the Data Register and submit it to committee")

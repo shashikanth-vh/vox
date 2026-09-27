@@ -12,6 +12,7 @@ Folders (one per service, sub-folders per tag), all through the single front doo
     ATLAS          {{baseUrl}}/atlas/v1/...           (dashboard / today / pipeline)
     VocX           {{baseUrl}}/vocx/v1/...            (voice touchpoint capture + /api/vox/*)
     PULSE          {{baseUrl}}/pulse/v1/...           (news radar)
+    DocRAG         {{baseUrl}}/docrag/v1/...          (documents → cited answers)
 
 Requests are generated from each service's LIVE FastAPI OpenAPI, so the collection can
 never drift from the code. Bodies are scaffolding samples typed from the schemas; path
@@ -38,6 +39,7 @@ SERVICES = [
     ("atlas",        "services/atlas",     "app.main:create_app",  "/atlas",        "ATLAS"),
     ("vocx",         "services/vocx",      "app.main:create_app",  "/vocx",         "VocX"),
     ("pulse",        "services/pulse",     "app.main:create_app",  "/pulse",        "PULSE"),
+    ("docrag",       "services/docrag",    "app.main:create_app",  "/docrag",       "DocRAG"),
 ]
 
 _H = [{"key": "X-Tenant", "value": "{{tenant}}"},
@@ -145,9 +147,19 @@ def build_service(key: str, spec: dict, prefix: str, display: str) -> dict:
                  for p in op.get("parameters", []) if p.get("in") == "query"]
             if q:
                 item["request"]["url"]["query"] = q
-            body = (op.get("requestBody", {}).get("content", {})
-                    .get("application/json", {}).get("schema"))
-            if body is not None:
+            content = op.get("requestBody", {}).get("content", {})
+            body = content.get("application/json", {}).get("schema")
+            form = content.get("multipart/form-data", {}).get("schema")
+            if form is not None:
+                # Uploads: a file field per binary property, text fields for the rest.
+                props = _resolve(form, spec).get("properties", {})
+                item["request"]["body"] = {"mode": "formdata", "formdata": [
+                    {"key": k, "type": "file", "src": ""}
+                    if _resolve(v, spec).get("format") == "binary"
+                    or _resolve(v, spec).get("contentMediaType")
+                    else {"key": k, "type": "text", "value": json.dumps(sample(v, spec)).strip('"')}
+                    for k, v in props.items()]}
+            elif body is not None:
                 item["request"]["header"].append(
                     {"key": "Content-Type", "value": "application/json"})
                 item["request"]["body"] = {
@@ -174,7 +186,7 @@ def main() -> None:
         "description":
             "Every REST endpoint of every backend service, generated from the LIVE OpenAPI "
             "of each app. One front door: NGINX terminates TLS on :8443 and the gateway "
-            "routes by prefix (/access, /orchestrator, /atlas, /vocx, /pulse, else Register)."
+            "routes by prefix (/access, /orchestrator, /atlas, /vocx, /pulse, /docrag, else Register)."
             " Bodies are TYPE-correct scaffolding — replace values before sending. Sending "
             "requires an environment: select 'PRISM — All APIs' (or the E2E environments, "
             "which share the same variables).",

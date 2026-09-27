@@ -9,6 +9,10 @@
 # * The small stateful volumes — vocx state (Google tokens, alias map),
 #   pulse, dex — tar to S3 every 6 hours; the Whisper model cache is excluded
 #   (re-downloadable, large).
+# * DocRAG's document volume (uploaded originals + knowledge + chunks) syncs to S3 on
+#   the same 60s cadence. DocRAG writes every file by rename, so — as with MinIO — a
+#   sync sees each file whole. Its Qdrant volume is NOT shipped: vectors are rebuilt
+#   from these files at startup.
 set -u
 
 if [ -z "${LIVEBACKUP_S3_BUCKET:-}" ]; then
@@ -43,7 +47,7 @@ snap_volume() {  # name  mounted-path  [tar excludes...]
   rm -f "$tmp"
 }
 
-echo "[objship] mirroring MinIO -> $S3/minio-live (60s cadence); volumes every ${VOL_EVERY_S}s"
+echo "[objship] mirroring MinIO -> $S3/minio-live and DocRAG -> $S3/docrag-live (60s cadence); volumes every ${VOL_EVERY_S}s"
 last_vol=0
 while true; do
   if aws s3 sync /data/minio "$S3/minio-live/" \
@@ -52,6 +56,10 @@ while true; do
     rm -f "$FAILED" 2>/dev/null
   else
     fail "minio sync"
+  fi
+  if [ -d /data/docrag ]; then
+    aws s3 sync /data/docrag "$S3/docrag-live/" --exclude "*.tmp" \
+      --no-progress >/dev/null 2>&1 || fail "docrag sync"
   fi
   now="$(date +%s)"
   if [ "$((now - last_vol))" -ge "$VOL_EVERY_S" ]; then

@@ -1,0 +1,143 @@
+{{- if .Values.qdrant.enabled }}
+{{- $name := printf "%s-qdrant" (include "docrag.fullname" .) }}
+# DocRAG's own Qdrant: derived vectors only (rebuilt from DocRAG's volume if lost).
+{{- if not .Values.qdrant.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "docrag.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vector-store
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.qdrant.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.qdrant.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "docrag.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vector-store
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # ReadWriteOnce storage: never two pods on one volume
+  selector:
+    matchLabels:
+      {{- include "docrag.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vector-store
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "docrag.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: vector-store
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: qdrant
+          image: {{ .Values.qdrant.image | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: QDRANT__TELEMETRY_DISABLED
+              value: "true"
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.qdrant.apiKey.existingSecret }}
+                  name: {{ .Values.qdrant.apiKey.existingSecret }}
+                  key: {{ .Values.qdrant.apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "docrag.secretName" . }}
+                  key: qdrant-api-key
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 6333
+          # Qdrant's health endpoints need no API key.
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.qdrant.resources | nindent 12 }}
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+            - name: snapshots
+              mountPath: /qdrant/snapshots
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.qdrant.persistence.existingClaim | default $name }}
+        - name: snapshots
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "docrag.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vector-store
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6333
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "docrag.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vector-store
+{{- if .Values.qdrant.networkPolicy.enabled }}
+---
+# Only DocRAG's own pods may reach its Qdrant (enforced where the CNI supports policies).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "docrag.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "docrag.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vector-store
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "docrag.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports:
+        - port: 6333
+          protocol: TCP
+{{- end }}
+{{- end }}

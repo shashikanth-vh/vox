@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "PRISM \u00b7 ALL Backend APIs (via NGINX)",
-    "description": "Every REST endpoint of every backend service, generated from the LIVE OpenAPI of each app. One front door: NGINX terminates TLS on :8443 and the gateway routes by prefix (/access, /orchestrator, /atlas, /vocx, /pulse, else Register). Bodies are TYPE-correct scaffolding \u2014 replace values before sending. Sending requires an environment: select 'PRISM \u2014 All APIs' (or the E2E environments, which share the same variables).",
+    "description": "Every REST endpoint of every backend service, generated from the LIVE OpenAPI of each app. One front door: NGINX terminates TLS on :8443 and the gateway routes by prefix (/access, /orchestrator, /atlas, /vocx, /pulse, /docrag, else Register). Bodies are TYPE-correct scaffolding \u2014 replace values before sending. Sending requires an environment: select 'PRISM \u2014 All APIs' (or the E2E environments, which share the same variables).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -17031,6 +17031,300 @@
                     "pulse",
                     "v1",
                     "scan"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DocRAG  (7 requests \u00b7 {{baseUrl}}/docrag)",
+      "item": [
+        {
+          "name": "DocRAG",
+          "item": [
+            {
+              "name": "GET /docrag/v1/documents \u2014 The tenant's documents, newest first",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/documents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "documents"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /docrag/v1/documents \u2014 Upload a PDF/XLSX; it is processed in the background",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/documents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "documents"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": ""
+                    },
+                    {
+                      "key": "use_sarvam",
+                      "type": "text",
+                      "value": "false"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /docrag/v1/documents/{doc_id} \u2014 One document's status; with ?include=knowledge, its reconstructed sections",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/documents/{{doc_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "documents",
+                    "{{doc_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "include",
+                      "value": "sample",
+                      "disabled": true
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "DELETE /docrag/v1/documents/{doc_id} \u2014 Remove a document and its chunks from the index",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/documents/{{doc_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "documents",
+                    "{{doc_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /docrag/v1/documents/{doc_id}/chunks \u2014 The document's RAG-ready knowledge chunks (with provenance)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/documents/{{doc_id}}/chunks",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "documents",
+                    "{{doc_id}}",
+                    "chunks"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /docrag/v1/query \u2014 Hybrid retrieval + an extractive or generative (Sarvam) cited answer",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/query",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "query"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"sample\",\n  \"mode\": \"extractive\",\n  \"top_k\": 1,\n  \"doc_ids\": [\n    \"sample\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "GET /docrag/v1/status \u2014 What this deployment can do (engines, keys) + the tenant's index size",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant",
+                    "value": "{{tenant}}"
+                  },
+                  {
+                    "key": "X-User-Email",
+                    "value": "{{userEmail}}"
+                  },
+                  {
+                    "key": "X-User-Roles",
+                    "value": "Admin"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/docrag/v1/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "docrag",
+                    "v1",
+                    "status"
                   ]
                 }
               }

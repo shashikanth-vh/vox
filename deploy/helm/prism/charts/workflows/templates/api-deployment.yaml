@@ -121,6 +121,34 @@ spec:
                   name: {{ include "workflows.secretName" . }}
                   key: access-api-key
                   {{- end }}
+            # The CAM workbench (served here): LLM engine + DocRAG as the document reader.
+            - name: WORKFLOWS_CAM_ENGINE
+              value: {{ .Values.api.cam.engine | quote }}
+            - name: WORKFLOWS_CAM_LLM_BASE_URL
+              value: {{ .Values.api.cam.llmBaseUrl | quote }}
+            {{- if or .Values.api.cam.llmApiKey.value .Values.api.cam.llmApiKey.existingSecret }}
+            - name: WORKFLOWS_CAM_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.api.cam.llmApiKey.existingSecret }}
+                  name: {{ .Values.api.cam.llmApiKey.existingSecret }}
+                  key: {{ .Values.api.cam.llmApiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.fullname" . }}-cam
+                  key: cam-llm-api-key
+                  {{- end }}
+            {{- end }}
+            {{- with .Values.api.cam.docragUrl }}
+            - name: WORKFLOWS_DOCRAG_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.api.cam.docragApiKey }}
+            - name: WORKFLOWS_DOCRAG_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "workflows.fullname" . }}-cam
+                  key: docrag-api-key
+            {{- end }}
             # In production set requireAuth=true AND an oidcIssuer so the approver/requester
             # identity is derived from a verified token — never a caller-supplied string.
             {{- if and .Values.api.requireAuth (not .Values.api.oidcIssuer) (not .Values.api.oidcIssuers) }}

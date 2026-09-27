@@ -119,6 +119,16 @@ api:
   oidcAllowedDomains: ""
   accessUrl: ""
   accessApiKey: ""
+  # The CAM workbench: the drafting engine and DocRAG as the document reader.
+  cam:
+    engine: "bedrock:zai.glm-5"
+    llmBaseUrl: "https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1"
+    llmApiKey:              # the Bedrock API key; empty = the offline stub engine
+      value: ""
+      existingSecret: ""
+      existingSecretKey: cam-llm-api-key
+    docragUrl: ""           # e.g. http://prism-docrag ; empty = basic in-process extraction
+    docragApiKey: ""        # must be one of DocRAG's config.apiKeys
   service:
     type: ClusterIP
     port: 80

@@ -1,0 +1,81 @@
+# DocRAG ON ITS OWN — DocRAG + its Qdrant, nothing else: no gateway, no Register, no
+# Postgres. DocRAG has no runtime dependency on the rest of PRISM, so it deploys as a
+# separate unit:
+#
+#   DOCRAG_API_KEYS=<a-long-random-key> DOCRAG_QDRANT_API_KEY=<another-key> \
+#   docker compose -f deploy/compose/docker-compose.docrag.yml up -d --build
+#
+#   curl -H "X-API-Key: $DOCRAG_API_KEYS" http://localhost:8010/v1/status
+#
+# In this mode the API key IS the authorization: there is no per-user RBAC (that is the
+# gateway's job when DocRAG runs inside the platform — see docker-compose.yml). Every
+# caller holding the key can read every document of every tenant it names in X-Tenant,
+# so issue keys per consuming system and keep them out of browsers.
+#
+# The port binds to LOCALHOST by default. To serve other machines put a TLS-terminating
+# proxy in front, or set DOCRAG_BIND=0.0.0.0 on a trusted private network.
+#
+# The project name is pinned: without it Compose derives "compose" from this directory —
+# the SAME project as the full stack — and the two would fight over one container.
+name: prism-docrag
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # Vector store (derived data: rebuilt from the docrag volume if lost). Not published.
+  docrag-qdrant:
+    logging: *default-logging
+    image: qdrant/qdrant:v1.18.2-unprivileged@sha256:b79aaa49ce7a7e5b7e9cf3fe76be400c911457084b4b7af47487c1c9ae5962e5
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /qdrant/snapshots:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000
+    environment:
+      QDRANT__SERVICE__API_KEY: "${DOCRAG_QDRANT_API_KEY:?set DOCRAG_QDRANT_API_KEY}"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - docrag_qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  docrag:
+    logging: *default-logging
+    build:
+      context: ../..
+      dockerfile: services/docrag/Dockerfile
+    depends_on:
+      docrag-qdrant:
+        condition: service_healthy
+    environment:
+      DOCRAG_QDRANT_URL: "http://docrag-qdrant:6333"
+      DOCRAG_QDRANT_API_KEY: "${DOCRAG_QDRANT_API_KEY:?set DOCRAG_QDRANT_API_KEY}"
+      # REQUIRED: compose refuses to start with an open front door.
+      DOCRAG_API_KEYS: "${DOCRAG_API_KEYS:?set DOCRAG_API_KEYS to one or more comma-separated keys}"
+      DOCRAG_DEFAULT_TENANT: "${DOCRAG_DEFAULT_TENANT:-EVAM}"
+      # Optional: OCR for scanned pages (Sarvam Doc AI) + generative answers.
+      DOCRAG_SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
+      DOCRAG_INGEST_WORKERS: "${DOCRAG_INGEST_WORKERS:-2}"
+      # A UI on another origin calling DocRAG directly (comma-separated origins).
+      DOCRAG_CORS_ORIGINS: "${DOCRAG_CORS_ORIGINS:-}"
+      DOCRAG_DEV_UI: "${DOCRAG_DEV_UI:-false}"
+      DOCRAG_LOG_JSON: "true"
+    ports:
+      - "${DOCRAG_BIND:-127.0.0.1}:${DOCRAG_PORT:-8010}:8000"
+    volumes:
+      - docragdata:/data/docrag
+    restart: unless-stopped
+
+volumes:
+  docragdata:       # originals + knowledge + chunks: the source of truth — back it up
+  docrag_qdrant:    # vectors: derived, rebuilt from docragdata if lost

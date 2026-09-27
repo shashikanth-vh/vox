@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ssl
 from functools import lru_cache
 
 from evam_backend_core.config import BaseServiceSettings
@@ -39,14 +40,43 @@ class Settings(BaseServiceSettings):
     internal_signing_algorithm: str = "HS256"
     internal_token_ttl_seconds: int = 120
 
-    # The CAM workbench engine: "provider:model". Anthropic is the only provider today;
-    # with no API key the deterministic stub runs, so dev/CI exercise the full lifecycle
-    # without a vendor account. Per-document text is bounded before it reaches the engine.
+    # The CAM workbench engine: "provider:model".
+    #   bedrock:<model>    an OpenAI-compatible chat endpoint (AWS Bedrock by default,
+    #                      e.g. bedrock:zai.glm-5 — the model Chitti uses), key in
+    #                      cam_llm_api_key;
+    #   anthropic:<model>  Anthropic's API, key in anthropic_api_key.
+    # With no key for the chosen provider the deterministic stub runs, so dev/CI exercise
+    # the full lifecycle without a vendor account.
     cam_engine: str = "anthropic:claude-haiku-4-5"
     anthropic_api_key: str = ""
+    cam_llm_base_url: str = "https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1"
+    cam_llm_api_key: str = ""
+    cam_max_completion_tokens: int = 32768
+    cam_llm_timeout_s: float = 540.0
     # Sized for a REAL CAM: the reference Pinnacle CAM extracts to ~150k chars, and an
     # "update this CAM" turn must carry the whole document, not the first 40% of it.
     cam_max_doc_chars: int = 200_000
+    # All documents of ONE turn together — keeps a 13-document request inside the
+    # model's context window; documents past the budget are named as skipped.
+    cam_max_total_doc_chars: int = 450_000
+    # The staged drafter (Generate CAM with a master prompt that has section specs):
+    # parallel calls, the context budget of ONE call (prompt rules + fact sheets +
+    # dataset), and the page-aligned part size a large document is digested in.
+    cam_pipeline_concurrency: int = 4
+    cam_call_budget_chars: int = 360_000
+    cam_digest_part_chars: int = 90_000
+
+    # Document extraction for the workbench. With docrag_url set, PDFs and spreadsheets
+    # are read by DocRAG (OpenDataLoader + Sarvam OCR for scans: real headings, tables
+    # and page markers) instead of the basic in-process text pass; if DocRAG is down the
+    # basic pass is used and the response says so.
+    docrag_url: str = ""
+    docrag_api_key: str = ""
+    docrag_timeout_s: float = 600.0
+    # DocRAG on another host (the Chitti split) sits behind that host's HTTPS edge with a
+    # private certificate: this CA is trusted IN ADDITION to the public roots, for the
+    # DocRAG calls only. Empty = the default trust store.
+    docrag_ca_file: str = ""
 
     # The Orchestrator API (python -m app.api) — the HTTP front door that starts
     # workflows / delivers signals. Empty api_keys = open (dev); set in production.
@@ -189,6 +219,14 @@ class Settings(BaseServiceSettings):
 
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    def docrag_verify(self) -> ssl.SSLContext | bool:
+        """TLS trust for the DocRAG calls: the private CA added to the public roots."""
+        if not self.docrag_ca_file:
+            return True
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=self.docrag_ca_file)
+        return context
 
 
 @lru_cache

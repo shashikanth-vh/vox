@@ -159,13 +159,38 @@ export const camService = {
     } catch (e) { throw new Error(msg(e, updateDraft ? 'rework the draft' : 'ask the engine')); }
   },
 
-  /** The box content rendered as a Word file — headings, lists, tables styled like
-   *  the CAM template. Downloads in the browser; the analyst reviews it in Word and
-   *  uploads it through the normal completed-CAM lane. */
-  async exportDocx(lendingId: string, markdown: string, title?: string): Promise<void> {
+  /** Start the STAGED drafter (per-document fact sheets → locked financial dataset →
+   *  section-by-section writing) as a job; poll ``draftJob`` for progress and the draft. */
+  async draftStaged(lendingId: string, input: {
+    source_doc_ids: string[]; prompt_doc_id?: string; prompt_text?: string;
+    template_doc_id?: string; instruction?: string; doc_titles?: Record<string, string>;
+  }): Promise<any> {
+    try {
+      return await orchestrator.post<any>(`/v1/cam/${lendingId}/draft`, input,
+        { timeoutMs: 90_000 });
+    } catch (e) { throw new Error(msg(e, 'start drafting the CAM')); }
+  },
+
+  /** One staged-drafting job: status (running | done | failed), stage, done/total,
+   *  and when done the draft, the financial workpaper and each document's fate. */
+  async draftJob(jobId: string): Promise<any> {
+    try {
+      return await orchestrator.get<any>(`/v1/cam/jobs/${jobId}`, undefined,
+        { timeoutMs: 30_000 });
+    } catch (e) { throw new Error(msg(e, 'check the drafting progress')); }
+  },
+
+  /** The box content rendered as a Word file. With ``templateDocId`` (the tenant's CAM
+   *  template) the draft is written INTO that template — its styles, fonts and
+   *  letterhead; without one, a clean standalone document. Downloads in the browser;
+   *  the analyst reviews it in Word and uploads it through the completed-CAM lane. */
+  async exportDocx(lendingId: string, markdown: string, title?: string,
+                   templateDocId?: string): Promise<void> {
     try {
       const blob = await orchestrator.postBlob(`/v1/cam/${lendingId}/export-docx`,
-        { markdown, ...(title ? { title } : {}) }, { timeoutMs: 60_000 });
+        { markdown, ...(title ? { title } : {}),
+          ...(templateDocId ? { template_doc_id: templateDocId } : {}) },
+        { timeoutMs: 60_000 });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `${(title || 'CAM').replace(/[\\/:*?"<>|]+/g, '_')}.docx`;

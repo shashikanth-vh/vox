@@ -11,6 +11,8 @@ The files in `postman/`:
 | `Orchestrator.postman_collection.json` | **14 requests** — the whole workflow plane (qualification, structuring, document collection, CP/CS checklist, Advaya handover prepare + approve) |
 | `PRISM_UI_CRUD.postman_collection.json` | **158 requests** — just the table CRUD the PRISM UI calls, every one routed through the **NGINX edge** |
 | `PRISM.postman_environment.json` | Shared variables for the three reference collections above |
+| `PRISM_DocRAG.postman_collection.json` | **DocRAG, 12 requests with assertions** — status → upload → wait until ready → list / knowledge / chunks → query (extractive, scoped, generative) → delete (§1c) |
+| `PRISM_DocRAG_Standalone.postman_environment.json` | Its environment for a DocRAG deployed **on its own** (`docragUrl`, `docragApiKey`) |
 
 They are generated from the frozen OpenAPI contracts (`docs/openapi/*.json`), so they always
 match what the frontend codegens against — never hand-edited.
@@ -61,6 +63,26 @@ Tables covered: `entities`, `leads`, `deals`, `lending`, `syndication` (+ nested
 Governance endpoints — CP/CS checklists and Advaya handover packages — are **not** in this
 collection; they live in the full `Register.postman_collection.json`, because the UI reaches them
 through the workflow plane (maker/checker), not through plain CRUD.
+
+## 1c. The DocRAG collection
+
+Every request targets `{{docragUrl}}`, so the one collection serves both deployments:
+
+| Deployment | Environment | `docragUrl` | Key |
+|---|---|---|---|
+| Inside PRISM (through the edge) | `PRISM Full` / `PRISM — All APIs` | unset → defaults to `{{baseUrl}}/docrag` | injected by the gateway; the caller needs `upload_remove_documents` |
+| DocRAG on its own (`deploy/compose/docker-compose.docrag.yml`, or the subchart alone) | `PRISM — DocRAG standalone` | `http://localhost:8010` | `docragApiKey` = one of the service's `DOCRAG_API_KEYS` |
+
+Request 01 uploads `postman/fixtures/docrag-sample-term-sheet.pdf` (synthetic, no real data);
+request 02 re-runs itself until processing finishes. From the command line:
+
+```bash
+newman run postman/PRISM_DocRAG.postman_collection.json \
+  -e postman/PRISM_DocRAG_Standalone.postman_environment.json \
+  --env-var docragApiKey=$DOCRAG_API_KEYS --working-dir postman
+```
+
+In the Postman app, re-select the file on request 01 if the fixture path does not resolve.
 
 ## 2. Know which host you are hitting
 
@@ -193,6 +215,7 @@ rejected (usually **422**).
 ```bash
 scripts/export_openapi.sh      # refresh docs/openapi/*.json AND regenerate the collections
 python scripts/gen_postman.py  # collections only (env is always rewritten)
+python scripts/gen_docrag_postman.py  # the DocRAG flow collection only
 ```
 
 Commit the regenerated files in the same PR as the API change so the contract, the collections and

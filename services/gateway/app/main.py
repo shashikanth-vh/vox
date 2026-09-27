@@ -33,6 +33,8 @@ from fastapi.responses import ORJSONResponse
 
 from app.chitti_proxy import proxy_chitti
 from app.config import get_settings
+from app.docs import SpecCache, edge_spec, swagger_html
+from app.docs import upstreams as docs_upstreams
 from app.resolver import AccessUnavailableError, Resolver, UserDeniedError
 from app.routes_map import operation_for
 
@@ -77,7 +79,10 @@ _SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/vox/captu
                # The all-firms sweep: four hundred terms fanned out across three news
                # sources. Minutes, legitimately — and cutting it short throws away a
                # scan that was working, which is exactly what the short budget did.
-               "/pulse/v1/news/sweep")
+               "/pulse/v1/news/sweep",
+               # A generative answer waits on the Sarvam chat model (up to 120s). Uploads
+               # are NOT here: ingestion is asynchronous, the upload itself returns at once.
+               "/docrag/v1/query")
 
 
 def _timeout_for(settings, full_path: str) -> float:  # noqa: ANN001
@@ -111,6 +116,7 @@ def _route(settings, full_path: str) -> tuple[str, str, str]:  # noqa: ANN001
         ("/atlas", settings.atlas_url, settings.atlas_api_key),
         ("/vocx", settings.vocx_url, settings.vocx_api_key),
         ("/pulse", settings.pulse_url, settings.pulse_api_key),
+        ("/docrag", settings.docrag_url, settings.docrag_api_key),
         ("/orchestrator", settings.orchestrator_url, settings.orchestrator_api_key),
         ("/chitti", settings.chitti_url, settings.chitti_api_key),
     )
@@ -158,7 +164,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="PRISM Gateway", version="0.1.0",
                   default_response_class=ORJSONResponse, lifespan=lifespan,
-                  docs_url="/docs", openapi_url="/openapi.json")
+                  docs_url=None, redoc_url=None,
+                  openapi_url="/openapi.json" if settings.docs_enabled else None)
     app.state.chitti_limiter = anyio.CapacityLimiter(settings.chitti_max_concurrent_requests)
     app.add_middleware(RequestContextMiddleware)
     if settings.cors_origin_list():
@@ -185,6 +192,32 @@ def create_app() -> FastAPI:
     @app.get("/readyz", include_in_schema=False)
     async def readyz() -> dict:
         return {"status": "ready", "service": settings.app_name}
+
+    if settings.docs_enabled:
+        spec_cache = SpecCache()
+
+        @app.get("/docs", include_in_schema=False)
+        async def swagger_ui() -> Response:
+            entries = [(name, f"/docs/specs/{key}.json")
+                       for key, name, *_ in docs_upstreams(settings)]
+            entries.append(("Gateway (composition)", "/docs/specs/gateway.json"))
+            return Response(swagger_html(entries, primary=entries[0][0]),
+                            media_type="text/html")
+
+        @app.get("/docs/specs/{key}.json", include_in_schema=False)
+        async def swagger_spec(key: str, request: Request) -> Response:
+            if key == "gateway":
+                return ORJSONResponse(edge_spec(request.app.openapi(), "", "PRISM Gateway"))
+            row = next((r for r in docs_upstreams(settings) if r[0] == key), None)
+            if row is None:
+                return _problem(404, f"No routed service named '{key}'.")
+            _, name, url, api_key, prefix = row
+            try:
+                spec = await spec_cache.get(request.app.state.client, key, url, api_key,
+                                            prefix, f"PRISM {name}")
+            except (httpx.HTTPError, ValueError) as exc:
+                return _problem(502, f"{name} did not return its OpenAPI: {exc}")
+            return ORJSONResponse(spec)
 
     @app.post("/gateway/cache/invalidate", include_in_schema=False)
     async def invalidate_cache(request: Request) -> dict:

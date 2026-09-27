@@ -86,6 +86,13 @@ _RAW: list[tuple[str, str, str]] = [
     ("GET",    r"^/pulse/v1/news/(search|config|schedules)$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/news/(email|email-digest|email-test)$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/news/schedules(/(delete|run|update))?$", "run_news_scan"),
+    # DocRAG — uploaded documents (KYC, CIBIL consents, sanction letters) are the same
+    # material the Data Register's document routes guard, so every data route — upload,
+    # delete, read, and query (which returns document text) — needs the document grant.
+    ("POST",   r"^/docrag/v1/documents$", "upload_remove_documents"),
+    ("DELETE", r"^/docrag/v1/documents/[^/]+$", "upload_remove_documents"),
+    ("GET",    r"^/docrag/v1/documents(/.*)?$", "upload_remove_documents"),
+    ("POST",   r"^/docrag/v1/query$", "upload_remove_documents"),
     # Orchestrator — starting/deciding workflows maps to the same operation the applied
     # change requires, so an unauthorized user is stopped before a durable workflow starts.
     ("POST",   r"^/orchestrator/v1/workflows/vox-touchpoints$", "log_interaction"),

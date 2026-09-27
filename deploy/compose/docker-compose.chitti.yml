@@ -1,4 +1,4 @@
-# Chitti host: self-contained production serving with a remote Register.
+# Chitti host (the AI host): Chitti with a remote Register, and DocRAG.
 # Use --env-file deploy/compose/.env.chitti; do not merge the platform base.
 name: chitti
 
@@ -157,11 +157,68 @@ services:
       retries: 10
       start_period: 60s
 
+  # DocRAG rides the same split: documents -> structured Markdown for the CAM workbench
+  # (OpenDataLoader + Sarvam OCR), plus its own hybrid index. Reached only through
+  # chitti-nginx at /docrag/ — the services host's gateway and orchestrator call
+  # ${GATEWAY_CHITTI_URL}/docrag with DOCRAG_FRONT_KEY.
+  docrag-qdrant:
+    logging: *chitti-logging
+    image: qdrant/qdrant:v1.18.2-unprivileged@sha256:b79aaa49ce7a7e5b7e9cf3fe76be400c911457084b4b7af47487c1c9ae5962e5
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /qdrant/snapshots:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000
+    environment:
+      QDRANT__SERVICE__API_KEY: "${DOCRAG_QDRANT_API_KEY:?Set DOCRAG_QDRANT_API_KEY}"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - docrag_qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1
+
+  docrag:
+    logging: *chitti-logging
+    build:
+      context: ../..
+      dockerfile: services/docrag/Dockerfile
+    depends_on:
+      docrag-qdrant:
+        condition: service_healthy
+    environment:
+      DOCRAG_QDRANT_URL: "http://docrag-qdrant:6333"
+      DOCRAG_QDRANT_API_KEY: "${DOCRAG_QDRANT_API_KEY:?Set DOCRAG_QDRANT_API_KEY}"
+      DOCRAG_API_KEYS: "${DOCRAG_FRONT_KEY:?Set DOCRAG_FRONT_KEY}"
+      DOCRAG_DEFAULT_TENANT: "EVAM"
+      # Optional OCR for scanned pages and images; blank leaves them flagged, not read.
+      DOCRAG_SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
+      DOCRAG_INGEST_WORKERS: "${DOCRAG_INGEST_WORKERS:-2}"
+      DOCRAG_DEV_UI: "false"
+      DOCRAG_LOG_JSON: "true"
+    volumes:
+      # Originals, knowledge, chunks and the extraction cache: back this volume up.
+      - docrag_data:/data/docrag
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # OpenDataLoader's JVM is capped at 1 GB; embeddings and Python on top.
+    mem_limit: 4g
+    cpus: 2
+
   chitti-nginx:
     image: nginx:1.27-alpine
     logging: *chitti-logging
     depends_on:
       chitti:
+        condition: service_started
+      docrag:
         condition: service_started
     volumes:
       - ../nginx/chitti.conf:/etc/nginx/nginx.conf:ro
@@ -184,3 +241,5 @@ services:
 volumes:
   chitti_model_cache:
   chitti_qdrant_data:
+  docrag_data:
+  docrag_qdrant_data:

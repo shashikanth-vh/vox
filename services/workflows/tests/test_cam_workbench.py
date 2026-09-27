@@ -327,7 +327,7 @@ async def test_the_stub_engine_names_why_a_scan_is_skipped(monkeypatch):
     body = gen.json()
     assert [d["doc_id"] for d in body["included"]] == ["fin-1"]
     reason = next(s for s in body["skipped"] if s["doc_id"] == "scan-1")["reason"]
-    assert "stub engine cannot read scans" in reason
+    assert "this engine cannot read scans" in reason and "SARVAM_API_KEY" in reason
 
 
 def test_docx_and_unreadable_formats_extract_or_say_why():
@@ -353,7 +353,10 @@ def test_docx_and_unreadable_formats_extract_or_say_why():
     text2, reason2 = extract_text("application/octet-stream", docx)
     assert reason2 is None and "Assess the borrower" in text2
 
+    # An image is readable only by OCR (DocRAG + Sarvam); without it the reason says so.
     _, why = extract_text("image/png", b"\x89PNG....")
+    assert why and "OCR" in why
+    _, why = extract_text("application/octet-stream", b"\x00\x01binary")
     assert why and "no extractor" in why
 
 

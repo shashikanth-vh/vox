@@ -16,6 +16,7 @@
 #   ./prism-deploy.sh restore-files <minio-*.tar.gz> # the document store (restore WITH its dump)
 #   ./prism-deploy.sh restore-vocx <vocx-*.tar.gz>   # VOX recordings + state volume
 #   ./prism-deploy.sh restore-pulse <pulse-*.tar.gz> # PULSE news-digest schedules
+#   ./prism-deploy.sh restore-docrag <docrag-*.tar.gz> # DocRAG documents + extraction cache
 #   ./prism-deploy.sh restore-secrets <secrets-*.tar.gz> # .env + VocX secrets + TLS certs
 #   ./prism-deploy.sh restore-plan                   # what protects this system, what exists,
 #                                                    # and exactly which files to restore from
@@ -330,6 +331,25 @@ backup_pulse() {
   echo "$tarball"
 }
 
+# The DocRAG data volume: documents uploaded to DocRAG, their knowledge and chunks, and the
+# extraction cache the CAM workbench reads through — OCR'd pages there cost Sarvam money
+# to redo. Its Qdrant index is NOT archived: it is derived, and DocRAG rebuilds it from
+# this volume on start.
+backup_docrag() {
+  local tarball="$BACKUPS/docrag-$STAMP.tar.gz"
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_docragdata" || true)"
+  if [[ -z "$vol" ]]; then
+    warn "no ${PROJECT}_docragdata volume — DocRAG data not captured"
+    return 0
+  fi
+  step "Backing up the DocRAG data ($vol) → $tarball"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$tarball")" -C /data . 2>>"$LOG" || die "DocRAG-data backup failed"
+  gzip -t "$tarball" 2>>"$LOG" || die "the DocRAG archive is corrupt (gzip -t failed): $tarball"
+  say "  $(du -h "$tarball" | cut -f1) written and verified"
+  echo "$tarball"
+}
+
 # Tag the CURRENT images so a rollback never has to rebuild. A tagged image is not
 # dangling, so `docker image prune` leaves it alone — which is the whole point: the
 # rollback path must not depend on an untagged layer nobody promised to keep.
@@ -379,17 +399,41 @@ restore_images() {          # re-point the compose image names at the tagged sna
 # (111: Connection refused)" against a container that no longer exists, while every
 # container reports perfectly healthy. A reload re-reads the config and re-resolves,
 # without dropping a connection; a restart is the fallback if the reload is refused.
+# Is a running service's bind mount attached to something OTHER than the live tree's
+# path? Bind mounts pin the inode, so after a tree swap they keep the previous release.
+bound_elsewhere() {         # $1: service  $2: path in the live tree  $3: path in the container
+  local host_ino ctr_ino
+  host_ino="$(stat -c %i "$2" 2>/dev/null)" || return 1
+  ctr_ino="$(dc "$LIVE" exec -T "$1" stat -c %i "$3" 2>/dev/null)" || return 1
+  [[ -n "$ctr_ino" && "$host_ino" != "$ctr_ino" ]]
+}
+
+rebind_if_stale() {         # $1: service  $2: path in the live tree  $3: path in the container
+  dc "$LIVE" ps --status running --services 2>/dev/null | grep -qx "$1" || return 0
+  if bound_elsewhere "$1" "$2" "$3"; then
+    step "$1 is still bound to the previous tree — recreating it"
+    run dc "$LIVE" up -d --force-recreate --no-deps "$1" || warn "could not recreate $1; check it by hand"
+  fi
+  return 0
+}
+
 reload_edge() {
   dc "$LIVE" ps --status running --services 2>/dev/null | grep -qx nginx || return 0
   # A single-file bind mount binds the INODE, not the path: after the tree swap the
   # running container still reads the PREVIOUS release's nginx.conf, and a reload
   # would faithfully re-read that stale file. When the config in the container
   # differs from the live tree's, only a recreate picks the new file up.
+  # The certs DIRECTORY is bound the same way: left on the previous tree, it vanishes
+  # when that release is pruned and the next nginx start fails. Compare what the
+  # container is bound to (inode), not only what the file says.
+  rebind_if_stale dex "$LIVE/deploy/compose/dex/config.yaml" /etc/dex/config.yaml
   local live_sum ctr_sum
   live_sum="$(md5sum "$LIVE/deploy/nginx/nginx.conf" 2>/dev/null | cut -d' ' -f1)"
   ctr_sum="$(dc "$LIVE" exec -T nginx md5sum /etc/nginx/nginx.conf 2>/dev/null | cut -d' ' -f1)"
-  if [[ -n "$live_sum" && -n "$ctr_sum" && "$live_sum" != "$ctr_sum" ]]; then
-    step "Edge config changed in this release — recreating nginx to rebind it"
+  if [[ -n "$live_sum" && -n "$ctr_sum" && "$live_sum" != "$ctr_sum" ]] ||
+     bound_elsewhere nginx "$LIVE/deploy/nginx/nginx.conf" /etc/nginx/nginx.conf ||
+     bound_elsewhere nginx "$LIVE/deploy/nginx/certs" /etc/nginx/certs; then
+    step "Edge config or certificates not bound to the live tree — recreating nginx"
     run dc "$LIVE" up -d --force-recreate nginx || warn "could not recreate nginx; check it by hand"
     return 0
   fi
@@ -455,6 +499,7 @@ prune_old() {
   ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
   ls -1t "$BACKUPS"/vocx-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
   ls -1t "$BACKUPS"/pulse-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
+  ls -1t "$BACKUPS"/docrag-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
 
   # DOCKER IMAGES accumulate the same way the release trees did: every upgrade tags
   # ~18 prism-rollback/<service>:<stamp> images and each rebuild orphans the previous
@@ -475,7 +520,11 @@ prune_old() {
       | grep -v ":${keep_stamp}\$" | tee -a "$LOG" | wc -l)
     docker images "prism-rollback/*" --format '{{.Repository}}:{{.Tag}}' \
       | grep -v ":${keep_stamp}\$" | xargs -r docker rmi >>"$LOG" 2>&1 || true
-    (( trimmed > 0 )) && say "  removed $trimmed old rollback image tag(s) (kept :$keep_stamp)"
+    # An if, not `(( … )) && say`: with nothing trimmed that line would be the function's
+    # last status (1), and set -e would abort a finished upgrade at the prune.
+    if (( trimmed > 0 )); then
+      say "  removed $trimmed old rollback image tag(s) (kept :$keep_stamp)"
+    fi
   fi
   docker image prune -f >>"$LOG" 2>&1 || true
 }
@@ -494,6 +543,7 @@ cmd_upgrade() {
   files_backup="$(backup_files)"
   backup_vocx >/dev/null
   backup_pulse >/dev/null
+  backup_docrag >/dev/null
   secrets_backup="$(backup_secrets)"
   image_map="$(snapshot_images)"
 
@@ -593,7 +643,8 @@ cmd_upgrade() {
 
 _FRESH_GENERATED_KEYS=(PRISM_DB_PASSWORD MINIO_ROOT_PASSWORD INTERNAL_SIGNING_SECRET
   SVC_ATLAS_KEY SVC_VOX_KEY SVC_PULSE_KEY SVC_WORKFLOWS_KEY SVC_GATEWAY_KEY
-  SVC_ADVAYA_KEY PULSE_API_KEYS WORKFLOWS_API_KEYS VOCX_FRONT_KEY STT_API_KEY)
+  SVC_ADVAYA_KEY PULSE_API_KEYS WORKFLOWS_API_KEYS VOCX_FRONT_KEY STT_API_KEY
+  DOCRAG_FRONT_KEY DOCRAG_QDRANT_API_KEY)
 
 materialise_env() {         # $1: example file  $2: destination .env
   local src="$1" dst="$2" line key
@@ -695,6 +746,24 @@ cmd_fresh() {
     say "  self-signed TLS certificate for localhost — replace for any real hostname"
   fi
 
+  # Pulled (not built) images must be reachable BEFORE the long build: MinIO's own
+  # registries stopped serving anonymous pulls in 2025, so a new machine without the
+  # image cached fails here — with the fix named — instead of after the build.
+  step "Checking the pulled images are reachable"
+  local pull_log; pull_log="$(mktemp)"
+  if ! dc "$LIVE" pull --ignore-buildable >"$pull_log" 2>&1; then
+    cat "$pull_log" >>"$LOG"
+    grep -iE "error|denied|unauthorized|not found" "$pull_log" | tail -5 >&2 || true
+    if grep -qi minio "$pull_log"; then
+      say "  MinIO's registries now refuse anonymous pulls. Set MINIO_IMAGE in"
+      say "  $LIVE/deploy/compose/.env to a reachable build, e.g."
+      say "      MINIO_IMAGE=pgsty/minio:RELEASE.2026-08-04T00-00-00Z   (community fork)"
+    fi
+    rm -f "$pull_log"
+    die "some images cannot be pulled — fix and re-run (after removing $LIVE); log: $LOG"
+  fi
+  cat "$pull_log" >>"$LOG"; rm -f "$pull_log"
+
   step "Building the images (first build downloads base layers — this takes a while)"
   if ! dc "$LIVE" build; then
     warn "build failed — nothing was started; the unpacked tree is kept for inspection"
@@ -718,8 +787,10 @@ cmd_fresh() {
   say "  secrets   : $envf   — generated; parked lines start with '# set when needed:'"
   say "  sign-in   : no sso profile → the gateway's local walkthrough posture."
   say "              Bundled Dex users exist too (see deploy/compose/dex/config.yaml)."
-  say "  AI keys   : ANTHROPIC_API_KEY / SARVAM_API_KEY are parked — VOX falls back to"
-  say "              its offline stub until you set one and run: docker compose up -d"
+  say "  AI keys   : parked until set in $envf, then: docker compose up -d"
+  say "              WORKFLOWS_CAM_LLM_API_KEY — CAM workbench drafting (Bedrock GLM)"
+  say "              SARVAM_API_KEY            — OCR for scanned PDFs and images (DocRAG), VOX"
+  say "              ANTHROPIC_API_KEY         — VOX structuring (else its offline stub)"
   say "  upgrades  : $0 upgrade <next-release.zip>   (backups + rollback from now on)"
 }
 
@@ -826,8 +897,10 @@ cmd_restore_db() {
   _pw="$(grep -E '^PRISM_DB_PASSWORD=' "$LIVE/deploy/compose/.env" 2>/dev/null |
          head -1 | cut -d= -f2- | sed 's/[[:space:]]*#.*$//' | tr -d '"' | xargs || true)"
   _pw="${_pw:-prism}"
-  dc "$LIVE" exec -T postgres psql -U prism -d postgres \
-    -v pw="$_pw" -c "ALTER ROLE prism PASSWORD :'pw';" >>"$LOG" 2>&1 ||
+  # The statement goes in on stdin: psql substitutes :'pw' there, never inside -c.
+  echo "ALTER ROLE prism PASSWORD :'pw';" |
+    dc "$LIVE" exec -T postgres psql -U prism -d postgres -v ON_ERROR_STOP=1 \
+      -v pw="$_pw" >>"$LOG" 2>&1 ||
     warn "could not re-assert the prism role password — services may fail to connect; see $LOG"
 
   step "Starting the services again"
@@ -941,6 +1014,39 @@ cmd_restore_pulse() {
 
   step "Starting PULSE again"
   run dc "$LIVE" start pulse || dc "$LIVE" up -d
+  wait_healthy || warn "not healthy after the restore — check the log"
+  say "  safety snapshot: $now"
+}
+
+cmd_restore_docrag() {
+  local tarball="${1:-}"
+  [[ -f "$tarball" ]] || die "usage: $0 restore-docrag <docrag-*.tar.gz>"
+  gzip -t "$tarball" || die "that archive is corrupt"
+  preflight
+  local vol; vol="$(docker volume ls -q | grep -x "${PROJECT}_docragdata" || true)"
+  [[ -n "$vol" ]] || die "no ${PROJECT}_docragdata volume — is the stack initialised?"
+
+  # Same contract as restore-pulse: the restore is itself reversible.
+  local now="$BACKUPS/docrag-before-restore-$STAMP.tar.gz"
+  step "Snapshotting the CURRENT DocRAG data first → $now"
+  docker run --rm -v "$vol":/data:ro -v "$BACKUPS":/out alpine \
+    tar -czf "/out/$(basename "$now")" -C /data . 2>>"$LOG" ||
+    die "could not take a safety snapshot — refusing to restore over the volume"
+
+  step "Stopping DocRAG while its volume is replaced"
+  run dc "$LIVE" stop docrag || true
+
+  step "Restoring $tarball"
+  local abs; abs="$(readlink -f "$tarball")"
+  if ! docker run --rm -v "$vol":/data -v "$abs":/restore.tar.gz:ro alpine \
+      sh -c 'find /data -mindepth 1 -delete && tar -xzf /restore.tar.gz -C /data' 2>>"$LOG"; then
+    warn "the restore reported errors — see $LOG"
+    warn "the pre-restore state is at $now"
+  fi
+
+  # DocRAG re-indexes restored documents into its Qdrant on start.
+  step "Starting DocRAG again"
+  run dc "$LIVE" start docrag || dc "$LIVE" up -d
   wait_healthy || warn "not healthy after the restore — check the log"
   say "  safety snapshot: $now"
 }
@@ -1129,10 +1235,11 @@ case "${1:-}" in
   restore-files) shift; cmd_restore_files "$@" ;;
   restore-vocx) shift; cmd_restore_vocx "$@" ;;
   restore-pulse) shift; cmd_restore_pulse "$@" ;;
+  restore-docrag) shift; cmd_restore_docrag "$@" ;;
   restore-secrets) shift; cmd_restore_secrets "$@" ;;
   restore-plan)  cmd_restore_plan ;;
   backup)     preflight; backup_db >/dev/null; backup_files >/dev/null
-              backup_vocx >/dev/null; backup_pulse >/dev/null
+              backup_vocx >/dev/null; backup_pulse >/dev/null; backup_docrag >/dev/null
               backup_secrets >/dev/null; snapshot_images >/dev/null
               say "${c_grn}backup complete${c_off} → $BACKUPS" ;;
   status)     cmd_status ;;

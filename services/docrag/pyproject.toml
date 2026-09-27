@@ -1,0 +1,70 @@
+[project]
+name = "prism-docrag"
+version = "0.2.0"
+description = "PRISM DocRAG — document → knowledge → hybrid retrieval with cited answers"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "evam-backend-core",
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "gunicorn==23.0.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-json-logger==3.2.1",
+    "python-multipart==0.0.20",
+    "orjson==3.10.12",
+    "pymupdf==1.25.1",
+    "openpyxl==3.1.5",
+    "numpy>=1.26,<3",
+    "requests==2.32.3",
+    # The vector layer: Qdrant (hybrid dense + sparse) and FastEmbed (ONNX, no torch).
+    "qdrant-client==1.18.0",
+    "fastembed==0.8.0",
+]
+
+[project.optional-dependencies]
+# OpenDataLoader: the structural PDF extractor. Also needs a JRE on PATH at runtime.
+odl = ["opendataloader-pdf==2.5.10"]
+dev = ["pytest==8.3.4", "pytest-asyncio==0.25.0", "httpx==0.28.1", "ruff==0.8.4", "mypy==1.14.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["dev_ui.html"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
+# PyMuPDF's SWIG bindings emit these at import; they are not actionable here.
+filterwarnings = ["ignore:builtin type .* has no __module__ attribute:DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "C4", "SIM"]
+ignore = ["S101", "B008", "S105"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S603", "S607", "S105", "S106"]
+# subprocess to the fixed opendataloader-pdf binary, argv list (no shell)
+"app/knowledge/extractors/odl_extractor.py" = ["S603"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["fastembed.*", "pymupdf.*", "fitz.*", "openpyxl.*", "requests.*"]
+ignore_missing_imports = true

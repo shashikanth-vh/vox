@@ -49,6 +49,9 @@ services:
   gateway:
     environment:
       GATEWAY_REQUIRE_AUTH: "true"
+      # /docs publishes the whole route catalogue (it grants no access). Off unless
+      # GATEWAY_DOCS_ENABLED=true is set for this host.
+      GATEWAY_DOCS_ENABLED: "${GATEWAY_DOCS_ENABLED:-false}"
       # The issuer as reachable INSIDE the compose network — the gateway fetches JWKS from it and
       # matches the `iss` claim, so it must equal dex's own `issuer` value.
       GATEWAY_OIDC_ISSUER: "http://dex:5556/dex"
@@ -70,6 +73,11 @@ services:
   vocx:
     environment:
       VOCX_DEV_UI: "false"
+
+  # Same for the DocRAG console.
+  docrag:
+    environment:
+      DOCRAG_DEV_UI: "false"
 
   orchestrator:
     environment:

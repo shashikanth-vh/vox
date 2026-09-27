@@ -1,0 +1,684 @@
+{
+  "info": {
+    "name": "PRISM \u00b7 DocRAG \u2014 documents \u2192 cited answers",
+    "description": "Upload a PDF/XLSX, wait for background processing, explore the reconstructed knowledge, query it (extractive or generative), delete it. All requests use {{docragUrl}}: set it to {{baseUrl}}/docrag inside PRISM (the gateway injects the service key; the caller needs `upload_remove_documents`), or to the service's own URL when DocRAG is deployed on its own (then {{docragApiKey}} must be one of its DOCRAG_API_KEYS).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const a = pm.request.headers.find(h => h.key.toLowerCase() === 'authorization' && !h.disabled);",
+          "if (a && /^\\s*(Bearer|Basic)?\\s*$/i.test(pm.variables.replaceIn(a.value))) {",
+          "    pm.request.headers.remove(a.key);",
+          "}",
+          "if (!pm.variables.get('docragUrl')) {",
+          "    pm.variables.set('docragUrl', pm.variables.replaceIn('{{baseUrl}}') + '/docrag');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "docId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Status \u2014 what this deployment can do",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/status",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "status"
+          ]
+        },
+        "description": "Engines available (OpenDataLoader, Sarvam) and the tenant's index size."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.test('has tenant', () => pm.expect(pm.response.json()).to.have.property('tenant'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Upload a document (PDF / XLSX)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "fixtures/docrag-sample-term-sheet.pdf"
+            },
+            {
+              "key": "use_sarvam",
+              "value": "true",
+              "type": "text"
+            }
+          ]
+        },
+        "description": "Multipart upload. 202 = queued for background processing; 200 with duplicate=true = this exact file is already indexed for the tenant. In the Postman app, re-select the file if the fixture path does not resolve (newman: --working-dir postman)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('accepted', () => pm.expect([200, 202]).to.include(pm.response.code));",
+              "const d = pm.response.json();",
+              "pm.collectionVariables.set('docId', d.id);",
+              "pm.variables.set('pollCount', 0);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Wait until ready (polls itself)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents/{{docId}}",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents",
+            "{{docId}}"
+          ]
+        },
+        "description": "Re-runs itself every second while status is queued/processing (up to 60 polls) \u2014 in the collection runner / newman. Sent by hand, just re-send it."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('document found', () => pm.response.to.have.status(200));",
+              "const d = pm.response.json();",
+              "const n = Number(pm.variables.get('pollCount') || 0);",
+              "if (['queued', 'processing'].includes(d.status) && n < 60) {",
+              "    pm.variables.set('pollCount', n + 1);",
+              "    setTimeout(() => {}, 1000);",
+              "    postman.setNextRequest(pm.info.requestName);",
+              "} else {",
+              "    pm.variables.set('pollCount', 0);",
+              "    pm.test('ingestion finished as ready', () => pm.expect(d.status).to.eql('ready'));",
+              "    pm.test('produced chunks', () => pm.expect(d.chunk_count).to.be.above(0));",
+              "    if (d.warnings.length) console.log('warnings:', d.warnings);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 List documents",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.test('contains the upload', () => pm.expect(pm.response.json().items.map(d => d.id)).to.include(pm.collectionVariables.get('docId')));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Document + reconstructed knowledge",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents/{{docId}}?include=knowledge",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents",
+            "{{docId}}"
+          ],
+          "query": [
+            {
+              "key": "include",
+              "value": "knowledge"
+            }
+          ]
+        },
+        "description": "Section tree, tables (verbatim rows), entities, metadata and warnings."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.test('has sections', () => pm.expect(pm.response.json().knowledge.sections).to.be.an('array').that.is.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Knowledge chunks",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents/{{docId}}/chunks",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents",
+            "{{docId}}",
+            "chunks"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.test('chunks carry provenance', () => {",
+              "    const c = pm.response.json().items[0];",
+              "    pm.expect(c).to.include.keys('section_path', 'pages', 'extraction_engines', 'doc_id');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Query \u2014 extractive (cited passages)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/query",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "query"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"What is the tenor of the facility?\",\n  \"mode\": \"extractive\",\n  \"top_k\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "const r = pm.response.json();",
+              "pm.test('ranked results with citations', () => {",
+              "    pm.expect(r.results).to.be.an('array').that.is.not.empty;",
+              "    pm.expect(r.citations.length).to.eql(r.results.length);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Query \u2014 restricted to this document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/query",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "query"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"PAN ABCDE1234F\",\n  \"top_k\": 3,\n  \"doc_ids\": [\n    \"{{docId}}\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));",
+              "pm.test('only this document', () => pm.response.json().results.forEach(x => pm.expect(x.chunk.doc_id).to.eql(pm.collectionVariables.get('docId'))));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Query \u2014 generative (Sarvam)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/query",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "query"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"Summarise the key commercial terms.\",\n  \"mode\": \"generative\",\n  \"top_k\": 5\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Needs DOCRAG_SARVAM_API_KEY on the service; without it the answer is 409 (never a fabricated answer). 502 = Sarvam itself failed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('answered, or refused for lack of a key', () => pm.expect([200, 409]).to.include(pm.response.code));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Query \u2014 validation error (empty query)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/query",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "query"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422', () => pm.response.to.have.status(422));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Delete the document",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents/{{docId}}",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents",
+            "{{docId}}"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('204', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Deleted document is gone",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Tenant",
+            "value": "{{tenant}}"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{docragApiKey}}"
+          },
+          {
+            "key": "X-User-Email",
+            "value": "{{userEmail}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{docragUrl}}/v1/documents/{{docId}}",
+          "host": [
+            "{{docragUrl}}"
+          ],
+          "path": [
+            "v1",
+            "documents",
+            "{{docId}}"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

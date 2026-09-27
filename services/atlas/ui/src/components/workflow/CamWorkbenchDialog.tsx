@@ -75,6 +75,32 @@ function displayTurn(text: string): string {
     .replace(/^\[generate\][^\n]*/, 'Generate the CAM from the prompt and the attached documents.');
 }
 
+// What a generation spent, in one line: model tokens, documents, OCR.
+const compact = (n: number) =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : `${n}`;
+
+function usageLine(usage: any): string {
+  const llm = usage?.llm;
+  const docs = usage?.documents;
+  if (!llm) return '';
+  const engine = (llm.engines || []).join(', ') || 'engine';
+  const parts = [
+    `${engine}: ${llm.calls} call${llm.calls === 1 ? '' : 's'}`
+      + (llm.failed ? ` (${llm.failed} retried)` : ''),
+    `${compact(llm.input_tokens)} in / ${compact(llm.output_tokens)} out tokens`,
+  ];
+  if (docs) {
+    parts.push(`${docs.read} document${docs.read === 1 ? '' : 's'} read`
+      + (docs.skipped ? `, ${docs.skipped} skipped` : ''));
+    if (docs.ocr_pages || docs.sarvam_jobs) {
+      parts.push(`OCR: ${docs.ocr_pages} page${docs.ocr_pages === 1 ? '' : 's'}`
+        + (docs.sarvam_jobs ? ` (${docs.sarvam_jobs} new Sarvam job${docs.sarvam_jobs === 1 ? '' : 's'}, `
+          + `${docs.sarvam_pages_submitted} pages)` : ' (from cache)'));
+    }
+  }
+  return ` Used — ${parts.join(' · ')}.`;
+}
+
 export default function CamWorkbenchDialog({ action, subjectId, entityId, onClose, onDone }: {
   action: WorkflowAction | null;
   subjectId: string;
@@ -110,6 +136,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState('');
+  // Staged Generate CAM: live stage text for the button, and the locked financial
+  // workpaper the draft was written from (downloadable for verification).
+  const [progress, setProgress] = useState('');
+  const [workpaper, setWorkpaper] = useState('');
   const [loading, setLoading] = useState(false);
   const [tplBusy, setTplBusy] = useState(false);
 
@@ -223,42 +253,60 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
     });
   };
 
-  // The point of the conversation: everything established above + the prompt + the
-  // ticked documents becomes the CAM draft — SHAPED BY THE CAM TEMPLATE, which rides
-  // along so the engine mirrors its exact sections. The finished draft downloads as
-  // Word immediately: verify it, adjust if needed, upload it as the completed CAM.
+  // The point of the conversation: the prompt + every document put in front of the
+  // engine on this CAM + what the conversation established becomes the CAM draft.
+  // It runs STAGED on the server (fact sheet per document → locked financial dataset →
+  // each section written from them → summary last) as a job this screen polls, so no
+  // deal is too large for one request. The finished draft is filled into the CAM
+  // template and downloads as Word: verify it, adjust, upload it as the completed CAM.
   const generateCam = () => {
     if (busy) return;
-    // A typed-but-unsent question still counts — it rides inside the brief.
+    // A typed-but-unsent question still counts — it rides as an instruction.
     const pending = question.trim();
-    const brief =
-      'Prepare the complete CAM report now. '
-      + (defaults.example
-        ? 'A CAM TEMPLATE document is attached: reproduce its exact structure — the same '
-          + 'sections, in the same order, under the same headings; fill each with this '
-          + "case's content. "
-        : '')
-      + (activePromptId ? "Follow the prompt document's instructions exactly. " : '')
-      + 'Use everything established in this conversation and every document provided. '
-      + 'Where information is missing, name the gap rather than inventing a figure. '
-      + 'Output the full CAM in Markdown with headings and tables, ready to render to Word.'
-      + (pending ? `\n\nAlso take this into account: ${pending}` : '');
     setQuestion('');
+    setWorkpaper('');
     setChat((c) => [...c, { role: 'user',
       text: 'Generate the CAM report from this conversation, in the CAM template\'s format.'
         + (pending ? `\n(Also: ${pending})` : '') }]);
     void run('generate', async () => {
-      const ride = [...(activePromptId ? [activePromptId] : []),
-                    ...(defaults.example ? [defaults.example.id] : []), ...sel];
-      const out = await camService.refine(subjectId, brief, true, ride);
-      setChat((c) => [...c, { role: 'assistant', text: out.draft_md || '' }]);
+      const job = await camService.draftStaged(subjectId, {
+        source_doc_ids: [...sel],
+        ...(activePromptId ? { prompt_doc_id: activePromptId } : {}),
+        ...(defaults.example ? { template_doc_id: defaults.example.id } : {}),
+        ...(pending ? { instruction: pending } : {}),
+        doc_titles: Object.fromEntries(sources.map((d) => [d.id, d.title])),
+      });
+      let state = job;
+      const started = Date.now();
+      try {
+        while (state.status === 'running') {
+          const tokens = state.usage?.llm?.total_tokens;
+          setProgress(`${state.stage || 'Starting'}${state.total ? ` ${state.done}/${state.total}` : ''}`
+            + (tokens ? ` · ${compact(tokens)} tokens` : '') + '…');
+          await new Promise((r) => setTimeout(r, 2500));
+          state = await camService.draftJob(job.job_id);
+          if (Date.now() - started > 40 * 60_000) {
+            throw new Error('Still drafting after 40 minutes — reopen the workbench later; '
+              + 'the draft is filed on this CAM when it completes.');
+          }
+        }
+      } finally { setProgress(''); }
+      if (state.status !== 'done') throw new Error(state.error || 'Drafting failed.');
+      setChat((c) => [...c, { role: 'assistant', text: state.draft_md || '' }]);
       setSel(new Set());
+      setWorkpaper(state.workpaper_md || '');
       // The draft is FOR VERIFICATION — hand it over as a Word file straight away.
-      if (out.draft_md) {
-        await camService.exportDocx(subjectId, out.draft_md,
-          title.trim() || `CAM v${working?.report_version ?? 1} draft`);
+      if (state.draft_md) {
+        await camService.exportDocx(subjectId, state.draft_md,
+          title.trim() || `CAM v${state.report_version ?? working?.report_version ?? 1} draft`,
+          defaults.example?.id);
       }
-      return 'CAM generated and downloaded as Word — verify it, make any updates, then upload the completed CAM.';
+      const unread = (state.documents || []).filter((d: any) => d.reason);
+      return `CAM generated (${state.calls} drafting steps) and downloaded as Word — verify it, `
+        + 'make any updates, then upload the completed CAM.'
+        + (unread.length ? ` ${unread.length} item(s) could not be used: `
+          + unread.map((d: any) => `${d.document || d.section}: ${d.reason}`).join('; ') : '')
+        + usageLine(state.usage);
     });
   };
 
@@ -561,13 +609,26 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                       Draft v{working.report_version}
                       <Box component="span" onClick={() => void run('draft-word', async () => {
                           await camService.exportDocx(subjectId, working!.draft_md!,
-                            `CAM v${working!.report_version} draft`);
+                            `CAM v${working!.report_version} draft`, defaults.example?.id);
                           return 'Draft downloaded as Word — continue in Word, then upload it below.';
                         })}
                         sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.6,
                           textDecoration: 'underline' }}>
                         {busy === 'draft-word' ? 'Rendering…' : 'Download as Word'}
                       </Box>
+                      {!!workpaper && (
+                        <Box component="span"
+                          title="The locked financial dataset every section quotes — check it against the source documents"
+                          onClick={() => void run('workpaper', async () => {
+                            await camService.exportDocx(subjectId, workpaper,
+                              `CAM v${working!.report_version} financial workpaper`);
+                            return 'Financial workpaper downloaded.';
+                          })}
+                          sx={{ color: 'primary.main', cursor: 'pointer', ml: 0.8,
+                            textDecoration: 'underline' }}>
+                          {busy === 'workpaper' ? 'Rendering…' : 'Financial workpaper'}
+                        </Box>
+                      )}
                     </Typography>
                   )}
                   {!!working?.document_id && (
@@ -712,7 +773,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   onClick={() => generateCam()}
                   title="Turns the whole conversation + the prompt + the ticked documents into the full CAM draft"
                   sx={{ whiteSpace: 'nowrap', textTransform: 'none' }}>
-                  {busy === 'generate' ? 'Drafting…' : 'Generate CAM'}
+                  {busy === 'generate' ? (progress || 'Drafting…') : 'Generate CAM'}
                 </Button>
               </Box>
             </Box>

@@ -1,0 +1,121 @@
+{{- if and (not .Values.qdrant.enabled) (not .Values.qdrant.url) }}
+{{- fail "docrag: qdrant.enabled=false needs qdrant.url (an external Qdrant) — DocRAG cannot run without a vector store." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "docrag.fullname" . }}
+  labels:
+    {{- include "docrag.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "docrag.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  # Recreate, not RollingUpdate: the data volume is ReadWriteOnce, so a surge pod could
+  # never attach it and the rollout would hang.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "docrag.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "docrag.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: docrag
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: DOCRAG_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: DOCRAG_LOG_JSON
+              value: {{ .Values.config.logJson | quote }}
+            - name: DOCRAG_DEFAULT_TENANT
+              value: {{ .Values.config.defaultTenant | quote }}
+            - name: DOCRAG_INGEST_WORKERS
+              value: {{ .Values.config.ingestWorkers | quote }}
+            - name: DOCRAG_MAX_UPLOAD_BYTES
+              value: {{ .Values.config.maxUploadBytes | quote }}
+            - name: DOCRAG_DEV_UI
+              value: {{ .Values.config.devUi | quote }}
+            - name: DOCRAG_DATA_DIR
+              value: /data/docrag
+            - name: DOCRAG_QDRANT_URL
+              value: {{ .Values.qdrant.enabled | ternary (printf "http://%s-qdrant:6333" (include "docrag.fullname" .)) .Values.qdrant.url | quote }}
+            - name: DOCRAG_QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.qdrant.apiKey.existingSecret }}
+                  name: {{ .Values.qdrant.apiKey.existingSecret }}
+                  key: {{ .Values.qdrant.apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "docrag.secretName" . }}
+                  key: qdrant-api-key
+                  {{- end }}
+            - name: DOCRAG_CORS_ORIGINS
+              value: {{ .Values.corsOrigins | quote }}
+            - name: DOCRAG_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "docrag.secretName" . }}
+                  key: api-keys
+            - name: DOCRAG_SARVAM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.sarvam.apiKey.existingSecret }}
+                  name: {{ .Values.sarvam.apiKey.existingSecret }}
+                  key: {{ .Values.sarvam.apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "docrag.secretName" . }}
+                  key: sarvam-api-key
+                  {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          # Ready = the embedding model is loaded (503 with the reason otherwise).
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data/docrag
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "docrag.fullname" .)) }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

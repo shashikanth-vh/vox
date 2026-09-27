@@ -275,6 +275,6 @@ def test_a_trailing_comma_in_the_smtp_host_is_absorbed(monkeypatch):
     # gives the password one too, and the desk then sees "authentication failed" for a
     # password they can see is correct.
     assert Settings(smtp_pass="secret,").smtp_pass == "secret,"
-    assert Settings(smtp_pass="hnwi okbt ggah blrw,").smtp_password_looks_mangled() is True
-    assert Settings(smtp_pass="hnwi okbt ggah blrw").smtp_password_looks_mangled() is False
+    assert Settings(smtp_pass="abcd efgh ijkl mnop,").smtp_password_looks_mangled() is True
+    assert Settings(smtp_pass="abcd efgh ijkl mnop").smtp_password_looks_mangled() is False
     assert Settings(smtp_pass="").smtp_password_looks_mangled() is False

@@ -87,6 +87,7 @@ jobs:
           pip install -e "services/pulse[dev]"
           pip install -e "services/stt[dev]"
           pip install -e "services/atlas[dev]"
+          pip install -e "services/docrag[dev]"
 
       - name: Lint (ruff)
         run: |
@@ -98,6 +99,7 @@ jobs:
           python -m ruff check services/pulse/app services/pulse/tests
           python -m ruff check services/stt/app services/stt/tests
           python -m ruff check services/atlas/app services/atlas/tests
+          python -m ruff check services/docrag/app services/docrag/tests
           python -m ruff check packages/evam-backend-core/evam_backend_core packages/evam-backend-core/examples
           python -m ruff check packages/evam-register-client/evam_register_client packages/evam-register-client/tests
 
@@ -111,6 +113,7 @@ jobs:
           (cd services/pulse && python -m mypy app)
           (cd services/stt && python -m mypy app)
           (cd services/atlas && python -m mypy app)
+          (cd services/docrag && python -m mypy app)
           (cd packages/evam-backend-core && python -m mypy evam_backend_core)
           (cd packages/evam-register-client && python -m mypy evam_register_client)
 
@@ -145,6 +148,9 @@ jobs:
       - name: Test (atlas — aggregations + composed views e2e)
         run: cd services/atlas && python -m pytest -q
 
+      - name: Test — DocRAG (stub embedder, in-process Qdrant, PyMuPDF path; no models, no Java)
+        run: cd services/docrag && python -m pytest -q
+
   images:
     name: docker build (every service image)
     runs-on: ubuntu-latest
@@ -156,7 +162,7 @@ jobs:
           # Catches the class of bug where a Dockerfile installs shared packages
           # --no-deps and the service forgets to declare a transitive dependency:
           # the image builds here even though editable installs in CI would hide it.
-          for svc in register access gateway vocx pulse atlas workflows; do
+          for svc in register access gateway vocx pulse atlas workflows docrag; do
             echo "::group::build prism-$svc"
             docker build -f services/$svc/Dockerfile -t prism-$svc:ci .
             echo "::endgroup::"
@@ -167,6 +173,10 @@ jobs:
           docker run --rm prism-gateway:ci python -c "import app.main"
           docker run --rm prism-atlas:ci python -c "import app.main"
           docker run --rm prism-pulse:ci python -c "import app.main"
+          # DocRAG: the app imports, the baked FastEmbed models load OFFLINE (no network in
+          # the container), and Java is present for OpenDataLoader.
+          docker run --rm --network none prism-docrag:ci python -c "import app.main; from app.config import get_settings; from app.rag.embeddings import FastEmbedEmbedder; e = FastEmbedEmbedder(get_settings()); e.warm(); print(e.embed_query('smoke')[0].shape)"
+          docker run --rm prism-docrag:ci java -version
           docker run --rm prism-vocx:ci python -c "import app.main"
           docker run --rm prism-workflows:ci python -c "import app.api, app.worker"
 
