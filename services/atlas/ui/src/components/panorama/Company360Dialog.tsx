@@ -97,17 +97,22 @@ function Section({ id, title, badge, summary, open, onToggle, children }: {
 function Ladder({ ladder, current }: { ladder: string[]; current: string | null }) {
   const idx = current ? ladder.indexOf(current) : -1;
   if (idx < 0) return null;
+  // Amber marks WORK IN PROGRESS. The last rung is the finish line — landing
+  // there is success and wears green, or a fully-disbursed line would read as
+  // something failing.
+  const done = idx === ladder.length - 1;
+  const mark = done ? '#1B7A45' : '#B45309';
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, pl: '18px' }}>
       <Box sx={{ display: 'flex', gap: '5px' }}>
         {ladder.map((s, i) => (
           <Box key={s} sx={{ height: 5, flex: 1, borderRadius: '3px',
-            bgcolor: i < idx ? CHART_TEAL : i === idx ? '#B45309' : '#E7ECEF' }} />))}
+            bgcolor: i < idx ? CHART_TEAL : i === idx ? mark : '#E7ECEF' }} />))}
       </Box>
       <Box sx={{ display: 'flex' }}>
         {ladder.map((s, i) => (
           <Typography key={s} sx={{ flex: 1, fontSize: 8.6, lineHeight: 1.2,
-            color: i === idx ? '#B45309' : tokens.muted,
+            color: i === idx ? mark : tokens.muted,
             fontWeight: i === idx ? 700 : 400 }}>{s.replace(' Completed', '')
               .replace('Ready for Disbursement', 'Ready')}</Typography>))}
       </Box>
@@ -293,7 +298,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     flexDirection: 'column', gap: 0.7 }}>
                     <Box sx={{ display: 'flex', gap: 1.1 }}>
                       <Box sx={{ width: 8, height: 8, mt: '5px', borderRadius: 99,
-                        bgcolor: r.stage === 'Rejected' ? '#9AA8AF' : '#B45309',
+                        bgcolor: r.stage === 'Rejected' ? '#9AA8AF'
+                          : r.stage === 'Disbursed' ? '#1B7A45' : '#B45309',
                         flexShrink: 0 }} />
                       <Box>
                         <Typography sx={{ fontSize: 12.8, color: '#17252B' }}>
@@ -355,7 +361,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Section id="interactions" title="INTERACTIONS & VOCX"
                 open={!!openSections.interactions} onToggle={toggle}
                 summary={p.interactions.length
-                  ? `${p.interactions.length} recent · last ${fmtDay(p.interactions[0].occurred_at)}`
+                  ? `${fmtDay(p.interactions[0].occurred_at)} · ${((p.interactions[0]
+                      .summary || p.interactions[0].notes || p.interactions[0].type)
+                      .slice(0, 90))} · ${p.interactions.length} recent`
                   : 'none logged'}>
                 {p.interactions.map((i, n) => (
                   <Box key={n}>
@@ -371,11 +379,13 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               </Section>
 
               <Section id="news" title="NEWS"
-                badge={news ? <Chip size="small" label={`${news.length} found`}
+                badge={news ? <Chip size="small" label={`${news.length} in 30 days`}
                   sx={{ height: 19, fontSize: 10, color: tokens.tealHi,
                     border: `1px solid ${tokens.tealHi}`, bgcolor: '#F0F8F6' }} /> : undefined}
                 open={!!openSections.news} onToggle={toggle}
-                summary={news?.[0]?.headline || (newsErr ? 'radar unavailable' : 'searching…')}>
+                summary={news === null
+                  ? (newsErr ? 'radar unavailable' : 'searching…')
+                  : (news[0]?.headline || 'no mentions in the last 30 days')}>
                 {(news || []).map((a) => (
                   <Box key={a.url}>
                     <Typography component="a" href={a.url} target="_blank" rel="noreferrer"
@@ -384,6 +394,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>
                       {[a.source, a.when].filter(Boolean).join(' · ')}</Typography>
                   </Box>))}
+                {news !== null && !news.length && !newsErr && (
+                  <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+                    No mentions in the last 30 days.</Typography>)}
                 {newsErr && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
                   News radar did not answer: {newsErr}</Typography>}
               </Section>

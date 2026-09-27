@@ -118,7 +118,10 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                            "Set WORKFLOWS_DOCRAG_URL to enable document Q&A indexing.")
 
         http = request.app.state.http
-        list_path = f"/v1/documents?entity_id={payload.entity_id}&page_size=100"
+        # The register's list routes REJECT unknown query params (a guessed
+        # filter must fail loudly, not silently return everything) — so this
+        # speaks their exact dialect: `limit`, not `page_size`.
+        list_path = f"/v1/documents?entity_id={payload.entity_id}&limit=100"
         r = await http.get(f"{base}{list_path}",
                            headers=reg_headers(request, caller, who, "GET",
                                                "/v1/documents"))
