@@ -392,10 +392,15 @@ export default function ProspectsPage() {
   return (
     <>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8, mb: 1.2, mt: 0.4 }}>
-        <ChipRow label="Vertical" items={countTags(universe, 'verticals')}
+        <ChipRow label="Sector" items={countTags(universe, 'verticals')}
           selected={verticals} onToggle={toggle(verticals, setVerticals)} />
-        <ChipRow label="Sub-sector" items={countTags(afterVerticals, 'sub_sectors')}
-          selected={subs} onToggle={toggle(subs, setSubs)} />
+        {/* Progressive disclosure: all ~25 sub-sectors at once was a wall. The row
+            appears once a sector is picked and then holds only THAT sector's
+            sub-sectors (the counts already cascade); it stays while a sub-sector
+            is still selected so the filter can always be seen and removed. */}
+        {(verticals.length > 0 || subs.length > 0) && (
+          <ChipRow label="Sub-sector" items={countTags(afterVerticals, 'sub_sectors')}
+            selected={subs} onToggle={toggle(subs, setSubs)} />)}
         <ChipRow label="Status"
           items={statusCounts.map(([s, n]) => [STATUS_LABEL[s] || s, n]) as
             [string, number][]}
