@@ -83,6 +83,15 @@ async def _build_company(reg: AsyncClient) -> str:
                             json={"stage": "Note Circulated"})
     assert moved.status_code == 200, moved.text
 
+    # A DEAD line: neither a live deal nor exposure, and the brief says what
+    # happened to it instead of calling it an ask (the staging screenshot bug).
+    dead = await reg.post("/v1/lending", headers=ADMIN, json={
+        "entity_id": eid, "stage": "Diligence", "amount_cr": 2.0})
+    assert dead.status_code == 201, dead.text
+    killed = await reg.patch(f"/v1/lending/{dead.json()['id']}", headers=ADMIN,
+                             json={"stage": "Rejected"})
+    assert killed.status_code == 200, killed.text
+
     inter = await reg.post("/v1/interactions", headers=ADMIN, json={
         "subject_type": "Entity", "subject_id": eid,
         "interaction_type": "Site Visit",
@@ -116,8 +125,11 @@ async def test_panorama_tells_the_whole_story(reg: AsyncClient):
     # OPEN leads, not lifetime — the converted one is history, not an open lead.
     assert p["stats"]["open_leads"] == 1
     assert p["stats"]["leads_converted"] == 1
+    # The rejected line is NOT live and carries NO exposure.
     assert p["stats"]["live_deals"] == 1
     assert p["stats"]["exposure_ask_cr"] == 12.0
+    assert "was rejected" in p["brief"]
+    assert "at Rejected" not in p["brief"]
     assert p["stats"]["documents"] == 1
 
     lend = p["lending"][0]

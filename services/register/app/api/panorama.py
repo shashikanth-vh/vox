@@ -58,6 +58,23 @@ def _num(v: Any) -> float | None:
     return None if v is None else float(v)
 
 
+def _clip(s: str | None, n: int) -> str:
+    """Cut at a word boundary with an ellipsis — a brief that stops mid-word
+    ("asset sa") reads as a glitch, not a summary."""
+    t = (s or "").strip()
+    if len(t) <= n:
+        return t
+    cut = t[:n].rsplit(" ", 1)[0].rstrip(",;:")
+    return cut + "…"
+
+
+# A DEAD line is not a live deal: it neither counts nor carries exposure, and the
+# brief says what happened to it instead of calling it an ask.
+LENDING_DEAD = {"Rejected"}
+SYN_DEAD = {"Withdrawn", "Rejected", "Dropped"}
+AM_DEAD = {"Dropped", "Closed"}  # Closed = completed — finished, not live
+
+
 async def _resolve_anchor(ctx: RequestContext, entity_id: str | None,
                           company: str | None) -> tuple[Any | None, str, str]:
     """(entity row | None, matched_by, display name). A name-only company that has
@@ -230,8 +247,11 @@ async def company_panorama(
             contacts.append({"name": nm, "designation": None, "phone": None,
                              "source": "interaction"})
 
-    exposure = sum((_num(r.amount_cr) or 0.0) for r in lending) \
-        + sum((_num(r.amount_cr) or 0.0) for r in synd)
+    live_lending = [r for r in lending if (r.stage or "") not in LENDING_DEAD]
+    live_synd = [r for r in synd if (r.status or "") not in SYN_DEAD]
+    live_am = [r for r in am if (r.status or "") not in AM_DEAD]
+    exposure = sum((_num(r.amount_cr) or 0.0) for r in live_lending) \
+        + sum((_num(r.amount_cr) or 0.0) for r in live_synd)
     last_touch = None
     for i in inters:
         last_touch = _iso(i.occurred_at)
@@ -248,30 +268,37 @@ async def company_panorama(
         bits.append(f"{head} ({extras})." if extras else f"{head}.")
     else:
         bits.append(f"{display} — no client master yet; showing what carries the name.")
-    if lending:
-        r = lending[0]
+    if live_lending:
+        r = live_lending[0]
         amt = _num(r.amount_cr)
         amount_txt = f"₹{amt:g} Cr " if amt else ""
         pend = f", pending with {r.pending_with}" if r.pending_with else ""
         bits.append(f"Live lending ask of {amount_txt}at {r.stage or 'unknown stage'}{pend}.")
-    if synd:
-        r = synd[0]
+    dead_lending = [r for r in lending if (r.stage or "") in LENDING_DEAD]
+    if dead_lending:
+        bits.append(f"Lending {dead_lending[0].tracker_no or ''} was "
+                    f"{(dead_lending[0].stage or 'closed').lower()}.".replace("  ", " "))
+    if live_synd:
+        r = live_synd[0]
         bits.append(f"Syndication {r.tracker_no or ''} at {r.status or '—'}.".strip())
+    if live_am:
+        r = live_am[0]
+        bits.append(f"Asset monetisation {r.tracker_no or ''} at {r.status or '—'}.".strip())
     if open_leads:
         l = open_leads[0]
-        note = (l.next_action or l.notes or "").strip()
+        note = _clip(l.next_action or l.notes, 140)
         bits.append(f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
-                    f"{l.rm or 'unassigned'})" + (f": {note[:140]}" if note else "."))
+                    f"{l.rm or 'unassigned'})" + (f": {note}" if note else "."))
     if converted:
         bits.append(f"{len(converted)} lead(s) became deals.")
     if inters:
         i = inters[0]
         when = i.occurred_at.date().isoformat() if i.occurred_at else ""
-        summ = (i.summary or i.notes or "").strip()
+        summ = _clip(i.summary or i.notes, 160)
         if summ:
-            bits.append(f"Last touch {when}: {summ[:160]}")
+            bits.append(f"Last touch {when}: {summ}")
     if prospect is not None and prospect.remarks:
-        bits.append(f"Desk remark: {prospect.remarks[:120]}")
+        bits.append(f"Desk remark: {_clip(prospect.remarks, 120)}")
 
     return {
         "anchor": {
@@ -290,7 +317,7 @@ async def company_panorama(
         "stats": {
             "open_leads": len(open_leads),
             "leads_converted": len(converted),
-            "live_deals": len(lending) + len(synd) + len(am),
+            "live_deals": len(live_lending) + len(live_synd) + len(live_am),
             "exposure_ask_cr": round(exposure, 2) if exposure else None,
             "last_touch": last_touch,
             "documents": len(docs),

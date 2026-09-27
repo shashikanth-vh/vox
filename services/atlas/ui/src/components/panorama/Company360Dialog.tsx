@@ -133,8 +133,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => { if (!alive) return; setP(r);
-        fetchTerm(r.anchor.name)
-          .then((arts) => { if (alive) setNews(arts.slice(0, 5)); })
+        // Date-bounded so the "30 days" tile means 30 days, not "whatever came back".
+        const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+        fetchTerm(r.anchor.name, from)
+          .then((arts) => { if (alive) setNews(arts.slice(0, 6)); })
           .catch((e) => { if (alive) setNewsErr(String(e?.message || e)); });
       })
       .catch((e) => { if (alive) setErr(apiErr(e, 'load the company 360')); });
@@ -259,10 +261,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     flexDirection: 'column', gap: 0.7 }}>
                     <Box sx={{ display: 'flex', gap: 1.1 }}>
                       <Box sx={{ width: 8, height: 8, mt: '5px', borderRadius: 99,
-                        bgcolor: '#B45309', flexShrink: 0 }} />
+                        bgcolor: r.stage === 'Rejected' ? '#9AA8AF' : '#B45309',
+                        flexShrink: 0 }} />
                       <Box>
                         <Typography sx={{ fontSize: 12.8, color: '#17252B' }}>
-                          <b>Lending {r.tracker_no}</b> — {fmtCr(r.amount_cr)}
+                          <b>Lending {r.tracker_no}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}
                           {r.pending_with ? ` · pending with ${r.pending_with}` : ''}
                         </Typography>
                         <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
