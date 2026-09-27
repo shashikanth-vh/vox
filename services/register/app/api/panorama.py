@@ -1,0 +1,359 @@
+"""Company 360 — one company's whole story across the register, in one read.
+
+``GET /v1/panorama?entity_id=…`` (or ``?company=<name>`` when the caller only has
+a name, e.g. a lead that never settled an entity) returns everything the register
+knows about ONE company: its client-master identity, open leads and lead history,
+the live product lines (lending / syndication / asset monetisation) with their
+stage ladders, the latest interactions and VOCX field notes, the Data Register's
+documents, the prospect-universe row, the people we actually talk to, and a
+deterministic BRIEF composed from all of it.
+
+Three rules keep it honest:
+
+* **One anchor.** Everything hangs off the client master (entity). A name-only
+  lookup resolves through the same canonical-name identity the lead birth and
+  the prospect import use, and the response says which anchor matched.
+* **RBAC per section, server-side.** Each section is included only at the
+  caller's matrix access for that module; a section the role cannot see comes
+  back in ``restricted`` — named, not silently missing — and a SCOPED view
+  applies the same company-scope condition the list routes apply.
+* **Read-only.** The panorama never writes; the numbers are the register's live
+  rows at the moment of the call (``generated_at``).
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, date, datetime
+from typing import Any
+
+from fastapi import Query
+from sqlalchemy import func, select
+
+from app.core.errors import NotFoundError, ValidationAppError
+from app.core.router import api_router
+from app.core.security import RequestContext, get_context
+from fastapi import Depends
+
+router = api_router(tags=["Company 360"])
+
+# The forward ladders the drawer's steppers render — the same vocabulary
+# evam_backend_core.lifecycle enforces on writes (terminal Rejected / On Hold /
+# Dropped states are shown as the row's stage text, not as ladder steps).
+LENDING_LADDER = ["Data Awaited", "Diligence", "Note Circulated", "Sanctioned",
+                  "CP/CS Completed", "Ready for Disbursement", "Disbursed"]
+SYNDICATION_LADDER = ["Deal Sourced", "Docs Pending", "IM in Prep", "IM Circulated",
+                      "Queries Received", "IP Received", "Sanctioned", "Disbursed"]
+AM_LADDER = ["Teaser Prepared", "Teaser Shared", "In Discussion", "NBO Received",
+             "BO Received", "SPA / Documentation", "Closed"]
+
+
+def _iso(v: Any) -> str | None:
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    return None
+
+
+def _num(v: Any) -> float | None:
+    return None if v is None else float(v)
+
+
+async def _resolve_anchor(ctx: RequestContext, entity_id: str | None,
+                          company: str | None) -> tuple[Any | None, str, str]:
+    """(entity row | None, matched_by, display name). A name-only company that has
+    no client master yet still gets a panorama — of whatever carries that name."""
+    from app.models import Entity
+
+    if entity_id:
+        try:
+            eid = uuid.UUID(entity_id)
+        except ValueError as exc:
+            raise ValidationAppError("entity_id must be a UUID.") from exc
+        ent = (await ctx.session.execute(select(Entity).where(
+            Entity.tenant_id == ctx.tenant_id, Entity.id == eid,
+            Entity.deleted_at.is_(None)))).scalar_one_or_none()
+        if ent is None:
+            raise NotFoundError(f"entity '{entity_id}' not found.")
+        return ent, "entity", ent.display_name or ent.legal_name
+
+    name = (company or "").strip()
+    if not name:
+        raise ValidationAppError("Pass entity_id or company.")
+    low = name.lower()
+    ent = (await ctx.session.execute(select(Entity).where(
+        Entity.tenant_id == ctx.tenant_id, Entity.deleted_at.is_(None),
+        func.lower(Entity.legal_name) == low)
+        .limit(1))).scalar_one_or_none()
+    if ent is None:
+        ent = (await ctx.session.execute(select(Entity).where(
+            Entity.tenant_id == ctx.tenant_id, Entity.deleted_at.is_(None),
+            func.lower(func.coalesce(Entity.display_name, "")) == low)
+            .limit(1))).scalar_one_or_none()
+    if ent is None:
+        # The same canonical key the lead birth and the prospect import share.
+        from evam_backend_core.company_identity import canonical_name
+
+        from app.models import Prospect
+
+        key = canonical_name(name)
+        p = (await ctx.session.execute(select(Prospect).where(
+            Prospect.tenant_id == ctx.tenant_id, Prospect.deleted_at.is_(None),
+            Prospect.name_key == key).limit(1))).scalar_one_or_none()
+        if p is not None and p.entity_id is not None:
+            ent = (await ctx.session.execute(select(Entity).where(
+                Entity.tenant_id == ctx.tenant_id, Entity.id == p.entity_id,
+                Entity.deleted_at.is_(None)))).scalar_one_or_none()
+        if ent is not None:
+            return ent, "prospect", ent.display_name or ent.legal_name
+    if ent is not None:
+        return ent, "name", ent.display_name or ent.legal_name
+    return None, "name-only", name
+
+
+@router.get("/v1/panorama", summary="Company 360 — one company across the register")
+async def company_panorama(
+    ctx: RequestContext = Depends(get_context),
+    entity_id: str | None = Query(default=None),
+    company: str | None = Query(default=None, max_length=300),
+) -> dict[str, Any]:
+    from app.authz import Access
+    from app.authz.engine import view_access
+    from app.authz.scope import build_scope, company_scoped_condition
+    from app.models import (
+        AssetMonetisation,
+        Deal,
+        Document,
+        Entity,  # noqa: F401 - resolved in _resolve_anchor
+        Interaction,
+        Lead,
+        LendingTracker,
+        Prospect,
+        SyndicationTracker,
+    )
+
+    if ctx.user is None:
+        raise ValidationAppError("The panorama needs a signed-in identity.")
+
+    ent, matched_by, display = await _resolve_anchor(ctx, entity_id, company)
+    eid = ent.id if ent is not None else None
+    scope = await build_scope(ctx, ctx.user)
+
+    def access(view: str) -> Access:
+        return view_access(ctx.user, view)
+
+    restricted: list[str] = []
+
+    async def rows(model, view: str, section: str, *conds, order=None, limit=200,
+                   options=None):
+        """The module's rows for this company under the caller's matrix access.
+        NONE → the section is named in ``restricted`` and returns []. SCOPED →
+        the same company-scope condition the list routes apply."""
+        acc = access(view)
+        if acc is Access.NONE:
+            restricted.append(section)
+            return []
+        stmt = select(model).where(model.tenant_id == ctx.tenant_id,
+                                   model.deleted_at.is_(None), *conds)
+        if acc is Access.SCOPED:
+            stmt = stmt.where(company_scoped_condition(scope, model))
+        if order is not None:
+            stmt = stmt.order_by(order)
+        if options is not None:
+            stmt = stmt.options(*options)
+        return (await ctx.session.execute(stmt.limit(limit))).scalars().all()
+
+    # ---- leads: the open book, plus how many ever became deals -----------------
+    lead_conds = ([Lead.entity_id == eid] if eid is not None
+                  else [func.lower(Lead.company) == display.lower()])
+    leads = await rows(Lead, "leads", "leads", *lead_conds,
+                       order=Lead.last_interaction_date.desc().nulls_last())
+    open_leads = [l for l in leads if l.converted_deal_id is None
+                  and (l.status or "Active") == "Active"]
+    converted = [l for l in leads if l.converted_deal_id is not None]
+
+    # ---- deals and the three product trackers ---------------------------------
+    by_entity = [] if eid is None else [Deal.entity_id == eid]
+    deals = [] if eid is None else await rows(Deal, "deals", "deals", *by_entity)
+    lending = [] if eid is None else await rows(
+        LendingTracker, "lending", "lending", LendingTracker.entity_id == eid)
+    from sqlalchemy.orm import selectinload
+
+    synd = [] if eid is None else await rows(
+        SyndicationTracker, "syndication", "syndication",
+        SyndicationTracker.entity_id == eid,
+        options=[selectinload(SyndicationTracker.lenders)])
+    am = [] if eid is None else await rows(
+        AssetMonetisation, "asset_monetisation", "asset_monetisation",
+        AssetMonetisation.entity_id == eid)
+
+    # ---- the timeline: interactions ride the deals/leads views ----------------
+    inter_view = "deals" if access("deals") is not Access.NONE else "leads"
+    inters = [] if eid is None else await rows(
+        Interaction, inter_view, "interactions", Interaction.entity_id == eid,
+        order=Interaction.occurred_at.desc(), limit=10)
+
+    # ---- documents: the Data Register (clients view, company-scoped) ----------
+    docs = [] if eid is None else await rows(
+        Document, "clients", "documents", Document.entity_id == eid,
+        order=Document.uploaded_at.desc().nulls_last(), limit=50)
+
+    # ---- prospect universe row -------------------------------------------------
+    prospect = None
+    if access("prospects") is Access.NONE:
+        restricted.append("prospects")
+    else:
+        from sqlalchemy import or_
+
+        from evam_backend_core.company_identity import canonical_name
+
+        # By master link OR by canonical name: a prospect that never went through
+        # promotion (no entity_id yet) is still this company's universe row.
+        key = canonical_name(display)
+        p_cond = (or_(Prospect.entity_id == eid, Prospect.name_key == key)
+                  if eid is not None else Prospect.name_key == key)
+        prospect = (await ctx.session.execute(select(Prospect).where(
+            Prospect.tenant_id == ctx.tenant_id, Prospect.deleted_at.is_(None),
+            p_cond).limit(1))).scalar_one_or_none()
+
+    # ---- contacts: the people we actually talk to ------------------------------
+    contacts: list[dict[str, Any]] = []
+    seen = set()
+    for l in leads:
+        if l.contact and l.contact.lower() not in seen:
+            seen.add(l.contact.lower())
+            contacts.append({"name": l.contact, "designation": l.designation,
+                             "phone": l.phone, "source": l.lead_no or "lead"})
+    for i in inters:
+        nm = (i.contact_name or "").strip()
+        if nm and nm.lower() not in seen:
+            seen.add(nm.lower())
+            contacts.append({"name": nm, "designation": None, "phone": None,
+                             "source": "interaction"})
+
+    exposure = sum((_num(r.amount_cr) or 0.0) for r in lending) \
+        + sum((_num(r.amount_cr) or 0.0) for r in synd)
+    last_touch = None
+    for i in inters:
+        last_touch = _iso(i.occurred_at)
+        break
+    if last_touch is None:
+        dts = [l.last_interaction_date for l in leads if l.last_interaction_date]
+        last_touch = _iso(max(dts)) if dts else None
+
+    # ---- the brief: deterministic, from the same rows the sections show --------
+    bits: list[str] = []
+    if ent is not None:
+        head = display
+        extras = ", ".join(x for x in [ent.sector, ent.state] if x)
+        bits.append(f"{head} ({extras})." if extras else f"{head}.")
+    else:
+        bits.append(f"{display} — no client master yet; showing what carries the name.")
+    if lending:
+        r = lending[0]
+        amt = _num(r.amount_cr)
+        amount_txt = f"₹{amt:g} Cr " if amt else ""
+        pend = f", pending with {r.pending_with}" if r.pending_with else ""
+        bits.append(f"Live lending ask of {amount_txt}at {r.stage or 'unknown stage'}{pend}.")
+    if synd:
+        r = synd[0]
+        bits.append(f"Syndication {r.tracker_no or ''} at {r.status or '—'}.".strip())
+    if open_leads:
+        l = open_leads[0]
+        note = (l.next_action or l.notes or "").strip()
+        bits.append(f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
+                    f"{l.rm or 'unassigned'})" + (f": {note[:140]}" if note else "."))
+    if converted:
+        bits.append(f"{len(converted)} lead(s) became deals.")
+    if inters:
+        i = inters[0]
+        when = i.occurred_at.date().isoformat() if i.occurred_at else ""
+        summ = (i.summary or i.notes or "").strip()
+        if summ:
+            bits.append(f"Last touch {when}: {summ[:160]}")
+    if prospect is not None and prospect.remarks:
+        bits.append(f"Desk remark: {prospect.remarks[:120]}")
+
+    return {
+        "anchor": {
+            "entity_id": str(eid) if eid else None,
+            "matched_by": matched_by,
+            "name": display,
+            "cin": getattr(ent, "cin", None) or (prospect.cin if prospect else None),
+            "sector": getattr(ent, "sector", None),
+            "sub_sector": getattr(ent, "sub_sector", None),
+            "state": getattr(ent, "state", None)
+            or (prospect.state if prospect else None),
+            "domain": (prospect.domain if prospect else None),
+            "about": getattr(ent, "about", None),
+        },
+        "restricted": restricted,
+        "stats": {
+            "open_leads": len(open_leads),
+            "leads_converted": len(converted),
+            "live_deals": len(lending) + len(synd) + len(am),
+            "exposure_ask_cr": round(exposure, 2) if exposure else None,
+            "last_touch": last_touch,
+            "documents": len(docs),
+        },
+        "leads": [{
+            "lead_no": l.lead_no, "status": l.status, "temperature": l.temperature,
+            "rm": l.rm, "sector": l.sector, "source": l.source,
+            "last_interaction_date": _iso(l.last_interaction_date),
+            "next_action": l.next_action,
+            "next_action_date": _iso(l.next_action_date),
+            "notes": l.notes, "converted": l.converted_deal_id is not None,
+        } for l in leads],
+        "deals": [{
+            "deal_no": d.deal_no, "code": d.code, "stage": d.stage,
+            "product_type": d.product_type, "rm": d.rm,
+        } for d in deals],
+        "lending": [{
+            "tracker_no": r.tracker_no, "stage": r.stage,
+            "amount_cr": _num(r.amount_cr), "pending_with": r.pending_with,
+            "rm": r.rm, "analyst": r.analyst,
+            "stage_updated_at": _iso(r.stage_updated_at),
+            "sanction_date": _iso(r.sanction_date),
+            "disbursed_amount": _num(r.disbursed_amount),
+            "remarks": r.remarks, "ladder": LENDING_LADDER,
+        } for r in lending],
+        "syndication": [{
+            "tracker_no": r.tracker_no, "status": r.status,
+            "amount_cr": _num(r.amount_cr), "pending_with": r.pending_with,
+            "rm": r.rm, "ladder": SYNDICATION_LADDER,
+            "lenders": [{
+                "name": x.lender_name, "status": x.status,
+                "amount_cr": _num(x.amount_cr),
+                "last_chase": x.last_chase_note, "last_reply": x.last_reply_note,
+            } for x in (r.lenders or [])],
+        } for r in synd],
+        "asset_monetisation": [{
+            "tracker_no": r.tracker_no, "status": r.status,
+            "indicative_value_cr": _num(r.indicative_value_cr),
+            "deal_type": r.deal_type, "investor": r.investor, "rm": r.rm,
+            "ladder": AM_LADDER,
+        } for r in am],
+        "interactions": [{
+            "occurred_at": _iso(i.occurred_at), "type": i.interaction_type,
+            "summary": i.summary, "notes": (i.notes or "")[:300] or None,
+            "by": i.performed_by, "contact": i.contact_name,
+            "lender": i.lender_name,
+        } for i in inters],
+        "documents": [{
+            "title": d.title, "section": d.section, "doc_type": d.doc_type,
+            "filename": d.original_filename,
+            "uploaded_at": _iso(d.uploaded_at), "uploaded_by": d.uploaded_by,
+        } for d in docs],
+        "prospect": None if prospect is None else {
+            "prospect_no": prospect.prospect_no, "status": prospect.status,
+            "verticals": prospect.verticals, "sub_sectors": prospect.sub_sectors,
+            "remarks": prospect.remarks, "revenue_cr": _num(prospect.revenue_cr),
+            "net_profit_cr": _num(prospect.net_profit_cr),
+            "ebitda_cr": _num(prospect.ebitda_cr),
+            "founded_year": prospect.founded_year,
+            "emails": prospect.emails, "phones": prospect.phones,
+            "lead_count": len(prospect.lead_ids or []),
+        },
+        "contacts": contacts[:10],
+        "brief": " ".join(bits),
+        "generated_at": datetime.now(UTC).isoformat(),
+    }

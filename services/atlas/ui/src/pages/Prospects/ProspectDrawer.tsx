@@ -9,6 +9,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MenuItem from '@mui/material/MenuItem';
 import { DrawerSection, FieldGrid, FieldShell, TextFld }
   from '../../components/common/Field';
+import Company360Dialog, { Company360Chip }
+  from '../../components/panorama/Company360Dialog';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
 import { prospectsService, type ProspectRow } from '../../services/prospectsService';
@@ -76,6 +78,7 @@ function DrawerBody({ p, canManage, canLead, tagOptions, onClose, onSaved,
   const [verts, setVerts] = useState<string[]>(p.verticals || []);
   const [subs, setSubs] = useState<string[]>(p.sub_sectors || []);
   const [busy, setBusy] = useState(false);
+  const [c360, setC360] = useState(false);
   const [err, setErr] = useState('');
   const set = (k: string) => (v: unknown) =>
     setF((prev) => ({ ...prev, [k]: String(v ?? '') }));
@@ -139,11 +142,13 @@ function DrawerBody({ p, canManage, canLead, tagOptions, onClose, onSaved,
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, p: '9px 16px',
         bgcolor: '#F1F3F5', borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}>
-        <Typography sx={{ fontSize: 15.6, fontWeight: 700, flex: 1 }}>
+        <Typography sx={{ fontSize: 15.6, fontWeight: 700 }}>
           {p.name}
           <Typography component="span" sx={{ fontSize: 12, color: tokens.muted,
             fontWeight: 500, ml: 1 }}>{p.prospect_no}</Typography>
         </Typography>
+        <Company360Chip onClick={() => setC360(true)} />
+        <Box sx={{ flex: 1 }} />
         <Chip size="small" color={STATUS_COLOR[p.status] || 'default'}
           label={STATUS_LABEL[p.status] || p.status} sx={{ fontSize: 10.8, height: 21 }} />
         <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
@@ -265,6 +270,8 @@ function DrawerBody({ p, canManage, canLead, tagOptions, onClose, onSaved,
         <Button size="small" variant="contained" onClick={save}
           disabled={busy || !dirty || !f.name.trim()}>Save changes</Button>
       </Box>
+      <Company360Dialog open={c360} entityId={p.entity_id} company={p.name}
+        onClose={() => setC360(false)} />
     </>
   );
 }

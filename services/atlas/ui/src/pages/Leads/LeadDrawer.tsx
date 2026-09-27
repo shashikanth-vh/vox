@@ -12,6 +12,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import { employeesService } from '../../services/employeesService';
 import InteractionRow from '../../components/common/InteractionRow';
+import Company360Dialog, { Company360Chip } from '../../components/panorama/Company360Dialog';
 import { tokens } from '../../theme';
 import type { Lead } from './lead.types';
 
@@ -31,6 +32,7 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
   const [edits, setEdits] = useState<Partial<Lead>>({});
   const [ints, setInts] = useState<Interaction[]>([]);
   const [logOpen, setLogOpen] = useState(false);
+  const [c360, setC360] = useState(false);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -105,7 +107,9 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
   return (
     <Drawer anchor="right" open={!!lead} onClose={onClose} PaperProps={{ sx: { width: 560, maxWidth: '100vw' } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, p: '9px 16px', bgcolor: '#F1F3F5', borderBottom: 1, borderColor: 'divider' }}>
-        <Typography sx={{ fontSize: 15.6, fontWeight: 700, flex: 1 }}>{v('company')}</Typography>
+        <Typography sx={{ fontSize: 15.6, fontWeight: 700 }}>{v('company')}</Typography>
+        <Company360Chip onClick={() => setC360(true)} />
+        <Box sx={{ flex: 1 }} />
         <CodeText code={row.id} /><TempPill temp={v('temp')} />
         <IconButton onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
       </Box>
@@ -183,6 +187,8 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
       </Box>
       <LogInteractionDialog code={row.id} refType="Lead" lead={row} open={logOpen}
         onClose={() => setLogOpen(false)} onDone={reloadInteractions} />
+      <Company360Dialog open={c360} entityId={row.entityId}
+        company={v('company')} onClose={() => setC360(false)} />
     </Drawer>
   );
 }

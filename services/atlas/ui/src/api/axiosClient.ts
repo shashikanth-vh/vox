@@ -23,6 +23,10 @@ export const ORCHESTRATOR_URL: string =
 // keeps it on the one door everything else uses.
 export const PULSE_URL: string =
   import.meta.env.VITE_PULSE_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/pulse` : '/pulse');
+// DocRAG — documents → cited answers. Same one-door rule as PULSE: '/docrag'
+// behind the edge, the gateway injects the service credential.
+export const DOCRAG_URL: string =
+  import.meta.env.VITE_DOCRAG_URL || (PRISM_BASE_URL ? `${PRISM_BASE_URL}/docrag` : '/docrag');
 
 // Empty dexUrl = the DEV POSTURE: no sign-in request at all, identity is header-trusted.
 // env.json ships it empty for precisely that reason.
