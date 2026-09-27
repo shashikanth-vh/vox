@@ -10,7 +10,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
-import { panoramaService, type DocAskResult, type Panorama }
+import { panoramaService, type DocAskResult, type IndexResult, type Panorama }
   from '../../services/panoramaService';
 import { fetchTerm, type Article } from '../../services/newsService';
 
@@ -124,11 +124,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [askBusy, setAskBusy] = useState(false);
   const [askOut, setAskOut] = useState<DocAskResult | null>(null);
   const [askErr, setAskErr] = useState('');
+  const [idxBusy, setIdxBusy] = useState(false);
+  const [idxOut, setIdxOut] = useState<IndexResult | null>(null);
+  const [idxErr, setIdxErr] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setP(null); setErr(''); setNews(null); setNewsErr('');
     setAsk(''); setAskOut(null); setAskErr('');
+    setIdxBusy(false); setIdxOut(null); setIdxErr('');
     setOpenSections({ engagements: true });
     let alive = true;
     panoramaService.get({ entityId, company })
@@ -152,6 +156,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     try { setAskOut(await panoramaService.askDocuments(p.anchor.name, ask.trim())); }
     catch (e: any) { setAskErr(String(e?.message || e)); }
     finally { setAskBusy(false); }
+  };
+
+  const runIndex = async () => {
+    if (!p?.anchor.entity_id) return;
+    setIdxBusy(true); setIdxErr(''); setIdxOut(null);
+    try {
+      const r = await panoramaService.indexDocuments(p.anchor.entity_id, p.anchor.name);
+      setIdxOut(r); setAskOut(null);
+    } catch (e: any) { setIdxErr(apiErr(e, 'index the documents')); }
+    finally { setIdxBusy(false); }
   };
 
   const fin = p?.prospect;
@@ -425,8 +439,29 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 </Box>
                 <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column',
                   gap: 0.7 }}>
-                  <Typography sx={{ fontSize: 10.5, fontWeight: 700,
-                    color: tokens.muted }}>ASK THE INDEXED DOCUMENTS</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ fontSize: 10.5, fontWeight: 700,
+                      color: tokens.muted }}>ASK THE INDEXED DOCUMENTS</Typography>
+                    <Box sx={{ flex: 1 }} />
+                    {p.stats.documents > 0 && p.anchor.entity_id && (
+                      <Button size="small" variant="text" onClick={runIndex}
+                        disabled={idxBusy} sx={{ fontSize: 11, py: 0 }}>
+                        {idxBusy ? <CircularProgress size={13} />
+                          : `Index ${p.stats.documents} register file(s) for Q&A`}
+                      </Button>)}
+                  </Box>
+                  {idxOut && (
+                    <Alert severity={idxOut.indexed.length ? 'success' : 'warning'}
+                      sx={{ fontSize: 11.6, py: 0 }}>
+                      Indexed {idxOut.indexed.length} of {idxOut.total_on_register}
+                      {idxOut.indexed.some((x) => x.duplicate) ? ' (some already were)' : ''}
+                      {idxOut.skipped.length
+                        ? ` · skipped ${idxOut.skipped.length}: ${idxOut.skipped
+                          .slice(0, 3).map((s) => s.reason).join('; ')}` : ''}
+                      {idxOut.note ? ` — ${idxOut.note}` : ''}
+                    </Alert>)}
+                  {idxErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>
+                    {idxErr}</Typography>}
                   <Box sx={{ display: 'flex', gap: 0.8 }}>
                     <TextField size="small" fullWidth value={ask}
                       placeholder="e.g. What is the promoter shareholding?"
@@ -438,8 +473,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   </Box>
                   {askOut?.noDocuments && (
                     <Alert severity="info" sx={{ fontSize: 11.6, py: 0 }}>
-                      No files indexed for this company yet — upload them to the
-                      document AI first, then ask again.</Alert>)}
+                      No files indexed for this company yet
+                      {p.stats.documents > 0 && p.anchor.entity_id
+                        ? ' — press “Index register file(s) for Q&A” above, then ask again.'
+                        : ' — upload documents first, then ask again.'}</Alert>)}
                   {askOut?.answer && (
                     <Box sx={{ bgcolor: '#F6FAF9', border: '1px solid #D6E7E3',
                       borderRadius: '10px', p: '9px 11px' }}>

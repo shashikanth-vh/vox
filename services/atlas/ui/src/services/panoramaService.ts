@@ -1,5 +1,6 @@
 import { api } from '../api/http';
 import { DOCRAG_URL } from '../api/axiosClient';
+import { orchestrator } from '../api/orchestratorClient';
 import { authHeaders } from '../auth/session';
 
 /**
@@ -73,6 +74,14 @@ export interface DocAskResult {
   noDocuments: boolean;
 }
 
+export interface IndexResult {
+  company: string;
+  total_on_register: number;
+  indexed: { file: string; doc_id: string | null; duplicate: boolean }[];
+  skipped: { file: string; reason: string }[];
+  note: string | null;
+}
+
 function docragHeaders(): Record<string, string> {
   return { Accept: 'application/json', 'Content-Type': 'application/json',
     ...authHeaders() };
@@ -86,6 +95,14 @@ export const panoramaService = {
     return api.get<Panorama>('/panorama', params);
   },
 
+  /** Bridge the seam the ask-box sits on: read the company's Data Register
+   *  files (as the caller — RBAC and scope hold) and index the supported ones
+   *  into DocRAG under "<Company> — <file>" names the ask-box matches. */
+  indexDocuments(entityId: string, company: string): Promise<IndexResult> {
+    return orchestrator.post<IndexResult>('/v1/panorama/index-documents',
+      { entity_id: entityId, company });
+  },
+
   /** Ask this company's indexed documents. Scoped by DocRAG doc_ids whose names
    *  carry the company; empty match = an honest "nothing indexed yet". */
   async askDocuments(company: string, question: string): Promise<DocAskResult> {
@@ -93,14 +110,24 @@ export const panoramaService = {
       { headers: docragHeaders() });
     if (!listRes.ok) throw new Error(`DocRAG unavailable (${listRes.status})`);
     const listing = await listRes.json();
-    const needle = company.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-    const ids: string[] = (listing.items || [])
-      .filter((d: any) => {
-        const n = String(d.name || d.filename || '').toLowerCase();
-        return needle.some((w) => n.includes(w));
-      })
-      .map((d: any) => String(d.id))
-      .slice(0, 50);
+    const items: any[] = listing.items || [];
+    const nameOf = (d: any) => String(d.name || d.filename || '').toLowerCase();
+    // The bridge names its uploads "<Company> — <file>", so the exact prefix is
+    // the scope. Only when nothing carries it do we fall back to word matching
+    // (hand-uploaded files) — and never on words generic enough to hit another
+    // company ("Power", "Systems", "Private").
+    const prefix = `${company.toLowerCase()} — `;
+    let matched = items.filter((d) => nameOf(d).startsWith(prefix));
+    if (!matched.length) {
+      const generic = new Set(['private', 'limited', 'systems', 'power', 'india',
+        'energy', 'solar', 'technologies', 'company', 'industries']);
+      const needle = company.toLowerCase().split(/\s+/)
+        .filter((w) => w.length > 3 && !generic.has(w));
+      if (needle.length) {
+        matched = items.filter((d) => needle.some((w) => nameOf(d).includes(w)));
+      }
+    }
+    const ids: string[] = matched.map((d) => String(d.id)).slice(0, 50);
     if (!ids.length) return { answer: null, citations: [], noDocuments: true };
     const qRes = await fetch(`${DOCRAG_URL}/v1/query`, {
       method: 'POST', headers: docragHeaders(),

@@ -93,6 +93,9 @@ _RAW: list[tuple[str, str, str]] = [
     ("DELETE", r"^/docrag/v1/documents/[^/]+$", "upload_remove_documents"),
     ("GET",    r"^/docrag/v1/documents(/.*)?$", "upload_remove_documents"),
     ("POST",   r"^/docrag/v1/query$", "upload_remove_documents"),
+    # Company 360 → DocRAG bridge (orchestrator): indexing a company's register
+    # files into the document AI reads the same material, so the same grant.
+    ("POST",   r"^/orchestrator/v1/panorama/index-documents$", "upload_remove_documents"),
     # Orchestrator — starting/deciding workflows maps to the same operation the applied
     # change requires, so an unauthorized user is stopped before a durable workflow starts.
     ("POST",   r"^/orchestrator/v1/workflows/vox-touchpoints$", "log_interaction"),

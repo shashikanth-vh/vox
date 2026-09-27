@@ -4786,6 +4786,16 @@ def create_app() -> FastAPI:
     mount_cam(app, settings, denied=denied, verified_email=_verified_email,
               caller_context=_caller_context, problem=_problem)
 
+    # Company 360 → DocRAG bridge: index a company's register files for the
+    # dialog's ask-box. Same front door, same verified identity; register reads
+    # travel as the human via the same signed-context builder the lanes use.
+    from app.panorama_bridge import mount_panorama_bridge
+    mount_panorama_bridge(
+        app, settings, denied=denied, verified_email=_verified_email,
+        caller_context=_caller_context, problem=_problem,
+        reg_headers=lambda request, caller, who, method, path:
+            _delegated_headers(request, who, caller, method, path))
+
     return app
 
 
