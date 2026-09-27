@@ -42,7 +42,9 @@ export interface Panorama {
             state: string | null; domain: string | null; about: string | null };
   restricted: string[];
   stats: { open_leads: number; leads_converted: number; live_deals: number;
-           exposure_ask_cr: number | null; last_touch: string | null;
+           deals_in_flight: number; deals_on_hold: number; deals_done: number;
+           exposure_ask_cr: number | null; booked_cr: number | null;
+           on_hold_cr: number | null; last_touch: string | null;
            documents: number };
   leads: PanoramaLead[];
   deals: { deal_no: string | null; code: string | null; stage: string | null;

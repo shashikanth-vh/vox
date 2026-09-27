@@ -251,10 +251,25 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             <Tile label="OPEN LEADS" value={String(p.stats.open_leads)}
               sub={p.stats.leads_converted
                 ? `${p.stats.leads_converted} became deal(s)` : undefined} />
-            <Tile label="LIVE DEALS" value={String(p.stats.live_deals)}
-              sub={p.lending[0]?.stage || p.syndication[0]?.status || undefined} />
-            <Tile label="EXPOSURE ASK" value={p.stats.exposure_ask_cr != null
-              ? fmtCr(p.stats.exposure_ask_cr) : '—'} sub="across live lines" />
+            <Tile label="DEALS" value={String(p.stats.live_deals)}
+              sub={[
+                p.stats.deals_in_flight ? `${p.stats.deals_in_flight} in flight` : '',
+                p.stats.deals_done ? `${p.stats.deals_done} disbursed` : '',
+                p.stats.deals_on_hold ? `${p.stats.deals_on_hold} on hold` : '',
+              ].filter(Boolean).join(' · ') || undefined} />
+            <Tile label="EXPOSURE"
+              value={p.stats.exposure_ask_cr != null ? fmtCr(p.stats.exposure_ask_cr)
+                : p.stats.booked_cr != null ? fmtCr(p.stats.booked_cr)
+                : p.stats.on_hold_cr != null ? fmtCr(p.stats.on_hold_cr) : '—'}
+              sub={[
+                p.stats.exposure_ask_cr != null ? 'in-flight ask' : '',
+                p.stats.booked_cr != null
+                  ? (p.stats.exposure_ask_cr != null
+                    ? `${fmtCr(p.stats.booked_cr)} booked` : 'booked · disbursed') : '',
+                p.stats.on_hold_cr != null
+                  ? (p.stats.exposure_ask_cr != null || p.stats.booked_cr != null
+                    ? `${fmtCr(p.stats.on_hold_cr)} on hold` : 'on hold') : '',
+              ].filter(Boolean).join(' · ') || undefined} />
             <Tile label="LAST TOUCH" value={fmtDay(p.stats.last_touch)}
               sub={p.interactions[0]?.by || undefined} />
             <Tile label="NEWS · 30 DAYS" value={news ? String(news.length) : '…'}

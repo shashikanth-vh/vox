@@ -68,11 +68,29 @@ def _clip(s: str | None, n: int) -> str:
     return cut + "…"
 
 
-# A DEAD line is not a live deal: it neither counts nor carries exposure, and the
-# brief says what happened to it instead of calling it an ask.
+# Every line lands in ONE bucket, and the words follow the bucket:
+#   in-flight — being worked: counts as a live deal, its amount is the ASK;
+#   on hold   — paused: named, its amount shown as on hold, never as an ask;
+#   done      — finished successfully (Disbursed / Closed): the BOOK, not an ask;
+#   dead      — Rejected / Withdrawn / Dropped: neither counted nor summed.
 LENDING_DEAD = {"Rejected"}
+LENDING_DONE = {"Disbursed"}
 SYN_DEAD = {"Withdrawn", "Rejected", "Dropped"}
-AM_DEAD = {"Dropped", "Closed"}  # Closed = completed — finished, not live
+SYN_DONE = {"Disbursed"}
+AM_DEAD = {"Dropped"}
+AM_DONE = {"Closed"}
+ON_HOLD = {"On Hold"}
+
+
+def _bucket(state: str | None, dead: set, done: set) -> str:
+    s = state or ""
+    if s in dead:
+        return "dead"
+    if s in done:
+        return "done"
+    if s in ON_HOLD:
+        return "hold"
+    return "flight"
 
 
 async def _resolve_anchor(ctx: RequestContext, entity_id: str | None,
@@ -247,11 +265,25 @@ async def company_panorama(
             contacts.append({"name": nm, "designation": None, "phone": None,
                              "source": "interaction"})
 
-    live_lending = [r for r in lending if (r.stage or "") not in LENDING_DEAD]
-    live_synd = [r for r in synd if (r.status or "") not in SYN_DEAD]
-    live_am = [r for r in am if (r.status or "") not in AM_DEAD]
-    exposure = sum((_num(r.amount_cr) or 0.0) for r in live_lending) \
-        + sum((_num(r.amount_cr) or 0.0) for r in live_synd)
+    lines = ([("lending", r, _bucket(r.stage, LENDING_DEAD, LENDING_DONE))
+              for r in lending]
+             + [("syndication", r, _bucket(r.status, SYN_DEAD, SYN_DONE))
+                for r in synd]
+             + [("am", r, _bucket(r.status, AM_DEAD, AM_DONE)) for r in am])
+    in_flight = [(k, r) for k, r, b in lines if b == "flight"]
+    on_hold = [(k, r) for k, r, b in lines if b == "hold"]
+    done = [(k, r) for k, r, b in lines if b == "done"]
+
+    def _amt(kind: str, r: Any, booked: bool = False) -> float:
+        if kind == "am":
+            return _num(r.indicative_value_cr) or 0.0
+        if booked and kind == "lending":
+            return _num(r.disbursed_amount) or _num(r.amount_cr) or 0.0
+        return _num(r.amount_cr) or 0.0
+
+    ask_cr = sum(_amt(k, r) for k, r in in_flight if k != "am")
+    booked_cr = sum(_amt(k, r, booked=True) for k, r in done if k != "am")
+    on_hold_cr = sum(_amt(k, r) for k, r in on_hold if k != "am")
     last_touch = None
     for i in inters:
         last_touch = _iso(i.occurred_at)
@@ -268,22 +300,38 @@ async def company_panorama(
         bits.append(f"{head} ({extras})." if extras else f"{head}.")
     else:
         bits.append(f"{display} — no client master yet; showing what carries the name.")
-    if live_lending:
-        r = live_lending[0]
+    _KIND = {"lending": "Lending", "syndication": "Syndication",
+             "am": "Asset monetisation"}
+    fl_lending = [r for k, r in in_flight if k == "lending"]
+    if fl_lending:
+        r = fl_lending[0]
         amt = _num(r.amount_cr)
         amount_txt = f"₹{amt:g} Cr " if amt else ""
         pend = f", pending with {r.pending_with}" if r.pending_with else ""
         bits.append(f"Live lending ask of {amount_txt}at {r.stage or 'unknown stage'}{pend}.")
-    dead_lending = [r for r in lending if (r.stage or "") in LENDING_DEAD]
-    if dead_lending:
-        bits.append(f"Lending {dead_lending[0].tracker_no or ''} was "
-                    f"{(dead_lending[0].stage or 'closed').lower()}.".replace("  ", " "))
-    if live_synd:
-        r = live_synd[0]
-        bits.append(f"Syndication {r.tracker_no or ''} at {r.status or '—'}.".strip())
-    if live_am:
-        r = live_am[0]
-        bits.append(f"Asset monetisation {r.tracker_no or ''} at {r.status or '—'}.".strip())
+    for k, r in done[:2]:
+        amt = _amt(k, r, booked=True)
+        bits.append(f"{_KIND[k]} {r.tracker_no or ''} "
+                    f"{'disbursed' if k != 'am' else 'closed'}"
+                    + (f" ₹{amt:g} Cr." if amt else "."))
+    for k, r in on_hold[:2]:
+        amt = _amt(k, r)
+        bits.append(f"{_KIND[k]} {r.tracker_no or ''} on hold"
+                    + (f" (₹{amt:g} Cr)." if amt else "."))
+    for k, r, b in lines:
+        if b == "dead":
+            state = (r.stage if k == "lending" else r.status) or "closed"
+            bits.append(f"{_KIND[k]} {r.tracker_no or ''} was {state.lower()}.")
+            break
+    for k, r in in_flight:
+        if k == "syndication":
+            bits.append(f"Syndication {r.tracker_no or ''} at {r.status or '—'}.".strip())
+            break
+    for k, r in in_flight:
+        if k == "am":
+            bits.append(f"Asset monetisation {r.tracker_no or ''} at "
+                        f"{r.status or '—'}.".strip())
+            break
     if open_leads:
         l = open_leads[0]
         note = _clip(l.next_action or l.notes, 140)
@@ -317,8 +365,15 @@ async def company_panorama(
         "stats": {
             "open_leads": len(open_leads),
             "leads_converted": len(converted),
-            "live_deals": len(live_lending) + len(live_synd) + len(live_am),
-            "exposure_ask_cr": round(exposure, 2) if exposure else None,
+            # Everything that is neither dead nor merely historical — with the
+            # composition beside it so "2" can say "1 disbursed · 1 on hold".
+            "live_deals": len(in_flight) + len(on_hold) + len(done),
+            "deals_in_flight": len(in_flight),
+            "deals_on_hold": len(on_hold),
+            "deals_done": len(done),
+            "exposure_ask_cr": round(ask_cr, 2) if ask_cr else None,
+            "booked_cr": round(booked_cr, 2) if booked_cr else None,
+            "on_hold_cr": round(on_hold_cr, 2) if on_hold_cr else None,
             "last_touch": last_touch,
             "documents": len(docs),
         },
