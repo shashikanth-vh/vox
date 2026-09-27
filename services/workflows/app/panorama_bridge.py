@@ -28,8 +28,13 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Request
 from pydantic import BaseModel, ConfigDict, Field
+
+from evam_backend_core.logging import get_logger
+
+log = get_logger("panorama.bridge")
 
 # Mirrors services/docrag/app/store.SUPPORTED_SUFFIXES (kept small on purpose:
 # a new suffix lands there first, then here).
@@ -122,9 +127,15 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
         # filter must fail loudly, not silently return everything) — so this
         # speaks their exact dialect: `limit`, not `page_size`.
         list_path = f"/v1/documents?entity_id={payload.entity_id}&limit=100"
-        r = await http.get(f"{base}{list_path}",
-                           headers=reg_headers(request, caller, who, "GET",
-                                               "/v1/documents"))
+        try:
+            r = await http.get(f"{base}{list_path}",
+                               headers=reg_headers(request, caller, who, "GET",
+                                                   "/v1/documents"))
+        except httpx.HTTPError as exc:
+            log.warning("panorama_index_register_unreachable",
+                        extra={"error": str(exc)})
+            return problem(502, "Register unreachable",
+                           f"Could not read the document list: {exc}")
         if r.status_code >= 300:
             return problem(502, "Register refused the document list",
                            f"HTTP {r.status_code} from the register.")
@@ -133,43 +144,74 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
         indexed: list[dict[str, Any]] = []
         skipped: list[dict[str, str]] = []
 
-        async def _fetch(doc_id: str) -> tuple[bytes | None, str, int]:
+        # Every per-file network hop is guarded: one unreachable host or one
+        # corrupt file becomes a NAMED skip, never a 500 that hides the rest.
+        async def _fetch(doc_id: str) -> tuple[bytes | None, str, str]:
             content_path = f"/v1/documents/{doc_id}/content"
-            got = await http.get(f"{base}{content_path}",
-                                 headers=reg_headers(request, caller, who, "GET",
-                                                     content_path),
-                                 follow_redirects=True)
+            try:
+                got = await http.get(f"{base}{content_path}",
+                                     headers=reg_headers(request, caller, who,
+                                                         "GET", content_path),
+                                     follow_redirects=True,
+                                     timeout=60.0)
+            except httpx.HTTPError as exc:
+                return None, "", f"register read failed ({exc.__class__.__name__})"
             if got.status_code >= 300:
-                return None, "", got.status_code
-            return got.content, got.headers.get("content-type") or "", 200
+                return None, "", f"register refused the read (HTTP {got.status_code})"
+            return got.content, got.headers.get("content-type") or "", ""
 
         async def _upload(display_name: str, data: bytes, ctype: str) -> None:
-            up = await http.post(
-                f"{docrag_url}/v1/documents",
-                headers={"X-API-Key": settings.docrag_api_key,
-                         "X-Tenant": request.headers.get(
-                             "X-Tenant", settings.register_tenant)},
-                files={"file": (f"{payload.company} — {display_name}", data,
-                                ctype or "application/octet-stream")},
-                timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
+            try:
+                up = await http.post(
+                    f"{docrag_url}/v1/documents",
+                    headers={"X-API-Key": settings.docrag_api_key,
+                             "X-Tenant": request.headers.get(
+                                 "X-Tenant", settings.register_tenant)},
+                    files={"file": (f"{payload.company} — {display_name}", data,
+                                    ctype or "application/octet-stream")},
+                    timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
+            except httpx.HTTPError as exc:
+                log.warning("panorama_index_docrag_unreachable",
+                            extra={"error": str(exc), "docrag": docrag_url})
+                skipped.append({"file": display_name,
+                                "reason": f"document AI unreachable at {docrag_url} "
+                                          f"({exc.__class__.__name__}) — is the "
+                                          f"docrag container running?"})
+                return
             if up.status_code >= 300:
                 skipped.append({"file": display_name,
                                 "reason": f"document AI refused it "
                                           f"(HTTP {up.status_code})"})
                 return
-            body = up.json()
+            try:
+                body = up.json()
+            except ValueError:
+                body = {}
             indexed.append({"file": display_name, "doc_id": body.get("id"),
                             "duplicate": bool(body.get("duplicate"))})
 
+        try:
+            await _walk(items, _fetch, _upload, skipped)
+        except Exception as exc:  # noqa: BLE001 - the last resort must NAME itself
+            log.exception("panorama_index_failed")
+            return problem(500, "Indexing failed",
+                           f"{exc.__class__.__name__}: {exc}")
+
+        return {"company": payload.company, "total_on_register": len(items),
+                "indexed": indexed, "skipped": skipped,
+                "note": ("Files are processed in the background — the first "
+                         "answers may take a minute while pages are read.")
+                if indexed else None}
+
+    async def _walk(items: list, _fetch: Any, _upload: Any,
+                    skipped: list) -> None:
         for d in items:
             fname = d.get("original_filename") or f"{d.get('title', 'document')}"
             suffix = Path(fname).suffix.lower()
             if suffix == ".zip":
-                blob, _, status = await _fetch(d.get("id"))
+                blob, _, why = await _fetch(d.get("id"))
                 if blob is None:
-                    skipped.append({"file": fname,
-                                    "reason": f"register refused the read "
-                                              f"(HTTP {status})"})
+                    skipped.append({"file": fname, "reason": why})
                     continue
                 inner, inner_skips = unpack_zip(blob, fname)
                 skipped.extend(inner_skips)
@@ -181,16 +223,8 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                                 "reason": f"{suffix or 'no extension'} is not "
                                           f"readable by the document AI"})
                 continue
-            blob, ctype, status = await _fetch(d.get("id"))
+            blob, ctype, why = await _fetch(d.get("id"))
             if blob is None:
-                skipped.append({"file": fname,
-                                "reason": f"register refused the read "
-                                          f"(HTTP {status})"})
+                skipped.append({"file": fname, "reason": why})
                 continue
             await _upload(fname, blob, ctype)
-
-        return {"company": payload.company, "total_on_register": len(items),
-                "indexed": indexed, "skipped": skipped,
-                "note": ("Files are processed in the background — the first "
-                         "answers may take a minute while pages are read.")
-                if indexed else None}
