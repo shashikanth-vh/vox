@@ -28,6 +28,22 @@ import { fetchTerm, type Article } from '../../services/newsService';
 
 const CHART_TEAL = '#0D9488';
 
+// One-tap questions for the ask-box — the needs the desk actually has when a
+// file lands, phrased so retrieval finds the right pages. Free text stays for
+// everything else.
+const ASK_PRESETS: [string, string][] = [
+  ['Key financials', 'What are the key financials — revenue, EBITDA, PAT, net '
+    + 'worth and borrowings — with figures and the years they belong to?'],
+  ['Promoters & shareholding', 'Who are the promoters and directors, and what '
+    + 'is the shareholding pattern, including any pledge of shares?'],
+  ['Registrations', 'List the company’s registrations and identifiers: '
+    + 'CIN, PAN and GST numbers with their states and validity.'],
+  ['Banking & CIBIL', 'What do the banking and CIBIL documents show — '
+    + 'accounts, limits, scores, overdues and any adverse remarks?'],
+  ['Compliance', 'Which compliance filings and certificates are present, and '
+    + 'what is their status or validity?'],
+];
+
 function fmtCr(v: number | null | undefined): string {
   return v == null ? '—' : `₹${Number(v).toLocaleString('en-IN',
     { maximumFractionDigits: 1 })} Cr`;
@@ -150,10 +166,12 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const toggle = (id: string) =>
     setOpenSections((s) => ({ ...s, [id]: !s[id] }));
 
-  const runAsk = async () => {
-    if (!p || !ask.trim()) return;
+  const runAsk = async (preset?: string) => {
+    const q = (preset ?? ask).trim();
+    if (!p || !q) return;
+    if (preset) setAsk(preset);
     setAskBusy(true); setAskErr(''); setAskOut(null);
-    try { setAskOut(await panoramaService.askDocuments(p.anchor.name, ask.trim())); }
+    try { setAskOut(await panoramaService.askDocuments(p.anchor.name, q)); }
     catch (e: any) { setAskErr(String(e?.message || e)); }
     finally { setAskBusy(false); }
   };
@@ -462,12 +480,20 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     </Alert>)}
                   {idxErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>
                     {idxErr}</Typography>}
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                    {ASK_PRESETS.map(([label, q]) => (
+                      <Chip key={label} size="small" clickable label={label}
+                        disabled={askBusy} onClick={() => runAsk(q)}
+                        sx={{ height: 22, fontSize: 10.8, fontWeight: 600,
+                          color: tokens.tealHi, bgcolor: '#F0F8F6',
+                          border: `1px solid ${tokens.tealHi}` }} />))}
+                  </Box>
                   <Box sx={{ display: 'flex', gap: 0.8 }}>
                     <TextField size="small" fullWidth value={ask}
-                      placeholder="e.g. What is the promoter shareholding?"
+                      placeholder="…or ask anything about these files"
                       onChange={(e) => setAsk(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') runAsk(); }} />
-                    <Button size="small" variant="outlined" onClick={runAsk}
+                    <Button size="small" variant="outlined" onClick={() => runAsk()}
                       disabled={askBusy || !ask.trim()}>
                       {askBusy ? <CircularProgress size={15} /> : 'Ask'}</Button>
                   </Box>
@@ -488,6 +514,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                           cited · {askOut.citations.map((c) =>
                             [c.doc, c.where].filter(Boolean).join(' ')).join(' · ')}
                         </Typography>)}
+                      {askOut.mode === 'extractive' && (
+                        <Typography sx={{ fontSize: 10, color: tokens.muted,
+                          mt: 0.4 }}>
+                          Matching passages shown — written summaries switch on
+                          with the answer model.</Typography>)}
                     </Box>)}
                   {askErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>
                     Document AI did not answer: {askErr}</Typography>}

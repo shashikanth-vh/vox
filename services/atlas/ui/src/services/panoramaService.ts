@@ -72,6 +72,8 @@ export interface DocAskResult {
   answer: string | null;
   citations: { doc: string; where: string }[];
   noDocuments: boolean;
+  /** 'generative' = a written summary; 'extractive' = cited passages. */
+  mode: 'generative' | 'extractive' | null;
 }
 
 export interface IndexResult {
@@ -128,12 +130,17 @@ export const panoramaService = {
       }
     }
     const ids: string[] = matched.map((d) => String(d.id)).slice(0, 50);
-    if (!ids.length) return { answer: null, citations: [], noDocuments: true };
-    const qRes = await fetch(`${DOCRAG_URL}/v1/query`, {
+    if (!ids.length) {
+      return { answer: null, citations: [], noDocuments: true, mode: null };
+    }
+    // A WRITTEN summary when the answer model is configured; cited passages
+    // when it is not (409) or it stumbles (502) — never a dead end.
+    const run = (mode: string) => fetch(`${DOCRAG_URL}/v1/query`, {
       method: 'POST', headers: docragHeaders(),
-      body: JSON.stringify({ query: question, mode: 'extractive', top_k: 5,
-        doc_ids: ids }),
+      body: JSON.stringify({ query: question, mode, top_k: 5, doc_ids: ids }),
     });
+    let qRes = await run('generative');
+    if (qRes.status === 409 || qRes.status === 502) qRes = await run('extractive');
     if (!qRes.ok) throw new Error(`DocRAG query failed (${qRes.status})`);
     const out = await qRes.json();
     const citations = (out.citations || []).slice(0, 3).map((c: any) => ({
@@ -143,6 +150,7 @@ export const panoramaService = {
         .filter(Boolean).join(' · '),
     }));
     return { answer: typeof out.answer === 'string' ? out.answer : null,
-      citations, noDocuments: false };
+      citations, noDocuments: false,
+      mode: out.mode === 'generative' ? 'generative' : 'extractive' };
   },
 };
