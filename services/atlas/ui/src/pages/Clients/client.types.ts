@@ -11,5 +11,10 @@ export interface Client {
   entityId?: string;
   /** The Register's own unique code (e.g. ECOSOCH-123456) — distinct from the local group code. */
   entityCode?: string;
+  /** Optional identity — the CIN anchors the 360's market feed (Tracxn). */
+  cin?: string;
+  city?: string;
+  country?: string;
+  address?: string;
 }
 export interface ClientRow extends Client { code: string; }

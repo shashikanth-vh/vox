@@ -126,3 +126,47 @@ async def test_no_cin_anywhere_says_where_to_add_it(reg: AsyncClient, monkeypatc
                       headers=ADMIN)
     assert r.status_code == 409
     assert "No CIN on record" in r.json()["error"]["detail"]
+
+
+async def test_placeholder_cin_is_ignored_and_a_lead_cin_is_used(reg: AsyncClient,
+                                                                   monkeypatch):
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+    # The placeholder older UI builds stamped: stem + the code's own six digits.
+    ent = await reg.post("/v1/entities", headers=ADMIN, json={
+        "code": "GENESIS-482913", "legal_name": "Genesis Poweronics Pvt Ltd",
+        "cin": "U40106KA2015PTC482913"})
+    assert ent.status_code == 201, ent.text
+    eid = ent.json()["id"]
+
+    # Placeholder only → treated as NO CIN; nothing is sent to Tracxn.
+    r = await reg.get(f"/v1/panorama/financials?entity_id={eid}", headers=ADMIN)
+    assert r.status_code == 409
+    assert reg._calls == []  # type: ignore[attr-defined]
+    pano = (await reg.get(f"/v1/panorama?entity_id={eid}", headers=ADMIN)).json()
+    assert pano["anchor"]["cin"] is None
+
+    # The desk types the real CIN on a lead of this (already existing) master.
+    lead = await reg.post("/v1/leads", headers=ADMIN, json={
+        "company": "Genesis Poweronics Pvt Ltd", "source": "BDRM",
+        "entity_id": eid})
+    assert lead.status_code == 201, lead.text
+    up = await reg.patch(f"/v1/leads/{lead.json()['id']}", headers=ADMIN,
+                         json={"cin": CIN})
+    assert up.status_code == 200, up.text
+
+    r2 = await reg.get(f"/v1/panorama/financials?entity_id={eid}", headers=ADMIN)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["cin"] == CIN and r2.json()["resolved"] is True
+    pano2 = (await reg.get(f"/v1/panorama?entity_id={eid}", headers=ADMIN)).json()
+    assert pano2["anchor"]["cin"] == CIN
+
+
+def test_a_genuine_cin_with_the_same_stem_is_kept():
+    class E:  # noqa: D401 — a stand-in master
+        code = "SUNRISE-7B54"
+        cin = "U40106KA2015PTC482913"
+    assert tracxn_mod.real_cin(E()) == "U40106KA2015PTC482913"
+    E.code = "SUNRISE-111111"
+    assert tracxn_mod.real_cin(E()) == "U40106KA2015PTC482913"
+    E.code = "SUNRISE-482913"
+    assert tracxn_mod.real_cin(E()) is None

@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import Query
 from sqlalchemy import func, select
 
+from app.api.tracxn import real_cin
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -371,7 +372,9 @@ async def company_panorama(
             "entity_id": str(eid) if eid else None,
             "matched_by": matched_by,
             "name": display,
-            "cin": getattr(ent, "cin", None) or (prospect.cin if prospect else None),
+            "cin": real_cin(ent)
+            or next((l.cin.strip() for l in leads if (l.cin or "").strip()), None)
+            or (prospect.cin if prospect else None),
             "sector": getattr(ent, "sector", None),
             "sub_sector": getattr(ent, "sub_sector", None),
             "state": getattr(ent, "state", None)

@@ -190,9 +190,28 @@ def normalize(kind: str, payload: dict | None) -> dict:
     return {"legal_entity_id": None, "rows": len(rows)}
 
 
+_PLACEHOLDER_CIN_STEM = "U40106KA2015PTC"
+
+
+def real_cin(entity: Any) -> str | None:
+    """The master's CIN, unless it is the placeholder older ATLAS builds stamped
+    on every UI-created client: the fixed stem plus the SAME six digits that
+    end the entity code (``NAME-123456`` ↔ ``U40106KA2015PTC123456``). That
+    pairing is exact, so a genuine CIN is never mistaken for one — and a
+    placeholder is never sent to a paid API."""
+    cin = (getattr(entity, "cin", None) or "").strip()
+    if not cin:
+        return None
+    code = getattr(entity, "code", None) or ""
+    tail = code.rsplit("-", 1)[-1] if "-" in code else ""
+    if tail.isdigit() and len(tail) == 6 and cin == f"{_PLACEHOLDER_CIN_STEM}{tail}":
+        return None
+    return cin
+
+
 async def _resolve_cin(ctx: RequestContext, entity_id: str | None,
                        cin: str | None) -> str:
-    from app.models import Entity, Prospect
+    from app.models import Entity, Lead, Prospect
 
     if cin and cin.strip():
         return cin.strip()
@@ -201,8 +220,16 @@ async def _resolve_cin(ctx: RequestContext, entity_id: str | None,
     ent = (await ctx.session.execute(select(Entity).where(
         Entity.tenant_id == ctx.tenant_id, Entity.id == entity_id,
         Entity.deleted_at.is_(None)))).scalar_one_or_none()
-    if ent is not None and ent.cin:
-        return ent.cin
+    if ent is not None and real_cin(ent):
+        return real_cin(ent)
+    # A CIN the desk typed on a lead AFTER the master existed never reaches the
+    # master (birth-only copy) — but it is still this company's CIN.
+    lc = (await ctx.session.execute(select(Lead.cin).where(
+        Lead.tenant_id == ctx.tenant_id, Lead.deleted_at.is_(None),
+        Lead.entity_id == entity_id, Lead.cin.is_not(None), Lead.cin != "")
+        .order_by(Lead.updated_at.desc()).limit(1))).scalar_one_or_none()
+    if lc:
+        return lc.strip()
     # The prospect universe may know the CIN even when the master does not.
     p = (await ctx.session.execute(select(Prospect.cin).where(
         Prospect.tenant_id == ctx.tenant_id, Prospect.deleted_at.is_(None),

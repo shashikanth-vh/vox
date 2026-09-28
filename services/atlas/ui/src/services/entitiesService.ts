@@ -26,7 +26,10 @@ export interface EntityInput {
   register_status: string;
   state: string;
   location: string;
-  cin: string;
+  cin?: string;
+  city?: string;
+  country?: string;
+  address?: string;
   notes: string;
 }
 
@@ -44,6 +47,11 @@ export interface EntitySeed {
   state?: string;
   location?: string;
   registerStatus?: string;
+  /** Optional identity — sent only when the desk actually knows it. */
+  cin?: string;
+  city?: string;
+  country?: string;
+  address?: string;
 }
 
 // Mirrors the collection's pre-request script: runSuffix = String(Date.now()).slice(-6).
@@ -78,9 +86,22 @@ export function buildEntityPayload(seed: EntitySeed, suffix = runSuffix()): Enti
     // still sends the collection's values rather than an empty string.
     state: state || 'Karnataka',
     location: (seed.location || '').trim() || state || 'Bengaluru, Karnataka',
-    cin: `U40106KA2015PTC${suffix}`,
+    // Identity goes only when KNOWN. (Older builds stamped a made-up CIN here,
+    // which would have been sent to the paid market feed as if it were real.)
+    ...Object.fromEntries((['cin', 'city', 'country', 'address'] as const)
+      .map((k) => [k, (seed[k] || '').trim()]).filter(([, v]) => v)),
     notes: seed.notes || '',
   };
+}
+
+/** The placeholder older builds stamped: fixed stem + the entity code's own six
+ *  digits. Read back as blank so the drawer invites the real one. Mirrors the
+ *  register's `real_cin`. */
+export function realCin(e: any): string {
+  const cin = String(e?.cin || '').trim();
+  const code = String(e?.code || '');
+  const tail = code.includes('-') ? code.slice(code.lastIndexOf('-') + 1) : '';
+  return /^\d{6}$/.test(tail) && cin === `U40106KA2015PTC${tail}` ? '' : cin;
 }
 
 // --- reads -----------------------------------------------------------------
@@ -127,6 +148,10 @@ export function toClientRow(e: any): ClientRow {
     lifecycle: LIFECYCLE_OF[e?.register_status] || e?.register_status || 'Prospect',
     entityId: e?.id,
     entityCode: e?.code,
+    cin: realCin(e),
+    city: e?.city || '',
+    country: e?.country || '',
+    address: e?.address || '',
   };
 }
 

@@ -7,7 +7,7 @@ import { clientsService } from '../../services/clientsService';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
 
-const blank = { name: '', sector: 'Other', lens: 'Mitigation', state: '', toi: '', about: '' };
+const blank = { name: '', sector: 'Other', lens: 'Mitigation', state: '', toi: '', about: '', cin: '', city: '', country: '', address: '' };
 
 export default function AddClientDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const { user } = useAuth();
@@ -38,11 +38,17 @@ export default function AddClientDialog({ open, onClose, onSaved }: { open: bool
           <SelectFld label="Segment / sector" value={f.sector} onChange={(v) => set('sector', v)} options={referenceService.getRefSync('Sector')} />
           <SelectFld label="Climate lens" value={f.lens} onChange={(v) => set('lens', v)} options={referenceService.getRefSync('Lens')} />
           <TextFld label="State" value={f.state} onChange={(v) => set('state', v)} />
+          <TextFld label="CIN (optional)" value={f.cin} onChange={(v) => set('cin', v)} placeholder="21-character MCA CIN" />
+          <TextFld label="City (optional)" value={f.city} onChange={(v) => set('city', v)} />
+          <TextFld label="Country (optional)" value={f.country} onChange={(v) => set('country', v)} />
           <TextFld label="Type of industry" value={f.toi} onChange={(v) => set('toi', v)} placeholder="EPC / IPP / Manufacturing / Services" />
         </FieldGrid>
         <Box sx={{ mt: 1.4 }}>
           <TextFld label="About the company" value={f.about} onChange={(v) => set('about', v)} multiline
             placeholder="3–4 lines: what they do, scale, why it fits Evam" />
+        </Box>
+        <Box sx={{ mt: 1.4 }}>
+          <TextFld label="Registered address (optional)" value={f.address} onChange={(v) => set('address', v)} multiline />
         </Box>
         <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: 1 }}>
           The Group Code is minted automatically from the name.

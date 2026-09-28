@@ -30,7 +30,7 @@ export const clientsService = {
     hydrate(rows);
   },
 
-  get(code: string): Client { return db().clients[code] ?? { name: code, sector: '', lens: '', state: '', about: '', toi: '' }; },
+  get(code: string): Client { return db().clients[code] ?? { name: code, sector: '', lens: '', state: '', about: '', toi: '', cin: '', city: '', country: '', address: '' }; },
   // A client IS a Register entity, so the read is GET /v1/entities — there is no
   // /clients route. The Register neither pages nor sorts for us (its filtering is
   // fail-closed, so sending page/size/sortBy would 400 the whole list), hence the
@@ -59,7 +59,7 @@ export const clientsService = {
   // unknown sector) has to reach the user instead of console.warn. The local-store
   // insert stays optimistic so the grid updates instantly, and mock mode skips
   // straight to it.
-  async create(input: { name: string; sector?: string; lens?: string; state?: string; toi?: string; about?: string }, by: string): Promise<{ ok: boolean; error?: string; code?: string }> {
+  async create(input: { name: string; sector?: string; lens?: string; state?: string; toi?: string; about?: string; cin?: string; city?: string; country?: string; address?: string }, by: string): Promise<{ ok: boolean; error?: string; code?: string }> {
     const name = (input.name || '').trim();
     if (!name) return { ok: false, error: 'Company name is required' };
     // The duplicate check asks the REGISTER, not the browser's cache. That cache holds
@@ -83,6 +83,8 @@ export const clientsService = {
     const client: any = {
       name, sector: input.sector || 'Other', lens: input.lens || 'Mitigation',
       state: input.state || '', about: input.about || '', toi: input.toi || '',
+      cin: (input.cin || '').trim(), city: (input.city || '').trim(),
+      country: (input.country || '').trim(), address: (input.address || '').trim(),
       notes: `Added ${today()}`, lifecycle: 'Prospect',
     };
     if (USE_REAL_API) {
@@ -90,6 +92,8 @@ export const clientsService = {
         const entity = await entitiesService.create({
           company: name, sector: client.sector, lens: client.lens,
           state: client.state, notes: client.about,
+          cin: client.cin, city: client.city, country: client.country,
+          address: client.address,
         });
         client.entityId = entity?.id;
         client.entityCode = entity?.code;
@@ -115,7 +119,7 @@ export const clientsService = {
     // register_status), so they are left off rather than sent somewhere they are ignored.
     const wire: Record<string, string> = {
       name: 'legal_name', sector: 'sector', lens: 'lens', state: 'state',
-      about: 'notes',
+      about: 'notes', cin: 'cin', city: 'city', country: 'country', address: 'address',
     };
     const body: Record<string, any> = {};
     Object.entries(patch).forEach(([k, v]) => { if (wire[k]) body[wire[k]] = v; });
