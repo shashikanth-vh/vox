@@ -134,6 +134,8 @@ async def test_panorama_tells_the_whole_story(reg: AsyncClient):
     # OPEN leads, not lifetime — the converted one is history, not an open lead.
     assert p["stats"]["open_leads"] == 1
     assert p["stats"]["leads_converted"] == 1
+    # The two-layer model spoken correctly: ONE deal, TWO product lines.
+    assert p["stats"]["deal_count"] == 1
     # Buckets, not a blur: the rejected line vanishes; the on-hold mandate is
     # counted but NAMED as on hold, and its ₹25 Cr never joins the ask.
     assert p["stats"]["live_deals"] == 2

@@ -41,7 +41,8 @@ export interface Panorama {
             cin: string | null; sector: string | null; sub_sector: string | null;
             state: string | null; domain: string | null; about: string | null };
   restricted: string[];
-  stats: { open_leads: number; leads_converted: number; live_deals: number;
+  stats: { open_leads: number; leads_converted: number;
+           deal_count: number | null; live_deals: number;
            deals_in_flight: number; deals_on_hold: number; deals_done: number;
            exposure_ask_cr: number | null; booked_cr: number | null;
            on_hold_cr: number | null; last_touch: string | null;

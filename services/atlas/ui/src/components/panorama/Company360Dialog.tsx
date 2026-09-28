@@ -251,7 +251,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             <Tile label="OPEN LEADS" value={String(p.stats.open_leads)}
               sub={p.stats.leads_converted
                 ? `${p.stats.leads_converted} became deal(s)` : undefined} />
-            <Tile label="DEALS" value={String(p.stats.live_deals)}
+            <Tile
+              label={p.stats.deal_count != null ? 'DEALS · PRODUCTS' : 'PRODUCTS'}
+              value={p.stats.deal_count != null
+                ? `${p.stats.deal_count} · ${p.stats.live_deals}`
+                : String(p.stats.live_deals)}
               sub={[
                 p.stats.deals_in_flight ? `${p.stats.deals_in_flight} in flight` : '',
                 p.stats.deals_done ? `${p.stats.deals_done} disbursed` : '',

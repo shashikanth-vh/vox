@@ -365,8 +365,14 @@ async def company_panorama(
         "stats": {
             "open_leads": len(open_leads),
             "leads_converted": len(converted),
-            # Everything that is neither dead nor merely historical — with the
-            # composition beside it so "2" can say "1 disbursed · 1 on hold".
+            # The house's two-layer model, spoken correctly: a company has DEALS
+            # (the commercial relationships) and each deal carries PRODUCT LINES
+            # (lending / syndication / asset monetisation). Zeon is 1 deal with
+            # 2 products — never "2 deals". deal_count is None when the deals
+            # view is restricted for this caller (unknown, not zero).
+            "deal_count": None if "deals" in restricted else len(deals),
+            # Product lines that are neither dead nor merely historical — with
+            # the composition beside it so "2" can say "1 disbursed · 1 on hold".
             "live_deals": len(in_flight) + len(on_hold) + len(done),
             "deals_in_flight": len(in_flight),
             "deals_on_hold": len(on_hold),
