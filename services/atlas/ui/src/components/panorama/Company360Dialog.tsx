@@ -157,6 +157,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     { engagements: true });
   const [briefOpen, setBriefOpen] = useState(false);
+  const [newsSev, setNewsSev] = useState<Severity | null>(null);
   const [ask, setAsk] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [askOut, setAskOut] = useState<DocAskResult | null>(null);
@@ -170,14 +171,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setP(null); setErr(''); setNews(null); setNewsErr('');
     setAsk(''); setAskOut(null); setAskErr('');
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
-    setOpenSections({ engagements: true }); setBriefOpen(false);
+    setOpenSections({ engagements: true }); setBriefOpen(false); setNewsSev(null);
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => { if (!alive) return; setP(r);
         // Date-bounded so the "30 days" tile means 30 days, not "whatever came back".
         const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
         fetchTerm(r.anchor.name, from)
-          .then((arts) => { if (alive) setNews(arts.slice(0, 6)); })
+          .then((arts) => { if (alive) setNews(arts.slice(0, 15)); })
           .catch((e) => { if (alive) setNewsErr(String(e?.message || e)); });
       })
       .catch((e) => { if (alive) setErr(apiErr(e, 'load the company 360')); });
@@ -441,26 +442,48 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 summary={news === null
                   ? (newsErr ? 'radar unavailable' : 'searching…')
                   : (news[0]?.headline || 'no mentions in the last 30 days')}>
-                {(news || []).map((a) => {
+                {(() => {
                   const live = (p.stats.deals_in_flight + p.stats.deals_done) > 0;
-                  const sev = a.severity || classify(a.headline, live)[0];
-                  return (
-                    <Box key={a.url} sx={{ borderLeft: `3px solid ${SEV_BG[sev]}`,
-                      pl: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
-                        <SevPill s={sev} />
-                        <Typography component="a" href={a.url} target="_blank"
-                          rel="noreferrer"
-                          sx={{ fontSize: 12.6, color: '#17252B',
-                            textDecoration: 'none',
-                            '&:hover': { color: tokens.tealHi } }}>
-                          {a.headline}</Typography>
-                      </Box>
-                      <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>
-                        {[a.source, a.when].filter(Boolean).join(' · ')}</Typography>
+                  const graded = (news || []).map((a) => ({ a,
+                    sev: (a.severity || classify(a.headline, live)[0]) as Severity }));
+                  const counts = (['GREEN', 'AMBER', 'RED', 'BLUE'] as Severity[])
+                    .map((s) => [s, graded.filter((g) => g.sev === s).length] as const)
+                    .filter(([, n]) => n > 0);
+                  const shown = newsSev
+                    ? graded.filter((g) => g.sev === newsSev) : graded;
+                  return <>
+                    {/* The radar's stat-filter idiom: counts you can click. */}
+                    {counts.length > 1 && (
+                      <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
+                        {counts.map(([s, n]) => (
+                          <Chip key={s} size="small" clickable
+                            label={`${SEV_LABEL[s].toLowerCase()} · ${n}`}
+                            onClick={() => setNewsSev(newsSev === s ? null : s)}
+                            sx={{ height: 20, fontSize: 10.2, fontWeight: 700,
+                              color: newsSev === s ? '#fff' : SEV_BG[s],
+                              bgcolor: newsSev === s ? SEV_BG[s] : 'transparent',
+                              border: `1.5px solid ${SEV_BG[s]}` }} />))}
+                      </Box>)}
+                    <Box sx={{ maxHeight: 280, overflowY: 'auto', display: 'flex',
+                      flexDirection: 'column', gap: 1, pr: 0.5 }}>
+                      {shown.map(({ a, sev }) => (
+                        <Box key={a.url} sx={{ borderLeft: `3px solid ${SEV_BG[sev]}`,
+                          pl: 1, flexShrink: 0 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                            <SevPill s={sev} />
+                            <Typography component="a" href={a.url} target="_blank"
+                              rel="noreferrer"
+                              sx={{ fontSize: 12.6, color: '#17252B',
+                                textDecoration: 'none',
+                                '&:hover': { color: tokens.tealHi } }}>
+                              {a.headline}</Typography>
+                          </Box>
+                          <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>
+                            {[a.source, a.when].filter(Boolean).join(' · ')}</Typography>
+                        </Box>))}
                     </Box>
-                  );
-                })}
+                  </>;
+                })()}
                 {news !== null && !news.length && !newsErr && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
                     No mentions in the last 30 days.</Typography>)}
