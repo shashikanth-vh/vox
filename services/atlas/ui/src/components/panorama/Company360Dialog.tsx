@@ -306,7 +306,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
                 from register · field notes · news · documents</Typography>
             </Box>
-            <Typography sx={{ fontSize: 13, color: '#17252B', lineHeight: 1.6 }}>
+            <Typography sx={{ fontSize: 13, color: '#17252B', lineHeight: 1.6,
+              // Expanded, the card holds its ground and the TEXT scrolls — a
+              // long field note must not shove the sections off screen.
+              ...(briefOpen ? { maxHeight: 240, overflowY: 'auto', pr: 1,
+                display: 'block' } : {}) }}>
               {briefOpen ? (p.brief_full || p.brief) : p.brief}
               {(p.brief_full || '') !== p.brief && (
                 <Typography component="span" onClick={() => setBriefOpen((v) => !v)}
