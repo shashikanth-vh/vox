@@ -345,8 +345,11 @@ async def company_panorama(
         l = open_leads[0]
         head = (f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
                 f"{l.rm or 'unassigned'})")
+        # The digest clips hard; the EXPANDED rendering is for the reader who
+        # asked for everything, so its bound exists only to stop a pasted
+        # essay — a real field note fits whole.
         note_s = _clip(l.next_action or l.notes, 140)
-        note_f = _clip(l.next_action or l.notes, 600)
+        note_f = _clip(l.next_action or l.notes, 4000)
         _both(head + (f": {note_s}" if note_s else "."),
               head + (f": {note_f}" if note_f else "."))
     if converted:
@@ -358,10 +361,10 @@ async def company_panorama(
         summ = _clip(i.summary or i.notes, 160)
         if summ:
             _both(f"Last touch {when}: {summ}",
-                  f"Last touch {when}: {_clip(i.summary or i.notes, 700)}")
+                  f"Last touch {when}: {_clip(i.notes or i.summary, 4000)}")
     if prospect is not None and prospect.remarks:
         _both(f"Desk remark: {_clip(prospect.remarks, 120)}",
-              f"Desk remark: {_clip(prospect.remarks, 500)}")
+              f"Desk remark: {_clip(prospect.remarks, 2000)}")
 
     return {
         "anchor": {
