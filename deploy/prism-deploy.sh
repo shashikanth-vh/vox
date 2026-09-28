@@ -495,11 +495,15 @@ prune_old() {
       rm -rf "$d"
     done
   fi
-  ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
-  ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
-  ls -1t "$BACKUPS"/vocx-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
-  ls -1t "$BACKUPS"/pulse-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
-  ls -1t "$BACKUPS"/docrag-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f
+  # `|| true` on each: under pipefail, `ls` with NOTHING to list exits 2 and a
+  # family with zero backups (any box's first upgrade, or a box without that
+  # module) aborted the whole run AFTER it had succeeded — production hit this
+  # on docrag-* the first time 298 ran. Pruning nothing is a no-op, not a fault.
+  ls -1t "$BACKUPS"/db-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f || true
+  ls -1t "$BACKUPS"/minio-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f || true
+  ls -1t "$BACKUPS"/vocx-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f || true
+  ls -1t "$BACKUPS"/pulse-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f || true
+  ls -1t "$BACKUPS"/docrag-*.tar.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))" | xargs -r rm -f || true
 
   # DOCKER IMAGES accumulate the same way the release trees did: every upgrade tags
   # ~18 prism-rollback/<service>:<stamp> images and each rebuild orphans the previous
