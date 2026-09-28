@@ -12,7 +12,8 @@ import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
 import { panoramaService, type DocAskResult, type IndexResult, type Panorama }
   from '../../services/panoramaService';
-import { fetchTerm, type Article } from '../../services/newsService';
+import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
+  from '../../services/newsService';
 
 /**
  * Company 360 — one company's whole story, in one place (the approved mockup).
@@ -27,6 +28,20 @@ import { fetchTerm, type Article } from '../../services/newsService';
  */
 
 const CHART_TEAL = '#0D9488';
+
+// PULSE's own verdict colors, verbatim from the radar — two PRISM surfaces must
+// never disagree about the same headline.
+const SEV_BG: Record<Severity, string> = {
+  RED: tokens.bad, AMBER: tokens.warn, GREEN: tokens.ok, BLUE: '#1F6FA8',
+};
+
+function SevPill({ s }: { s: Severity }) {
+  return (
+    <Box component="span" sx={{ fontSize: 9.5, fontWeight: 800, borderRadius: 999,
+      px: '8px', py: '1px', color: '#fff', bgcolor: SEV_BG[s], flexShrink: 0 }}>
+      {SEV_LABEL[s]}</Box>
+  );
+}
 
 // One-tap questions for the ask-box — the needs the desk actually has when a
 // file lands, phrased so retrieval finds the right pages. Free text stays for
@@ -407,21 +422,45 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               </Section>
 
               <Section id="news" title="NEWS"
-                badge={news ? <Chip size="small" label={`${news.length} in 30 days`}
-                  sx={{ height: 19, fontSize: 10, color: tokens.tealHi,
-                    border: `1px solid ${tokens.tealHi}`, bgcolor: '#F0F8F6' }} /> : undefined}
+                badge={news ? <>
+                  <Chip size="small" label={`${news.length} in 30 days`}
+                    sx={{ height: 19, fontSize: 10, color: tokens.tealHi,
+                      border: `1px solid ${tokens.tealHi}`, bgcolor: '#F0F8F6' }} />
+                  {(() => {
+                    // The desk cares first when it's bad — surface the worst
+                    // verdict on the collapsed row, PULSE's colors exactly.
+                    const live = (p.stats.deals_in_flight + p.stats.deals_done) > 0;
+                    const sevs = news.map((a) =>
+                      a.severity || classify(a.headline, live)[0]);
+                    const worst: Severity | null = sevs.includes('RED') ? 'RED'
+                      : sevs.includes('AMBER') ? 'AMBER' : null;
+                    return worst ? <SevPill s={worst} /> : null;
+                  })()}
+                </> : undefined}
                 open={!!openSections.news} onToggle={toggle}
                 summary={news === null
                   ? (newsErr ? 'radar unavailable' : 'searching…')
                   : (news[0]?.headline || 'no mentions in the last 30 days')}>
-                {(news || []).map((a) => (
-                  <Box key={a.url}>
-                    <Typography component="a" href={a.url} target="_blank" rel="noreferrer"
-                      sx={{ fontSize: 12.6, color: '#17252B', textDecoration: 'none',
-                        '&:hover': { color: tokens.tealHi } }}>{a.headline}</Typography>
-                    <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>
-                      {[a.source, a.when].filter(Boolean).join(' · ')}</Typography>
-                  </Box>))}
+                {(news || []).map((a) => {
+                  const live = (p.stats.deals_in_flight + p.stats.deals_done) > 0;
+                  const sev = a.severity || classify(a.headline, live)[0];
+                  return (
+                    <Box key={a.url} sx={{ borderLeft: `3px solid ${SEV_BG[sev]}`,
+                      pl: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                        <SevPill s={sev} />
+                        <Typography component="a" href={a.url} target="_blank"
+                          rel="noreferrer"
+                          sx={{ fontSize: 12.6, color: '#17252B',
+                            textDecoration: 'none',
+                            '&:hover': { color: tokens.tealHi } }}>
+                          {a.headline}</Typography>
+                      </Box>
+                      <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>
+                        {[a.source, a.when].filter(Boolean).join(' · ')}</Typography>
+                    </Box>
+                  );
+                })}
                 {news !== null && !news.length && !newsErr && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
                     No mentions in the last 30 days.</Typography>)}
