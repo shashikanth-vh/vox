@@ -568,6 +568,22 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                   </Typography>
                   {docsOpen && (
                     <>
+                      {/* The master tick: a 20-file KYC pack should not cost 20 clicks.
+                          Half-ticked shows as indeterminate; clicking it completes the
+                          set, clicking again clears it. */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', px: 0.3 }}>
+                        <Checkbox size="small" sx={{ py: 0.4 }}
+                          checked={sources.length > 0 && sel.size === sources.length}
+                          indeterminate={sel.size > 0 && sel.size < sources.length}
+                          onChange={() => setSel(sel.size === sources.length
+                            ? new Set() : new Set(sources.map((d) => d.id)))} />
+                        <Typography sx={{ fontSize: 11.8, color: tokens.muted,
+                          userSelect: 'none' }}>
+                          {sel.size === sources.length && sources.length > 0
+                            ? 'All selected — click to clear'
+                            : `Select all (${sources.length})`}
+                        </Typography>
+                      </Box>
                       <Box sx={{ maxHeight: 190, overflowY: 'auto',
                         border: `1px solid ${tokens.line}`, borderRadius: 1 }}>
                         {sources.map((d, i) => (
