@@ -35,7 +35,8 @@ from sqlalchemy import select
 async def settle_company(session: Any, tenant_id: Any, name: str, *,
                          sector: str | None = None, lens: str | None = None,
                          actor: str = "register",
-                         note: str | None = None) -> tuple[str, uuid.UUID | None]:
+                         note: str | None = None,
+                         identity: dict | None = None) -> tuple[str, uuid.UUID | None]:
     """Resolve a company NAME against the client master. Returns (outcome, id):
 
     - ("linked",  id)   — exactly one live master matches canonically;
@@ -89,6 +90,13 @@ async def settle_company(session: Any, tenant_id: Any, name: str, *,
         lifecycle="Prospect",
         notes=note or f"Created when lead for '{name}' was added to the register.",
     )
+    # Identity the caller already knows (a lead's CIN/city, a prospect's
+    # registrar data) seeds the NEWBORN master only — a matched master above
+    # was returned untouched, because it outranks a lead's free text.
+    for k in ("cin", "city", "state", "country", "address"):
+        v = (identity or {}).get(k)
+        if v:
+            setattr(entity, k, str(v).strip())
     session.add(entity)
     await session.flush()
     # The trail must say a company was born here — the CRUD repository stamps its
@@ -109,6 +117,8 @@ async def lead_company_to_master(ctx: Any, body: dict) -> None:
         return
     _outcome, eid = await settle_company(
         ctx.session, ctx.tenant_id, str(body.get("company") or ""),
-        sector=body.get("sector"), lens=body.get("lens"), actor=ctx.actor)
+        sector=body.get("sector"), lens=body.get("lens"), actor=ctx.actor,
+        identity={k: body.get(k)
+                  for k in ("cin", "city", "state", "country", "address")})
     if eid is not None:
         body["entity_id"] = eid

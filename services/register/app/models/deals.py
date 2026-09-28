@@ -52,6 +52,14 @@ class Lead(RegisterBase):
     contact: Mapped[str | None] = mapped_column(String(200))
     designation: Mapped[str | None] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(40))
+    # Company identity, collected piecemeal as the desk learns it — optional on
+    # purpose, and copied onto a client master this lead BIRTHS (never onto an
+    # existing master, which outranks a lead's free text).
+    cin: Mapped[str | None] = mapped_column(String(40))
+    city: Mapped[str | None] = mapped_column(String(120))
+    address: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(String(60))
+    country: Mapped[str | None] = mapped_column(String(60))
     last_interaction_date: Mapped[date | None] = mapped_column(Date)
     next_action: Mapped[str | None] = mapped_column(Text)
     next_action_date: Mapped[date | None] = mapped_column(Date)

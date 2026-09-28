@@ -16,6 +16,7 @@ from app.api.advaya_manual import router as advaya_manual_router
 from app.api.calendar import router as calendar_router
 from app.api.chitti import router as chitti_router
 from app.api.panorama import router as panorama_router
+from app.api.tracxn import router as tracxn_router
 from app.api.prospect_rules import router as prospects_router
 from app.api.closure import router as closure_router
 from app.api.covenants import router as covenants_router
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
         prospects_router,
         # Company 360 — one company's whole story, RBAC'd per section.
         panorama_router,
+        tracxn_router,
         build_resource_router(),
     ]
     # The DORMANT Advaya acknowledgement path (internal handoff record) is registered ONLY under an

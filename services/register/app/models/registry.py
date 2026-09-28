@@ -55,6 +55,9 @@ class Entity(RegisterBase):
 
     state: Mapped[str | None] = mapped_column(String(60))
     location: Mapped[str | None] = mapped_column(String(200))
+    city: Mapped[str | None] = mapped_column(String(120))
+    country: Mapped[str | None] = mapped_column(String(60))
+    address: Mapped[str | None] = mapped_column(Text)
 
     register_status: Mapped[str | None] = mapped_column(String(40), index=True)  # origination marker
     # The client's RELATIONSHIP journey (the ATLAS "Vistaar journey"): Prospect →

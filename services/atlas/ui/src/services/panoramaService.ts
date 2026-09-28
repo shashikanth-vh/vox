@@ -73,6 +73,27 @@ export interface Panorama {
   generated_at: string;
 }
 
+export interface TracxnSeries {
+  points: { year: number; value: number }[];
+  unit?: string | null;
+  rows?: number;
+  note?: string;
+}
+
+/** The market feed (Tracxn), CIN-anchored and cached register-side. */
+export interface TracxnFinancials {
+  cin: string;
+  configured: boolean;
+  resolved: boolean;
+  note?: string;
+  legal_entity?: { id: string; name: string | null };
+  series?: Record<string, TracxnSeries>;
+  board?: { name: string; designation: string | null; since: string | null }[];
+  shareholders?: { name: string; pct: number }[];
+  fetched_now?: number;
+  fetched_at?: string;
+}
+
 export interface DocAskResult {
   answer: string | null;
   citations: { doc: string; where: string }[];
@@ -100,6 +121,18 @@ export const panoramaService = {
     if (q.entityId) params.entity_id = q.entityId;
     else if (q.company) params.company = q.company;
     return api.get<Panorama>('/panorama', params);
+  },
+
+  /** The FINANCIALS card's live feed. 409 = not configured, or no CIN on
+   *  record — both carry a human remedy in the error detail, and the card
+   *  falls back to prospect figures rather than going blank. */
+  financials(q: { entityId?: string | null; cin?: string | null;
+                  refresh?: boolean }): Promise<TracxnFinancials> {
+    const params: Record<string, string> = {};
+    if (q.entityId) params.entity_id = q.entityId;
+    if (q.cin) params.cin = q.cin;
+    if (q.refresh) params.refresh = 'true';
+    return api.get<TracxnFinancials>('/panorama/financials', params);
   },
 
   /** Bridge the seam the ask-box sits on: read the company's Data Register

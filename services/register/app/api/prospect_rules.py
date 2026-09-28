@@ -354,7 +354,11 @@ async def create_lead_from_prospect(
     outcome, entity_id = await settle_company(
         ctx.session, ctx.tenant_id, prospect.name,
         sector=payload.sector, actor=actor,
-        note=f"Created from prospect {prospect.prospect_no or prospect.id}.")
+        note=f"Created from prospect {prospect.prospect_no or prospect.id}.",
+        # The universe already knows this company's registrar identity — a
+        # NEWBORN master starts with it (a matched master stays untouched).
+        identity={"cin": prospect.cin, "city": prospect.city,
+                  "state": prospect.state, "country": prospect.country})
 
     contact_bits = []
     if prospect.emails:

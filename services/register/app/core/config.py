@@ -30,6 +30,16 @@ class Settings(BaseServiceSettings):
     db_user: str = "register"
     db_password: str = "register"
 
+    # ---- Tracxn (the Company-360 market feed) ----------------------------
+    # Empty token = not configured: the panorama financials endpoint answers
+    # 409 and the UI keeps its "market feed soon" card. Answers are cached per
+    # (tenant, CIN, endpoint) for cache_days — Tracxn bills per call, and filed
+    # financials do not change by the hour.
+    tracxn_access_token: str = ""
+    tracxn_base_url: str = "https://platform.tracxn.com/api/3.0"
+    tracxn_cache_days: int = 7
+    tracxn_timeout_s: float = 30.0
+
     # ---- Security --------------------------------------------------------
     # Comma-separated API keys accepted by the service (X-API-Key header).
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["dev-local-key"])

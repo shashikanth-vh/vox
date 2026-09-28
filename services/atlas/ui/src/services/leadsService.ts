@@ -71,6 +71,11 @@ export function toLeadPayload(lead: Lead, opts?: { withNumber?: boolean }): Lead
     next_action_date: isoDate(lead.nextDate),
     conv: lead.conv,
     notes: lead.notes,
+    cin: lead.cin,
+    city: lead.city,
+    address: lead.address,
+    state: lead.state,
+    country: lead.country,
   };
   for (const [k, v] of Object.entries(optional)) {
     if (v != null && String(v).trim() !== '') (body as any)[k] = String(v).trim();
@@ -90,6 +95,11 @@ export function toLeadRow(r: any): Lead {
     id: r?.lead_no || '',
     apiId: r?.id,
     entityId: r?.entity_id,
+    cin: r?.cin || '',
+    city: r?.city || '',
+    address: r?.address || '',
+    state: r?.state || '',
+    country: r?.country || '',
     company: r?.company || '',
     sector: r?.sector || '',
     lens: r?.lens || '',

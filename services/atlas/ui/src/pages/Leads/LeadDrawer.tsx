@@ -150,6 +150,21 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
           </Box>
         </DrawerSection>
 
+        {/* Optional identity — filled as and when the desk learns it. The CIN is what
+            anchors the 360's market feed (Tracxn), so it is worth capturing early;
+            everything here is copied onto the client master only at birth. */}
+        <DrawerSection title="Company details (optional)">
+          <FieldGrid>
+            <TextFld label="CIN" value={v('cin') || ''} disabled={ro} onChange={(x) => set('cin', x)} />
+            <TextFld label="State" value={v('state') || ''} disabled={ro} onChange={(x) => set('state', x)} />
+            <TextFld label="City" value={v('city') || ''} disabled={ro} onChange={(x) => set('city', x)} />
+            <TextFld label="Country" value={v('country') || ''} disabled={ro} onChange={(x) => set('country', x)} />
+          </FieldGrid>
+          <Box sx={{ mt: 1 }}>
+            <TextFld label="Registered address" value={v('address') || ''} disabled={ro} onChange={(x) => set('address', x)} multiline />
+          </Box>
+        </DrawerSection>
+
         <DrawerSection title={`Interactions (${ints.length})`}
           action={canInteract ? <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setLogOpen(true)}>Log interaction</Button> : undefined}>
           <Box sx={{ borderLeft: `2px solid ${tokens.line}`, pl: 1.5 }}>

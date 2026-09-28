@@ -10,7 +10,8 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
-import { panoramaService, type DocAskResult, type IndexResult, type Panorama }
+import { panoramaService, type DocAskResult, type IndexResult, type Panorama,
+  type TracxnFinancials, type TracxnSeries }
   from '../../services/panoramaService';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
   from '../../services/newsService';
@@ -28,6 +29,71 @@ import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
  */
 
 const CHART_TEAL = '#0D9488';
+
+// The dataviz palette for the financial small multiples — each series keeps ONE
+// color everywhere it appears, values live on different scales so each series
+// gets its own tiny chart rather than sharing an axis.
+const FIN_SERIES: [key: string, label: string, color: string][] = [
+  ['revenue', 'Revenue', '#0D9488'],
+  ['ebitda', 'EBITDA', '#B45309'],
+  ['net_profit', 'PAT', '#6D5FD3'],
+];
+const FIN_CONTEXT: [key: string, label: string][] = [
+  ['valuation', 'Valuation'],
+  ['employees', 'Employees'],
+  ['employees_labour', 'Employees (labour filings)'],
+  ['bs_assets', 'Total assets'],
+  ['cf_operating', 'Operating cash flow'],
+];
+
+function finNum(v: number): string {
+  return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-IN')
+    : v.toLocaleString('en-IN', { maximumFractionDigits: 1 });
+}
+
+/** One small-multiple: thin rounded bars, the newest value labelled in ink,
+ *  first/last years only. Negative values (a loss-making PAT) hang below a
+ *  zero baseline in the same series color. */
+function MiniBars({ label, series, color }: {
+  label: string; series: TracxnSeries; color: string;
+}) {
+  const pts = series.points.slice(-6);
+  if (!pts.length) return null;
+  const W = 168, H = 66, top = 12, bottom = 52;
+  const hi = Math.max(0, ...pts.map((x) => x.value));
+  const lo = Math.min(0, ...pts.map((x) => x.value));
+  const span = hi - lo || 1;
+  const y = (v: number) => top + ((hi - v) / span) * (bottom - top);
+  const zero = y(0);
+  const step = W / pts.length;
+  const last = pts[pts.length - 1];
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
+        <Box sx={{ width: 7, height: 7, borderRadius: 99, bgcolor: color,
+          flexShrink: 0 }} />
+        <Typography sx={{ fontSize: 10.2, fontWeight: 700, color: tokens.muted,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {label}{series.unit ? ` · ${series.unit}` : ''}</Typography>
+      </Box>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+        <line x1={0} x2={W} y1={zero} y2={zero} stroke="#E7ECEF" strokeWidth={1} />
+        {pts.map((pt, i) => {
+          const x = i * step + step / 2;
+          const yv = y(pt.value);
+          return <rect key={pt.year} x={x - 2.5} y={Math.min(yv, zero)} width={5}
+            height={Math.max(2, Math.abs(yv - zero))} rx={2.5} fill={color} />;
+        })}
+        <text x={(pts.length - 1) * step + step / 2}
+          y={Math.min(y(last.value), zero) - 3} textAnchor="middle"
+          fontSize="8.8" fontWeight="700" fill="#17252B">{finNum(last.value)}</text>
+        {pts.map((pt, i) => (i === 0 || i === pts.length - 1) ? (
+          <text key={pt.year} x={i * step + step / 2} y={H - 2} textAnchor="middle"
+            fontSize="7.6" fill="#7B8A92">{pt.year}</text>) : null)}
+      </svg>
+    </Box>
+  );
+}
 
 // PULSE's own verdict colors, verbatim from the radar — two PRISM surfaces must
 // never disagree about the same headline.
@@ -165,12 +231,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [idxBusy, setIdxBusy] = useState(false);
   const [idxOut, setIdxOut] = useState<IndexResult | null>(null);
   const [idxErr, setIdxErr] = useState('');
+  const [trx, setTrx] = useState<TracxnFinancials | null>(null);
+  const [trxBusy, setTrxBusy] = useState(false);
+  const [trxErr, setTrxErr] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setP(null); setErr(''); setNews(null); setNewsErr('');
     setAsk(''); setAskOut(null); setAskErr('');
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
+    setTrx(null); setTrxBusy(false); setTrxErr('');
     setOpenSections({ engagements: true }); setBriefOpen(false); setNewsSev(null);
     let alive = true;
     panoramaService.get({ entityId, company })
@@ -187,6 +257,32 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
 
   const toggle = (id: string) =>
     setOpenSections((s) => ({ ...s, [id]: !s[id] }));
+
+  // The market feed is fetched LAZILY, on the card's first expand — the register
+  // caches per CIN so a re-open is free, but the dialog itself should not spend
+  // a 15-endpoint resolve for a user who never opens FINANCIALS.
+  useEffect(() => {
+    if (!open || !p || !openSections.financials) return;
+    if (trx || trxBusy || trxErr) return;
+    if (!p.anchor.entity_id && !p.anchor.cin) return;
+    let alive = true;
+    setTrxBusy(true);
+    panoramaService.financials({ entityId: p.anchor.entity_id, cin: p.anchor.cin })
+      .then((r) => { if (alive) setTrx(r); })
+      .catch((e) => { if (alive) setTrxErr(apiErr(e, 'reach the market feed')); })
+      .finally(() => { if (alive) setTrxBusy(false); });
+    return () => { alive = false; };
+  }, [open, p, openSections.financials, trx, trxBusy, trxErr]);
+
+  const refreshTrx = () => {
+    if (!p || trxBusy) return;
+    setTrxBusy(true); setTrxErr('');
+    panoramaService.financials({ entityId: p.anchor.entity_id,
+      cin: p.anchor.cin, refresh: true })
+      .then(setTrx)
+      .catch((e) => setTrxErr(apiErr(e, 'refresh the market feed')))
+      .finally(() => setTrxBusy(false));
+  };
 
   const runAsk = async (preset?: string) => {
     const q = (preset ?? ask).trim();
@@ -514,7 +610,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
 
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2 }}>
               <Section id="financials" title="FINANCIALS"
-                badge={hasFin
+                badge={trx?.resolved
+                  ? <Chip size="small" label="Tracxn · live" sx={{ height: 19,
+                      fontSize: 10, fontWeight: 700, color: '#fff',
+                      bgcolor: CHART_TEAL }} />
+                  : hasFin
                   ? <Chip size="small" label="from prospect universe" sx={{ height: 19,
                       fontSize: 10, color: tokens.tealHi,
                       border: `1px solid ${tokens.tealHi}`, bgcolor: '#F0F8F6' }} />
@@ -522,9 +622,109 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       fontSize: 10, color: '#B45309', border: '1px solid #B45309',
                       bgcolor: '#FDF3E7' }} />}
                 open={!!openSections.financials} onToggle={toggle}
-                summary={hasFin ? `Revenue ${fmtCr(fin!.revenue_cr)}`
-                  : 'lights up when the feed connects'}>
-                {hasFin ? (
+                summary={(() => {
+                  const rev = trx?.series?.revenue?.points;
+                  if (rev?.length) {
+                    const l = rev[rev.length - 1];
+                    return `Revenue ${finNum(l.value)}${trx?.series?.revenue?.unit
+                      ? ` ${trx.series.revenue.unit}` : ''} (FY${l.year})`;
+                  }
+                  return hasFin ? `Revenue ${fmtCr(fin!.revenue_cr)}`
+                    : 'filings, board & shareholding from the market feed';
+                })()}>
+                {trxBusy && !trx && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={15} />
+                    <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
+                      Asking the market feed…</Typography>
+                  </Box>)}
+                {/* 409s carry the remedy in the detail — not configured, or no
+                    CIN anywhere. Say it, then fall through to what we DO have. */}
+                {trxErr && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
+                  {trxErr}</Typography>}
+                {trx && !trx.resolved && (
+                  <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+                    {trx.note || 'Tracxn has no filings for this CIN.'}
+                    {trx.cin ? ` (CIN ${trx.cin})` : ''}</Typography>)}
+
+                {trx?.resolved && (() => {
+                  const s = trx.series || {};
+                  const main = FIN_SERIES.filter(([k]) => s[k]?.points.length);
+                  // Context series live on wildly different scales (heads, ₹),
+                  // so each keeps its own chart; first two that have data.
+                  const extra = FIN_CONTEXT
+                    .filter(([k]) => s[k]?.points.length).slice(0, 2);
+                  return <>
+                    {main.length > 0 && (
+                      <Box sx={{ display: 'grid', gap: 1.2,
+                        gridTemplateColumns: `repeat(${Math.min(main.length, 3)}, 1fr)` }}>
+                        {main.map(([k, lab, col]) => (
+                          <MiniBars key={k} label={lab} series={s[k]} color={col} />))}
+                      </Box>)}
+                    {extra.length > 0 && (
+                      <Box sx={{ display: 'grid', gap: 1.2,
+                        gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                        {extra.map(([k, lab]) => (
+                          <MiniBars key={k} label={lab} series={s[k]}
+                            color="#5B6B74" />))}
+                      </Box>)}
+                    {!main.length && !extra.length && (
+                      <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+                        Tracxn knows the company but has no filed series yet.
+                      </Typography>)}
+                    {(trx.board || []).length > 0 && <>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800,
+                        letterSpacing: '.06em', color: tokens.muted, mt: 0.4 }}>
+                        BOARD</Typography>
+                      {(trx.board || []).slice(0, 6).map((m) => (
+                        <Typography key={m.name} sx={{ fontSize: 11.8,
+                          color: '#17252B' }}>
+                          <b>{m.name}</b>{m.designation ? ` · ${m.designation}` : ''}
+                          {m.since ? ` · since ${String(m.since).slice(0, 4)}` : ''}
+                        </Typography>))}
+                    </>}
+                    {(trx.shareholders || []).length > 0 && <>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800,
+                        letterSpacing: '.06em', color: tokens.muted, mt: 0.4 }}>
+                        SHAREHOLDING</Typography>
+                      {(trx.shareholders || []).slice(0, 6).map((h) => (
+                        <Box key={h.name} sx={{ display: 'flex',
+                          alignItems: 'center', gap: 1 }}>
+                          <Typography sx={{ fontSize: 11.6, color: '#17252B',
+                            width: '42%', whiteSpace: 'nowrap', overflow: 'hidden',
+                            textOverflow: 'ellipsis' }}>{h.name}</Typography>
+                          <Box sx={{ flex: 1, height: 6, bgcolor: '#E7ECEF',
+                            borderRadius: 3 }}>
+                            <Box sx={{ width: `${Math.min(100, Math.max(0, h.pct))}%`,
+                              height: 6, bgcolor: CHART_TEAL, borderRadius: 3 }} />
+                          </Box>
+                          <Typography sx={{ fontSize: 11, fontWeight: 700,
+                            color: '#17252B', width: 44, textAlign: 'right' }}>
+                            {h.pct.toFixed(1)}%</Typography>
+                        </Box>))}
+                    </>}
+                    <Box className="no-print" sx={{ display: 'flex',
+                      alignItems: 'center', gap: 1 }}>
+                      <Typography sx={{ fontSize: 10, color: tokens.muted }}>
+                        as reported · Tracxn
+                        {trx.legal_entity?.name ? ` · ${trx.legal_entity.name}` : ''}
+                        {trx.fetched_at ? ` · fetched ${fmtDay(trx.fetched_at)}` : ''}
+                      </Typography>
+                      <Box sx={{ flex: 1 }} />
+                      <Tooltip title="Re-fetches every series from Tracxn (spends API calls); otherwise answers come from the register's cache.">
+                        <Box component="span">
+                          <Button size="small" variant="text" onClick={refreshTrx}
+                            disabled={trxBusy}
+                            sx={{ fontSize: 10.5, py: 0, minWidth: 0 }}>
+                            {trxBusy ? <CircularProgress size={12} /> : 'Refresh'}
+                          </Button>
+                        </Box>
+                      </Tooltip>
+                    </Box>
+                  </>;
+                })()}
+
+                {!trx?.resolved && hasFin && (
                   <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
                     gap: 1 }}>
                     {([['Revenue', fin!.revenue_cr], ['EBITDA', fin!.ebitda_cr],
@@ -537,13 +737,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       </Box>))}
                     {fin!.founded_year && <Typography sx={{ gridColumn: '1 / -1',
                       fontSize: 11, color: tokens.muted }}>
-                      Founded {fin!.founded_year} · multi-year trend arrives with the
-                      market feed</Typography>}
-                  </Box>
-                ) : (
+                      Founded {fin!.founded_year} · figures from the prospect
+                      universe</Typography>}
+                  </Box>)}
+                {!trx?.resolved && !hasFin && !trxBusy && !trxErr && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-                    Market data (multi-year revenue, EBITDA, funding) renders here when
-                    the feed is connected; the key stays server-side.</Typography>)}
+                    {(!p.anchor.entity_id && !p.anchor.cin)
+                      ? 'Add the company’s CIN — on the lead, the client master or '
+                        + 'the prospect row — and the Tracxn market feed lights up here.'
+                      : 'Market data (multi-year revenue, EBITDA, PAT, board, '
+                        + 'shareholding) renders here when the feed is connected; '
+                        + 'the key stays server-side.'}</Typography>)}
               </Section>
 
               <Section id="documents" title="DOCUMENTS"

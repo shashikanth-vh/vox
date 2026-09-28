@@ -22,6 +22,7 @@ from app.models.prism import (
     MonitoringReporting,
 )
 from app.models.prospects import Prospect
+from app.models.tracxn import TracxnCache
 from app.models.reconciliation import ImportReconciliationItem
 from app.models.registry import Counterparty, Entity, Person
 from app.models.series import NumberSeries
@@ -51,6 +52,7 @@ __all__ = [
     "Entity",
     "Person",
     "Prospect",
+    "TracxnCache",
     "Counterparty",
     "Lead",
     "Deal",

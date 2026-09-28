@@ -79,6 +79,9 @@ class EntityCreate(CreateModel):
     lens: str | None = Field(default=None, max_length=20)
     state: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=60)
+    address: str | None = None
     register_status: str | None = Field(default=None, max_length=40)
     lifecycle: str | None = Field(default=None, max_length=40)
     promoter_group_code: str | None = Field(default=None, max_length=60)
@@ -101,6 +104,9 @@ class EntityUpdate(UpdateModel):
     lens: str | None = Field(default=None, max_length=20)
     state: str | None = Field(default=None, max_length=60)
     location: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=60)
+    address: str | None = None
     register_status: str | None = Field(default=None, max_length=40)
     lifecycle: str | None = Field(default=None, max_length=40)
     promoter_group_code: str | None = Field(default=None, max_length=60)
@@ -123,6 +129,9 @@ class EntityRead(ReadModel):
     lens: str | None
     state: str | None
     location: str | None
+    city: str | None
+    country: str | None
+    address: str | None
     register_status: str | None
     lifecycle: str | None
     promoter_group_code: str | None
@@ -188,6 +197,11 @@ class LeadCreate(CreateModel):
     contact: str | None = Field(default=None, max_length=200)
     designation: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=40)
+    cin: str | None = Field(default=None, max_length=40)
+    city: str | None = Field(default=None, max_length=120)
+    address: str | None = None
+    state: str | None = Field(default=None, max_length=60)
+    country: str | None = Field(default=None, max_length=60)
     last_interaction_date: date | None = None
     next_action: str | None = None
     next_action_date: date | None = None
@@ -210,6 +224,11 @@ class LeadUpdate(UpdateModel):
     contact: str | None = Field(default=None, max_length=200)
     designation: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=40)
+    cin: str | None = Field(default=None, max_length=40)
+    city: str | None = Field(default=None, max_length=120)
+    address: str | None = None
+    state: str | None = Field(default=None, max_length=60)
+    country: str | None = Field(default=None, max_length=60)
     last_interaction_date: date | None = None
     next_action: str | None = None
     next_action_date: date | None = None
@@ -232,6 +251,11 @@ class LeadRead(ReadModel):
     contact: str | None
     designation: str | None
     phone: str | None
+    cin: str | None
+    city: str | None
+    address: str | None
+    state: str | None
+    country: str | None
     last_interaction_date: date | None
     next_action: str | None
     next_action_date: date | None
