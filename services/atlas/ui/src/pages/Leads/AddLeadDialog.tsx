@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Alert, IconButton } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Alert, IconButton, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { FieldGrid, TextFld, SelectFld } from '../../components/common/Field';
 import { referenceService } from '../../services/referenceService';
@@ -25,7 +25,7 @@ function defaultRm(user: { roles: string[]; name: string }): string {
 export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
   const { user } = useAuth();
   const ref = referenceService;
-  const blank = { company: '', contact: '', designation: '', sector: 'Other', lens: 'Mitigation', source: 'BDRM', sourceDetail: '', rm: defaultRm(user), temp: 'Warm', phone: '', notes: '' };
+  const blank = { company: '', contact: '', designation: '', sector: 'Other', lens: 'Mitigation', source: 'BDRM', sourceDetail: '', rm: defaultRm(user), temp: 'Warm', phone: '', notes: '', cin: '', city: '', state: '', country: '', address: '' };
   const [f, setF] = useState(blank);
   // Live matches against the register as the name is TYPED: existing clients
   // are selectable (the new lead attaches to them — a linked lead converts
@@ -68,6 +68,12 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
     if (!c.entityId) return;
     setLinked({ code: c.code, name: c.name, entityId: c.entityId });
     set('company', c.name);           // the canonical spelling travels with the link
+    // What the master already knows fills the blanks — never over what was typed.
+    const m: any = db().clients[c.code] || {};
+    setF((p) => ({ ...p,
+      ...Object.fromEntries((['cin', 'city', 'state', 'country', 'address'] as const)
+        .filter((k) => !String((p as any)[k] || '').trim() && m[k])
+        .map((k) => [k, String(m[k])])) }));
     setClientHits([]);
   };
 
@@ -134,6 +140,17 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
           </FieldGrid>
           <Box sx={{ mt: 1.4 }}><TextFld label="Notes / ask" value={f.notes} onChange={(v) => set('notes', v)} multiline /></Box>
         </Box>
+        {/* Optional — capture what is known now, fill the rest later from the lead
+            drawer. The CIN is what lights up the 360's market feed. */}
+        <Typography sx={{ mt: 2, mb: 0.6, fontSize: 11, fontWeight: 800, letterSpacing: '.07em', color: '#44535B' }}>
+          COMPANY DETAILS (OPTIONAL)</Typography>
+        <FieldGrid>
+          <TextFld label="CIN" value={f.cin} onChange={(v) => set('cin', v)} placeholder="21-character MCA CIN" />
+          <TextFld label="State" value={f.state} onChange={(v) => set('state', v)} />
+          <TextFld label="City" value={f.city} onChange={(v) => set('city', v)} />
+          <TextFld label="Country" value={f.country} onChange={(v) => set('country', v)} />
+        </FieldGrid>
+        <Box sx={{ mt: 1.4 }}><TextFld label="Registered address" value={f.address} onChange={(v) => set('address', v)} multiline /></Box>
         {err && <Alert severity="warning" sx={{ mt: 1.2, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
       <DialogActions>

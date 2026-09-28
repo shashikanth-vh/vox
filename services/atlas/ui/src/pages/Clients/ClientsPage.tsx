@@ -11,7 +11,6 @@ import { CodeText, LensPill, LifePill } from '../../components/common/Pills';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
 import AddClientDialog from './AddClientDialog';
-import Company360Dialog, { Company360Chip } from '../../components/panorama/Company360Dialog';
 import { clientsService } from '../../services/clientsService';
 import type { ClientRow } from './client.types';
 
@@ -23,7 +22,6 @@ export default function ClientsPage() {
   const [addProd, setAddProd] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [del, setDel] = useState<ClientRow | null>(null);
-  const [c360, setC360] = useState<ClientRow | null>(null);
   const [err, setErr] = useState('');
   const refresh = () => qc.invalidateQueries();
 
@@ -71,16 +69,12 @@ export default function ClientsPage() {
         onDelete={can(user.roles, 'deleteRow') ? (r) => setDel(r) : undefined}
         // v12: the whole row is clickable and opens the company drawer.
         onRowClick={(r) => setOpen(r.code)}
-        // Company 360 — everything PRISM knows about the company, one click.
-        extraActions={(r) => <Company360Chip onClick={() => setC360(r)} />}
         mobileCard={{
           primary: (r) => r.name,
           value: (r) => <LifePill stage={(r as any).lifecycle || 'Prospect'} />,
         }}
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
-      <Company360Dialog open={!!c360} entityId={c360?.entityId}
-        company={c360?.name} onClose={() => setC360(null)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       <AddClientDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={refresh} />
       <ConfirmDialog open={!!del} title="Delete client"

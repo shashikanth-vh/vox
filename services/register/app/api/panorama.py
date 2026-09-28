@@ -344,8 +344,8 @@ async def company_panorama(
 
     if open_leads:
         l = open_leads[0]
-        head = (f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
-                f"{l.rm or 'unassigned'})")
+        who = ", ".join(x for x in (l.temperature, l.rm or "unassigned") if x)
+        head = f"Open lead {l.lead_no or ''} ({who})"
         # The digest clips hard; the EXPANDED rendering is for the reader who
         # asked for everything, so its bound exists only to stop a pasted
         # essay — a real field note fits whole.

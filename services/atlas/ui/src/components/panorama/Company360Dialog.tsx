@@ -304,6 +304,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     finally { setIdxBusy(false); }
   };
 
+  const inPrism = !!p && (p.leads.length > 0 || (p.stats.deal_count ?? 0) > 0
+    || p.stats.live_deals > 0);
   const fin = p?.prospect;
   const hasFin = !!fin && (fin.revenue_cr != null || fin.ebitda_cr != null
     || fin.net_profit_cr != null);
@@ -430,7 +432,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       bgcolor: tokens.tealHi, flexShrink: 0 }} />
                     <Box>
                       <Typography sx={{ fontSize: 12.8, color: '#17252B' }}>
-                        <b>{l.lead_no}</b> — Lead, {l.temperature || '—'} · {l.rm || 'unassigned'}
+                        <b>{l.lead_no}</b> — {['Lead', l.temperature, l.rm || 'unassigned']
+                          .filter(Boolean).join(' · ')}
                       </Typography>
                       <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
                         {[fmtDay(l.last_interaction_date), l.next_action || l.notes]
@@ -591,11 +594,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   News radar did not answer: {newsErr}</Typography>}
               </Section>
 
-              {p.prospect && (
+              {/* The prospect row is the story only until PRISM has one of its
+                  own. Once a lead or deal exists, its stored status ("uncontacted"
+                  when the lead was added directly) is stale — the section stays
+                  only for what it still adds: sub-sectors or the desk's remark. */}
+              {p.prospect && (!inPrism || p.prospect.remarks
+                || (p.prospect.sub_sectors || []).length > 0) && (
                 <Section id="prospect" title="PROSPECT UNIVERSE"
                   open={!!openSections.prospect} onToggle={toggle}
-                  summary={`${p.prospect.prospect_no || ''} · ${(p.prospect.verticals || [])
-                    .join(', ')} · ${p.prospect.status}`}>
+                  summary={[p.prospect.prospect_no, (p.prospect.verticals || []).join(', '),
+                    inPrism ? null : p.prospect.status.replace(/_/g, ' ')]
+                    .filter(Boolean).join(' · ')}>
                   <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
                     {(p.prospect.verticals || []).map((v) => <Chip key={v} size="small"
                       color="primary" variant="outlined" label={v}
