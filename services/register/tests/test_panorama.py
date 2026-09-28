@@ -160,6 +160,10 @@ async def test_panorama_tells_the_whole_story(reg: AsyncClient):
     assert p["contacts"][0]["name"] == "Jagadeesh Gudagunti"
     assert "Note Circulated" in p["brief"]
     assert "pending with Credit" in p["brief"]
+    # The full brief carries the same sentences with longer field notes — never
+    # shorter than the digest, and identical when nothing was clipped.
+    assert p["brief_full"].startswith(p["brief"].split(" Open lead")[0])
+    assert len(p["brief_full"]) >= len(p["brief"])
     assert p["restricted"] == []
 
 

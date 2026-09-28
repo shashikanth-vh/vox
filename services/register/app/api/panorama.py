@@ -332,21 +332,36 @@ async def company_panorama(
             bits.append(f"Asset monetisation {r.tracker_no or ''} at "
                         f"{r.status or '—'}.".strip())
             break
+    # Two renderings of the same sentences: the DIGEST (tight clips, the
+    # 30-second read) and the FULL text behind its "more" click — same facts,
+    # longer leash, still bounded so a pasted essay cannot flood the card.
+    bits_full: list[str] = list(bits)
+
+    def _both(short: str, full: str) -> None:
+        bits.append(short)
+        bits_full.append(full)
+
     if open_leads:
         l = open_leads[0]
-        note = _clip(l.next_action or l.notes, 140)
-        bits.append(f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
-                    f"{l.rm or 'unassigned'})" + (f": {note}" if note else "."))
+        head = (f"Open lead {l.lead_no or ''} ({l.temperature or 'no temp'}, "
+                f"{l.rm or 'unassigned'})")
+        note_s = _clip(l.next_action or l.notes, 140)
+        note_f = _clip(l.next_action or l.notes, 600)
+        _both(head + (f": {note_s}" if note_s else "."),
+              head + (f": {note_f}" if note_f else "."))
     if converted:
-        bits.append(f"{len(converted)} lead(s) became deals.")
+        _both(f"{len(converted)} lead(s) became deals.",
+              f"{len(converted)} lead(s) became deals.")
     if inters:
         i = inters[0]
         when = i.occurred_at.date().isoformat() if i.occurred_at else ""
         summ = _clip(i.summary or i.notes, 160)
         if summ:
-            bits.append(f"Last touch {when}: {summ}")
+            _both(f"Last touch {when}: {summ}",
+                  f"Last touch {when}: {_clip(i.summary or i.notes, 700)}")
     if prospect is not None and prospect.remarks:
-        bits.append(f"Desk remark: {_clip(prospect.remarks, 120)}")
+        _both(f"Desk remark: {_clip(prospect.remarks, 120)}",
+              f"Desk remark: {_clip(prospect.remarks, 500)}")
 
     return {
         "anchor": {
@@ -443,5 +458,6 @@ async def company_panorama(
         },
         "contacts": contacts[:10],
         "brief": " ".join(bits),
+        "brief_full": " ".join(bits_full),
         "generated_at": datetime.now(UTC).isoformat(),
     }

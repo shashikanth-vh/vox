@@ -141,6 +141,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [newsErr, setNewsErr] = useState('');
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     { engagements: true });
+  const [briefOpen, setBriefOpen] = useState(false);
   const [ask, setAsk] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [askOut, setAskOut] = useState<DocAskResult | null>(null);
@@ -154,7 +155,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setP(null); setErr(''); setNews(null); setNewsErr('');
     setAsk(''); setAskOut(null); setAskErr('');
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
-    setOpenSections({ engagements: true });
+    setOpenSections({ engagements: true }); setBriefOpen(false);
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => { if (!alive) return; setP(r);
@@ -290,7 +291,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 from register · field notes · news · documents</Typography>
             </Box>
             <Typography sx={{ fontSize: 13, color: '#17252B', lineHeight: 1.6 }}>
-              {p.brief}</Typography>
+              {briefOpen ? (p.brief_full || p.brief) : p.brief}
+              {(p.brief_full || '') !== p.brief && (
+                <Typography component="span" onClick={() => setBriefOpen((v) => !v)}
+                  sx={{ fontSize: 12.5, fontWeight: 700, color: tokens.tealHi,
+                    cursor: 'pointer', ml: 0.6, userSelect: 'none',
+                    '&:hover': { textDecoration: 'underline' } }}>
+                  {briefOpen ? 'less' : 'more'}
+                </Typography>)}
+            </Typography>
           </Box>
 
           <Box sx={{ display: 'grid', gap: 1.4, alignItems: 'start',

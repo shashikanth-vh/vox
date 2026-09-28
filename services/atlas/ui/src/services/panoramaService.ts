@@ -68,6 +68,8 @@ export interface Panorama {
   contacts: { name: string; designation: string | null; phone: string | null;
               source: string }[];
   brief: string;
+  /** The same sentences with full field notes — what "more" reveals. */
+  brief_full: string;
   generated_at: string;
 }
 
