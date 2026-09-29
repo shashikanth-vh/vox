@@ -367,7 +367,43 @@ async def company_panorama(
         _both(f"Desk remark: {_clip(prospect.remarks, 120)}",
               f"Desk remark: {_clip(prospect.remarks, 2000)}")
 
+    # ---- the Data Register's own view of what is still missing -------------
+    # Deterministic and per-tenant (the checklist template), so the brief can
+    # say "5 required documents to request" for EVERY company, graded or not.
+    checklist: dict[str, Any] = {"required_total": 0, "required_on_file": 0,
+                                 "missing": []}
+    if eid is not None and access("documents") is not Access.NONE:
+        try:
+            from app.repositories.documents import data_register
+
+            reg = await data_register(ctx.session, ctx.tenant_id, "Entity", eid,
+                                      scope="entity", verify_subject=False)
+            for sec in reg.get("sections", []):
+                for it in sec.get("items", []):
+                    if not it.get("is_required"):
+                        continue
+                    checklist["required_total"] += 1
+                    if it.get("on_file") or it.get("documents"):
+                        checklist["required_on_file"] += 1
+                    else:
+                        checklist["missing"].append({
+                            "section": sec.get("section"),
+                            "slot_key": it.get("slot_key"), "label": it.get("label")})
+        except Exception:  # noqa: BLE001 - the checklist is an extra, never a blocker
+            checklist = {"required_total": 0, "required_on_file": 0, "missing": [],
+                         "note": "checklist unavailable"}
+
+    stamps = [x for x in (
+        [l.created_at for l in leads] + [r.created_at for r in lending]
+        + [r.created_at for r in synd] + [r.created_at for r in am]) if x]
+    owners = sorted({x for x in (
+        [l.rm for l in leads] + [r.rm for r in lending] + [r.rm for r in synd]
+        + [r.rm for r in am]) if x})
+
     return {
+        "since": _iso(min(stamps)) if stamps else None,
+        "owners": owners,
+        "checklist": checklist,
         "anchor": {
             "entity_id": str(eid) if eid else None,
             "matched_by": matched_by,
@@ -411,6 +447,7 @@ async def company_panorama(
             "next_action": l.next_action,
             "next_action_date": _iso(l.next_action_date),
             "notes": l.notes, "converted": l.converted_deal_id is not None,
+            "created_at": _iso(l.created_at),
         } for l in leads],
         "deals": [{
             "deal_no": d.deal_no, "code": d.code, "stage": d.stage,
@@ -424,22 +461,28 @@ async def company_panorama(
             "sanction_date": _iso(r.sanction_date),
             "disbursed_amount": _num(r.disbursed_amount),
             "remarks": r.remarks, "ladder": LENDING_LADDER,
+            "created_at": _iso(r.created_at),
         } for r in lending],
         "syndication": [{
             "tracker_no": r.tracker_no, "status": r.status,
             "amount_cr": _num(r.amount_cr), "pending_with": r.pending_with,
             "rm": r.rm, "ladder": SYNDICATION_LADDER,
+            "created_at": _iso(r.created_at),
             "lenders": [{
                 "name": x.lender_name, "status": x.status,
                 "amount_cr": _num(x.amount_cr),
                 "last_chase": x.last_chase_note, "last_reply": x.last_reply_note,
+                "note": x.note, "since": _iso(x.since),
+                "response_date": _iso(x.response_date),
+                "chased_date": _iso(x.chased_date),
+                "updated_at": _iso(x.updated_at),
             } for x in (r.lenders or [])],
         } for r in synd],
         "asset_monetisation": [{
             "tracker_no": r.tracker_no, "status": r.status,
             "indicative_value_cr": _num(r.indicative_value_cr),
             "deal_type": r.deal_type, "investor": r.investor, "rm": r.rm,
-            "ladder": AM_LADDER,
+            "ladder": AM_LADDER, "created_at": _iso(r.created_at),
         } for r in am],
         "interactions": [{
             "occurred_at": _iso(i.occurred_at), "type": i.interaction_type,

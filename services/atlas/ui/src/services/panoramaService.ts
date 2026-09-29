@@ -22,6 +22,7 @@ export interface PanoramaLead {
   rm: string | null; sector: string | null; source: string | null;
   last_interaction_date: string | null; next_action: string | null;
   next_action_date: string | null; notes: string | null; converted: boolean;
+  created_at?: string | null;
 }
 
 export interface PanoramaLine {
@@ -30,13 +31,24 @@ export interface PanoramaLine {
   analyst?: string | null; stage_updated_at?: string | null;
   sanction_date?: string | null; disbursed_amount?: number | null;
   remarks?: string | null; ladder: string[];
+  created_at?: string | null;
   lenders?: { name: string; status: string | null; amount_cr: number | null;
-              last_chase: string | null; last_reply: string | null }[];
+              last_chase: string | null; last_reply: string | null;
+              note?: string | null; since?: string | null;
+              response_date?: string | null; chased_date?: string | null;
+              updated_at?: string | null }[];
   indicative_value_cr?: number | null; deal_type?: string | null;
   investor?: string | null;
 }
 
 export interface Panorama {
+  /** When PRISM first saw the company (earliest lead or product line). */
+  since?: string | null;
+  owners?: string[];
+  /** The Data Register's required slots still empty — the brief's "to request". */
+  checklist?: { required_total: number; required_on_file: number;
+                missing: { section: string | null; slot_key: string | null;
+                           label: string | null }[]; note?: string };
   anchor: { entity_id: string | null; matched_by: string; name: string;
             cin: string | null; sector: string | null; sub_sector: string | null;
             state: string | null; domain: string | null; about: string | null };
@@ -74,7 +86,7 @@ export interface Panorama {
 }
 
 export interface TracxnSeries {
-  points: { year: number; value: number }[];
+  points: { year: number; value: number; fy?: string | null }[];
   unit?: string | null;
   rows?: number;
   note?: string;
@@ -86,7 +98,8 @@ export interface TracxnFinancials {
   configured: boolean;
   resolved: boolean;
   note?: string;
-  legal_entity?: { id: string; name: string | null };
+  legal_entity?: { id: string; name: string | null; incorporated?: string | null;
+                   status?: string | null; country?: string | null };
   series?: Record<string, TracxnSeries>;
   board?: { name: string; designation: string | null; since: string | null }[];
   shareholders?: { name: string; pct: number }[];

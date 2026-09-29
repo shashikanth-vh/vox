@@ -176,6 +176,10 @@ async def test_panorama_rbac_names_what_it_hides(reg: AsyncClient):
     # the section is empty but NOT listed as restricted (they hold the view)…
     assert p["lending"] == []
     assert "lending" not in p["restricted"]
+    # The brief's extras ride every panorama: when the company was first seen,
+    # who owns it, and what the Data Register still wants.
+    assert "since" in p and "owners" in p
+    assert set(p["checklist"]) >= {"required_total", "required_on_file", "missing"}
     # …and nothing they cannot see leaks through the stats.
     assert p["stats"]["live_deals"] == 0
 

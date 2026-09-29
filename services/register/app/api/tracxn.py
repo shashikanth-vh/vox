@@ -90,6 +90,32 @@ async def _tracxn_post(settings: Any, path: str, body: dict) -> dict:
         return {"_error": "non-JSON answer"}
 
 
+def _period_of(row: dict) -> tuple[int | None, str | None]:
+    """(year, label) of a Tracxn timeseries row. Filed financials come as a
+    range — Indian FY Apr 2025–Mar 2026 → year 2026, label "FY 2025-26"; a
+    point-in-time row carries ``timestamp.date``. Flat ``year``-style keys
+    still count, for any endpoint that answers that way."""
+    ts = row.get("timestamp")
+    if isinstance(ts, dict):
+        rng = ts.get("dateRange") if isinstance(ts.get("dateRange"), dict) else None
+        if rng:
+            end = rng.get("end") if isinstance(rng.get("end"), dict) else {}
+            start = rng.get("start") if isinstance(rng.get("start"), dict) else {}
+            y_end, y_start = end.get("year"), start.get("year")
+            if isinstance(y_end, int):
+                label = (f"FY {y_start}-{str(y_end)[-2:]}"
+                         if isinstance(y_start, int) and y_start != y_end else str(y_end))
+                return y_end, label
+            if isinstance(y_start, int):
+                return y_start, str(y_start)
+        for k in ("date", "asOn", "asOnDate"):
+            d = ts.get(k)
+            if isinstance(d, dict) and isinstance(d.get("year"), int):
+                return d["year"], str(d["year"])
+    y = _year_of(row)
+    return y, (str(y) if y is not None else None)
+
+
 def _year_of(row: dict) -> int | None:
     for k in _YEAR_KEYS:
         v = row.get(k)
@@ -100,6 +126,29 @@ def _year_of(row: dict) -> int | None:
             if token.isdigit() and 1900 < int(token) < 2100:
                 return int(token)
     return None
+
+
+_INR_PER_CRORE = 10_000_000.0
+
+
+def _money_of(row: dict) -> tuple[float | None, str | None]:
+    """(value, unit) of a row. Tracxn files money as ``data.amount.value`` in
+    whole currency units with ``data.currency``; INR is shown in crore because
+    that is the unit every other number in PRISM wears. Counts (employees)
+    come as ``data.value``/``data.count`` and stay as they are."""
+    data = row.get("data")
+    if isinstance(data, dict):
+        amt = data.get("amount")
+        if isinstance(amt, dict) and isinstance(amt.get("value"), (int, float)):
+            cur = data.get("currency") or amt.get("currency")
+            v = float(amt["value"])
+            if cur == "INR":
+                return v / _INR_PER_CRORE, "₹ Cr"
+            return v, str(cur) if cur else None
+        for k in ("value", "count", "employeeCount", "total"):
+            if isinstance(data.get(k), (int, float)):
+                return float(data[k]), data.get("unit")
+    return _value_of(row), None
 
 
 def _value_of(row: dict) -> float | None:
@@ -145,15 +194,21 @@ def normalize(kind: str, payload: dict | None) -> dict:
         return {"points": [], "note": "unrecognised answer shape"}
 
     if kind == "series":
-        pts: dict[int, float] = {}
+        pts: dict[int, tuple[float, str | None]] = {}
+        unit: str | None = None
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            y, v = _year_of(row), _value_of(row)
-            if y is not None and v is not None:
-                pts[y] = v
-        return {"points": [{"year": y, "value": pts[y]} for y in sorted(pts)],
-                "unit": _unit_of([r for r in rows if isinstance(r, dict)]),
+            y, label = _period_of(row)
+            v, u = _money_of(row)
+            if y is None or v is None:
+                continue
+            unit = unit or u
+            # Tracxn may file the same year twice (restated); the LAST row wins.
+            pts[y] = (v, label)
+        return {"points": [{"year": y, "value": pts[y][0], "fy": pts[y][1]}
+                           for y in sorted(pts)],
+                "unit": unit or _unit_of([r for r in rows if isinstance(r, dict)]),
                 "rows": len(rows)}
 
     if kind == "board":
@@ -191,8 +246,24 @@ def normalize(kind: str, payload: dict | None) -> dict:
     # resolve
     for row in rows:
         if isinstance(row, dict) and row.get("id"):
+            cur = row.get("currentName") if isinstance(row.get("currentName"), dict) else {}
+            inc = row.get("incorporationDate") if isinstance(
+                row.get("incorporationDate"), dict) else {}
+            loc = row.get("location") if isinstance(row.get("location"), dict) else {}
+            country = (loc.get("country") or {}).get("name") if isinstance(
+                loc.get("country"), dict) else None
+            incorporated = None
+            if isinstance(inc.get("year"), int):
+                incorporated = (f"{inc['year']:04d}-{int(inc.get('month') or 1):02d}-"
+                                f"{int(inc.get('day') or 1):02d}")
             return {"legal_entity_id": str(row["id"]),
-                    "name": _pick(row, ("name", "legalName", "companyName")),
+                    "name": cur.get("name") or _pick(row, ("name", "legalName",
+                                                           "companyName")),
+                    "incorporated": incorporated,
+                    "status": row.get("status"),
+                    "country": country,
+                    "company_ids": [str(x) for x in (row.get("companyIds") or [])
+                                    if x] or None,
                     "rows": len(rows)}
     return {"legal_entity_id": None, "rows": len(rows)}
 
@@ -359,7 +430,10 @@ async def panorama_financials(
                   if c.fetched_at is not None), default=now)
     return {
         "cin": the_cin, "configured": True, "resolved": True,
-        "legal_entity": {"id": lei, "name": resolved.get("name")},
+        "legal_entity": {"id": lei, "name": resolved.get("name"),
+                         "incorporated": resolved.get("incorporated"),
+                         "status": resolved.get("status"),
+                         "country": resolved.get("country")},
         "series": series,
         "board": board.get("members", []),
         "shareholders": captable.get("holders", []),

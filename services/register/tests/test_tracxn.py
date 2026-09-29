@@ -19,9 +19,22 @@ CIN = "L72200KA2012PLC065294"
 
 # One canned Tracxn per path — realistic shapes from the Postman collection's
 # documentation, exercised through the SAME normaliser production runs.
+def _row(attr: str, rupees: int, fy_start: int) -> dict:
+    return {"id": f"{attr}-{fy_start}", "attributeName": attr,
+            "legalEntityId": "le-123", "companyIds": ["c-9"],
+            "data": {"amount": {"value": rupees}, "currency": "INR"},
+            "timestamp": {"isRange": True, "dateRange": {
+                "start": {"day": 1, "month": 4, "year": fy_start},
+                "end": {"day": 31, "month": 3, "year": fy_start + 1}}},
+            "dataInOtherCurrencies": {"USD": rupees / 88.0, "INR": rupees}}
+
+
 CANNED = {
     "/legalentities": {"result": [
-        {"id": "le-123", "entityId": CIN, "name": "Bangalore Test Company"}]},
+        {"id": "le-123", "entityId": CIN,
+         "incorporationDate": {"day": 11, "month": 8, "year": 2012},
+         "currentName": {"name": "Bangalore Test Company"}, "status": "PUBLISHED",
+         "location": {"country": {"name": "India"}}}], "total_count": 1},
     "/boardmembers": {"result": [
         {"people": {"id": "p1", "name": "Rohan Mehta"},
          "designation": "Managing Director", "from": "2015-04-01"},
@@ -30,13 +43,17 @@ CANNED = {
         {"shareholders": [
             {"name": "Promoter Group", "percentage": 74.2},
             {"name": "Angel Fund I", "percentage": 12.5}]}]},
+    # The wire shape Tracxn actually answers (from the saved Postman responses):
+    # money in whole rupees under data.amount.value, the period as an Apr–Mar
+    # dateRange, newest first, restated years repeated.
     "/companies/timeseries/revenue": {"result": [
-        {"financialYear": "2023", "value": 71.2, "currency": "INR Cr",
-         "companyIds": ["c-9"]},
-        {"financialYear": "2024", "value": 79.8, "currency": "INR Cr"},
-        {"financialYear": "2025", "value": 86.4, "currency": "INR Cr"}]},
+        _row("REVENUE", 864_000_000, 2025), _row("REVENUE", 798_000_000, 2024),
+        _row("REVENUE", 712_000_000, 2023)], "total_count": 3},
     "/companies/timeseries/ebitda": {"result": [
-        {"financialYear": "2025", "value": 9.1, "currency": "INR Cr"}]},
+        _row("EBITDA", -16_872_000, 2025)], "total_count": 1},
+    "/companies/timeseries/employeecountannualreport": {"result": [
+        {"attributeName": "EMPLOYEE_COUNT", "data": {"value": 212},
+         "timestamp": {"date": {"day": 31, "month": 3, "year": 2025}}}]},
 }
 
 
@@ -89,11 +106,19 @@ async def test_feed_normalises_caches_and_audits(reg: AsyncClient, monkeypatch):
     p = r.json()
     assert p["resolved"] is True
     assert p["legal_entity"]["id"] == "le-123"
-    # Series normalised to year/value points, unit carried "as reported".
+    assert p["legal_entity"]["name"] == "Bangalore Test Company"
+    assert p["legal_entity"]["incorporated"] == "2012-08-11"
+    assert p["legal_entity"]["country"] == "India"
+    # Series normalised to FY points in crore, oldest first, FY labelled.
     rev = p["series"]["revenue"]
-    assert [x["year"] for x in rev["points"]] == [2023, 2024, 2025]
+    assert [x["year"] for x in rev["points"]] == [2024, 2025, 2026]
+    assert [x["fy"] for x in rev["points"]] == ["FY 2023-24", "FY 2024-25", "FY 2025-26"]
     assert rev["points"][-1]["value"] == 86.4
-    assert rev["unit"] == "INR Cr"
+    assert rev["unit"] == "₹ Cr"
+    assert p["series"]["ebitda"]["points"] == [
+        {"year": 2026, "value": -1.6872, "fy": "FY 2025-26"}]
+    # A count is not money: no crore conversion.
+    assert p["series"]["employees"]["points"] == [{"year": 2025, "value": 212.0, "fy": "2025"}]
     # An endpoint Tracxn answered empty degrades to empty points, not a 500.
     assert p["series"]["valuation"]["points"] == []
     # Board and cap table.
