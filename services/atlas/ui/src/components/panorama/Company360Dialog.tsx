@@ -626,8 +626,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         </Box>
       </Box>
 
+      {/* Every card keeps its height: a child that scrolls inside itself (the
+          expanded brief) must not be shrunk to nothing by the column's overflow. */}
       <Box className="c360-body" sx={{ p: { xs: '12px 12px 16px', sm: '14px 20px 16px' }, overflowY: 'auto',
-        overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 1.4, minWidth: 0 }}>
+        overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 1.4, minWidth: 0,
+        '& > *': { flexShrink: 0 } }}>
         {err && <Alert severity="warning" sx={{ fontSize: 12.4 }}>{err}</Alert>}
         {!p && !err && <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress size={26} /></Box>}
