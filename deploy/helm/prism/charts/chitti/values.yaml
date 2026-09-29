@@ -21,6 +21,12 @@ provider:
   timeoutSeconds: 60
   maxRetries: 2
 requestTimeoutSeconds: 240
+# Company 360 risk grade (POST /v1/risk-grade). The rubric runs on provider.model.
+# docragUrl: the in-cluster DocRAG for document evidence (empty = graded without it);
+# docragKey: the key NAME in credentials.existingSecret holding DocRAG's API key.
+riskGrade:
+  docragUrl: ''
+  docragKey: ''
 storage:
   className: ''
   accessModes:
@@ -47,5 +53,7 @@ networkPolicy:
   enabled: true
   gatewayPodLabels:
     app.kubernetes.io/name: gateway
+  # The orchestrator requests risk grades; set its pod labels to admit it.
+  orchestratorPodLabels: {}
 nodeSelector: {}
 tolerations: []

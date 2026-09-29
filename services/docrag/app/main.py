@@ -60,6 +60,7 @@ _TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _DOC_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _INDEX_CONNECT_ATTEMPTS = 30
 _MAGIC = {".pdf": (b"%PDF",), ".xlsx": (b"PK\x03\x04",),
+          ".xls": (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",),     # OLE2 compound file
           ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",), ".png": (b"\x89PNG",),
           ".tif": (b"II*\x00", b"MM\x00*"), ".tiff": (b"II*\x00", b"MM\x00*"),
           ".bmp": (b"BM",)}

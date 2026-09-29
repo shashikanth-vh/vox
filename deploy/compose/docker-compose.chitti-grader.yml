@@ -1,0 +1,46 @@
+# Company 360 risk grades on a SINGLE-HOST stack (no Chitti split): Chitti runs next
+# to the local DocRAG in grader-only mode — its conversational pipeline stays off, so
+# it needs no ontology index, embedding models or Register delegation, only the model
+# key. Merge after the base (and prod-posture) files:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod-posture.yml \
+#     -f docker-compose.chitti-grader.yml up -d --build chitti orchestrator
+#
+# Needs in .env: CHITTI_GATEWAY_KEY (openssl rand -hex 32). The Bedrock key defaults to
+# the CAM's (WORKFLOWS_CAM_LLM_API_KEY); set CHITTI_LLM_API_KEY to use another.
+# A split deployment does not use this file: its Chitti host serves /v1/risk-grade.
+services:
+  chitti:
+    build:
+      context: ../..
+      dockerfile: services/chitti/Dockerfile
+    image: prism-chitti-grader:${PRISM_TAG:-local}
+    environment:
+      CHITTI_ENVIRONMENT: production
+      CHITTI_API_KEYS: "${CHITTI_GATEWAY_KEY:?Set CHITTI_GATEWAY_KEY}"
+      CHITTI_PIPELINE_ENABLED: "false"
+      CHITTI_LOG_JSON: "true"
+      CHITTI_LLM_BASE_URL: "${WORKFLOWS_CAM_LLM_BASE_URL:-https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1}"
+      CHITTI_LLM_API_KEY: "${CHITTI_LLM_API_KEY:-${WORKFLOWS_CAM_LLM_API_KEY:?Set WORKFLOWS_CAM_LLM_API_KEY}}"
+      CHITTI_LLM_MAX_COMPLETION_TOKENS: "32768"
+      CHITTI_RISK_GRADE_MODEL: "${CHITTI_RISK_GRADE_MODEL:-zai.glm-5}"
+      CHITTI_DOCRAG_URL: "http://docrag:8000"
+      CHITTI_DOCRAG_API_KEY: "${DOCRAG_FRONT_KEY:-compose-docrag-front}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=64m"]
+    mem_limit: 1g
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  orchestrator:
+    environment:
+      WORKFLOWS_CHITTI_URL: "http://chitti:8000"
+      WORKFLOWS_CHITTI_API_KEY: "${CHITTI_GATEWAY_KEY:?Set CHITTI_GATEWAY_KEY}"

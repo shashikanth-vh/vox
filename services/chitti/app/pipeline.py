@@ -332,8 +332,14 @@ class ChittiPipeline:
                         "model": model,
                     }
                 )
-            log.info("pipeline_stage_started", extra={"stage": name, "model": model,
-                        **({"input": stage_input} if self.settings.log_pipeline else {})})
+            log.info(
+                "pipeline_stage_started",
+                extra={
+                    "stage": name,
+                    "model": model,
+                    **({"input": stage_input} if self.settings.log_pipeline else {}),
+                },
+            )
             try:
                 result = await call()
             except asyncio.CancelledError:
@@ -512,7 +518,14 @@ class ChittiPipeline:
                 *interpretation.unresolved_terms,
             ]
         )
-        focus_queries, focus_slots = _focused_retrieval_queries(interpretation)
+        focus_queries, focus_slots = (
+            ([], 0) if interpretation.retrieval_queries else _focused_retrieval_queries(interpretation)
+        )
+        retrieval_options = (
+            {"retrieval_queries": interpretation.retrieval_queries}
+            if interpretation.retrieval_queries
+            else {}
+        )
         retrieval = await self._stage(
             records,
             StageName.RETRIEVAL,
@@ -520,12 +533,14 @@ class ChittiPipeline:
                 "query": retrieval_query,
                 "focus_queries": focus_queries,
                 "focus_slots": focus_slots,
+                **retrieval_options,
             },
             lambda: self.retriever.search(
                 retrieval_query,
                 focus_queries=focus_queries,
                 focus_slots=focus_slots,
                 audience=AUDIENCE_GROUNDING,
+                **retrieval_options,
             ),
         )
         stopped = self._diagnostic_stop(records, identity, request_id)
@@ -753,11 +768,17 @@ class ChittiPipeline:
             metadata["last_completed_stage"] = next(
                 record.stage for record in reversed(records) if record.status == "completed"
             )
-        metadata["public_evidence"] = [{
-            "reference": "E1",
-            "label": f"Based on {len(evidence.contributing_records)} accessible records",
-            "retrieved_at": evidence.retrieved_at.isoformat(),
-        }] if evidence.contributing_records else []
+        metadata["public_evidence"] = (
+            [
+                {
+                    "reference": "E1",
+                    "label": f"Based on {len(evidence.contributing_records)} accessible records",
+                    "retrieved_at": evidence.retrieved_at.isoformat(),
+                }
+            ]
+            if evidence.contributing_records
+            else []
+        )
         if rows:
             metadata["result_table"] = rows
         from app.result_tables import result_tables

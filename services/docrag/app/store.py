@@ -39,7 +39,7 @@ from app.rag.vector_index import VectorIndex
 
 log = get_logger("docrag.store")
 
-SUPPORTED_SUFFIXES = {".pdf", ".xlsx", *IMAGE_SUFFIXES}
+SUPPORTED_SUFFIXES = {".pdf", ".xlsx", ".xls", *IMAGE_SUFFIXES}
 PENDING = ("queued", "processing")
 
 

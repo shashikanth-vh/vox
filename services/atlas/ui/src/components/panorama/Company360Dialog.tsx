@@ -11,8 +11,9 @@ import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
 import { panoramaService, type DocAskResult, type IndexResult, type Panorama,
-  type TracxnFinancials, type TracxnSeries }
+  type TracxnFinancials, type TracxnSeries, type RiskGrade }
   from '../../services/panoramaService';
+import { BAND_COLOR, RiskGradeChip, RiskGradeDetails } from './RiskGrade';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
   from '../../services/newsService';
 
@@ -23,9 +24,11 @@ import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
  * each section below is a one-line row that opens on click. The register's
  * panorama endpoint supplies every PRISM section RBAC'd server-side; news comes
  * from PULSE (the radar's own search); the ask-box queries DocRAG restricted to
- * this company's indexed files. Financials and risk grade render as wire-ready
- * cards until their feeds connect. Download = the browser's print-to-PDF over a
- * print stylesheet — the footer stamps sources and generation time.
+ * this company's indexed files. The risk grade (on request) is the ATLAS client
+ * rubric run by the orchestrator on the CAM's engine — see RiskGrade.tsx.
+ * Financials come from the Tracxn market feed, CIN-anchored and cached
+ * register-side. Download = the browser's print-to-PDF over a print
+ * stylesheet — the footer stamps sources and generation time.
  */
 
 const CHART_TEAL = '#0D9488';
@@ -234,6 +237,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [trx, setTrx] = useState<TracxnFinancials | null>(null);
   const [trxBusy, setTrxBusy] = useState(false);
   const [trxErr, setTrxErr] = useState('');
+  const [grade, setGrade] = useState<RiskGrade | null>(null);
+  const [gradeBusy, setGradeBusy] = useState(false);
+  const [gradeErr, setGradeErr] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -241,10 +247,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setAsk(''); setAskOut(null); setAskErr('');
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
     setTrx(null); setTrxBusy(false); setTrxErr('');
+    setGrade(null); setGradeBusy(false); setGradeErr('');
     setOpenSections({ engagements: true }); setBriefOpen(false); setNewsSev(null);
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => { if (!alive) return; setP(r);
+        // A grade computed earlier (by anyone, for this role's view) shows at once;
+        // a new one is only ever computed on request — it is a model call.
+        panoramaService.riskGrade(r.anchor.entity_id, r.anchor.name)
+          .then((g) => { if (alive && g) setGrade(g); })
+          .catch(() => { /* no saved grade to show — the button stays */ });
         // Date-bounded so the "30 days" tile means 30 days, not "whatever came back".
         const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
         fetchTerm(r.anchor.name, from)
@@ -292,6 +304,20 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     try { setAskOut(await panoramaService.askDocuments(p.anchor.name, q)); }
     catch (e: any) { setAskErr(String(e?.message || e)); }
     finally { setAskBusy(false); }
+  };
+
+  const runGrade = async (refresh: boolean) => {
+    if (!p) return;
+    setGradeBusy(true); setGradeErr('');
+    // The same verdicts the News section shows: PULSE's, else the local classifier.
+    const live = (p.stats.deals_in_flight + p.stats.deals_done) > 0;
+    const newsIn = (news || []).map((a) => ({ headline: a.headline, source: a.source,
+      when: a.when, severity: a.severity || classify(a.headline, live)[0] }));
+    try {
+      setGrade(await panoramaService.gradeRisk(p.anchor.entity_id, p.anchor.name,
+        newsIn, refresh));
+    } catch (e: any) { setGradeErr(apiErr(e, 'grade this client')); }
+    finally { setGradeBusy(false); }
   };
 
   const runIndex = async () => {
@@ -345,8 +371,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         </Box>
         <Box sx={{ flex: 1 }} />
         <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Chip size="small" variant="outlined" label="Risk grade — soon"
-            sx={{ height: 24, fontSize: 11, color: tokens.muted, borderStyle: 'dashed' }} />
+          <RiskGradeChip grade={grade} busy={gradeBusy} error={gradeErr}
+            canGrade={!!p && (news !== null || !!newsErr)} onGrade={runGrade} />
           <Button size="small" variant="contained" startIcon={<DownloadIcon />}
             onClick={() => window.print()}>Download</Button>
           <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
@@ -846,14 +872,24 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               </Section>
 
               <Section id="risk" title="RISK GRADE"
-                badge={<Chip size="small" label="coming soon" sx={{ height: 19,
-                  fontSize: 10, color: tokens.muted, borderStyle: 'dashed' }}
-                  variant="outlined" />}
+                badge={grade ? <Chip size="small" label={`${grade.label} · ${grade.score}/100`}
+                  sx={{ height: 19, fontSize: 10, fontWeight: 800, color: '#fff',
+                    bgcolor: BAND_COLOR[grade.rating] }} /> : undefined}
                 open={!!openSections.risk} onToggle={toggle}
-                summary="internal grading joins here">
-                <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-                  The internal risk grade renders here when the grading service
-                  connects — same card, live value.</Typography>
+                summary={grade ? grade.verdict
+                  : 'AI grade from the ATLAS client rubric — not computed yet'}>
+                {grade ? <RiskGradeDetails grade={grade}
+                  onRegrade={gradeBusy ? undefined : () => runGrade(true)} /> : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+                    <Typography sx={{ fontSize: 11.6, color: tokens.muted, flex: 1 }}>
+                      Grades this client RED / AMBER / GREEN from its Register footprint,
+                      indexed documents and 30-day news, using the ATLAS client rubric.
+                      {gradeErr && <span style={{ color: tokens.bad }}> {gradeErr}</span>}
+                    </Typography>
+                    <Button size="small" variant="outlined" disabled={gradeBusy || (news === null && !newsErr)}
+                      onClick={() => runGrade(false)}>
+                      {gradeBusy ? <CircularProgress size={15} /> : 'Grade risk'}</Button>
+                  </Box>)}
               </Section>
             </Box>
           </Box>

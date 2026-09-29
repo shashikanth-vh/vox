@@ -167,6 +167,11 @@ def test_remote_sets_chitti_tls_and_removes_register_ports(settings):
         elif name == 'orchestrator':
             expected['environment']['WORKFLOWS_DOCRAG_URL'] = 'https://chitti.example.test:8443/docrag'
             expected['environment']['WORKFLOWS_DOCRAG_CA_FILE'] = '/etc/prism/chitti-ca.crt'
+            # Company 360 risk grades: the orchestrator asks the AI host's Chitti.
+            expected['environment']['WORKFLOWS_CHITTI_URL'] = 'https://chitti.example.test:8443'
+            expected['environment']['WORKFLOWS_CHITTI_API_KEY'] = (
+                'fixture-chitti_gateway_key-32-characters-value'
+            )
             assert service['volumes'][-1]['target'] == '/etc/prism/chitti-ca.crt'
             assert service['volumes'][-1]['read_only'] is True
             expected['volumes'] = service['volumes']

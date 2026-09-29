@@ -11,6 +11,7 @@ index to a new collection, rebuilt from the saved chunks.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,24 @@ def model_source(model_cls: Any, name: str) -> str:
     return str(source)
 
 
+def download(fetch: Any, source: str, revision: str, local_dir: str,
+             attempts: int = 4, pause_s: float = 5.0) -> str:
+    """snapshot_download, retried: Hugging Face occasionally drops one of the many
+    small files a model repo holds (a 499 or a reset), and that one file must not
+    fail a whole image build. Files already fetched are kept between attempts; few
+    parallel requests keep the burst under the hub's limits."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return str(fetch(source, revision=revision, local_dir=local_dir, max_workers=2))
+        except Exception as exc:  # noqa: BLE001 - any transport/hub error is retried
+            if attempt == attempts:
+                raise
+            print(f"download of {source} failed ({type(exc).__name__}); "
+                  f"retry {attempt}/{attempts - 1} in {pause_s * attempt:.0f}s")
+            time.sleep(pause_s * attempt)
+    raise AssertionError("unreachable")
+
+
 def main() -> None:
     from fastembed import SparseTextEmbedding, TextEmbedding
     from huggingface_hub import snapshot_download
@@ -37,7 +56,7 @@ def main() -> None:
             ("dense", TextEmbedding, s.dense_model, s.dense_model_revision),
             ("sparse", SparseTextEmbedding, s.sparse_model, s.sparse_model_revision)):
         source = model_source(cls, name)
-        path = snapshot_download(source, revision=pinned, local_dir=str(Path(s.model_dir) / kind))
+        path = download(snapshot_download, source, pinned, str(Path(s.model_dir) / kind))
         model = cls(name, specific_model_path=path)
         list(model.embed(["docrag model bake"]))
         print(f"baked {kind} {name} @ {pinned[:12]} from {source}")

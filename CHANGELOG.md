@@ -6,6 +6,59 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The risk grade reads the company's own files, asks PULSE, and gives a report.**
+  * *Data Register, the CAM way:* the orchestrator reads the company's files in
+    Financials and Banking & Debt (`WORKFLOWS_RISK_GRADE_DOC_SECTIONS`) as the caller,
+    sends the bytes through DocRAG `/v1/extract` (OpenDataLoader, Sarvam OCR, cached per
+    file) and ships only the text to Chitti (40k chars per file, 160k per grade). Pending,
+    rejected, superseded and expired slots are skipped; every file's fate is listed.
+  * *PULSE:* the firm's and its key people's news (last 90 days, PULSE's verdicts) is
+    fetched server-side (`WORKFLOWS_PULSE_URL` / `_API_KEY`); the dialog's news is only a
+    fallback.
+  * *Steadier grades:* each pillar takes the median of three readings (a hard trigger
+    needs a majority), then the rubric is applied once. *Confidence is a percentage:*
+    60% × data coverage + 40% × agreement between the readings.
+  * *Report:* `GET /orchestrator/v1/panorama/risk-grade/report` returns the saved grade as
+    a Word document (the **Report** button in the (i)).
+  * *Legacy Excel:* DocRAG reads `.xls` (CMA workbooks) via xlrd; the CAM and Company 360
+    indexing send real OLE2 workbooks to it, and a CSV labelled as Excel is read as text.
+  * `/orchestrator/v1/panorama/` joins the long-running lane (edge and gateway, 600 s): a
+    first grade may OCR scanned financials.
+
+- **Company 360 grades a client RED / AMBER / GREEN.** The header's "Risk grade — soon"
+  becomes a live grade: the desk's rubric (`services/chitti/app/prompts/
+  ATLAS_Client_Risk_Rating_Prompt.md`, Part B — edit it to change the grading) runs on
+  GLM in **Chitti on the AI host** (`POST /v1/risk-grade`), over what PRISM holds on the
+  company: the Register's panorama read AS the signed-in user (RBAC holds; the
+  orchestrator reads it and forwards it — `POST|GET /orchestrator/v1/panorama/risk-grade`),
+  passages from the company's indexed documents in the AI host's DocRAG (the 360 ask-box's
+  preset questions), and the 30-day news. The rubric's arithmetic is re-applied to the
+  model's answer — weights, bands (70 / 45), any hard trigger → RED, no financials or
+  banking → never GREEN (PROVISIONAL); pillars without data are left out of the score, not
+  counted as 0, so the rubric's worked example (DESCO) comes out AMBER – PROVISIONAL as
+  written. Three independent readings, the median kept; a score within 3 of a band line is
+  flagged "near a band line". The chip carries the band's colour (dashed when provisional);
+  its (i) shows how the grade was reached — pillars with evidence, triggers, risks and
+  mitigants, documents to request, the rubric's overrides, and what it was built from.
+  Grades are computed on request (a model call, ~3 × 4k tokens) and cached 24 h per company
+  and per visible-section set. No model configured → 409, never a placeholder grade.
+  Operator steps: none beyond the split's existing keys — Chitti reuses
+  `CHITTI_LLM_API_KEY` and `DOCRAG_FRONT_KEY`; the orchestrator reuses
+  `GATEWAY_CHITTI_URL` and `CHITTI_GATEWAY_KEY`. Upgrade the Chitti host first (new
+  `/v1/risk-grade` route in `chitti.conf`, 2 MB bodies), then the services host.
+  Optional: `CHITTI_RISK_GRADE_MODEL` (default `zai.glm-5`).
+  A **single-host** stack (no split) grades too: `docker-compose.chitti-grader.yml` runs
+  Chitti next to the local DocRAG in grader-only mode (pipeline off — no index, models or
+  Register delegation), reusing the CAM's Bedrock key; `prism-deploy.sh` merges it
+  automatically once `.env` carries `CHITTI_GATEWAY_KEY` (`openssl rand -hex 32`).
+- **Company 360 "Index register files for Q&A" works on a split host.** Its uploads to
+  DocRAG used the orchestrator's default HTTP client, which does not trust the AI host's
+  private CA, so every file was skipped with `CERTIFICATE_VERIFY_FAILED` while the call
+  still answered 200. It now uses the CAM's DocRAG client (`WORKFLOWS_DOCRAG_CA_FILE`).
+- **Company 360 no longer crashes without a backend.** A non-panorama answer (the SPA's
+  own HTML when no gateway is reachable) is refused with a readable message instead of
+  taking the screen down on `p.stats`.
+
 - **DocRAG joins the Chitti split.** The Chitti host becomes the AI host: its Compose
   project (`docker-compose.chitti.yml`) now also runs `docrag` and `docrag-qdrant`, and
   `chitti.conf` serves DocRAG at `/docrag/` on the same HTTPS port and certificate

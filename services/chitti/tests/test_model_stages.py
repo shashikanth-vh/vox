@@ -786,7 +786,8 @@ async def test_each_reasoning_stage_uses_its_own_call_and_model():
     assert all(call["response_format"]["type"] == "json_schema" for call in completions.calls)
     assert all(call["response_format"]["json_schema"]["strict"] for call in completions.calls)
     assert all(call["max_completion_tokens"] == 32768 for call in completions.calls)
-    assert all(call["extra_body"] == {"reasoning": {"enabled": True}} for call in completions.calls)
+    # Reasoning is no longer requested per call (83cf90f) — the provider's default applies.
+    assert all("extra_body" not in call for call in completions.calls)
     assert all("JSON" in call["messages"][0]["content"] for call in completions.calls)
     assert '"canonical_value_source": "name"' in completions.calls[2]["messages"][1]["content"]
     assert '"analyst": {' in completions.calls[2]["messages"][1]["content"]

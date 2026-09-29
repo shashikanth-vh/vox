@@ -32,6 +32,9 @@ export const orchestrator = {
       { params, ...(opts?.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).then((r) => r.data),
   patch: <T>(url: string, data?: any) => orchestratorClient.patch<T>(url, data).then((r) => r.data),
   // Binary answers (a rendered .docx) — the response is a Blob, not JSON.
+  getBlob: (url: string, params?: Record<string, any>) =>
+    orchestratorClient.get(url, { params, responseType: 'blob', timeout: 60_000 })
+      .then((r) => r.data as Blob),
   postBlob: (url: string, data?: any, opts?: { timeoutMs?: number }) =>
     orchestratorClient.post(url, data, { responseType: 'blob',
       ...(opts?.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).then((r) => r.data as Blob),

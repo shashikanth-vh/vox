@@ -775,6 +775,9 @@ services:
       # is down the workbench falls back to its basic text pass and says so per document.
       WORKFLOWS_DOCRAG_URL: "http://docrag:8000"
       WORKFLOWS_DOCRAG_API_KEY: "${DOCRAG_FRONT_KEY:-compose-docrag-front}"
+      # Company 360 risk grades ask PULSE for the firm's and its people's news server-side.
+      WORKFLOWS_PULSE_URL: "http://pulse:8000"
+      WORKFLOWS_PULSE_API_KEY: "${PULSE_API_KEYS:-compose-pulse-key}"
       # Machine callers (VocX, UIs) must present this key — no longer an open endpoint.
       WORKFLOWS_API_KEYS: "${WORKFLOWS_API_KEYS:-compose-workflows-key}"
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"

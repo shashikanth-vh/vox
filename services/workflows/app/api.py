@@ -4796,6 +4796,15 @@ def create_app() -> FastAPI:
         reg_headers=lambda request, caller, who, method, path:
             _delegated_headers(request, who, caller, method, path))
 
+    # Company 360 risk grade: the ATLAS client rubric over the company's footprint,
+    # on the CAM's engine. Reads the panorama as the human, like the bridge.
+    from app.risk_grade import mount_risk_grade
+    mount_risk_grade(
+        app, settings, denied=denied, verified_email=_verified_email,
+        caller_context=_caller_context, problem=_problem,
+        reg_headers=lambda request, caller, who, method, path:
+            _delegated_headers(request, who, caller, method, path))
+
     return app
 
 

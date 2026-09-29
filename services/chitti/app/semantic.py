@@ -20,7 +20,12 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue, SparseVecto
 
 from app.config import Settings
 from app.contracts import AUDIENCE_GROUNDING, AUDIENCE_PLANNING, ROLE_INVARIANT, ROLE_SEMANTIC
-from app.stage_models import RetrievalFocus, RetrievalMatch, SemanticRetrievalResult
+from app.stage_models import (
+    RetrievalFocus,
+    RetrievalMatch,
+    SemanticRetrievalResult,
+    deduplicate_retrieval_queries,
+)
 
 PASSAGES_FILE = Path(__file__).parent / "ontology" / "passages.json"
 MANIFEST_FILE = "manifest.json"
@@ -60,16 +65,15 @@ def ontology_content_identity(source: dict[str, Any] | None = None) -> str:
     passages = []
     for passage in source.get("passages", []):
         metadata = dict(passage.get("metadata") or {})
-        passages.append({
-            "id": passage["id"],
-            "content": passage["content"],
-            "role": metadata.get("role"),
-            "audience": sorted(metadata.get("audience") or []),
-            "metadata": {
-                key: value for key, value in sorted(metadata.items())
-                if key not in {"sources"}
-            },
-        })
+        passages.append(
+            {
+                "id": passage["id"],
+                "content": passage["content"],
+                "role": metadata.get("role"),
+                "audience": sorted(metadata.get("audience") or []),
+                "metadata": {key: value for key, value in sorted(metadata.items()) if key not in {"sources"}},
+            }
+        )
     canonical = json.dumps(
         {"version": source.get("version"), "passages": sorted(passages, key=lambda item: item["id"])},
         ensure_ascii=False,
@@ -166,9 +170,7 @@ def verify_model_manifest(settings: Settings) -> None:
         raise SemanticDependencyError(f"Invalid model manifest at {path}: {exc}") from exc
     expected = expected_manifest(settings)
     if actual.get("models") != expected:
-        raise SemanticDependencyError(
-            "Cached model ids/revisions do not match configured retrieval models."
-        )
+        raise SemanticDependencyError("Cached model ids/revisions do not match configured retrieval models.")
 
 
 def load_models(settings: Settings) -> RetrievalModels:
@@ -216,12 +218,26 @@ class SemanticRetriever:
         self,
         query: str,
         *,
+        retrieval_queries: list[str] | None = None,
         focus_queries: list[RetrievalFocus] | None = None,
         focus_slots: int = 0,
         audience: str = AUDIENCE_GROUNDING,
     ) -> SemanticRetrievalResult:
         limit = self._limit_for(audience)
-        candidate_pool = await self._hybrid_candidates(query)
+        queries = deduplicate_retrieval_queries(retrieval_queries or [])
+        if queries:
+            # Search every stated need. Keep each search's existing candidate limits;
+            # merge before audience-specific reranking, without resource/facet gates.
+            pools = []
+            for index, need_query in enumerate(queries, start=1):
+                candidates = await self._hybrid_candidates(need_query)
+                pools.append(
+                    [{**candidate, "origins": [f"retrieval_query:{index}"]} for candidate in candidates]
+                )
+            candidate_pool = _merge_candidate_pools(pools)
+        else:
+            # Missing and empty lists intentionally preserve the complete legacy path.
+            candidate_pool = await self._hybrid_candidates(query)
         primary = await self._rerank_matches(
             query,
             _filter_audience_candidates(candidate_pool, audience),
@@ -236,13 +252,14 @@ class SemanticRetriever:
                 origin="planning_shared_pool",
                 limit=self._limit_for(AUDIENCE_PLANNING),
             )
-        if not focus_queries or focus_slots <= 0:
+        if queries or not focus_queries or focus_slots <= 0:
             return _retrieval_result(
                 query,
                 primary,
                 focus_queries=[],
                 passage_limit=limit,
                 planning_matches=planning_matches,
+                semantic_query_count=len(queries) if queries else 1,
             )
 
         focused_groups = await asyncio.gather(
@@ -305,9 +322,7 @@ class SemanticRetriever:
             asyncio.to_thread(lambda: list(self.models.dense.query_embed(query))[0]),
             asyncio.to_thread(lambda: list(self.models.sparse.query_embed(query))[0]),
         )
-        role_filter: list[Any] = [
-            FieldCondition(key="metadata.role", match=MatchValue(value=ROLE_SEMANTIC))
-        ]
+        role_filter: list[Any] = [FieldCondition(key="metadata.role", match=MatchValue(value=ROLE_SEMANTIC))]
         if audience is not None:
             role_filter.append(FieldCondition(key="metadata.audience", match=MatchValue(value=audience)))
         query_filter = Filter(must=role_filter)
@@ -345,43 +360,37 @@ class SemanticRetriever:
     ) -> list[RetrievalMatch]:
         ranked = [dict(item) for item in candidates]
         documents = [
-            str(
-                item["payload"].get("retrieval_text")
-                or item["payload"].get("content")
-                or ""
-            )
+            str(item["payload"].get("retrieval_text") or item["payload"].get("content") or "")
             for item in ranked
         ]
-        rerank_scores = await asyncio.to_thread(
-            lambda: list(self.models.reranker.rerank(query, documents))
-        )
+        rerank_scores = await asyncio.to_thread(lambda: list(self.models.reranker.rerank(query, documents)))
         for item, score in zip(ranked, rerank_scores, strict=True):
             item["rerank_score"] = float(score)
             content = str(item["payload"].get("content") or "")
             item["exact_match"], item["normalized_match"] = _match_signals(query, content)
         ranked.sort(
-            key=lambda item: (
-                item["exact_match"], item["normalized_match"], item["rerank_score"]
-            ),
+            key=lambda item: (item["exact_match"], item["normalized_match"], item["rerank_score"]),
             reverse=True,
         )
         matches = []
         for item in ranked[:limit]:
             payload = item["payload"]
-            matches.append(RetrievalMatch(
-                passage_id=str(payload["passage_id"]),
-                source=str(payload["source"]),
-                version=str(payload["version"]),
-                content=str(payload["content"]),
-                metadata=dict(payload.get("metadata") or {}),
-                dense_score=item.get("dense_score"),
-                sparse_score=item.get("sparse_score"),
-                fusion_score=item["fusion_score"],
-                rerank_score=item["rerank_score"],
-                exact_match=item["exact_match"],
-                normalized_match=item["normalized_match"],
-                origins=[origin],
-            ))
+            matches.append(
+                RetrievalMatch(
+                    passage_id=str(payload["passage_id"]),
+                    source=str(payload["source"]),
+                    version=str(payload["version"]),
+                    content=str(payload["content"]),
+                    metadata=dict(payload.get("metadata") or {}),
+                    dense_score=item.get("dense_score"),
+                    sparse_score=item.get("sparse_score"),
+                    fusion_score=item["fusion_score"],
+                    rerank_score=item["rerank_score"],
+                    exact_match=item["exact_match"],
+                    normalized_match=item["normalized_match"],
+                    origins=[origin, *item.get("origins", [])],
+                )
+            )
         return matches
 
 
@@ -392,6 +401,7 @@ def _retrieval_result(
     focus_queries: list[RetrievalFocus],
     passage_limit: int,
     planning_matches: list[RetrievalMatch] | None = None,
+    semantic_query_count: int | None = None,
 ) -> SemanticRetrievalResult:
     estimated_tokens = sum(max(1, len(match.content) // 4) for match in matches)
     return SemanticRetrievalResult(
@@ -399,18 +409,37 @@ def _retrieval_result(
         matches=matches,
         planning_matches=planning_matches or [],
         focus_queries=focus_queries,
-        semantic_query_count=1 + len(focus_queries),
+        semantic_query_count=semantic_query_count or 1 + len(focus_queries),
         passage_limit=passage_limit,
         estimated_context_tokens=estimated_tokens,
     )
 
 
-def _filter_audience_candidates(
-    candidates: list[dict[str, Any]], audience: str
-) -> list[dict[str, Any]]:
+def _merge_candidate_pools(pools: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Union by passage identity, retaining all recall origins and one coherent score tuple.
+
+    Scores remain those of the strongest fused occurrence, not sums across repeated
+    queries. The union is reranked against the original request for each audience.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for pool in pools:
+        for candidate in pool:
+            key = str(candidate["payload"]["passage_id"])
+            previous = merged.get(key)
+            if previous is None:
+                merged[key] = dict(candidate)
+                continue
+            origins = list(dict.fromkeys([*previous["origins"], *candidate["origins"]]))
+            best = candidate if candidate["fusion_score"] > previous["fusion_score"] else previous
+            merged[key] = {**best, "origins": origins}
+    return list(merged.values())
+
+
+def _filter_audience_candidates(candidates: list[dict[str, Any]], audience: str) -> list[dict[str, Any]]:
     """Apply the audience and role boundary before cross-encoder ranking."""
     return [
-        candidate for candidate in candidates
+        candidate
+        for candidate in candidates
         if audience in (candidate.get("payload", {}).get("metadata", {}).get("audience") or [])
         and candidate.get("payload", {}).get("metadata", {}).get("role") == ROLE_SEMANTIC
     ]
@@ -423,11 +452,7 @@ def _select_need_match(
 ) -> RetrievalMatch | None:
     """Return the highest-ranked passage that explicitly serves one surface need."""
     return next(
-        (
-            match
-            for match in matches
-            if facet in (match.metadata.get("semantic_facets") or [])
-        ),
+        (match for match in matches if facet in (match.metadata.get("semantic_facets") or [])),
         None,
     )
 
@@ -447,21 +472,33 @@ def _promote_focused_matches(
     for match in focused[: min(slots, limit)]:
         if match.passage_id in selected_indexes:
             index = selected_indexes[match.passage_id]
-            selected[index] = selected[index].model_copy(update={
-                "origins": list(dict.fromkeys([
-                    *selected[index].origins,
-                    *match.origins,
-                ])),
-            })
+            selected[index] = selected[index].model_copy(
+                update={
+                    "origins": list(
+                        dict.fromkeys(
+                            [
+                                *selected[index].origins,
+                                *match.origins,
+                            ]
+                        )
+                    ),
+                }
+            )
             continue
         if match.passage_id in promoted_indexes:
             index = promoted_indexes[match.passage_id]
-            promoted[index] = promoted[index].model_copy(update={
-                "origins": list(dict.fromkeys([
-                    *promoted[index].origins,
-                    *match.origins,
-                ])),
-            })
+            promoted[index] = promoted[index].model_copy(
+                update={
+                    "origins": list(
+                        dict.fromkeys(
+                            [
+                                *promoted[index].origins,
+                                *match.origins,
+                            ]
+                        )
+                    ),
+                }
+            )
             continue
         promoted_indexes[match.passage_id] = len(promoted)
         promoted.append(match)
@@ -476,11 +513,14 @@ def _fuse(dense: list[Any], sparse: list[Any], *, rank_constant: int = 60) -> li
     for channel, points in (("dense", dense), ("sparse", sparse)):
         for rank, point in enumerate(points, start=1):
             key = str(point.id)
-            item = by_id.setdefault(key, {
-                "id": key,
-                "payload": dict(point.payload or {}),
-                "fusion_score": 0.0,
-            })
+            item = by_id.setdefault(
+                key,
+                {
+                    "id": key,
+                    "payload": dict(point.payload or {}),
+                    "fusion_score": 0.0,
+                },
+            )
             item[f"{channel}_score"] = float(point.score)
             item["fusion_score"] += 1.0 / (rank_constant + rank)
     return sorted(by_id.values(), key=lambda item: (-item["fusion_score"], item["id"]))

@@ -567,6 +567,10 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             return ".pdf"
         if "spreadsheetml" in (ctype or "") or (blob[:2] == b"PK" and b"xl/" in blob[:4096]):
             return ".xlsx"
+        # Legacy Excel 97–2003 (CMA workbooks) — only a real OLE2 file; a CSV sent as
+        # "application/vnd.ms-excel" is text and stays with the basic reader.
+        if blob.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") and "ms-excel" in (ctype or "").lower():
+            return ".xls"
         return image_suffix(ctype, blob)
 
     async def _extract(request: Request, doc_id: str, blob: bytes,

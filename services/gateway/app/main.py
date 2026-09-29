@@ -76,6 +76,9 @@ _SKIP_RESPONSE_HEADERS = {"content-length", "connection", "keep-alive",
 _SLOW_PATHS = ("/vocx/v1/capture_audio", "/vocx/v1/capture", "/vocx/v1/vox/capture",
                "/vocx/v1/template_fill",
                "/orchestrator/v1/cam/",
+               # Company 360: indexing a company's files, and a risk grade that reads
+               # its financials (Sarvam OCR on a first read) then three model readings.
+               "/orchestrator/v1/panorama/",
                # The all-firms sweep: four hundred terms fanned out across three news
                # sources. Minutes, legitimately — and cutting it short throws away a
                # scan that was working, which is exactly what the short budget did.

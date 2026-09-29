@@ -41,3 +41,40 @@ def extract_xlsx(path: str) -> list[PageResult]:
 
     wb.close()
     return results
+
+
+def extract_xls(path: str) -> list[PageResult]:
+    """Legacy Excel 97–2003 workbooks (CMA data still arrives as .xls): the same
+    one-table-per-sheet shape as extract_xlsx, so both converge downstream."""
+    import xlrd
+
+    book = xlrd.open_workbook(path, on_demand=True)
+    results: list[PageResult] = []
+    try:
+        for i in range(book.nsheets):
+            sheet = book.sheet_by_index(i)
+            rows = []
+            for r in range(sheet.nrows):
+                values = sheet.row_values(r)
+                if all(v in ("", None) for v in values):
+                    continue
+                rows.append([_cell_text(v) for v in values])
+            if not rows:
+                results.append(PageResult(page_number=i + 1,
+                                          markdown=f"# {sheet.name}\n\n[empty sheet]",
+                                          tables=[], engine="local_text_layer"))
+                continue
+            results.append(PageResult(page_number=i + 1, markdown=f"# {sheet.name}\n",
+                                      tables=[ExtractedTable(rows=rows)],
+                                      engine="local_text_layer"))
+            book.unload_sheet(i)
+    finally:
+        book.release_resources()
+    return results
+
+
+def _cell_text(value: object) -> str:
+    # xlrd returns every number as float: 1200.0 reads better as 1200.
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return "" if value is None else str(value)

@@ -129,6 +129,12 @@ api:
       existingSecretKey: cam-llm-api-key
     docragUrl: ""           # e.g. http://prism-docrag ; empty = basic in-process extraction
     docragApiKey: ""        # must be one of DocRAG's config.apiKeys
+  # Company 360 risk grade: computed by Chitti (POST /v1/risk-grade). Empty URL = off.
+  riskGrade:
+    chittiUrl: ""           # e.g. http://prism-chitti
+    chittiApiKey:           # one of Chitti's gateway keys
+      existingSecret: ""
+      existingSecretKey: chitti-api-key
   service:
     type: ClusterIP
     port: 80

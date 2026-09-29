@@ -110,6 +110,48 @@ export interface IndexResult {
   note: string | null;
 }
 
+export type RiskBand = 'RED' | 'AMBER' | 'GREEN';
+
+/** The orchestrator's grade: the ATLAS client rubric, re-applied server-side. */
+export interface RiskGrade {
+  rating: RiskBand; provisional: boolean; label: string; score: number;
+  confidence: 'High' | 'Medium' | 'Low'; verdict: string;
+  /** 60% × data coverage + 40% × agreement between the independent readings. */
+  confidence_pct?: number;
+  confidence_detail?: { data_coverage: number; agreement: number; spread: number;
+                        readings: number; model_said?: string };
+  pillars: { key: string; name: string; weight: number; score: number;
+             weighted: number; available: boolean; evidence: string }[];
+  hard_triggers: { trigger: string; status: 'Hit' | 'Clear' | 'Unknown';
+                   evidence: string }[];
+  risks: string[]; mitigants: string[]; data_gaps: string[];
+  move_up: string; move_down: string;
+  action: string; conditions: string[];
+  /** Where the rubric overrode the model — shown, never hidden. */
+  adjustments: string[];
+  /** Every independent reading; the grade shown is their median. */
+  runs?: { label: string; score: number }[];
+  /** Within a few points of a band line — the colour is not firm. */
+  borderline?: boolean;
+  company: string; entity_id?: string | null;
+  /** A regrade found nothing new to read: this is the previous grade, unchanged. */
+  unchanged?: boolean;
+  engine: string; prompt: string; prompt_version: string;
+  generated_at: string; generated_by: string; cached: boolean;
+  inputs: { register_sections_hidden: string[]; lending_lines: number;
+            platform_deals: number; asset_monetisation: number; interactions: number;
+            register_documents: number; document_passages: number;
+            documents_cited: string[]; document_note: string | null;
+            news_items: number; news_note?: string | null; documents_read?: number;
+            /** Every Data Register file in the graded sections, and what became of it. */
+            documents?: { name: string; section: string | null; used: boolean;
+                          engines: string[]; reason?: string; cached?: boolean;
+                          note?: string }[] };
+}
+
+export interface RiskNewsIn { headline: string; source?: string; when?: string;
+  severity?: string }
+
 function docragHeaders(): Record<string, string> {
   return { Accept: 'application/json', 'Content-Type': 'application/json',
     ...authHeaders() };
@@ -120,7 +162,52 @@ export const panoramaService = {
     const params: Record<string, string> = {};
     if (q.entityId) params.entity_id = q.entityId;
     else if (q.company) params.company = q.company;
-    return api.get<Panorama>('/panorama', params);
+    // A missing gateway answers with the SPA's index.html (200, text) — refuse
+    // anything that is not a panorama, so the dialog names the fault instead of
+    // crashing the whole screen on `p.stats`.
+    return api.get<Panorama>('/panorama', params).then((r) => {
+      if (!r || typeof r !== 'object' || !r.stats || !r.anchor) {
+        throw new Error('the Register did not return a company panorama '
+          + '(is the gateway reachable? — Company 360 has no offline data)');
+      }
+      return r;
+    });
+  },
+
+  /** The last grade for this company, or null when none was computed yet. */
+  async riskGrade(entityId: string | null, company: string): Promise<RiskGrade | null> {
+    try {
+      return await orchestrator.get<RiskGrade>('/v1/panorama/risk-grade',
+        { company, ...(entityId ? { entity_id: entityId } : {}) });
+    } catch (e: any) {
+      if (e?.response?.status === 404) return null;
+      throw e;
+    }
+  },
+
+  /** Grade (or regrade) with the ATLAS client rubric on the CAM's engine. One model
+   *  call over the whole footprint — allow minutes, not seconds. */
+  gradeRisk(entityId: string | null, company: string, news: RiskNewsIn[],
+            refresh = false): Promise<RiskGrade> {
+    return orchestrator.post<RiskGrade>('/v1/panorama/risk-grade',
+      { company, entity_id: entityId, news: news.slice(0, 60), refresh },
+      // A first grade reads the company's financials (OCR for scans) — allow minutes.
+      { timeoutMs: 600_000 });
+  },
+
+  /** The grade on screen as a Word report, saved to the browser's downloads. The
+   *  grade travels with the request, so the report is exactly what is shown — even
+   *  after the server's saved copy has expired (a restart, or 24 h). */
+  async downloadRiskReport(grade: RiskGrade): Promise<void> {
+    const blob = await orchestrator.postBlob('/v1/panorama/risk-grade/report', { grade },
+      { timeoutMs: 60_000 });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Risk grade - ${grade.company} - ${String(grade.generated_at).slice(0, 10)}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   },
 
   /** The FINANCIALS card's live feed. 409 = not configured, or no CIN on

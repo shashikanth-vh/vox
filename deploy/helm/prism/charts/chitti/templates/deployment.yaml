@@ -101,6 +101,19 @@ spec:
             - name: CHITTI_{{ $stage }}_MODEL
               value: {{ required "chitti.provider.model is required" $.Values.provider.model | quote }}
             {{- end }}
+            - name: CHITTI_RISK_GRADE_MODEL
+              value: {{ $.Values.provider.model | quote }}
+            {{- with .Values.riskGrade.docragUrl }}
+            - name: CHITTI_DOCRAG_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.riskGrade.docragKey }}
+            - name: CHITTI_DOCRAG_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "chitti.credentials.existingSecret is required" $.Values.credentials.existingSecret }}
+                  key: {{ . }}
+            {{- end }}
             {{- range $name, $value := dict "REQUEST_TIMEOUT_SECONDS" .Values.requestTimeoutSeconds "LLM_TIMEOUT_SECONDS" .Values.provider.timeoutSeconds "LLM_MAX_RETRIES" .Values.provider.maxRetries "LLM_MAX_COMPLETION_TOKENS" .Values.provider.maxCompletionTokens }}
             - name: CHITTI_{{ $name }}
               value: {{ $value | quote }}

@@ -133,6 +133,11 @@ services:
       CHITTI_PLANNING_MODEL: "${CHITTI_PLANNING_MODEL:-zai.glm-5}"
       CHITTI_QUALITATIVE_MODEL: "${CHITTI_QUALITATIVE_MODEL:-zai.glm-5}"
       CHITTI_ANSWER_MODEL: "${CHITTI_ANSWER_MODEL:-zai.glm-5}"
+      # Company 360 risk grade: the ATLAS client rubric on this host's model, with
+      # evidence from the local DocRAG (same key the services host sends it).
+      CHITTI_RISK_GRADE_MODEL: "${CHITTI_RISK_GRADE_MODEL:-zai.glm-5}"
+      CHITTI_DOCRAG_URL: "http://docrag:8000"
+      CHITTI_DOCRAG_API_KEY: "${DOCRAG_FRONT_KEY:?Set DOCRAG_FRONT_KEY}"
       CHITTI_MODEL_OFFLINE: "true"
       HF_HUB_OFFLINE: "true"
     volumes:

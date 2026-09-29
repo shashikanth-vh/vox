@@ -88,6 +88,7 @@ your deploy ritual backs it up and restores it). New knobs join the existing one
 | `DOCRAG_FRONT_KEY` / `DOCRAG_QDRANT_API_KEY` | DocRAG's inbound key (gateway-injected) and its own Qdrant's key | `compose-docrag-*` — **override** |
 | `SARVAM_API_KEY` | DocRAG: OCR for scanned pages + generative answers (documents leave the VM for Sarvam). Also what makes scanned CAM documents readable. | empty = off |
 | `WORKFLOWS_CAM_LLM_API_KEY` | CAM workbench engine key — AWS Bedrock, model `WORKFLOWS_CAM_ENGINE` (default `bedrock:zai.glm-5`) | empty = offline stub drafts |
+| `CHITTI_RISK_GRADE_MODEL` (`.env.chitti`) | Company 360 risk grade: the model Chitti runs the ATLAS client rubric on (with `CHITTI_LLM_API_KEY`; document evidence from the local DocRAG via `DOCRAG_FRONT_KEY`). The services host reaches it through the existing `GATEWAY_CHITTI_URL` / `CHITTI_GATEWAY_KEY`. | `zai.glm-5` |
 
 Changing `PRISM_DB_PASSWORD` on an **existing** database: Postgres only reads
 `POSTGRES_PASSWORD` at first init, so also run

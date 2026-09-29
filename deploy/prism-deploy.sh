@@ -123,6 +123,11 @@ compose_files() {           # in a given tree, the -f flags that tree supports
   if [[ -f "$tree/deploy/compose/docker-compose.services.yml" ]] &&
      grep -qE '^GATEWAY_CHITTI_URL=.+' "$tree/deploy/compose/.env" 2>/dev/null; then
     files+=(-f "$tree/deploy/compose/docker-compose.services.yml")
+  # A single-host box grades Company 360 risk with a local, grader-only Chitti — opt-in
+  # the same way: only when .env carries CHITTI_GATEWAY_KEY (and no split is set).
+  elif [[ -f "$tree/deploy/compose/docker-compose.chitti-grader.yml" ]] &&
+       grep -qE '^CHITTI_GATEWAY_KEY=.+' "$tree/deploy/compose/.env" 2>/dev/null; then
+    files+=(-f "$tree/deploy/compose/docker-compose.chitti-grader.yml")
   fi
   printf '%s\n' "${files[@]}"
 }

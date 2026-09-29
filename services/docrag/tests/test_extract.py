@@ -89,6 +89,17 @@ async def test_xlsx_sheet_is_a_table(client):
     assert "| DSCR | 1.20x | Quarterly |" in body["markdown"]
 
 
+async def test_legacy_xls_is_read_and_a_fake_one_refused(client):
+    from test_pipeline import _cma_xls
+
+    body = (await _extract(client, "Macwin_CMA Axis - Company.xls", _cma_xls())).json()
+    assert "# Operating Statement" in body["markdown"]
+    assert "| Revenue | 4200 | 5310.5 |" in body["markdown"]
+    # A CSV renamed to .xls is not an Excel 97–2003 file.
+    fake = await _extract(client, "cma.xls", b"Particulars,FY2024\nRevenue,4200\n")
+    assert fake.status_code == 415
+
+
 async def test_extract_validates_and_needs_the_key(monkeypatch):
     monkeypatch.setenv("DOCRAG_API_KEYS", "k1")
     async with new_client() as c:

@@ -69,6 +69,32 @@ def test_xlsx_sheet_becomes_table_chunk(tmp_path):
     assert "Covenant: DSCR, Threshold: 1.20x, Frequency: Quarterly" in tables[0].text
 
 
+def _cma_xls() -> bytes:
+    """A small real Excel 97–2003 workbook, like the CMA files desks upload."""
+    import io
+
+    import xlwt
+
+    book = xlwt.Workbook()
+    sheet = book.add_sheet("Operating Statement")
+    for r, row in enumerate([["Particulars", "FY2024", "FY2025"],
+                             ["Revenue", 4200, 5310.5], ["EBITDA", 610, 742]]):
+        for c, value in enumerate(row):
+            sheet.write(r, c, value)
+    book.add_sheet("Blank")
+    buf = io.BytesIO()
+    book.save(buf)
+    return buf.getvalue()
+
+
+def test_xls_sheet_becomes_table_chunk(tmp_path):
+    result = run_pipeline(_write(tmp_path, "source.xls", _cma_xls()))
+    tables = [c for c in result.chunks if c.element_types == ["table"]]
+    assert tables and tables[0].table_columns == ["Particulars", "FY2024", "FY2025"]
+    # Whole numbers read as integers, not 4200.0.
+    assert "Particulars: Revenue, FY2024: 4200, FY2025: 5310.5" in tables[0].text
+
+
 def test_parse_odl_json_typed_elements():
     data = {
         "number of pages": 1, "title": "Sanction", "kids": [
@@ -114,3 +140,19 @@ def test_opendataloader_runs_local_never_hybrid(tmp_path, monkeypatch):
     [cmd] = seen
     assert cmd[cmd.index("--hybrid") + 1] == "off"
     assert not any(arg.startswith("--hybrid-") for arg in cmd)
+
+
+def test_model_download_is_retried_then_succeeds(monkeypatch, tmp_path):
+    from app.rag import bake_models
+
+    monkeypatch.setattr(bake_models.time, "sleep", lambda s: None)
+    calls = []
+
+    def flaky(source, **kw):
+        calls.append(kw["max_workers"])
+        if len(calls) < 3:
+            raise RuntimeError("499 unknown")
+        return "/opt/models/sparse"
+
+    assert bake_models.download(flaky, "Qdrant/bm25", "22b8d2af", str(tmp_path)) == "/opt/models/sparse"
+    assert calls == [2, 2, 2]

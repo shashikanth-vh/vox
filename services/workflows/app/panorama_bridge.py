@@ -38,7 +38,7 @@ log = get_logger("panorama.bridge")
 
 # Mirrors services/docrag/app/store.SUPPORTED_SUFFIXES (kept small on purpose:
 # a new suffix lands there first, then here).
-_SUPPORTED = {".pdf", ".xlsx", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif"}
+_SUPPORTED = {".pdf", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif"}
 
 # Zip guards: a desk archive holds a handful of scans, not thousands — anything
 # past these bounds is a mistake or a bomb, and is refused with its reason.
@@ -160,9 +160,13 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                 return None, "", f"register refused the read (HTTP {got.status_code})"
             return got.content, got.headers.get("content-type") or "", ""
 
+        # DocRAG behind the AI host's private-CA edge needs the client that trusts
+        # that CA (the CAM's); the default client fails every upload on TLS.
+        docrag_http = getattr(request.app.state, "docrag_http", None) or http
+
         async def _upload(display_name: str, data: bytes, ctype: str) -> None:
             try:
-                up = await http.post(
+                up = await docrag_http.post(
                     f"{docrag_url}/v1/documents",
                     headers={"X-API-Key": settings.docrag_api_key,
                              "X-Tenant": request.headers.get(

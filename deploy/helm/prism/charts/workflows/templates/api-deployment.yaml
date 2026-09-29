@@ -149,6 +149,18 @@ spec:
                   name: {{ include "workflows.fullname" . }}-cam
                   key: docrag-api-key
             {{- end }}
+            # Company 360 risk grades are computed by Chitti (the rubric on its model).
+            {{- with .Values.api.riskGrade.chittiUrl }}
+            - name: WORKFLOWS_CHITTI_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.riskGrade.chittiApiKey.existingSecret }}
+            - name: WORKFLOWS_CHITTI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.api.riskGrade.chittiApiKey.existingSecretKey }}
+            {{- end }}
             # In production set requireAuth=true AND an oidcIssuer so the approver/requester
             # identity is derived from a verified token — never a caller-supplied string.
             {{- if and .Values.api.requireAuth (not .Values.api.oidcIssuer) (not .Values.api.oidcIssuers) }}

@@ -20,7 +20,7 @@ from app.knowledge.chunker import KnowledgeChunk, build_chunks
 from app.knowledge.doc_type import classify_doc_type
 from app.knowledge.extractors.odl_extractor import StructuredElement
 from app.knowledge.extractors.structured import extract_structured, score_pages
-from app.knowledge.extractors.xlsx_extractor import extract_xlsx
+from app.knowledge.extractors.xlsx_extractor import extract_xls, extract_xlsx
 from app.knowledge.reconstruct import reconstruct_document
 from app.knowledge.sarvam_client import SarvamError, digitise_document
 from app.knowledge.schema import ImageRegion, KnowledgeDocument
@@ -46,7 +46,7 @@ class PipelineResult:
 
 def _xlsx_elements(path: Path) -> tuple[list[StructuredElement], int]:
     elements: list[StructuredElement] = []
-    pages = extract_xlsx(str(path))
+    pages = (extract_xls if path.suffix.lower() == ".xls" else extract_xlsx)(str(path))
     for page in pages:
         sheet_name = page.markdown.lstrip("# ").strip()
         if sheet_name:
@@ -180,7 +180,7 @@ def run_pipeline(
     pdf_title = author = creation_date = None
     stats = no_sarvam_usage()
 
-    if suffix == ".xlsx":
+    if suffix in (".xlsx", ".xls"):
         elements, page_count = _xlsx_elements(path)
         engine = "local_text_layer"
     elif suffix == ".pdf":
@@ -207,7 +207,7 @@ def run_pipeline(
         warnings.extend(sarvam_warnings)
         engine = "image"
     else:
-        supported = ", ".join(sorted({".pdf", ".xlsx", *IMAGE_SUFFIXES}))
+        supported = ", ".join(sorted({".pdf", ".xlsx", ".xls", *IMAGE_SUFFIXES}))
         raise ValueError(f"Unsupported file type: {suffix} (supported: {supported})")
 
     if images:

@@ -21,6 +21,7 @@ from app.api import build_router
 from app.config import get_settings
 from app.model_stages import ModelStages
 from app.pipeline import ChittiPipeline
+from app.risk_grade import build_risk_router
 from app.semantic import SemanticRetriever, collection_name, verify_index_integrity
 
 log = get_logger("chitti")
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(build_router(settings))
+    app.include_router(build_risk_router(settings))
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict:

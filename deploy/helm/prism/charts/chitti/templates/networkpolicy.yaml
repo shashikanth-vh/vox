@@ -13,6 +13,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- toYaml .Values.networkPolicy.gatewayPodLabels | nindent 14 }}
+        {{- with .Values.networkPolicy.orchestratorPodLabels }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
       ports: [{protocol: TCP, port: 8000}]
 ---
 apiVersion: networking.k8s.io/v1

@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     qualitative_model: str = ""
     answer_model: str = ""
 
+    # Company 360 risk grade: the rubric runs on this host's model, with evidence
+    # from the local DocRAG. Empty model = the answer model.
+    risk_grade_model: str = ""
+    risk_grade_timeout_seconds: float = Field(default=240.0, gt=0, le=300)
+    risk_grade_runs: int = Field(default=3, ge=1, le=5)
+    docrag_url: str = ""
+    docrag_api_key: str = ""
+
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str = ""
     qdrant_collection_prefix: str = "chitti"

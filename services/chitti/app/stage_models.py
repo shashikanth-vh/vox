@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     RootModel,
+    StringConstraints,
     field_validator,
     model_serializer,
     model_validator,
@@ -259,6 +260,14 @@ class SurfaceLiteral(BaseModel):
     source_text: str = Field(min_length=1)
 
 
+def deduplicate_retrieval_queries(queries: list[str]) -> list[str]:
+    """Remove spelling-identical needs only; semantic deduplication belongs to the model."""
+    unique: dict[str, str] = {}
+    for query in queries:
+        unique.setdefault(" ".join(query.casefold().split()), query)
+    return list(unique.values())
+
+
 class QuestionInterpretation(BaseModel):
     standalone_question: str = Field(min_length=1)
     terms: list[SurfaceTerm] = Field(default_factory=list)
@@ -270,6 +279,15 @@ class QuestionInterpretation(BaseModel):
     relationship_terms: list[str] = Field(default_factory=list)
     qualitative_analysis: bool = False
     unresolved_terms: list[str] = Field(default_factory=list)
+    retrieval_queries: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]] = Field(
+        default_factory=list,
+        description="Distinct business-definition needs from the question; no inferred canonical meanings.",
+    )
+
+    @field_validator("retrieval_queries")
+    @classmethod
+    def unique_retrieval_queries(cls, queries: list[str]) -> list[str]:
+        return deduplicate_retrieval_queries(queries)
 
 
 class RetrievalMatch(BaseModel):
@@ -313,7 +331,7 @@ class SemanticRetrievalResult(BaseModel):
     matches: list[RetrievalMatch]
     planning_matches: list[RetrievalMatch] = Field(default_factory=list)
     focus_queries: list[RetrievalFocus] = Field(default_factory=list)
-    semantic_query_count: int = Field(default=1, ge=1, le=3)
+    semantic_query_count: int = Field(default=1, ge=1)
     passage_limit: int = Field(default=6, ge=1, le=50)
     estimated_context_tokens: int = Field(default=0, ge=0)
 

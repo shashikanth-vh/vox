@@ -511,6 +511,15 @@ PROMPTS = {
         "evidence availability. An undefined numerical measure alone does not imply qualitative "
         "analysis."
         "\n\n"
+        "Populate retrieval_queries with concise questions expressing every distinct business-definition "
+        "need in the request: the meaning of business terms, scopes, relationships, conditions, "
+        "measures and requested explanation evidence. Deduplicate overlapping needs without dropping "
+        "any distinct need. Preserve the user's wording and ambiguity. Ask what defines a need, "
+        "not for the business answer. Do not guess canonical resources, fields, values, relationships, "
+        "business rules or evidence availability. These queries supplement all existing fields; they "
+        "do not replace their extraction. If there are no business-definition needs, return an empty "
+        "list. Do not omit needs to meet a query count or length limit."
+        "\n\n"
         "Before returning, reconstruct the request from the extracted fields without relying on "
         "standalone_question. Restore any missing requested result, relationship, condition or "
         "comparison; remove unsupported additions. Check exact source spans and answer shape. Return "
@@ -1204,8 +1213,11 @@ class ModelStages:
         )
         log.info(
             "pipeline_model_request",
-            extra={"stage": stage, "model": model,
-                   **({"prompt": messages} if self.settings.log_pipeline else {})},
+            extra={
+                "stage": stage,
+                "model": model,
+                **({"prompt": messages} if self.settings.log_pipeline else {}),
+            },
         )
         attempt = ModelCallUsage(repair=False)
         sink = _usage_sink.get()
@@ -1216,7 +1228,6 @@ class ModelStages:
             messages=messages,
             response_format=cast(Any, response_format),
             max_completion_tokens=self.settings.llm_max_completion_tokens,
-            extra_body={"reasoning": {"enabled": True}},
         )
         attempt.response_received = True
         attempt.provider = _response_provider(response)
@@ -1294,7 +1305,6 @@ class ModelStages:
                 messages=repair_messages,
                 response_format=cast(Any, response_format),
                 max_completion_tokens=self.settings.llm_max_completion_tokens,
-                extra_body={"reasoning": {"enabled": True}},
             )
             repair_attempt.response_received = True
             repair_attempt.provider = _response_provider(repair_response)
@@ -1325,8 +1335,11 @@ class ModelStages:
                 raise
         log.info(
             "pipeline_model_response",
-            extra={"stage": stage, "model": model,
-                   **({"response": result.model_dump(mode="json")} if self.settings.log_pipeline else {})},
+            extra={
+                "stage": stage,
+                "model": model,
+                **({"response": result.model_dump(mode="json")} if self.settings.log_pipeline else {}),
+            },
         )
         return result
 
@@ -1703,7 +1716,7 @@ class ModelStages:
                     },
                 },
                 "caller_visible_candidates": stable_candidates,
-                "interpretation": interpretation.model_dump(),
+                "interpretation": interpretation.model_dump(exclude={"retrieval_queries"}),
                 "semantic_material": {
                     "query": retrieval.query,
                     "focus_queries": [item.model_dump() for item in retrieval.focus_queries],
@@ -2033,7 +2046,7 @@ class ModelStages:
                 stage="answerability",
                 model=self.settings.answerability_model,
                 payload={
-                    "interpretation": interpretation.model_dump(),
+                    "interpretation": interpretation.model_dump(exclude={"retrieval_queries"}),
                     "grounding": grounding.model_dump(),
                 },
                 output_type=AnswerabilityResultDraft,

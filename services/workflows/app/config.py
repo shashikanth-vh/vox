@@ -73,6 +73,18 @@ class Settings(BaseServiceSettings):
     docrag_url: str = ""
     docrag_api_key: str = ""
     docrag_timeout_s: float = 600.0
+    # Company 360 risk grade runs in Chitti on the AI host (same private-CA edge as
+    # its DocRAG, so the DocRAG CA client carries it). Empty URL = grading off.
+    chitti_url: str = ""
+    chitti_api_key: str = ""
+    chitti_timeout_s: float = 300.0
+    # What a grade reads beyond the panorama: the Data Register files in these sections
+    # (text through DocRAG, budgeted per file and per grade), and PULSE's news.
+    risk_grade_doc_sections: str = "Financials,Banking & Debt"
+    risk_grade_doc_max_chars: int = 40_000
+    risk_grade_docs_total_chars: int = 160_000
+    pulse_url: str = ""
+    pulse_api_key: str = ""
     # DocRAG on another host (the Chitti split) sits behind that host's HTTPS edge with a
     # private certificate: this CA is trusted IN ADDITION to the public roots, for the
     # DocRAG calls only. Empty = the default trust store.
