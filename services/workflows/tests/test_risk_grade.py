@@ -322,6 +322,111 @@ async def test_a_regrade_with_nothing_new_returns_the_same_grade(monkeypatch):
     assert len(ai.grades) == 2 and fresh["unchanged"] is False
 
 
+async def test_a_regrade_with_nothing_new_reads_no_file_again(monkeypatch):
+    # The reclick was minutes: every file downloaded and re-read only to learn that
+    # nothing changed. The Register's listing answers that before any file is read.
+    ai, reg = _AiHost(), _Register()
+    app = _grading_app(monkeypatch, ai, reg)
+    await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)
+    ai.extracts.clear()
+    reg.reads.clear()
+    again = (await _call(app, "POST", "/v1/panorama/risk-grade",
+                         json={**BODY, "refresh": True})).json()
+    assert again["unchanged"] is True and len(ai.grades) == 1
+    assert ai.extracts == [] and not any(u.endswith("/content") for u in reg.reads)
+    # A replaced file (same slot, new checksum) is new information: read and graded.
+    reg.docs = [{**DOCS[0], "checksum": "new"}, *DOCS[1:]]
+    fresh = (await _call(app, "POST", "/v1/panorama/risk-grade",
+                         json={**BODY, "refresh": True})).json()
+    assert fresh["unchanged"] is False and len(ai.grades) == 2 and ai.extracts
+
+
+class _FlakyDocrag(_AiHost):
+    """DocRAG answering 502 for the first ``fails`` reads of the audited financials
+    (d1.pdf) — a worker restarting under it."""
+
+    def __init__(self, fails: int) -> None:
+        super().__init__()
+        self.fails = fails
+
+    async def post(self, url, **kw):  # noqa: ANN001, ANN003
+        if (str(url).endswith("/v1/extract") and kw["files"]["file"][0] == "d1.pdf"
+                and self.fails > 0):
+            self.fails -= 1
+            return httpx.Response(502, text="bad gateway", request=httpx.Request("POST", url))
+        return await super().post(url, **kw)
+
+
+async def test_a_docrag_blip_is_retried_once(monkeypatch):
+    monkeypatch.setattr(rg, "_RETRY_S", 0)
+    ai = _FlakyDocrag(fails=1)
+    app = _grading_app(monkeypatch, ai)
+    g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
+    assert all(d["used"] for d in g["inputs"]["documents"])
+    assert len(ai.grades[0][1]["json"]["documents"]) == 3
+
+
+async def test_a_short_handed_grade_is_never_replayed_as_unchanged(monkeypatch):
+    # DocRAG down through the retry: the file is named with its reason, and the next
+    # regrade reads again instead of answering "unchanged" with the short-handed grade.
+    monkeypatch.setattr(rg, "_RETRY_S", 0)
+    ai = _FlakyDocrag(fails=2)
+    app = _grading_app(monkeypatch, ai)
+    first = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
+    unread = [d for d in first["inputs"]["documents"] if not d["used"]]
+    assert len(unread) == 1 and unread[0]["reason"] == "document AI refused it (HTTP 502)"
+    again = (await _call(app, "POST", "/v1/panorama/risk-grade",
+                         json={**BODY, "refresh": True})).json()
+    assert again["unchanged"] is False and len(ai.grades) == 2
+    assert all(d["used"] for d in again["inputs"]["documents"])
+
+
+def test_every_file_gets_a_share_of_the_budget():
+    # Two statement dumps first in read order used to eat the whole budget and drop
+    # every file after them. Now short files go in whole and the big ones share the rest.
+    shares = rg.share_budget([1_380_000, 180_000, 6_000, 25_000, 2_000], 40_000, 100_000)
+    assert shares[2:] == [6_000, 25_000, 2_000]
+    assert shares[0] == shares[1] == (100_000 - 33_000) // 2
+    assert sum(shares) <= 100_000 and all(s > 0 for s in shares)
+    # Never above the per-file cap, whatever is left.
+    assert rg.share_budget([90_000], 40_000, 200_000) == [40_000]
+
+
+def test_a_clipped_file_keeps_its_beginning_and_its_end():
+    text = "OPENING " + "x" * 50_000 + " CLOSING BALANCE 12,34,567"
+    cut = rg.clip_middle(text, 2_000)
+    assert len(cut) <= 2_000 and cut.startswith("OPENING")
+    assert cut.endswith("CLOSING BALANCE 12,34,567") and "characters left out here" in cut
+    assert rg.clip_middle("short", 2_000) == "short"
+
+
+async def test_no_file_is_left_out_when_the_files_are_large(monkeypatch):
+    # Big reads (a 1.4 MB bank-statement dump) no longer push later files out.
+    monkeypatch.setenv("WORKFLOWS_RISK_GRADE_DOC_MAX_CHARS", "3000")
+    monkeypatch.setenv("WORKFLOWS_RISK_GRADE_DOCS_TOTAL_CHARS", "5000")
+
+    class _BigReads(_AiHost):
+        async def post(self, url, **kw):  # noqa: ANN001, ANN003
+            if str(url).endswith("/v1/extract"):
+                name = kw["files"]["file"][0]
+                self.extracts.append(name)
+                return httpx.Response(200, json={"markdown": f"HEAD {name} " + "9" * 20_000
+                                                 + f" TAIL {name}"},
+                                      request=httpx.Request("POST", url))
+            return await super().post(url, **kw)
+
+    ai = _BigReads()
+    app = _grading_app(monkeypatch, ai)
+    g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
+    fates = g["inputs"]["documents"]
+    assert len(fates) == 3 and all(f["used"] for f in fates)
+    sent = ai.grades[0][1]["json"]["documents"]
+    assert len(sent) == 3 and sum(len(d["text"]) for d in sent) <= 5000
+    assert all(d["text"].rstrip().endswith(("TAIL d1.pdf", "TAIL d2.xls", "NTPC,45"))
+               for d in sent)
+    assert any("clipped" in (f.get("note") or "") for f in fates)
+
+
 def test_newest_audit_report_is_read_first():
     rows = [{"title": "Audited financials", "original_filename": "Audit Report F.Y. 2022'23.pdf"},
             {"title": "", "original_filename": "Audit Report F.Y. 2024'25_.pdf"},

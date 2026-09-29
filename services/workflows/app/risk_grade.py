@@ -39,6 +39,7 @@ from app.docx_out import markdown_to_docx
 log = get_logger("panorama.risk_grade")
 
 _TTL_S = 24 * 3600
+_RETRY_S = 3.0          # a DocRAG worker restart takes a few seconds
 # The AI host's edge caps this body (2 MB); the rubric reads the recent footprint.
 _KEEP = {"interactions": 30, "documents": 80, "leads": 25, "deals": 25, "lending": 25,
          "syndication": 40, "asset_monetisation": 25, "contacts": 25}
@@ -91,18 +92,54 @@ def read_order(d: dict[str, Any]) -> tuple[int, int, str]:
     return rank, -max(years + short, default=0), text
 
 
-def fingerprint(payload: dict[str, Any], day: str) -> str:
-    """What a grade was computed from: the records, the files' text, the news, the
-    day (days-in-stage moves daily). Equal fingerprints → the same grade."""
+def fingerprint(panorama: dict[str, Any], news: list[dict[str, Any]],
+                rows: list[dict[str, Any]], day: str) -> str:
+    """What a grade would be computed from: the records, the Data Register LISTING
+    (each file's id and checksum — a replaced file changes it), the news, the day
+    (days-in-stage moves daily). Equal fingerprints ? the same grade.
+
+    Built from the listing, not the files' text, so a regrade with nothing new is
+    answered before any file is downloaded or read — seconds, not minutes."""
     import hashlib
     import json as _json
 
-    p = {k: v for k, v in (payload.get("panorama") or {}).items() if k != "generated_at"}
+    p = {k: v for k, v in (panorama or {}).items() if k != "generated_at"}
     body = {"day": day, "panorama": p,
-            "news": sorted(str(n.get("headline")) for n in payload.get("news") or []),
-            "documents": [(d.get("name"), hashlib.sha256(str(d.get("text")).encode()).hexdigest())
-                          for d in payload.get("documents") or []]}
+            "news": sorted(str(n.get("headline")) for n in news or []),
+            "documents": sorted((str(d.get("id")), str(d.get("checksum") or d.get("size_bytes")),
+                                 str(d.get("updated_at") or ""), str(d.get("section")),
+                                 str(d.get("title") or ""), str(d.get("status") or ""))
+                                for d in rows or [])}
     return hashlib.sha256(_json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def share_budget(lengths: list[int], per_file: int, total: int) -> list[int]:
+    """Each file's share of the grade's text budget — every file gets one.
+
+    Handed out smallest first: a short file takes all it needs, and what it leaves
+    is split among the larger ones (never above ``per_file``). First-come-first-
+    served let two bank-statement dumps eat the whole budget and dropped every file
+    after them — which ones depended on the file count, so a regrade could read a
+    different set and move the band."""
+    shares = [0] * len(lengths)
+    left, n = total, len(lengths)
+    for i in sorted(range(len(lengths)), key=lambda j: lengths[j]):
+        shares[i] = min(lengths[i], per_file, left // n)
+        left -= shares[i]
+        n -= 1
+    return shares
+
+
+def clip_middle(text: str, room: int) -> str:
+    """``text`` cut to ``room`` characters from the MIDDLE: the head names the
+    document and its first figures, the tail holds a statement's latest months and
+    closing balance — a head-only cut lost exactly those."""
+    if len(text) <= room:
+        return text
+    mark = f"\n\n[… {len(text) - room:,} characters left out here …]\n\n"
+    head = max(0, (room - len(mark)) * 2 // 3)
+    tail = max(0, room - len(mark) - head)
+    return text[:head] + mark + (text[-tail:] if tail else "")
 
 
 def section_name(value: Any) -> str:
@@ -188,7 +225,7 @@ def report_markdown(g: dict[str, Any]) -> str:
         lines.append(f"| {p.get('key')}. {p.get('name')} | {p.get('weight')}% | "
                      f"{p.get('score')}/10 | {pts} | {ev} |")
     lines += ["", "Bands: GREEN ≥ 70 · AMBER 45–69 · RED < 45, scored over the pillars "
-              "that have data. Any hard trigger → RED. No financials or banking → never "
+              "that have data. Any hard trigger ? RED. No financials or banking ? never "
               "GREEN (PROVISIONAL).", ""]
     if c:
         lines += ["## Confidence", "",
@@ -221,7 +258,8 @@ def report_markdown(g: dict[str, Any]) -> str:
     if docs:
         lines += ["| Document | Section | Read by | Used |", "|---|---|---|---|"]
         for d in docs:
-            used = "yes" if d.get("used") else f"no — {d.get('reason', '')}"
+            used = ((f"yes — {d['note']}" if d.get("note") else "yes") if d.get("used")
+                    else f"no — {d.get('reason', '')}")
             lines.append(f"| {d.get('name')} | {d.get('section') or '—'} | "
                          f"{', '.join(d.get('engines') or []) or '—'} | {used} |")
         lines.append("")
@@ -254,7 +292,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
     docs_total = int(getattr(settings, "risk_grade_docs_total_chars", 160_000))
     cache: dict[str, tuple[float, dict]] = {}
     inflight: dict[str, asyncio.Future] = {}
-    # company key → (fingerprint of what the last grade read, that grade)
+    # company key ? (fingerprint of what the last grade read, that grade)
     last_read: dict[str, tuple[str, dict]] = {}
 
     async def _identity(request: Request) -> tuple[Any, str, Any]:
@@ -293,14 +331,24 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
             text, reason = extract_text(ctype, blob)
             return text, reason, (["basic"] if text else []), False
         http = getattr(request.app.state, "docrag_http", None) or request.app.state.http
-        try:
-            r = await http.post(
-                f"{docrag_url}/v1/extract", files={"file": (f"{doc_id}{suffix}", blob)},
-                headers={"X-API-Key": settings.docrag_api_key,
-                         "X-Tenant": request.headers.get("X-Tenant", settings.register_tenant)},
-                timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
-        except httpx.HTTPError as exc:
-            return "", f"document AI unreachable ({exc.__class__.__name__})", [], False
+        # One retry for a transient failure (DocRAG restarting answers 502 for a few
+        # seconds): without it a regrade silently reads fewer files and the band moves.
+        for attempt in (1, 2):
+            try:
+                r = await http.post(
+                    f"{docrag_url}/v1/extract", files={"file": (f"{doc_id}{suffix}", blob)},
+                    headers={"X-API-Key": settings.docrag_api_key,
+                             "X-Tenant": request.headers.get("X-Tenant", settings.register_tenant)},
+                    timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
+            except httpx.HTTPError as exc:
+                if attempt == 1:
+                    await asyncio.sleep(_RETRY_S)
+                    continue
+                return "", f"document AI unreachable ({exc.__class__.__name__})", [], False
+            if r.status_code >= 500 and attempt == 1:
+                await asyncio.sleep(_RETRY_S)
+                continue
+            break
         if r.status_code >= 300:
             return "", f"document AI refused it (HTTP {r.status_code})", [], False
         body = r.json() or {}
@@ -309,33 +357,39 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         cached = bool(body.get("cached") or (body.get("telemetry") or {}).get("cached"))
         return md, (None if md.strip() else "no text could be read"), engines, cached
 
-    async def _documents(request: Request, caller: Any, who: str,
-                         entity_id: str | None) -> tuple[list[dict], list[dict], str | None]:
-        """(texts for the grader, every file's fate, note). Files in the configured
-        Data Register sections only; nothing is copied anywhere — text travels."""
+    async def _doc_rows(request: Request, caller: Any, who: str,
+                        entity_id: str | None) -> tuple[list[dict], str | None]:
+        """(the Data Register files the grade reads, in read order; note). The listing
+        only — cheap, so a regrade can tell "nothing new" before reading any file."""
         if not entity_id:
-            return [], [], "no client master record — the Data Register is not linked"
+            return [], "no client master record — the Data Register is not linked"
         path = "/v1/documents"
         try:
             r = await request.app.state.http.get(
                 f"{base}{path}?entity_id={entity_id}&limit=100",
                 headers=reg_headers(request, caller, who, "GET", path))
         except httpx.HTTPError as exc:
-            return [], [], f"Data Register unreachable ({exc.__class__.__name__})"
+            return [], f"Data Register unreachable ({exc.__class__.__name__})"
         if r.status_code >= 300:
-            return [], [], f"Data Register refused the list (HTTP {r.status_code})"
+            return [], f"Data Register refused the list (HTTP {r.status_code})"
         rows = [d for d in (r.json() or {}).get("items", [])
                 if section_name(d.get("section")) in sections
                 and (d.get("status") or "") not in _SKIP_STATUS
                 and (d.get("original_filename") or d.get("storage_uri") or d.get("size_bytes"))]
         if not rows:
-            return [], [], f"no files on the Data Register in {', '.join(sorted(sections))}"
+            return [], f"no files on the Data Register in {', '.join(sorted(sections))}"
         # The same file uploaded into two slots is read once.
         unique: dict[tuple[str, Any], dict] = {}
         for d in sorted(rows, key=read_order):
             unique.setdefault((str(d.get("original_filename") or d.get("id")).lower(),
                                d.get("checksum") or d.get("size_bytes")), d)
-        rows = list(unique.values())
+        return list(unique.values()), None
+
+    async def _documents(request: Request, caller: Any, who: str,
+                         rows: list[dict]) -> tuple[list[dict], list[dict]]:
+        """(texts for the grader, every file's fate). Nothing is copied anywhere —
+        text travels. A fate whose read failed for a passing reason carries
+        ``transient`` so that grade is never remembered as "the" grade of these files."""
         gate = asyncio.Semaphore(4)
 
         async def one(d: dict) -> dict:
@@ -350,33 +404,33 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                         f"{base}{cpath}", headers=reg_headers(request, caller, who, "GET", cpath),
                         follow_redirects=True, timeout=60.0)
                 except httpx.HTTPError as exc:
-                    return {**fate, "reason": f"register read failed ({exc.__class__.__name__})"}
+                    return {**fate, "transient": True,
+                            "reason": f"register read failed ({exc.__class__.__name__})"}
                 if got.status_code >= 300:
-                    return {**fate, "reason": f"register refused the read (HTTP {got.status_code})"}
+                    return {**fate, "transient": got.status_code >= 500,
+                            "reason": f"register refused the read (HTTP {got.status_code})"}
                 text, reason, engines, cached = await _extract(
                     request, str(d.get("id")), got.content,
                     got.headers.get("content-type") or d.get("content_type") or "", name)
+                transient = reason is not None and (reason.startswith("document AI unreachable")
+                                                    or "(HTTP 5" in reason)
                 return {**fate, "engines": engines, "cached": cached, "text": text,
-                        **({"reason": reason} if reason else {})}
+                        **({"reason": reason} if reason else {}),
+                        **({"transient": True} if transient else {})}
 
         fates = list(await asyncio.gather(*(one(d) for d in rows)))
+        read = [(f, f.pop("text", "") or "") for f in fates]
+        read = [(f, t) for f, t in read if t.strip()]
+        shares = share_budget([len(t) for _f, t in read], doc_max, docs_total)
         texts: list[dict] = []
-        used_total = 0
-        for f in fates:
-            text = f.pop("text", "") or ""
-            if not text.strip():
-                continue
-            room = min(doc_max, docs_total - used_total)
-            if room <= 1000:
-                f["reason"] = "left out: the per-grade document budget was used up"
-                continue
-            clipped = len(text) > room
-            text = text[:room]
-            used_total += len(text)
-            f.update(used=True, chars=len(text), **({"note": "clipped"} if clipped else {}))
+        for (f, full), room in zip(read, shares, strict=True):
+            text = clip_middle(full, room)
+            f.update(used=True, chars=len(text),
+                     **({"note": f"clipped: {len(text):,} of {len(full):,} characters, "
+                                 "beginning and end kept"} if len(full) > room else {}))
             texts.append({"name": f["name"], "section": f["section"], "title": f["title"],
                           "engines": f["engines"], "text": text})
-        return texts, fates, None
+        return texts, fates
 
     # ------------------------------------------------------------------ PULSE
     async def _pulse(request: Request, p: dict, company: str) -> tuple[list[dict], str | None]:
@@ -433,7 +487,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         p, err = await _panorama(request, caller, who, entity_id, company)
         if err is not None:
             return None, err
-        assert p is not None                  # no error → the panorama was read
+        assert p is not None                  # no error ? the panorama was read
         hit = cache.get(_key(entity_id, company, p.get("restricted") or []))
         if not hit or time.monotonic() - hit[0] > _TTL_S:
             return None, problem(404, "No grade yet",
@@ -486,7 +540,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         p, err = await _panorama(request, caller, who, payload.entity_id, payload.company)
         if err is not None:
             return err
-        assert p is not None                  # no error → the panorama was read
+        assert p is not None                  # no error ? the panorama was read
         key = _key(payload.entity_id, payload.company, p.get("restricted") or [])
         hit = cache.get(key)
         if hit and not payload.refresh and time.monotonic() - hit[0] < _TTL_S:
@@ -515,8 +569,8 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                      who: str, caller: Any, key: str) -> tuple[dict, Any]:
         company = (p.get("anchor") or {}).get("name") or payload.company
         entity_id = payload.entity_id or (p.get("anchor") or {}).get("entity_id")
-        (docs, fates, doc_note), (news, news_note) = await asyncio.gather(
-            _documents(request, caller, who, entity_id), _pulse(request, p, company))
+        (rows, doc_note), (news, news_note) = await asyncio.gather(
+            _doc_rows(request, caller, who, entity_id), _pulse(request, p, company))
         if not news and news_note:
             # PULSE could not be asked from here: fall back to what the dialog showed.
             news = [n.model_dump() for n in payload.news]
@@ -524,15 +578,17 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                 news_note = f"{news_note}; the dialog's 30-day news used instead"
         elif not news:
             news_note = "no headlines naming the firm or its people in the last 90 days"
-        sent = {"company": company, "panorama": trim_panorama(p), "news": news,
-                "documents": docs}
-        fp = fingerprint(sent, datetime.now(UTC).date().isoformat())
+        trimmed = trim_panorama(p)
+        fp = fingerprint(trimmed, news, rows, datetime.now(UTC).date().isoformat())
         prior = last_read.get(key)
         if prior and prior[0] == fp:
             # Nothing the grade reads has changed since the last one: the same grade,
-            # not a fresh model reading of the same facts (which would wobble).
+            # not a fresh model reading of the same facts (which would wobble) — and
+            # answered before any file is downloaded or read again.
             log.info("risk_grade_unchanged", extra={"company": company, "by": who})
             return {**prior[1], "unchanged": True}, None
+        docs, fates = await _documents(request, caller, who, rows) if rows else ([], [])
+        sent = {"company": company, "panorama": trimmed, "news": news, "documents": docs}
         # The AI host sits behind the same private-CA edge as its DocRAG: the client
         # built with that CA (WORKFLOWS_DOCRAG_CA_FILE) is the one that trusts it.
         http = getattr(request.app.state, "docrag_http", None) or request.app.state.http
@@ -566,5 +622,11 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                                       "news": len(news)})
         result = {**grade, "inputs": inputs, "generated_by": who, "entity_id": entity_id,
                   "unchanged": False}
-        last_read[key] = (fp, result)
+        if any(f.get("transient") for f in fates):
+            # A file could not be read this time (DocRAG restarting, a Register blip):
+            # the next regrade must read again, not repeat this short-handed grade.
+            log.warning("risk_grade_partial_read", extra={
+                "company": company, "unread": sum(1 for f in fates if f.get("transient"))})
+        else:
+            last_read[key] = (fp, result)
         return result, None
