@@ -6,6 +6,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
 import { panoramaService, type Panorama, type PanoramaLine, type TracxnFinancials,
@@ -151,27 +152,28 @@ function Bullet({ children, dot }: { children: React.ReactNode; dot?: string }) 
 /** A grouped bar chart for one card: up to two series that share a scale
  *  (EBITDA with PAT; net worth with liabilities), every bar labelled with its
  *  value, every financial year labelled, negatives below a zero line. */
-function BarChart({ title, unit, series, years }: {
+function BarChart({ title, unit, series, years, big, onExpand }: {
   title: string; unit?: string | null;
   series: { label: string; color: string; points: { year: number; value: number; fy?: string | null }[] }[];
-  years: number[];
+  years: number[]; big?: boolean; onExpand?: () => void;
 }) {
   const live = series.filter((sr) => sr.points.length);
   if (!live.length || !years.length) return null;
-  const W = 252, H = 124, top = 20, bottom = 104, L = 6, R = 6;
+  const W = big ? 900 : 360, H = big ? 360 : 168, top = big ? 34 : 24, bottom = big ? 320 : 142, L = 8, R = 8;
+  const fs = big ? { v: 13, y: 13, r: 3 } : { v: 9.2, y: 9.4, r: 2 };
   const vals = live.flatMap((sr) => sr.points.filter((x) => years.includes(x.year)).map((x) => x.value));
   const hi = Math.max(0, ...vals), lo = Math.min(0, ...vals);
   const span = hi - lo || 1;
   const y = (v: number) => top + ((hi - v) / span) * (bottom - top);
   const zero = y(0);
   const group = (W - L - R) / years.length;
-  const bw = Math.min(22, (group * 0.72) / live.length);
+  const bw = Math.min(big ? 70 : 30, (group * 0.72) / live.length);
   const at = (sr: typeof live[number], yr: number) => sr.points.find((x) => x.year === yr) || null;
   const fy = (yr: number) => `FY${String(yr).slice(2)}`;
   return (
     <Box sx={{ minWidth: 0 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.3 }}>
-        <Typography sx={{ fontSize: 10.4, fontWeight: 800, color: '#44535B', letterSpacing: '.04em' }}>{title}</Typography>
+        <Typography sx={{ fontSize: big ? 13 : 10.8, fontWeight: 800, color: '#44535B', letterSpacing: '.04em' }}>{title}</Typography>
         {live.map((sr) => (
           <Box key={sr.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Box sx={{ width: 7, height: 7, borderRadius: 99, bgcolor: sr.color }} />
@@ -179,6 +181,8 @@ function BarChart({ title, unit, series, years }: {
           </Box>))}
         <Box sx={{ flex: 1 }} />
         {unit && <Typography sx={{ fontSize: 9.6, color: tokens.muted }}>{unit}</Typography>}
+        {onExpand && <Tooltip title="Open large"><IconButton className="no-print" size="small" onClick={onExpand} sx={{ p: 0.3 }}>
+          <OpenInFullIcon sx={{ fontSize: 14, color: tokens.muted }} /></IconButton></Tooltip>}
       </Box>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
         {[0.25, 0.5, 0.75, 1].map((f) => { const gy = top + (1 - f) * (bottom - top);
@@ -192,12 +196,16 @@ function BarChart({ title, unit, series, years }: {
                 const x = gx + si * (bw + 3); const yv = y(pt.value);
                 const h = Math.max(1.5, Math.abs(yv - zero));
                 return (
-                  <g key={sr.label}>
-                    <rect x={x} y={Math.min(yv, zero)} width={bw} height={h} rx={2} fill={sr.color} />
-                    <text x={x + bw / 2} y={pt.value >= 0 ? Math.min(yv, zero) - 3 : Math.max(yv, zero) + 9}
-                      textAnchor="middle" fontSize="7.6" fontWeight="700" fill={INK}>{finNum(pt.value)}</text>
-                  </g>); })}
-              <text x={L + gi * group + group / 2} y={H - 4} textAnchor="middle" fontSize="8.4" fill="#7B8A92">{fy(yr)}</text>
+                  <Tooltip key={sr.label} arrow placement="top" enterDelay={100}
+                    title={`${sr.label} · ${pt.fy || pt.year}: ${finNum(pt.value)}${unit ? ` ${unit}` : ''}`}>
+                    <g style={{ cursor: 'default' }}>
+                      <rect x={x - 2} y={top - 6} width={bw + 4} height={bottom - top + 12} fill="transparent" />
+                      <rect x={x} y={Math.min(yv, zero)} width={bw} height={h} rx={fs.r} fill={sr.color} />
+                      <text x={x + bw / 2} y={pt.value >= 0 ? Math.min(yv, zero) - 4 : Math.max(yv, zero) + fs.v + 2}
+                        textAnchor="middle" fontSize={fs.v} fontWeight="700" fill={INK}>{finNum(pt.value)}</text>
+                    </g>
+                  </Tooltip>); })}
+              <text x={L + gi * group + group / 2} y={H - 6} textAnchor="middle" fontSize={fs.y} fill="#7B8A92">{fy(yr)}</text>
             </g>);
         })}
       </svg>
@@ -339,13 +347,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [gradeErr, setGradeErr] = useState('');
   const [dlErr, setDlErr] = useState('');
   const [dlBusy, setDlBusy] = useState(false);
+  const [bigChart, setBigChart] = useState<string | null>(null);
   const pRef = useRef<Panorama | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setP(null); setErr(''); setNews(null); setNewsErr(''); pRef.current = null;
     setTrx(null); setTrxBusy(false); setTrxErr('');
-    setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr(''); setDlBusy(false);
+    setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr(''); setDlBusy(false); setBigChart(null);
     setTab('engagements'); setNewsSev(null); setBriefOpen(false);
     let alive = true;
     panoramaService.get({ entityId: effEntityId, company: effCompany })
@@ -419,6 +428,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const growth = revL && revP && revP.value ? ((revL.value - revP.value) / Math.abs(revP.value)) * 100 : null;
   const eqL = last('bs_equity'), liabL = last('bs_liability');
   const leverage = eqL && liabL && eqL.value ? liabL.value / eqL.value : null;
+  const chartYears = [...new Set(['revenue', 'ebitda', 'net_profit', 'bs_equity', 'bs_liability']
+    .flatMap((k) => (series[k]?.points || []).map((x) => x.year)))].sort().slice(-5);
+  const srOf = (k: string, label: string, color: string) => ({ label, color, points: series[k]?.points || [] });
+  const charts = finState === 'live' ? [
+    { title: 'Revenue', series: [srOf('revenue', 'Revenue', FIN_SERIES[0][2])] },
+    { title: 'Profitability', series: [srOf('ebitda', 'EBITDA', FIN_SERIES[1][2]), srOf('net_profit', 'PAT', FIN_SERIES[2][2])] },
+    { title: 'Balance sheet', series: [srOf('bs_equity', 'Net worth', '#1B7A45'), srOf('bs_liability', 'Liabilities', '#B45309')] },
+    { title: 'Cash flow', series: [srOf('cf_operating', 'Operating', '#0D9488'), srOf('cf_financing', 'Financing', '#6D5FD3')] },
+  ].filter((c) => c.series.some((x) => x.points.length)) : [];
   const fin = p?.prospect;
   const hasFin = !!fin && (fin.revenue_cr != null || fin.ebitda_cr != null || fin.net_profit_cr != null);
   const live = !!p && (p.stats.deals_in_flight + p.stats.deals_done) > 0;
@@ -532,7 +550,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   // Every panel is in the DOM; only the chosen one shows on screen, all of them
   // on paper, each under its own heading.
   const Panel = ({ id, title, children }: { id: Tab; title: string; children: React.ReactNode }) => (
-    <Box className="c360-panel" hidden={tab !== id} sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+    <Box className="c360-panel" sx={{ display: tab === id ? 'flex' : 'none', flexDirection: 'column', gap: 1, minWidth: 0 }}>
       <Typography className="c360-panel-title" sx={{ display: 'none', fontSize: 10.5, fontWeight: 800,
         letterSpacing: '.08em', color: '#44535B', textTransform: 'uppercase', mt: 1 }}>{title}</Typography>
       {children}
@@ -561,7 +579,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
         .c360-body, .c360-body * { overflow: visible !important; max-height: none !important; }
         .c360-body { padding: 8px 0 !important; }
-        .c360-panel[hidden] { display: block !important; }
+        .c360-panel { display: flex !important; }
         .c360-panel-title { display: block !important; }
         .c360-tabs { display: none !important; }
         .c360-print * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -770,6 +788,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Box sx={{ overflowX: 'auto', overflowY: 'hidden', pb: 0.5 }}><Timeline events={events} /></Box>
             </Card>)}
 
+          {/* ---- financial trend: the charts get the full width -------------- */}
+          {charts.length > 0 && (
+            <Card>
+              <Eyebrow right={<Typography sx={{ fontSize: 10.5, color: tokens.muted }}>Tracxn filings · ₹ Cr · hover a bar for its value, ⤢ to enlarge</Typography>}>
+                Financial trend · {chartYears.length ? `${chartYears[0]}–${chartYears[chartYears.length - 1]}` : ''}</Eyebrow>
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'repeat(2, minmax(0,1fr))', md: `repeat(${Math.min(charts.length, 4)}, minmax(0,1fr))` } }}>
+                {charts.map((c) => <BarChart key={c.title} title={c.title} unit={series.revenue?.unit || '₹ Cr'} series={c.series} years={chartYears}
+                  onExpand={() => setBigChart(c.title)} />)}
+              </Box>
+            </Card>)}
+
           {/* ---- money + numbers --------------------------------------- */}
           <Box sx={{ display: 'grid', gap: 1.4, alignItems: 'start',
             gridTemplateColumns: { xs: 'minmax(0,1fr)', md: 'minmax(0,1.25fr) minmax(0,1fr)' } }}>
@@ -859,19 +888,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 const cell = (k: string, y: number) => series[k]?.points.find((x) => x.year === y) || null;
                 const fyLabel = (y: number) => SNAPSHOT_ROWS.map(([k]) => cell(k, y)?.fy).find(Boolean) || String(y);
                 const ratio = (num: string, den: string, y: number) => { const a = cell(num, y), b = cell(den, y); return a && b && b.value ? (a.value / Math.abs(b.value)) * 100 : null; };
-                const chartYears = [...new Set(['revenue', 'ebitda', 'net_profit', 'bs_equity', 'bs_liability']
-                  .flatMap((k) => (series[k]?.points || []).map((x) => x.year)))].sort().slice(-5);
-                const sr = (k: string, label: string, color: string) => ({ label, color, points: series[k]?.points || [] });
-                const charts = [
-                  { title: 'Revenue', series: [sr('revenue', 'Revenue', FIN_SERIES[0][2])] },
-                  { title: 'Profitability', series: [sr('ebitda', 'EBITDA', FIN_SERIES[1][2]), sr('net_profit', 'PAT', FIN_SERIES[2][2])] },
-                  { title: 'Balance sheet', series: [sr('bs_equity', 'Net worth', '#1B7A45'), sr('bs_liability', 'Liabilities', '#B45309')] },
-                ].filter((c) => c.series.some((x) => x.points.length));
                 return <>
-                  {charts.length > 0 && (
-                    <Box sx={{ display: 'grid', gap: 1.4, mb: 1.2, gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: `repeat(${Math.min(charts.length, 3)}, minmax(0,1fr))` } }}>
-                      {charts.map((c) => <BarChart key={c.title} title={c.title} unit={series.revenue?.unit || '₹ Cr'} series={c.series} years={chartYears} />)}
-                    </Box>)}
                   {years.length > 0 ? (
                     <Box sx={{ overflowX: 'auto' }}>
                       <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.6,
@@ -1186,6 +1203,13 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           </Typography>
         </>}
       </Box>
+      <Dialog open={!!bigChart} onClose={() => setBigChart(null)} maxWidth="md" fullWidth
+        PaperProps={{ sx: { p: 2, borderRadius: '12px' } }}>
+        {bigChart && charts.filter((c) => c.title === bigChart).map((c) => (
+          <BarChart key={c.title} big title={`${p?.anchor.name || ''} — ${c.title}`} unit={series.revenue?.unit || '₹ Cr'} series={c.series} years={chartYears} />))}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setBigChart(null)}>Close</Button></Box>
+      </Dialog>
     </Dialog>
   );
 }
