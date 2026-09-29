@@ -83,8 +83,9 @@ export function RiskGradeChip({ grade, busy, error, canGrade, onGrade }: {
       <Popover open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        PaperProps={{ sx: { width: 560, maxWidth: '94vw', maxHeight: '72vh',
-          p: '14px 16px', borderRadius: '12px' } }}>
+        marginThreshold={8}
+        PaperProps={{ sx: { width: 560, maxWidth: 'calc(100vw - 16px)', maxHeight: '78vh',
+          p: { xs: '12px 12px', sm: '14px 16px' }, borderRadius: '12px', overflowX: 'hidden' } }}>
         <RiskGradeDetails grade={grade} onRegrade={canGrade
           ? () => { setAnchor(null); onGrade(true); } : undefined} />
       </Popover>
@@ -176,14 +177,17 @@ export function RiskGradeDetails({ grade, onRegrade }: {
           each pillar takes the median of its scores.</Typography>)}
 
       <Label>HOW THE SCORE WAS BUILT — seven weighted pillars (score × weight)</Label>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(150px,1.3fr) 52px 44px 1.1fr',
-        columnGap: 1, rowGap: 0.6, alignItems: 'start', fontSize: 11.4 }}>
+      {/* Four columns on a desk; on a phone the evidence drops under its pillar
+          on a full-width row instead of being squeezed off the right edge. */}
+      <Box sx={{ display: 'grid', columnGap: 1, rowGap: 0.6, alignItems: 'start', fontSize: 11.4,
+        gridTemplateColumns: { xs: 'minmax(0,1fr) 44px 36px', sm: 'minmax(150px,1.3fr) 52px 44px 1.1fr' } }}>
         {['Pillar', 'Score', 'Pts', 'Evidence'].map((h) => (
-          <Typography key={h} sx={{ fontSize: 10, fontWeight: 700, color: tokens.muted }}>
+          <Typography key={h} sx={{ fontSize: 10, fontWeight: 700, color: tokens.muted,
+            display: h === 'Evidence' ? { xs: 'none', sm: 'block' } : 'block' }}>
             {h}</Typography>))}
         {grade.pillars.map((pl) => (
           <Box key={pl.key} sx={{ display: 'contents' }}>
-            <Typography sx={{ fontSize: 11.6, fontWeight: 600 }}>
+            <Typography sx={{ fontSize: 11.6, fontWeight: 600, minWidth: 0 }}>
               {pl.key}. {pl.name} <span style={{ color: tokens.muted, fontWeight: 400 }}>
                 ({pl.weight}%)</span>
               {!pl.available && <Chip size="small" label="no data · not scored" variant="outlined"
@@ -192,7 +196,9 @@ export function RiskGradeDetails({ grade, onRegrade }: {
             </Typography>
             <Typography sx={{ fontSize: 11.6 }}>{pl.score}/10</Typography>
             <Typography sx={{ fontSize: 11.6, fontWeight: 700 }}>{pl.weighted}</Typography>
-            <Typography sx={{ fontSize: 11, color: '#44535B', lineHeight: 1.4 }}>
+            <Typography sx={{ fontSize: 11, color: '#44535B', lineHeight: 1.4, minWidth: 0,
+              overflowWrap: 'anywhere', gridColumn: { xs: '1 / -1', sm: 'auto' },
+              pb: { xs: 0.6, sm: 0 }, borderBottom: { xs: `1px solid ${tokens.line}`, sm: 'none' } }}>
               {pl.evidence}</Typography>
           </Box>))}
       </Box>
@@ -212,7 +218,7 @@ export function RiskGradeDetails({ grade, onRegrade }: {
         </Box>)) : <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
           Not reported.</Typography>}
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 2 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'minmax(0,1fr) minmax(0,1fr)' }, columnGap: 2 }}>
         <Box><Label>TOP RISKS</Label><Bullets items={grade.risks} /></Box>
         <Box><Label>TOP MITIGANTS</Label><Bullets items={grade.mitigants} /></Box>
       </Box>

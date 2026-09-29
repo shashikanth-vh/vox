@@ -83,7 +83,15 @@ async def _tracxn_post(settings: Any, path: str, body: dict) -> dict:
     except httpx.HTTPError as exc:
         return {"_error": f"unreachable ({exc.__class__.__name__})"}
     if r.status_code >= 300:
-        return {"_error": f"HTTP {r.status_code}"}
+        # Tracxn says why in the body — "API out of credits" (403902000) is a
+        # very different remedy from a bad token, so the reason travels along.
+        why = ""
+        try:
+            j = r.json()
+            why = str(j.get("message") or j.get("error") or "") if isinstance(j, dict) else ""
+        except ValueError:
+            pass
+        return {"_error": f"HTTP {r.status_code}" + (f": {why[:120]}" if why else "")}
     try:
         return r.json()
     except ValueError:
@@ -397,8 +405,15 @@ async def panorama_financials(
             note = (f"Tracxn could not be reached from the register "
                     f"({err.split('(')[-1].rstrip(')')}) — check outbound HTTPS "
                     f"from the register container.")
+        elif err and "credit" in err.lower():
+            note = ("Tracxn's API credits are used up — Tracxn answered "
+                    f"“{err.split(':', 1)[-1].strip()}”. Top up the Tracxn plan and "
+                    "fetch again; nothing was spent or cached.")
+        elif err and ("401" in err or "403" in err):
+            note = (f"Tracxn refused the lookup ({err}) — check TRACXN_ACCESS_TOKEN "
+                    "and the plan's access to the legal entity API.")
         elif err:
-            note = f"Tracxn refused the lookup ({err}) — check TRACXN_ACCESS_TOKEN."
+            note = f"Tracxn answered with an error ({err}); nothing was cached, so the next fetch asks again."
         else:
             note = "Tracxn has no legal entity for this CIN."
         return {"cin": the_cin, "configured": True, "resolved": False,
@@ -419,8 +434,11 @@ async def panorama_financials(
     series: dict[str, Any] = {}
     board: dict[str, Any] = {}
     captable: dict[str, Any] = {}
+    errors: list[str] = []
     for key, payload, was_fetch in results:
         fetched += int(was_fetch)
+        if isinstance(payload, dict) and payload.get("_error"):
+            errors.append(str(payload["_error"]))
         kind = _ENDPOINTS[key][1]
         norm = normalize(kind, payload)
         if kind == "series":
@@ -441,8 +459,22 @@ async def panorama_financials(
 
     oldest = min((c.fetched_at for c in cached.values()
                   if c.fetched_at is not None), default=now)
+    # The entity resolved (or was cached) but the filings did not come: say
+    # WHY once at the top — an out-of-credits wall is a billing remedy, and
+    # fourteen "unavailable (HTTP 403)" chips would not tell anyone that.
+    note = None
+    if errors and len(errors) == len(keys):
+        first = errors[0]
+        if "credit" in first.lower():
+            note = ("Tracxn's API credits are used up — Tracxn answered "
+                    f"“{first.split(':', 1)[-1].strip()}”. The filings were not "
+                    "fetched; top up the Tracxn plan and Refresh.")
+        elif first.startswith("unreachable"):
+            note = "Tracxn could not be reached for the filings; Refresh to try again."
+        else:
+            note = f"Tracxn answered the filing calls with an error ({first}); Refresh to try again."
     return {
-        "cin": the_cin, "configured": True, "resolved": True,
+        "cin": the_cin, "configured": True, "resolved": True, "note": note,
         "legal_entity": {"id": lei, "name": resolved.get("name"),
                          "incorporated": resolved.get("incorporated"),
                          "status": resolved.get("status"),

@@ -255,3 +255,46 @@ async def test_cached_only_never_spends_and_serves_any_age(reg: AsyncClient, mon
     r2 = await reg.get(f"/v1/panorama/financials?cin={CIN}&cached_only=true", headers=ADMIN)
     assert r2.json()["resolved"] is True and r2.json()["fetched_now"] == 0
     assert len(calls) == n
+
+async def test_out_of_credits_is_named_not_blamed_on_the_token(reg: AsyncClient, monkeypatch):
+    """Tracxn's 403 "API out of credits" (errorCode 403902000) is a billing
+    remedy, not a token one: the note must say credits, and nothing is cached."""
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+    calls = reg._calls  # type: ignore[attr-defined]
+
+    async def broke(settings, path, body):  # noqa: ANN001
+        calls.append(path)
+        return {"_error": "HTTP 403: API out of credits"}
+
+    monkeypatch.setattr(tracxn_mod, "_tracxn_post", broke)
+    r = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["resolved"] is False
+    assert "credits are used up" in j["note"]
+    assert "API out of credits" in j["note"]
+    assert "TRACXN_ACCESS_TOKEN" not in j["note"]
+    n = len(calls)
+    r2 = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r2.json()["resolved"] is False
+    assert len(calls) == n + 1
+
+
+async def test_a_credit_wall_after_resolution_is_said_once_at_the_top(reg: AsyncClient, monkeypatch):
+    """The legal entity resolved (cached from a good day), then every series
+    call hits the credit wall: the card must say so once, not 14 times."""
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+
+    async def wall(settings, path, body):  # noqa: ANN001
+        if path.endswith("/legalentities"):
+            return {"result": [{"id": "le-123", "currentName": {"name": "Zeon"},
+                                "status": "Active"}]}
+        return {"_error": "HTTP 403: API out of credits"}
+
+    monkeypatch.setattr(tracxn_mod, "_tracxn_post", wall)
+    r = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["resolved"] is True
+    assert "credits are used up" in j["note"]
+    assert all(not s["points"] for s in j["series"].values())

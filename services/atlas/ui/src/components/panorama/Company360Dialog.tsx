@@ -238,19 +238,23 @@ function Ladder({ ladder, current }: { ladder: string[]; current: string | null 
   if (idx < 0) return null;
   const done = idx === ladder.length - 1;
   const mark = done ? STAGE_COLOR.done : STAGE_COLOR.hold;
+  // Seven stages need ~60px each to keep their names on one line; on a phone
+  // the ladder scrolls sideways rather than folding "Data Awaited" into a stack.
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-      <Box sx={{ display: 'flex', gap: '5px' }}>
-        {ladder.map((s, i) => (
-          <Box key={s} sx={{ height: 5, flex: 1, borderRadius: '3px',
-            bgcolor: i < idx ? CHART_TEAL : i === idx ? mark : '#E7ECEF' }} />))}
-      </Box>
-      <Box sx={{ display: 'flex' }}>
-        {ladder.map((s, i) => (
-          <Typography key={s} sx={{ flex: 1, fontSize: 8.6, lineHeight: 1.2,
-            color: i === idx ? mark : tokens.muted, fontWeight: i === idx ? 700 : 400 }}>
-            {s.replace(' Completed', '').replace('Ready for Disbursement', 'Ready')}
-          </Typography>))}
+    <Box sx={{ overflowX: 'auto', overflowY: 'hidden' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: ladder.length * 60 }}>
+        <Box sx={{ display: 'flex', gap: '5px' }}>
+          {ladder.map((s, i) => (
+            <Box key={s} sx={{ height: 5, flex: 1, borderRadius: '3px',
+              bgcolor: i < idx ? CHART_TEAL : i === idx ? mark : '#E7ECEF' }} />))}
+        </Box>
+        <Box sx={{ display: 'flex' }}>
+          {ladder.map((s, i) => (
+            <Typography key={s} sx={{ flex: 1, fontSize: 8.6, lineHeight: 1.2, whiteSpace: 'nowrap', pr: 0.4,
+              color: i === idx ? mark : tokens.muted, fontWeight: i === idx ? 700 : 400 }}>
+              {s.replace(' Completed', '').replace('Ready for Disbursement', 'Ready')}
+            </Typography>))}
+        </Box>
       </Box>
     </Box>
   );
@@ -588,13 +592,18 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
       }`}</style>
 
       {/* ---- header ------------------------------------------------------ */}
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.4, p: '13px 20px',
+      {/* On a phone the header stacks: actions on top, then the name across the
+          full width, chips and identifiers wrapping under it — never a
+          one-word-per-line column squeezed beside the buttons. */}
+      <Box sx={{ display: 'flex', flexDirection: small ? 'column' : 'row', alignItems: small ? 'stretch' : 'flex-start',
+        gap: small ? 0.6 : 1.4, p: small ? '10px 14px' : '13px 20px',
         bgcolor: '#fff', borderBottom: `1px solid ${tokens.line}` }}>
-        <Box sx={{ minWidth: 0 }}>
+        <Box sx={{ minWidth: 0, order: small ? 2 : 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             {target && <Chip size="small" clickable label={`← back to ${company || 'company'}`}
               onClick={() => setTarget(null)} sx={{ height: 21, fontSize: 10.8 }} />}
-            <Typography sx={{ fontSize: 18, fontWeight: 800, color: INK }}>
+            <Typography sx={{ fontSize: small ? 16.5 : 18, fontWeight: 800, color: INK, lineHeight: 1.2,
+              flexBasis: small ? '100%' : 'auto' }}>
               {p?.anchor.name || effCompany || '…'}</Typography>
             {p?.anchor.sector && <Chip size="small" variant="outlined" color="primary"
               label={p.anchor.sector} sx={{ height: 21, fontSize: 10.8 }} />}
@@ -605,7 +614,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             {openEws.length > 0 && <Chip size="small" label={`Early warning · ${openEws[0].severity}`}
               sx={{ height: 21, fontSize: 10.8, fontWeight: 800, color: '#fff', bgcolor: sevColor(openEws[0].severity) }} />}
           </Box>
-          <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+          <Typography sx={{ fontSize: 11.6, color: tokens.muted, mt: small ? 0.4 : 0, overflowWrap: 'anywhere' }}>
             {[p?.anchor.cin ? `CIN ${p.anchor.cin}` : null,
               p?.anchor.pan ? `PAN ${p.anchor.pan}` : null,
               p?.anchor.gstin ? `GSTIN ${p.anchor.gstin}` : null,
@@ -616,10 +625,12 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               .filter(Boolean).join(' · ')}
           </Typography>
         </Box>
-        <Box sx={{ flex: 1 }} />
-        <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {!small && <Box sx={{ flex: 1 }} />}
+        <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 1, order: small ? 1 : 0,
+          flexWrap: 'wrap', minWidth: 0 }}>
           <RiskGradeChip grade={grade} busy={gradeBusy} error={gradeErr}
             canGrade={!!p && (news !== null || !!newsErr)} onGrade={runGrade} />
+          {small && <Box sx={{ flex: 1 }} />}
           <Button size="small" variant="contained" startIcon={<DownloadIcon />}
             onClick={() => window.print()}>Download</Button>
           <IconButton size="small" onClick={close}><CloseIcon fontSize="small" /></IconButton>
@@ -643,7 +654,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Eyebrow>Where we stand</Eyebrow>
               <Typography sx={{ fontSize: 17, fontWeight: 800, color: INK, lineHeight: 1.25, mb: 0.8 }}>
                 {[p.stats.booked_cr != null ? `${fmtCr(p.stats.booked_cr)} disbursed` : '',
-                  p.stats.exposure_ask_cr != null ? `${fmtCr(p.stats.exposure_ask_cr)} in market` : '',
+                  p.stats.exposure_ask_cr != null ? `${fmtCr(p.stats.exposure_ask_cr)} in process` : '',
                   p.stats.on_hold_cr != null ? `${fmtCr(p.stats.on_hold_cr)} on hold` : '']
                   .filter(Boolean).join(', ') || (p.stats.open_leads
                     ? `${p.stats.open_leads} open lead${p.stats.open_leads > 1 ? 's' : ''}, no exposure yet`
@@ -952,10 +963,12 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               {finState === 'unconfigured' && (
                 <Typography sx={{ fontSize: 11.8, color: INK, lineHeight: 1.55 }}>The Tracxn market feed is not connected on this server (TRACXN_ACCESS_TOKEN is not set). CIN on record: {p.anchor.cin}.</Typography>)}
               {finState === 'nofilings' && (
-                <Typography sx={{ fontSize: 11.8, color: INK, lineHeight: 1.55 }}>
-                  {/reached|refused/.test(trx?.note || '') ? `${trx?.note} Nothing is cached from a failed lookup — the next open asks again.`
-                    : <>Tracxn has no legal entity for CIN <b>{p.anchor.cin}</b>. Check the CIN on record; a corrected one is looked up again on the next open.</>}
+                <Typography sx={{ fontSize: 11.8, color: /credits|reached|refused|error/.test(trx?.note || '') ? '#B45309' : INK, lineHeight: 1.55 }}>
+                  {/credits|reached|refused|error/.test(trx?.note || '') ? trx?.note
+                    : <>Tracxn has no legal entity for CIN <b>{p.anchor.cin}</b>. Check the CIN on record; a corrected one is looked up again on the next fetch.</>}
                 </Typography>)}
+              {finState === 'live' && trx?.note && (
+                <Typography sx={{ fontSize: 11.8, color: '#B45309', lineHeight: 1.55 }}>{trx.note}</Typography>)}
               {finState === 'error' && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>{trxErr}</Typography>}
               {finState !== 'live' && hasFin && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6, mt: 1 }}>
@@ -1037,7 +1050,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 const bookedAll = (p.stats.booked_cr || 0) + grp.members.reduce((a, m) => a + (m.booked_cr || 0), 0);
                 const ewsAll = openEws.length + grp.members.reduce((a, m) => a + m.ews_open, 0);
                 return <Typography sx={{ fontSize: 13.4, fontWeight: 800, color: INK, mb: 0.8 }}>
-                  {grp.members.length + 1} companies · {fmtCr(bookedAll)} booked · {fmtCr(askAll)} in market
+                  {grp.members.length + 1} companies · {fmtCr(bookedAll)} disbursed · {fmtCr(askAll)} in process
                   {ewsAll ? <span style={{ color: tokens.bad }}> · {ewsAll} open early warning{ewsAll > 1 ? 's' : ''}</span> : ''}
                 </Typography>;
               })()}
