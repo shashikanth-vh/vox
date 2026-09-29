@@ -84,6 +84,11 @@ function pct(n: number): string {
   return `${n >= 0 ? '+' : '−'}${Math.abs(n).toLocaleString('en-IN',
     { maximumFractionDigits: 0 })}%`;
 }
+/** The earliest of several ISO dates, ignoring blanks and junk. */
+function earliest(...xs: (string | null | undefined)[]): string | null {
+  return xs.filter((x): x is string => !!x && !Number.isNaN(Date.parse(x))).sort()[0] || null;
+}
+
 // Lender statuses, read the way the desk means them.
 const DEAD_RE = /declin|dropp|reject|withdr|not interested|pass/i;
 const ADV_RE = /ip received|in.?principle|sanction|approv|term sheet|disburs|credit approved/i;
@@ -519,8 +524,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const lastTouchIso = [p?.stats.last_touch, ...(p?.leads || []).map((l) => l.last_interaction_date)]
     .filter((x): x is string => !!x).sort().pop() || null;
   const lastTouchDays = daysAgo(lastTouchIso);
-  const earliest = (...xs: (string | null | undefined)[]) =>
-    xs.filter((x): x is string => !!x && !Number.isNaN(Date.parse(x))).sort()[0] || null;
+
   const genStamp = useMemo(() => p ? new Date(p.generated_at).toLocaleString('en-IN',
     { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '', [p]);
 
