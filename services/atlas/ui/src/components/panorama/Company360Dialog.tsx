@@ -304,6 +304,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [gradeBusy, setGradeBusy] = useState(false);
   const [gradeErr, setGradeErr] = useState('');
   const [dlErr, setDlErr] = useState('');
+  const [dlBusy, setDlBusy] = useState(false);
   // One market-feed fetch per open. A ref, not state: state here would be a
   // dependency of the effect that sets it, and re-running the effect on its
   // own "busy" flag is how the spinner once spun forever.
@@ -319,7 +320,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
     setTrx(null); setTrxBusy(false); setTrxErr(''); trxTried.current = false;
     pRef.current = null;
-    setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr('');
+    setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr(''); setDlBusy(false);
     setOpenSections({ engagements: true }); setBriefOpen(false); setNewsSev(null);
     let alive = true;
     panoramaService.get({ entityId, company })
@@ -980,6 +981,21 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   {!p.documents.length && <Typography sx={{ fontSize: 11.6,
                     color: tokens.muted }}>Nothing on the Data Register yet.</Typography>}
                 </Box>
+                {p.documents.length > 0 && p.anchor.entity_id && (
+                  <Box className="no-print" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />}
+                      disabled={dlBusy} sx={{ fontSize: 11, py: 0.2 }}
+                      onClick={() => {
+                        setDlErr(''); setDlBusy(true);
+                        void documentsService.downloadAll(p.anchor.entity_id!, p.anchor.name)
+                          .then((r) => { if (!r.ok || r.error) setDlErr(r.error || ''); })
+                          .finally(() => setDlBusy(false));
+                      }}>
+                      {dlBusy ? 'Packing…' : `Download all ${p.stats.documents} as .zip`}
+                    </Button>
+                    <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
+                      foldered by section · current versions only</Typography>
+                  </Box>)}
                 {dlErr && <Typography sx={{ fontSize: 11.2, color: tokens.bad }}>{dlErr}</Typography>}
                 <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column',
                   gap: 0.7 }}>

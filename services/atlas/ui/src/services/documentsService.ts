@@ -180,6 +180,29 @@ export const documentsService = {
     return { ok: true };
   },
 
+  /** The whole company file as one .zip, foldered by section — the register
+   *  packs it, so S3-backed files come along too. */
+  async downloadAll(entityId: string, company: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const { default: axiosClient } = await import('../api/axiosClient');
+      const res = await axiosClient.get(`/entities/${entityId}/documents/archive`,
+        { responseType: 'blob', timeout: 300_000 });
+      const blob = res.data as Blob;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${company.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'company'} — documents.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      const skipped = Number(res.headers?.['x-skipped'] || 0);
+      return { ok: true, error: skipped ? `${skipped} file(s) had no bytes on the register and were left out.` : undefined };
+    } catch (e: any) {
+      const status = e?.response?.status;
+      return { ok: false, error: status === 404 ? 'No document bytes on the register for this company.'
+        : status === 400 ? 'The file is over 200 MB — download documents individually.'
+        : `Could not download the archive (HTTP ${status ?? '?'}).` };
+    }
+  },
+
   /**
    * Verify a document — the checker half of the maker/checker pair.
    *

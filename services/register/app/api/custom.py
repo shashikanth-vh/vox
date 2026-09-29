@@ -1207,6 +1207,75 @@ def _content_disposition(filename: str, disposition: str = "inline") -> str:
             f"filename*=UTF-8''{quote(filename, safe='')}")
 
 
+_ARCHIVE_MAX_BYTES = 200 * 1024 * 1024
+
+
+@router.get("/v1/entities/{entity_id}/documents/archive", tags=["Documents"],
+            summary="Every current document of a company, as one .zip")
+async def download_document_archive(
+    entity_id: uuid.UUID, ctx: RequestContext = Depends(get_context),
+) -> Any:
+    """One click for the whole file: current (non-superseded) documents, foldered
+    by section, bytes pulled from inline storage or the object store. A document
+    with no bytes on record is left out and counted in ``X-Skipped``."""
+    import io
+    import zipfile
+    from pathlib import PurePosixPath
+
+    from app.models import Entity
+
+    await _ensure_company_read(ctx, entity_id)
+    ent = (await ctx.session.execute(select(Entity).where(
+        Entity.tenant_id == ctx.tenant_id, Entity.id == entity_id,
+        Entity.deleted_at.is_(None)))).scalar_one_or_none()
+    if ent is None:
+        raise NotFoundError(f"entity '{entity_id}' not found.")
+    rows = (await ctx.session.execute(select(Document).where(
+        Document.tenant_id == ctx.tenant_id, Document.entity_id == entity_id,
+        Document.deleted_at.is_(None), Document.status != "Superseded")
+        .order_by(Document.section, Document.uploaded_at))).scalars().all()
+
+    store = storage_mod.get_storage()
+    buf = io.BytesIO()
+    names: set[str] = set()
+    total = 0
+    skipped = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for d in rows:
+            blob: bytes | None = d.inline_content
+            if blob is None and d.storage_uri and store is not None:
+                parsed = storage_mod.parse_s3_uri(d.storage_uri)
+                if parsed:
+                    try:
+                        blob = await store.get(parsed[1])
+                    except Exception:  # noqa: BLE001 - one missing object skips one file
+                        blob = None
+            if blob is None:
+                skipped += 1
+                continue
+            total += len(blob)
+            if total > _ARCHIVE_MAX_BYTES:
+                raise ValidationAppError(
+                    "This company's file is over 200 MB — download the documents "
+                    "individually.")
+            folder = re.sub(r"[\\/]+", "-", (d.section or "Other").strip()) or "Other"
+            leaf = PurePosixPath(d.original_filename or d.title or str(d.id)).name
+            stem, suffix = (leaf.rsplit(".", 1) + [""])[:2] if "." in leaf else (leaf, "")
+            name, n = f"{folder}/{leaf}", 2
+            while name in names:
+                name = f"{folder}/{stem} ({n}){'.' + suffix if suffix else ''}"
+                n += 1
+            names.add(name)
+            zf.writestr(name, blob)
+    if not names:
+        raise NotFoundError("No document bytes on record for this company.")
+    filename = f"{ent.code or ent.legal_name or 'company'}-documents.zip"
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition": _content_disposition(filename, "attachment"),
+                 "X-Skipped": str(skipped), "X-Packed": str(len(names))})
+
+
 @router.get("/v1/documents/{doc_id}/content", tags=["Documents"],
             summary="Fetch a document's bytes (inline) or its storage reference")
 async def download_document(

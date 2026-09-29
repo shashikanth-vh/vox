@@ -110,3 +110,34 @@ async def test_upload_bad_subject_404(client: AsyncClient, monkeypatch):
                                     "subject_id": "00000000-0000-0000-0000-000000000000",
                                     "title": "x"})
         assert r.status_code == 404
+
+
+async def test_the_whole_file_downloads_as_one_zip(client: AsyncClient, monkeypatch):
+    import io
+    import zipfile
+
+    with mock_aws():
+        monkeypatch.setattr(storage_mod, "get_storage", lambda: _store())
+        eid = (await client.post("/v1/entities",
+                                 json={"code": "ZIPCO", "legal_name": "Zip Co"})).json()["id"]
+        # Two DIFFERENT slots that happen to carry the same filename (director
+        # PANs), plus a superseded upload that must NOT come along.
+        for slot, name, sec, blob in (
+                ("pan_a", "pan.pdf", "KYC & Constitutional", b"%PDF-1.4 pan"),
+                ("pan_b", "pan.pdf", "KYC & Constitutional", b"%PDF-1.4 pan again"),
+                ("af3", "audit.pdf", "Financials", b"%PDF-1.4 audit v1"),
+                ("af3", "audit.pdf", "Financials", b"%PDF-1.4 audit")):
+            r = await client.post(f"/v1/entities/{eid}/documents/upload",
+                                  files={"file": (name, blob, "application/pdf")},
+                                  data={"slot_key": slot, "section": sec, "title": name})
+            assert r.status_code == 201, r.text
+        r = await client.get(f"/v1/entities/{eid}/documents/archive")
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"].startswith("application/zip")
+        assert 'filename="ZIPCO-documents.zip"' in r.headers["content-disposition"]
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        assert sorted(zf.namelist()) == ["Financials/audit.pdf",
+                                         "KYC & Constitutional/pan (2).pdf",
+                                         "KYC & Constitutional/pan.pdf"]
+        assert zf.read("Financials/audit.pdf") == b"%PDF-1.4 audit"
+        assert r.headers["x-packed"] == "3" and r.headers["x-skipped"] == "0"
