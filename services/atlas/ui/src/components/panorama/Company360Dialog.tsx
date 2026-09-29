@@ -426,14 +426,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     add(trx?.legal_entity?.incorporated, 'Incorporated', '#7B8A92');
     p.leads.forEach((l) => add(l.created_at, `Lead ${l.lead_no || ''} opened`, CHART_TEAL));
     p.lending.forEach((r) => {
-      add(r.created_at, `${lendName(r)} started · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
+      const start = earliest(r.created_at, r.stage_updated_at, r.sanction_date);
+      const stageDay = (r.stage_updated_at || '').slice(0, 10);
+      if (start && start.slice(0, 10) !== stageDay) add(start, `${lendName(r)} started · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
       add(r.sanction_date, `Sanctioned ${fmtCr(r.amount_cr)}`, STAGE_COLOR.done, true);
       if (r.stage === 'Disbursed') add(r.stage_updated_at, `Disbursed ${fmtCr(r.disbursed_amount ?? r.amount_cr)}`, STAGE_COLOR.done, true);
-      else if (r.stage === 'Rejected') add(r.stage_updated_at, 'Lending rejected', STAGE_COLOR.dead, true);
+      else if (r.stage === 'Rejected') add(r.stage_updated_at, `${fmtCr(r.amount_cr)} lending rejected`, STAGE_COLOR.dead, true);
       else if (r.stage_updated_at && r.stage) add(r.stage_updated_at, `${lendName(r)} · ${r.stage}`, STAGE_COLOR.hold);
     });
     p.syndication.forEach((r) => {
-      add(r.created_at, `${synName(r)} launched · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
+      add(earliest(r.created_at, ...(r.lenders || []).map((x) => x.since || x.response_date)),
+        `${synName(r)} launched · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
       (r.lenders || []).filter((x) => x.response_date).slice(0, 4)
         .forEach((x) => add(x.response_date, `${x.name}: ${x.status || 'replied'}`,
           lenderBucket(x.status) === 'dead' ? STAGE_COLOR.dead
@@ -454,7 +457,25 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   }, [p, trx, grade, news]);
 
   const missing = p?.checklist?.missing || [];
-  const lastTouchDays = daysAgo(p?.stats.last_touch);
+  const isDead = (r: PanoramaLine) => r.stage === 'Rejected' || DEAD_RE.test(r.status || '');
+  const liveLend = (p?.lending || []).filter((r) => !isDead(r));
+  const deadLend = (p?.lending || []).filter(isDead);
+  // "0 advanced · 0 declined of 2 (0%)" says nothing; say what happened.
+  const lenderSummary = (v: ReturnType<typeof lenderView>) => {
+    if (!v.ls.length) return 'no lenders approached yet';
+    const replied = v.adv.length + v.dead.length + v.prog.filter((x) => x.response_date).length;
+    if (!v.adv.length && !v.dead.length) {
+      return `${v.ls.length} lender${v.ls.length > 1 ? 's' : ''} approached · ${replied ? `${replied} replied` : 'no reply yet'}`;
+    }
+    return `${v.adv.length} advanced · ${v.dead.length} declined of ${v.ls.length}`;
+  };
+  // The last touch is the latest dated contact anywhere — an interaction row,
+  // or the date the lead itself carries when nothing was logged separately.
+  const lastTouchIso = [p?.stats.last_touch, ...(p?.leads || []).map((l) => l.last_interaction_date)]
+    .filter((x): x is string => !!x).sort().pop() || null;
+  const lastTouchDays = daysAgo(lastTouchIso);
+  const earliest = (...xs: (string | null | undefined)[]) =>
+    xs.filter((x): x is string => !!x && !Number.isNaN(Date.parse(x))).sort()[0] || null;
   const genStamp = useMemo(() => p ? new Date(p.generated_at).toLocaleString('en-IN',
     { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '', [p]);
 
@@ -514,7 +535,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
             {[p?.anchor.cin,
               trx?.legal_entity?.incorporated ? `incorporated ${fmtDate(trx.legal_entity.incorporated)}` : null,
-              p?.since ? `with PRISM since ${fmtDate(p.since)}` : null,
+              p?.since ? `first activity ${fmtDate(p.since)}` : null,
               p?.owners?.length ? `owners: ${p.owners.join(', ')}` : null,
               p ? (p.anchor.matched_by === 'name-only' ? 'no client master yet' : null) : null]
               .filter(Boolean).join(' · ')}
@@ -554,16 +575,19 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 { value: p.stats.exposure_ask_cr || 0, color: STAGE_COLOR.flight },
                 { value: p.stats.on_hold_cr || 0, color: STAGE_COLOR.hold }]} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4, mt: 1 }}>
-                {p.lending.map((r) => <Bullet key={r.tracker_no || 'l'}
-                  dot={r.stage === 'Disbursed' ? STAGE_COLOR.done : r.stage === 'Rejected' ? STAGE_COLOR.dead : STAGE_COLOR.hold}>
+                {liveLend.map((r) => <Bullet key={r.tracker_no || 'l'}
+                  dot={r.stage === 'Disbursed' ? STAGE_COLOR.done : STAGE_COLOR.hold}>
                   <b>{lendName(r)}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}
                   {r.pending_with ? ` · pending with ${r.pending_with}` : ''}
                   {r.stage_updated_at ? ` · since ${fmtDay(r.stage_updated_at)}` : ''}</Bullet>)}
                 {p.syndication.map((r) => { const v = lenderView(r); return (
-                  <Bullet key={r.tracker_no || 's'} dot={CHART_TEAL}>
-                    <b>{synName(r)}</b> — {r.status || '—'} · {fmtCr(r.amount_cr)} ask
-                    {v.ls.length ? ` · ${v.adv.length} advanced · ${v.dead.length} declined of ${v.ls.length} lenders` : ''}
+                  <Bullet key={r.tracker_no || 's'} dot={isDead(r) ? STAGE_COLOR.dead : CHART_TEAL}>
+                    <b>{synName(r)}</b> — {r.status || '—'} · {fmtCr(r.amount_cr)} ask · {lenderSummary(v)}
                   </Bullet>); })}
+                {deadLend.length > 0 && (
+                  <Bullet dot={STAGE_COLOR.dead}>
+                    <b>Rejected earlier:</b> {deadLend.map((r) => `${fmtCr(r.amount_cr)} lending${r.stage_updated_at ? ` (${fmtDay(r.stage_updated_at)})` : ''}`).join(', ')}
+                  </Bullet>)}
                 {p.asset_monetisation.map((r) => <Bullet key={r.tracker_no || 'a'} dot={CHART_TEAL}>
                   <b>{amName(r)}</b> — {r.status || '—'}
                   {r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}</Bullet>)}
@@ -606,9 +630,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   <Bullet dot={leverage > 3 ? tokens.bad : leverage > 1.5 ? tokens.warn : tokens.ok}>
                     Liabilities {fmtCr(liabL.value)} vs net worth {fmtCr(eqL.value)} · <b>{leverage.toFixed(1)}×</b></Bullet>)}
                 {p.syndication.map((r) => { const v = lenderView(r); return v.ls.length ? (
-                  <Bullet key={r.tracker_no || 's'} dot={v.dead.length / v.ls.length >= 0.5 ? tokens.bad : tokens.warn}>
-                    Lenders on the {synName(r).toLowerCase()}: {v.adv.length} advanced, {v.prog.length} in progress,
-                    {' '}{v.dead.length} declined ({Math.round((v.dead.length / v.ls.length) * 100)}%)
+                  <Bullet key={r.tracker_no || 's'} dot={v.dead.length / v.ls.length >= 0.5 ? tokens.bad : v.dead.length ? tokens.warn : tokens.ok}>
+                    Lenders on the {synName(r).toLowerCase()}: {lenderSummary(v)}
+                    {v.dead.length ? ` (${Math.round((v.dead.length / v.ls.length) * 100)}% declined)` : ''}
                     {v.offered ? ` · ${fmtCr(v.offered)} on the table` : ''}</Bullet>) : null; })}
                 <Bullet dot={worst ? SEV_BG[worst] : tokens.ok}>
                   News: {news === null ? (newsErr ? 'radar unavailable' : 'searching…')
@@ -622,18 +646,27 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Eyebrow>What’s next</Eyebrow>
               <Typography sx={{ fontSize: 17, fontWeight: 800, color: INK, lineHeight: 1.25, mb: 0.8 }}>
                 {(() => {
-                  const l = p.leads.find((x) => !x.converted && x.next_action);
-                  const pend = p.lending.find((r) => r.pending_with && r.stage !== 'Disbursed' && r.stage !== 'Rejected');
                   if (grade?.action) return grade.action;
+                  const pend = liveLend.find((r) => r.pending_with && r.stage !== 'Disbursed');
                   if (pend) return `${lendName(pend)} pending with ${pend.pending_with}`;
+                  const syn = p.syndication.find((r) => !isDead(r));
+                  if (syn) {
+                    const wait = (syn.lenders || []).filter((x) => lenderBucket(x.status) === 'progress' && !x.response_date);
+                    return `${synName(syn)} at ${syn.status || '—'}${syn.pending_with ? ` — pending with ${syn.pending_with}`
+                      : wait.length ? ` — awaiting ${wait.length} lender repl${wait.length > 1 ? 'ies' : 'y'}` : ''}`;
+                  }
+                  const l = p.leads.find((x) => !x.converted && x.next_action);
                   if (l) return l.next_action!;
+                  const noted = p.leads.find((x) => !x.converted && x.notes);
+                  if (noted) return noted.notes!.split(/(?<=[.!?])\s/)[0];
                   return 'Nothing pending on record';
                 })()}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-                <Bullet dot={lastTouchDays != null && lastTouchDays > 14 ? tokens.warn : tokens.ok}>
-                  Last touch {lastTouchDays == null ? '—' : lastTouchDays === 0 ? 'today' : `${lastTouchDays} day${lastTouchDays > 1 ? 's' : ''} ago`}
-                  {p.interactions[0]?.by ? ` · ${p.interactions[0].by}` : ''}</Bullet>
+                <Bullet dot={lastTouchDays == null ? tokens.warn : lastTouchDays > 14 ? tokens.warn : tokens.ok}>
+                  {lastTouchDays == null ? 'No interaction logged yet'
+                    : `Last touch ${lastTouchDays === 0 ? 'today' : `${lastTouchDays} day${lastTouchDays > 1 ? 's' : ''} ago`}`}
+                  {lastTouchDays != null && p.interactions[0]?.by && p.stats.last_touch === lastTouchIso ? ` · ${p.interactions[0].by}` : ''}</Bullet>
                 {p.leads.filter((l) => !l.converted && l.next_action).slice(0, 2).map((l) => (
                   <Bullet key={l.lead_no || 'n'} dot={tokens.tealHi}>{l.lead_no}: {l.next_action}
                     {l.next_action_date ? ` · by ${fmtDay(l.next_action_date)}` : ''}</Bullet>))}

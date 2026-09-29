@@ -301,8 +301,14 @@ async def company_panorama(
         bits.append(f"{head} ({extras})." if extras else f"{head}.")
     else:
         bits.append(f"{display} — no client master yet; showing what carries the name.")
-    _KIND = {"lending": "Lending", "syndication": "Syndication",
+    # The desk's names: nothing on the UI shows a tracker number, so the brief
+    # names a line by product and amount, never by code.
+    _KIND = {"lending": "Lending", "syndication": "Platform deal",
              "am": "Asset monetisation"}
+
+    def _ask(k: str, r: Any) -> str:
+        amt = _amt(k, r)
+        return f"{_KIND[k]} ask of ₹{amt:g} Cr" if amt else _KIND[k]
     fl_lending = [r for k, r in in_flight if k == "lending"]
     if fl_lending:
         r = fl_lending[0]
@@ -312,26 +318,23 @@ async def company_panorama(
         bits.append(f"Live lending ask of {amount_txt}at {r.stage or 'unknown stage'}{pend}.")
     for k, r in done[:2]:
         amt = _amt(k, r, booked=True)
-        bits.append(f"{_KIND[k]} {r.tracker_no or ''} "
-                    f"{'disbursed' if k != 'am' else 'closed'}"
+        bits.append(f"{_KIND[k]} {'disbursed' if k != 'am' else 'closed'}"
                     + (f" ₹{amt:g} Cr." if amt else "."))
     for k, r in on_hold[:2]:
         amt = _amt(k, r)
-        bits.append(f"{_KIND[k]} {r.tracker_no or ''} on hold"
-                    + (f" (₹{amt:g} Cr)." if amt else "."))
+        bits.append(f"{_KIND[k]} on hold" + (f" (₹{amt:g} Cr)." if amt else "."))
     for k, r, b in lines:
         if b == "dead":
             state = (r.stage if k == "lending" else r.status) or "closed"
-            bits.append(f"{_KIND[k]} {r.tracker_no or ''} was {state.lower()}.")
+            bits.append(f"{_ask(k, r)} was {state.lower()}.")
             break
     for k, r in in_flight:
         if k == "syndication":
-            bits.append(f"Syndication {r.tracker_no or ''} at {r.status or '—'}.".strip())
+            bits.append(f"{_ask(k, r)} at {r.status or '—'}.")
             break
     for k, r in in_flight:
         if k == "am":
-            bits.append(f"Asset monetisation {r.tracker_no or ''} at "
-                        f"{r.status or '—'}.".strip())
+            bits.append(f"Asset monetisation at {r.status or '—'}.")
             break
     # Two renderings of the same sentences: the DIGEST (tight clips, the
     # 30-second read) and the FULL text behind its "more" click — same facts,
@@ -393,9 +396,23 @@ async def company_panorama(
             checklist = {"required_total": 0, "required_on_file": 0, "missing": [],
                          "note": "checklist unavailable"}
 
-    stamps = [x for x in (
-        [l.created_at for l in leads] + [r.created_at for r in lending]
-        + [r.created_at for r in synd] + [r.created_at for r in am]) if x]
+    # "Since" is the earliest dated FACT — a stage reached in May on a row the
+    # import created in August began in May, not August.
+    def _dt(x: Any) -> datetime | None:
+        if x is None:
+            return None
+        if isinstance(x, datetime):
+            return x if x.tzinfo else x.replace(tzinfo=UTC)
+        if isinstance(x, date):
+            return datetime(x.year, x.month, x.day, tzinfo=UTC)
+        return None
+
+    stamps = [d for d in (
+        [_dt(l.created_at) for l in leads] + [_dt(l.last_interaction_date) for l in leads]
+        + [_dt(r.created_at) for r in lending] + [_dt(r.stage_updated_at) for r in lending]
+        + [_dt(r.sanction_date) for r in lending]
+        + [_dt(r.created_at) for r in synd] + [_dt(r.created_at) for r in am]
+        + [_dt(i.occurred_at) for i in inters]) if d]
     owners = sorted({x for x in (
         [l.rm for l in leads] + [r.rm for r in lending] + [r.rm for r in synd]
         + [r.rm for r in am]) if x})
