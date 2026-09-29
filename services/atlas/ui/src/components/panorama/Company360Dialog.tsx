@@ -405,6 +405,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     return { ls, dead, adv, prog, offered };
   };
 
+  // The desk knows a line by product and stage ("Platform Deals · ask 1 —
+  // IM Circulated"), never by the register's tracker number — the grids and
+  // the drawer show none. When a company carries two of a kind, "ask 2" /
+  // "line 2" tells them apart the way the drawer does.
+  const nth = (list: PanoramaLine[], r: PanoramaLine, word: string) =>
+    list.length > 1 ? ` · ${word} ${list.indexOf(r) + 1}` : '';
+  const lendName = (r: PanoramaLine) => `Lending${nth(p?.lending || [], r, 'line')}`;
+  const synName = (r: PanoramaLine) => `Platform Deal${nth(p?.syndication || [], r, 'ask')}`;
+  const amName = (r: PanoramaLine) => `Asset Monetisation${nth(p?.asset_monetisation || [], r, 'line')}`;
   const events = useMemo<Ev[]>(() => {
     if (!p) return [];
     const out: Ev[] = [];
@@ -417,20 +426,20 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     add(trx?.legal_entity?.incorporated, 'Incorporated', '#7B8A92');
     p.leads.forEach((l) => add(l.created_at, `Lead ${l.lead_no || ''} opened`, CHART_TEAL));
     p.lending.forEach((r) => {
-      add(r.created_at, `Lending ${r.tracker_no || ''} started`, CHART_TEAL);
+      add(r.created_at, `${lendName(r)} started · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
       add(r.sanction_date, `Sanctioned ${fmtCr(r.amount_cr)}`, STAGE_COLOR.done, true);
       if (r.stage === 'Disbursed') add(r.stage_updated_at, `Disbursed ${fmtCr(r.disbursed_amount ?? r.amount_cr)}`, STAGE_COLOR.done, true);
       else if (r.stage === 'Rejected') add(r.stage_updated_at, 'Lending rejected', STAGE_COLOR.dead, true);
-      else if (r.stage_updated_at && r.stage) add(r.stage_updated_at, `Lending · ${r.stage}`, STAGE_COLOR.hold);
+      else if (r.stage_updated_at && r.stage) add(r.stage_updated_at, `${lendName(r)} · ${r.stage}`, STAGE_COLOR.hold);
     });
     p.syndication.forEach((r) => {
-      add(r.created_at, `Syndication ${r.tracker_no || ''} · ${fmtCr(r.amount_cr)}`, CHART_TEAL);
+      add(r.created_at, `${synName(r)} launched · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
       (r.lenders || []).filter((x) => x.response_date).slice(0, 4)
         .forEach((x) => add(x.response_date, `${x.name}: ${x.status || 'replied'}`,
           lenderBucket(x.status) === 'dead' ? STAGE_COLOR.dead
             : lenderBucket(x.status) === 'advanced' ? STAGE_COLOR.done : CHART_TEAL));
     });
-    p.asset_monetisation.forEach((r) => add(r.created_at, `Asset monetisation ${r.tracker_no || ''}`, CHART_TEAL));
+    p.asset_monetisation.forEach((r) => add(r.created_at, `${amName(r)} started`, CHART_TEAL));
     p.interactions.slice(0, 5).forEach((i) => add(i.occurred_at, `${i.type}${i.by ? ` · ${i.by}` : ''}`, '#1F6FA8'));
     const byDay = new Map<string, number>();
     p.documents.forEach((d) => { const k = (d.uploaded_at || '').slice(0, 10); if (k) byDay.set(k, (byDay.get(k) || 0) + 1); });
@@ -547,16 +556,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4, mt: 1 }}>
                 {p.lending.map((r) => <Bullet key={r.tracker_no || 'l'}
                   dot={r.stage === 'Disbursed' ? STAGE_COLOR.done : r.stage === 'Rejected' ? STAGE_COLOR.dead : STAGE_COLOR.hold}>
-                  <b>Lending {r.tracker_no}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}
+                  <b>{lendName(r)}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}
                   {r.pending_with ? ` · pending with ${r.pending_with}` : ''}
                   {r.stage_updated_at ? ` · since ${fmtDay(r.stage_updated_at)}` : ''}</Bullet>)}
                 {p.syndication.map((r) => { const v = lenderView(r); return (
                   <Bullet key={r.tracker_no || 's'} dot={CHART_TEAL}>
-                    <b>Syndication {r.tracker_no}</b> — {r.status || '—'} · {fmtCr(r.amount_cr)}
-                    {v.ls.length ? ` · ${v.adv.length} advanced · ${v.dead.length} declined of ${v.ls.length}` : ''}
+                    <b>{synName(r)}</b> — {r.status || '—'} · {fmtCr(r.amount_cr)} ask
+                    {v.ls.length ? ` · ${v.adv.length} advanced · ${v.dead.length} declined of ${v.ls.length} lenders` : ''}
                   </Bullet>); })}
                 {p.asset_monetisation.map((r) => <Bullet key={r.tracker_no || 'a'} dot={CHART_TEAL}>
-                  <b>Asset monetisation {r.tracker_no}</b> — {r.status || '—'}
+                  <b>{amName(r)}</b> — {r.status || '—'}
                   {r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}</Bullet>)}
                 {p.leads.filter((l) => !l.converted).map((l) => <Bullet key={l.lead_no || 'ld'} dot={tokens.tealHi}>
                   <b>Lead {l.lead_no}</b>{l.temperature ? ` · ${l.temperature}` : ''}{l.rm ? ` · ${l.rm}` : ''}
@@ -598,7 +607,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     Liabilities {fmtCr(liabL.value)} vs net worth {fmtCr(eqL.value)} · <b>{leverage.toFixed(1)}×</b></Bullet>)}
                 {p.syndication.map((r) => { const v = lenderView(r); return v.ls.length ? (
                   <Bullet key={r.tracker_no || 's'} dot={v.dead.length / v.ls.length >= 0.5 ? tokens.bad : tokens.warn}>
-                    Lenders on {r.tracker_no}: {v.adv.length} advanced, {v.prog.length} in progress,
+                    Lenders on the {synName(r).toLowerCase()}: {v.adv.length} advanced, {v.prog.length} in progress,
                     {' '}{v.dead.length} declined ({Math.round((v.dead.length / v.ls.length) * 100)}%)
                     {v.offered ? ` · ${fmtCr(v.offered)} on the table` : ''}</Bullet>) : null; })}
                 <Bullet dot={worst ? SEV_BG[worst] : tokens.ok}>
@@ -616,7 +625,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   const l = p.leads.find((x) => !x.converted && x.next_action);
                   const pend = p.lending.find((r) => r.pending_with && r.stage !== 'Disbursed' && r.stage !== 'Rejected');
                   if (grade?.action) return grade.action;
-                  if (pend) return `Lending ${pend.tracker_no} pending with ${pend.pending_with}`;
+                  if (pend) return `${lendName(pend)} pending with ${pend.pending_with}`;
                   if (l) return l.next_action!;
                   return 'Nothing pending on record';
                 })()}
@@ -630,7 +639,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     {l.next_action_date ? ` · by ${fmtDay(l.next_action_date)}` : ''}</Bullet>))}
                 {p.syndication.map((r) => { const wait = (r.lenders || []).filter((x) => lenderBucket(x.status) === 'progress' && !x.response_date);
                   return wait.length ? <Bullet key={r.tracker_no || 'w'} dot={tokens.warn}>
-                    {wait.length} lender{wait.length > 1 ? 's' : ''} yet to reply on {r.tracker_no}: {wait.slice(0, 3).map((x) => x.name).join(', ')}{wait.length > 3 ? '…' : ''}</Bullet> : null; })}
+                    {wait.length} lender{wait.length > 1 ? 's' : ''} yet to reply on the {synName(r).toLowerCase()}: {wait.map((x) => x.name).join(', ')}</Bullet> : null; })}
                 {missing.length > 0 ? (
                   <Bullet dot={tokens.warn}><b>{missing.length} required document{missing.length > 1 ? 's' : ''} to request:</b> {missing.slice(0, 4).map((m) => m.label).filter(Boolean).join(', ')}{missing.length > 4 ? ` +${missing.length - 4} more` : ''}</Bullet>
                 ) : p.checklist && p.checklist.required_total > 0 ? (
@@ -671,7 +680,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 {p.lending.map((r) => (
                   <Box key={r.tracker_no || 'l'}>
                     <Typography sx={{ fontSize: 12.8, color: INK, mb: 0.5 }}>
-                      <b>Lending {r.tracker_no}</b> — {r.stage || '—'} · ask {fmtCr(r.amount_cr)}
+                      <b>{lendName(r)}</b> — {r.stage || '—'} · ask {fmtCr(r.amount_cr)}
                       {r.disbursed_amount != null ? ` · disbursed ${fmtCr(r.disbursed_amount)}` : ''}
                       {r.sanction_date ? ` · sanctioned ${fmtDay(r.sanction_date)}` : ''}
                       <span style={{ color: tokens.muted }}>{r.rm ? ` · ${r.rm}` : ''}{r.analyst ? ` / ${r.analyst}` : ''}</span>
@@ -684,7 +693,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   return (
                     <Box key={r.tracker_no || 's'}>
                       <Typography sx={{ fontSize: 12.8, color: INK, mb: 0.6 }}>
-                        <b>Syndication {r.tracker_no}</b> — {r.status || '—'} · ask {fmtCr(r.amount_cr)}
+                        <b>{synName(r)}</b> — {r.status || '—'} · ask {fmtCr(r.amount_cr)}
                         {v.offered ? ` · ${fmtCr(v.offered)} on the table` : ''}
                         <span style={{ color: tokens.muted }}>{r.rm ? ` · ${r.rm}` : ''}</span>
                       </Typography>
@@ -728,7 +737,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     </Box>); })}
                 {p.asset_monetisation.map((r) => (
                   <Typography key={r.tracker_no || 'a'} sx={{ fontSize: 12.8, color: INK }}>
-                    <b>Asset monetisation {r.tracker_no}</b> — {r.status || '—'}
+                    <b>{amName(r)}</b> — {r.status || '—'}
                     {r.indicative_value_cr != null ? ` · indicative ${fmtCr(r.indicative_value_cr)}` : ''}
                     {r.deal_type ? ` · ${r.deal_type}` : ''}{r.investor ? ` · ${r.investor}` : ''}
                   </Typography>))}
@@ -851,17 +860,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   </Box>))}
                 {p.lending.map((r) => (
                   <Box key={r.tracker_no || 'l'} sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
-                    <Typography sx={{ fontSize: 12.8, color: INK }}><b>Lending {r.tracker_no}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}{r.pending_with ? ` · pending with ${r.pending_with}` : ''}
+                    <Typography sx={{ fontSize: 12.8, color: INK }}><b>{lendName(r)}</b> — {r.stage || '—'} · {fmtCr(r.amount_cr)}{r.pending_with ? ` · pending with ${r.pending_with}` : ''}
                       <span style={{ color: tokens.muted }}>{[r.rm, r.analyst, r.created_at ? `since ${fmtDate(r.created_at)}` : null].filter(Boolean).map((x) => ` · ${x}`).join('')}</span></Typography>
                     <Ladder ladder={r.ladder} current={r.stage || null} />
                   </Box>))}
                 {p.syndication.map((r) => (
                   <Box key={r.tracker_no || 's'}>
-                    <Typography sx={{ fontSize: 12.8, color: INK }}><b>Syndication {r.tracker_no}</b> — {r.status || '—'}{r.amount_cr != null ? ` · ${fmtCr(r.amount_cr)}` : ''}<span style={{ color: tokens.muted }}>{r.created_at ? ` · since ${fmtDate(r.created_at)}` : ''}</span></Typography>
+                    <Typography sx={{ fontSize: 12.8, color: INK }}><b>{synName(r)}</b> — {r.status || '—'}{r.amount_cr != null ? ` · ${fmtCr(r.amount_cr)} ask` : ''}<span style={{ color: tokens.muted }}>{r.created_at ? ` · since ${fmtDate(r.created_at)}` : ''}</span></Typography>
                     {(r.lenders || []).map((x) => <Typography key={x.name} sx={{ fontSize: 11.4, color: tokens.muted, pl: 1.5 }}>{x.name} — {x.status || '—'}{x.amount_cr != null ? ` · ${fmtCr(x.amount_cr)}` : ''}{x.last_reply ? ` · ${x.last_reply}` : ''}</Typography>)}
                   </Box>))}
                 {p.asset_monetisation.map((r) => (
-                  <Typography key={r.tracker_no || 'a'} sx={{ fontSize: 12.8, color: INK }}><b>Asset monetisation {r.tracker_no}</b> — {r.status || '—'}{r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}{r.investor ? ` · ${r.investor}` : ''}</Typography>))}
+                  <Typography key={r.tracker_no || 'a'} sx={{ fontSize: 12.8, color: INK }}><b>{amName(r)}</b> — {r.status || '—'}{r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}{r.investor ? ` · ${r.investor}` : ''}</Typography>))}
                 <Box sx={{ mt: 0.6 }}>
                   <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted, mb: 0.4 }}>INTERACTIONS & VOCX · {p.interactions.length}</Typography>
                   <Box sx={{ maxHeight: 260, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0.8, pr: 0.5 }}>
