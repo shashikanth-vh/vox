@@ -245,7 +245,7 @@ function Ladder({ ladder, current }: { ladder: string[]; current: string | null 
 
 // ---------- the timeline ------------------------------------------------------
 
-type Ev = { at: number; date: string; label: string; color: string; big?: boolean };
+type Ev = { at: number; date: string; label: string; color: string; big?: boolean; detail?: string; who?: string };
 
 function Timeline({ events }: { events: Ev[] }) {
   if (!events.length) return null;
@@ -270,13 +270,25 @@ function Timeline({ events }: { events: Ev[] }) {
         const stem = far ? 46 : 18;
         const ty = above ? Y - stem : Y + stem;
         return (
-          <g key={i}>
-            <line x1={cx} x2={cx} y1={Y} y2={ty + (above ? 6 : -6)} stroke="#DCE3E6" />
-            <circle cx={cx} cy={Y} r={e.big ? 7 : 5} fill={e.color} />
-            <text x={cx} y={above ? ty - 12 : ty + 22} textAnchor="middle" fontSize="9.4" fill="#7B8A92">{e.date}</text>
-            <text x={cx} y={above ? ty : ty + 10} textAnchor="middle" fontSize="10.2"
-              fontWeight={e.big ? 700 : 500} fill={INK}>{e.label}<title>{`${e.date} — ${e.label}`}</title></text>
-          </g>);
+          <Tooltip key={i} arrow placement={above ? 'top' : 'bottom'} enterDelay={150}
+            componentsProps={{ tooltip: { sx: { maxWidth: 360, bgcolor: '#fff', color: INK,
+              border: `1px solid ${tokens.line}`, boxShadow: '0 6px 24px rgba(23,37,43,.14)', p: '10px 12px' } },
+              arrow: { sx: { color: '#fff', '&::before': { border: `1px solid ${tokens.line}` } } } }}
+            title={<Box>
+              <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>{e.date}{e.who ? ` · ${e.who}` : ''}</Typography>
+              <Typography sx={{ fontSize: 12.4, fontWeight: 700, color: INK }}>{e.label}</Typography>
+              {e.detail && <Typography sx={{ fontSize: 11.6, color: INK, whiteSpace: 'pre-wrap', mt: 0.5,
+                maxHeight: 220, overflowY: 'auto' }}>{e.detail}</Typography>}
+            </Box>}>
+            <g style={{ cursor: e.detail ? 'pointer' : 'default' }}>
+              <rect x={cx - 60} y={above ? ty - 22 : Y - 8} width={120} height={above ? 34 : ty + 26 - Y} fill="transparent" />
+              <line x1={cx} x2={cx} y1={Y} y2={ty + (above ? 6 : -6)} stroke="#DCE3E6" />
+              <circle cx={cx} cy={Y} r={e.big ? 7 : 5} fill={e.color} />
+              <text x={cx} y={above ? ty - 12 : ty + 22} textAnchor="middle" fontSize="9.4" fill="#7B8A92">{e.date}</text>
+              <text x={cx} y={above ? ty : ty + 10} textAnchor="middle" fontSize="10.2"
+                fontWeight={e.big ? 700 : 500} fill={INK}>{e.label}</text>
+            </g>
+          </Tooltip>);
       })}
     </svg>
   );
@@ -417,39 +429,52 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const events = useMemo<Ev[]>(() => {
     if (!p) return [];
     const out: Ev[] = [];
-    const add = (iso: string | null | undefined, label: string, color: string, big = false) => {
+    const add = (iso: string | null | undefined, label: string, color: string, big = false,
+                 detail?: string | null, who?: string | null) => {
       if (!iso) return;
       const t = Date.parse(iso);
       if (Number.isNaN(t)) return;
-      out.push({ at: t, date: fmtDate(iso), label, color, big });
+      out.push({ at: t, date: fmtDate(iso), label, color, big, detail: detail || undefined, who: who || undefined });
     };
     add(trx?.legal_entity?.incorporated, 'Incorporated', '#7B8A92');
-    p.leads.forEach((l) => add(l.created_at, `Lead ${l.lead_no || ''} opened`, CHART_TEAL));
+    p.leads.forEach((l) => add(l.created_at, `Lead ${l.lead_no || ''} opened`, CHART_TEAL, false,
+      [l.source ? `Source: ${l.source}` : null, l.notes].filter(Boolean).join('\n'), l.rm));
     p.lending.forEach((r) => {
       const start = earliest(r.created_at, r.stage_updated_at, r.sanction_date);
       const stageDay = (r.stage_updated_at || '').slice(0, 10);
-      if (start && start.slice(0, 10) !== stageDay) add(start, `${lendName(r)} started · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
-      add(r.sanction_date, `Sanctioned ${fmtCr(r.amount_cr)}`, STAGE_COLOR.done, true);
-      if (r.stage === 'Disbursed') add(r.stage_updated_at, `Disbursed ${fmtCr(r.disbursed_amount ?? r.amount_cr)}`, STAGE_COLOR.done, true);
-      else if (r.stage === 'Rejected') add(r.stage_updated_at, `${fmtCr(r.amount_cr)} lending rejected`, STAGE_COLOR.dead, true);
-      else if (r.stage_updated_at && r.stage) add(r.stage_updated_at, `${lendName(r)} · ${r.stage}`, STAGE_COLOR.hold);
+      const rem = r.remarks || null;
+      if (start && start.slice(0, 10) !== stageDay) add(start, `${lendName(r)} started · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL, false, rem, r.rm);
+      add(r.sanction_date, `Sanctioned ${fmtCr(r.amount_cr)}`, STAGE_COLOR.done, true, rem, r.rm);
+      if (r.stage === 'Disbursed') add(r.stage_updated_at, `Disbursed ${fmtCr(r.disbursed_amount ?? r.amount_cr)}`, STAGE_COLOR.done, true, rem, r.rm);
+      else if (r.stage === 'Rejected') add(r.stage_updated_at, `${fmtCr(r.amount_cr)} lending rejected`, STAGE_COLOR.dead, true, rem, r.rm);
+      else if (r.stage_updated_at && r.stage) add(r.stage_updated_at, `${lendName(r)} · ${r.stage}`, STAGE_COLOR.hold, false,
+        [r.pending_with ? `Pending with ${r.pending_with}` : null, rem].filter(Boolean).join('\n'), r.rm);
     });
     p.syndication.forEach((r) => {
       add(earliest(r.created_at, ...(r.lenders || []).map((x) => x.since || x.response_date)),
-        `${synName(r)} launched · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL);
+        `${synName(r)} launched · ${fmtCr(r.amount_cr)} ask`, CHART_TEAL, false,
+        (r.lenders || []).length ? `${(r.lenders || []).length} lenders approached: ${(r.lenders || []).map((x) => x.name).join(', ')}` : null, r.rm);
       (r.lenders || []).filter((x) => x.response_date).slice(0, 4)
         .forEach((x) => add(x.response_date, `${x.name}: ${x.status || 'replied'}`,
           lenderBucket(x.status) === 'dead' ? STAGE_COLOR.dead
-            : lenderBucket(x.status) === 'advanced' ? STAGE_COLOR.done : CHART_TEAL));
+            : lenderBucket(x.status) === 'advanced' ? STAGE_COLOR.done : CHART_TEAL, false,
+          [x.last_reply || x.note, x.amount_cr != null ? `Offer ${fmtCr(x.amount_cr)}` : null].filter(Boolean).join('\n')));
     });
-    p.asset_monetisation.forEach((r) => add(r.created_at, `${amName(r)} started`, CHART_TEAL));
-    p.interactions.slice(0, 5).forEach((i) => add(i.occurred_at, `${i.type}${i.by ? ` · ${i.by}` : ''}`, '#1F6FA8'));
+    p.asset_monetisation.forEach((r) => add(r.created_at, `${amName(r)} started`, CHART_TEAL, false,
+      [r.status, r.deal_type, r.investor ? `Investor: ${r.investor}` : null,
+        r.indicative_value_cr != null ? `Indicative ${fmtCr(r.indicative_value_cr)}` : null].filter(Boolean).join(' · '), r.rm));
+    p.interactions.slice(0, 5).forEach((i) => add(i.occurred_at, `${i.type}${i.contact ? ` · ${i.contact}` : ''}${i.lender ? ` · ${i.lender}` : ''}`, '#1F6FA8', false,
+      i.summary && i.notes && i.summary !== i.notes ? `${i.summary}\n\n${i.notes}` : (i.summary || i.notes), i.by));
     const byDay = new Map<string, number>();
     p.documents.forEach((d) => { const k = (d.uploaded_at || '').slice(0, 10); if (k) byDay.set(k, (byDay.get(k) || 0) + 1); });
     [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 3)
-      .forEach(([k, n]) => add(k, `${n} document${n > 1 ? 's' : ''} uploaded`, '#6D5FD3'));
-    graded.slice(0, 3).forEach(({ a, sev }) => add(a.when, `News: ${a.headline}`, SEV_BG[sev]));
-    if (grade) add(grade.generated_at, `Graded ${grade.label} · ${grade.score}`, BAND_COLOR[grade.rating], true);
+      .forEach(([k, n]) => add(k, `${n} document${n > 1 ? 's' : ''} uploaded`, '#6D5FD3', false,
+        p.documents.filter((d) => (d.uploaded_at || '').slice(0, 10) === k).map((d) => d.filename || d.title).join('\n'),
+        p.documents.find((d) => (d.uploaded_at || '').slice(0, 10) === k)?.uploaded_by));
+    graded.slice(0, 3).forEach(({ a, sev }) => add(a.when, `News: ${a.headline}`, SEV_BG[sev], false,
+      [SEV_LABEL[sev], a.source].filter(Boolean).join(' · ')));
+    if (grade) add(grade.generated_at, `Graded ${grade.label} · ${grade.score}`, BAND_COLOR[grade.rating], true,
+      grade.verdict, grade.generated_by);
     out.sort((a, b) => a.at - b.at);
     if (out.length <= 14) return out;
     return [out[0], ...out.slice(-13)];
