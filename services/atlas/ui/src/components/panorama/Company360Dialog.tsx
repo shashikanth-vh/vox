@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, IconButton, TextField,
   Tooltip, Typography, useMediaQuery,
@@ -14,6 +14,7 @@ import { panoramaService, type DocAskResult, type IndexResult, type Panorama,
   type TracxnFinancials, type TracxnSeries, type RiskGrade }
   from '../../services/panoramaService';
 import { BAND_COLOR, RiskGradeChip, RiskGradeDetails } from './RiskGrade';
+import { documentsService } from '../../services/documentsService';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
   from '../../services/newsService';
 
@@ -159,6 +160,21 @@ function StackBar({ segs, height = 5 }: {
 // Product-line stage colors, the same three everywhere a line is drawn.
 const STAGE_COLOR = { flight: CHART_TEAL, done: '#1B7A45', hold: '#B45309' };
 
+/** DocRAG's passages carry the page's own markup — a shareholding table
+ *  arrives as <table> HTML. Read it as rows of cells, not as tags. */
+function tidyAnswer(text: string): string {
+  if (!/<\/?(table|tr|td|th|br|p|b|i)\b/i.test(text)) return text.replace(/\*\*/g, '');
+  const cell = (c: string) => c.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/<table[\s\S]*?<\/table>/gi, (tbl) => [...tbl.matchAll(/<tr[\s\S]*?<\/tr>/gi)]
+      .map((m) => [...m[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => cell(c[1])))
+      .filter((r) => r.some(Boolean))
+      .map((r) => r.join('   ·   ')).join('\n'))
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/\*\*/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function Tile({ label, value, sub, bar }: {
   label: string; value: string; sub?: string;
   bar?: { value: number; color: string }[];
@@ -287,6 +303,12 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [grade, setGrade] = useState<RiskGrade | null>(null);
   const [gradeBusy, setGradeBusy] = useState(false);
   const [gradeErr, setGradeErr] = useState('');
+  const [dlErr, setDlErr] = useState('');
+  // One market-feed fetch per open. A ref, not state: state here would be a
+  // dependency of the effect that sets it, and re-running the effect on its
+  // own "busy" flag is how the spinner once spun forever.
+  const trxTried = useRef(false);
+  const pRef = useRef<Panorama | null>(null);   // which panorama an answer belongs to
 
   const small = useMediaQuery('(max-width:700px)');
 
@@ -295,12 +317,13 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setP(null); setErr(''); setNews(null); setNewsErr('');
     setAsk(''); setAskOut(null); setAskErr('');
     setIdxBusy(false); setIdxOut(null); setIdxErr('');
-    setTrx(null); setTrxBusy(false); setTrxErr('');
-    setGrade(null); setGradeBusy(false); setGradeErr('');
+    setTrx(null); setTrxBusy(false); setTrxErr(''); trxTried.current = false;
+    pRef.current = null;
+    setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr('');
     setOpenSections({ engagements: true }); setBriefOpen(false); setNewsSev(null);
     let alive = true;
     panoramaService.get({ entityId, company })
-      .then((r) => { if (!alive) return; setP(r);
+      .then((r) => { if (!alive) return; setP(r); pRef.current = r;
         // The ask-box's index is housekeeping, not a decision — it runs itself.
         // The bridge only uploads what DocRAG does not already hold, so a
         // re-open costs one listing.
@@ -333,20 +356,21 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   // caches per CIN so a re-open is free, but the dialog itself should not spend
   // a 15-endpoint resolve for a user who never opens FINANCIALS.
   useEffect(() => {
-    if (!open || !p || !openSections.financials) return;
-    if (trx || trxBusy || trxErr) return;
+    if (!open || !p || !openSections.financials || trxTried.current) return;
     // No CIN anywhere (master, leads, prospect row) → nothing to look up. The
     // card explains itself instead of asking a paid API a question it cannot
     // answer.
     if (!p.anchor.cin) return;
-    let alive = true;
+    trxTried.current = true;
+    const mine = p;                       // the answer belongs to THIS panorama
     setTrxBusy(true);
     panoramaService.financials({ entityId: p.anchor.entity_id, cin: p.anchor.cin })
-      .then((r) => { if (alive) setTrx(r); })
-      .catch((e) => { if (alive) setTrxErr(apiErr(e, 'reach the market feed')); })
-      .finally(() => { if (alive) setTrxBusy(false); });
-    return () => { alive = false; };
-  }, [open, p, openSections.financials, trx, trxBusy, trxErr]);
+      .then((r) => { if (pRef.current === mine) setTrx(r); })
+      .catch((e) => { if (pRef.current === mine) {
+        setTrxErr(apiErr(e, 'reach the market feed') || 'The market feed did not answer.');
+      } })
+      .finally(() => { if (pRef.current === mine) setTrxBusy(false); });
+  }, [open, p, openSections.financials]);
 
   const refreshTrx = () => {
     if (!p || trxBusy) return;
@@ -767,7 +791,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       sx={{ height: 19, fontSize: 10, color: tokens.muted,
                         borderStyle: 'dashed' }} />
                   : finState === 'nofilings'
-                  ? <Chip size="small" variant="outlined" label="no filings"
+                  ? <Chip size="small" variant="outlined"
+                      label={/reached|refused/.test(trx?.note || '') ? 'feed did not answer' : 'no filings'}
                       sx={{ height: 19, fontSize: 10, color: tokens.muted }} />
                   : hasFin
                   ? <Chip size="small" label="from prospect universe" sx={{ height: 19,
@@ -786,7 +811,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     return 'no CIN on record — add it on the lead or client master';
                   }
                   if (finState === 'unconfigured') return 'market feed not connected on this server';
-                  if (finState === 'nofilings') return `Tracxn has no filings for CIN ${p.anchor.cin}`;
+                  if (finState === 'nofilings') {
+                    return /reached|refused/.test(trx?.note || '') ? (trx?.note || '')
+                      : `Tracxn has no filings for CIN ${p.anchor.cin}`;
+                  }
                   return hasFin ? `Revenue ${fmtCr(fin!.revenue_cr)} · prospect universe`
                     : 'filings, board & shareholding — expand to fetch';
                 })()}>
@@ -811,12 +839,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     (TRACXN_ACCESS_TOKEN is not set), so nothing was requested.
                     CIN on record: {p.anchor.cin}.
                   </Typography>)}
-                {finState === 'nofilings' && (
+                {finState === 'nofilings' && (/reached|refused/.test(trx?.note || '') ? (
                   <Typography sx={{ fontSize: 11.8, color: '#17252B', lineHeight: 1.55 }}>
-                    Tracxn has no legal entity for CIN <b>{p.anchor.cin}</b>
-                    {trx?.note ? ` — ${trx.note}` : ''}. Check the CIN on record;
-                    a corrected one is looked up again on the next open.
-                  </Typography>)}
+                    {trx?.note} Nothing is cached from a failed lookup — the next open
+                    asks again.
+                  </Typography>) : (
+                  <Typography sx={{ fontSize: 11.8, color: '#17252B', lineHeight: 1.55 }}>
+                    Tracxn has no legal entity for CIN <b>{p.anchor.cin}</b>. Check the
+                    CIN on record; a corrected one is looked up again on the next open.
+                  </Typography>))}
                 {finState === 'error' && (
                   <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
                     {trxErr}</Typography>)}
@@ -932,14 +963,24 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 <Box sx={{ display: 'flex', gap: 0.7, flexWrap: 'wrap', maxHeight: 96,
                   overflowY: 'auto', pr: 0.5 }}>
                   {p.documents.map((d) => (
-                    <Chip key={d.title + (d.uploaded_at || '')} size="small"
-                      label={d.filename || d.title}
-                      title={[d.section, d.doc_type, d.uploaded_by].filter(Boolean).join(' · ')}
+                    <Chip key={d.id || d.title + (d.uploaded_at || '')} size="small"
+                      label={d.filename || d.title} clickable={!!d.id}
+                      icon={d.id ? <DownloadIcon sx={{ fontSize: 13 }} /> : undefined}
+                      title={[d.section, d.doc_type, d.uploaded_by].filter(Boolean)
+                        .join(' · ') + (d.id ? ' · click to download' : '')}
+                      onClick={d.id ? () => {
+                        setDlErr('');
+                        void documentsService.download({ id: d.id!, name: d.filename || d.title,
+                          size: 0, type: '', when: '', by: '', label: d.title })
+                          .then((r) => { if (!r.ok) setDlErr(r.error || 'Download failed.'); });
+                      } : undefined}
                       sx={{ height: 22, fontSize: 11, bgcolor: '#EEF4F3', maxWidth: 260,
-                        color: tokens.tealHi, fontWeight: 600 }} />))}
+                        color: tokens.tealHi, fontWeight: 600,
+                        '& .MuiChip-icon': { color: tokens.tealHi } }} />))}
                   {!p.documents.length && <Typography sx={{ fontSize: 11.6,
                     color: tokens.muted }}>Nothing on the Data Register yet.</Typography>}
                 </Box>
+                {dlErr && <Typography sx={{ fontSize: 11.2, color: tokens.bad }}>{dlErr}</Typography>}
                 <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column',
                   gap: 0.7 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -992,7 +1033,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     <Box sx={{ bgcolor: '#F6FAF9', border: '1px solid #D6E7E3',
                       borderRadius: '10px', p: '9px 11px' }}>
                       <Typography sx={{ fontSize: 12.2, color: '#17252B',
-                        whiteSpace: 'pre-wrap' }}>{askOut.answer.slice(0, 900)}</Typography>
+                        whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto' }}>
+                        {tidyAnswer(askOut.answer).slice(0, 2400)}</Typography>
                       {askOut.citations.length > 0 && (
                         <Typography sx={{ fontSize: 10.5, color: tokens.tealHi,
                           fontWeight: 600, mt: 0.5 }}>

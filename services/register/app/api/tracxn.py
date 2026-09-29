@@ -23,6 +23,7 @@ The rules that keep it honest and affordable:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -68,19 +69,25 @@ _PCT_KEYS = ("percentage", "pct", "holdingPercentage", "stake",
 
 
 async def _tracxn_post(settings: Any, path: str, body: dict) -> dict:
-    """One Tracxn call. Isolated so tests stub the wire, not the logic."""
-    async with httpx.AsyncClient(timeout=settings.tracxn_timeout_s) as client:
-        r = await client.post(
-            f"{settings.tracxn_base_url.rstrip('/')}{path}",
-            headers={"accessToken": settings.tracxn_access_token,
-                     "Content-Type": "application/json"},
-            json=body)
-        if r.status_code >= 300:
-            return {"_error": f"HTTP {r.status_code}"}
-        try:
-            return r.json()
-        except ValueError:
-            return {"_error": "non-JSON answer"}
+    """One Tracxn call. Isolated so tests stub the wire, not the logic. Never
+    raises: an unreachable host or a refused call is an answer with ``_error``,
+    so the card can say what happened instead of the register answering 500."""
+    timeout = httpx.Timeout(float(settings.tracxn_timeout_s), connect=5.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                f"{settings.tracxn_base_url.rstrip('/')}{path}",
+                headers={"accessToken": settings.tracxn_access_token,
+                         "Content-Type": "application/json"},
+                json=body)
+    except httpx.HTTPError as exc:
+        return {"_error": f"unreachable ({exc.__class__.__name__})"}
+    if r.status_code >= 300:
+        return {"_error": f"HTTP {r.status_code}"}
+    try:
+        return r.json()
+    except ValueError:
+        return {"_error": "non-JSON answer"}
 
 
 def _year_of(row: dict) -> int | None:
@@ -280,6 +287,10 @@ async def panorama_financials(
                 and (now - row.fetched_at) < ttl:
             return row.payload, False
         payload = await _tracxn_post(settings, _ENDPOINTS[key][0], body)
+        # An error is not a filing: it is never kept, so the next open asks
+        # again instead of serving "unreachable" for a week.
+        if isinstance(payload, dict) and payload.get("_error"):
+            return payload, True
         if row is None:
             row = TracxnCache(tenant_id=ctx.tenant_id, cin=the_cin, endpoint=key)
             ctx.session.add(row)
@@ -297,20 +308,36 @@ async def panorama_financials(
     resolved = normalize("resolve", payload)
     lei = resolved.get("legal_entity_id")
     if not lei:
+        err = (payload or {}).get("_error") if isinstance(payload, dict) else None
+        if err and err.startswith("unreachable"):
+            note = (f"Tracxn could not be reached from the register "
+                    f"({err.split('(')[-1].rstrip(')')}) — check outbound HTTPS "
+                    f"from the register container.")
+        elif err:
+            note = f"Tracxn refused the lookup ({err}) — check TRACXN_ACCESS_TOKEN."
+        else:
+            note = "Tracxn has no legal entity for this CIN."
         return {"cin": the_cin, "configured": True, "resolved": False,
-                "note": "Tracxn has no legal entity for this CIN.",
-                "fetched_at": now.isoformat()}
+                "note": note, "fetched_at": now.isoformat()}
 
-    # 2) everything else hangs off the legal entity id.
+    # 2) everything else hangs off the legal entity id — fetched TOGETHER. One
+    #    slow endpoint must not turn fourteen of them into a minute of waiting.
     body = {"filter": {"legalEntityId": [lei]}}
+    keys = [k for k in _ENDPOINTS if k != "legalentity"]
+    gate = asyncio.Semaphore(5)
+
+    async def one(key: str) -> tuple[str, dict | None, bool]:
+        async with gate:
+            got, was = await get_payload(key, body)
+            return key, got, was
+
+    results = await asyncio.gather(*(one(k) for k in keys))
     series: dict[str, Any] = {}
     board: dict[str, Any] = {}
     captable: dict[str, Any] = {}
-    for key, (_path, kind) in _ENDPOINTS.items():
-        if key == "legalentity":
-            continue
-        payload, was_fetch = await get_payload(key, body)
+    for key, payload, was_fetch in results:
         fetched += int(was_fetch)
+        kind = _ENDPOINTS[key][1]
         norm = normalize(kind, payload)
         if kind == "series":
             series[key] = norm

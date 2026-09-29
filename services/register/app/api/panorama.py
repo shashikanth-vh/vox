@@ -448,6 +448,7 @@ async def company_panorama(
             "lender": i.lender_name,
         } for i in inters],
         "documents": [{
+            "id": str(d.id),
             "title": d.title, "section": d.section, "doc_type": d.doc_type,
             "filename": d.original_filename,
             "uploaded_at": _iso(d.uploaded_at), "uploaded_by": d.uploaded_by,

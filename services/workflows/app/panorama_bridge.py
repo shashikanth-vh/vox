@@ -210,9 +210,18 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                                           f"docrag container running?"})
                 return
             if up.status_code >= 300:
+                # DocRAG says WHY (a .pdf that is not a PDF inside, an .xls that
+                # is really HTML) — that reason is the one the desk can act on.
+                why = ""
+                try:
+                    b = up.json()
+                    e = b.get("error") if isinstance(b.get("error"), dict) else b
+                    why = str(e.get("detail") or e.get("title") or "").strip()
+                except (ValueError, AttributeError):
+                    why = ""
                 skipped.append({"file": display_name,
-                                "reason": f"document AI refused it "
-                                          f"(HTTP {up.status_code})"})
+                                "reason": f"document AI refused it (HTTP {up.status_code}"
+                                          f"{': ' + why[:140] if why else ''})"})
                 return
             try:
                 body = up.json()

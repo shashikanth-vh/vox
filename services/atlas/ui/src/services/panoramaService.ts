@@ -56,7 +56,7 @@ export interface Panorama {
   interactions: { occurred_at: string | null; type: string; summary: string | null;
                   notes: string | null; by: string | null; contact: string | null;
                   lender: string | null }[];
-  documents: { title: string; section: string | null; doc_type: string | null;
+  documents: { id?: string; title: string; section: string | null; doc_type: string | null;
                filename: string | null; uploaded_at: string | null;
                uploaded_by: string | null }[];
   prospect: { prospect_no: string | null; status: string; verticals: string[] | null;

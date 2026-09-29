@@ -38,7 +38,7 @@ class Settings(BaseServiceSettings):
     tracxn_access_token: str = ""
     tracxn_base_url: str = "https://platform.tracxn.com/api/3.0"
     tracxn_cache_days: int = 7
-    tracxn_timeout_s: float = 30.0
+    tracxn_timeout_s: float = 20.0
 
     # ---- Security --------------------------------------------------------
     # Comma-separated API keys accepted by the service (X-API-Key header).

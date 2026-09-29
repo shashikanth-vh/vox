@@ -170,3 +170,45 @@ def test_a_genuine_cin_with_the_same_stem_is_kept():
     assert tracxn_mod.real_cin(E()) == "U40106KA2015PTC482913"
     E.code = "SUNRISE-482913"
     assert tracxn_mod.real_cin(E()) is None
+
+
+async def test_an_unreachable_tracxn_is_an_answer_not_a_500_and_is_never_cached(
+        reg: AsyncClient, monkeypatch):
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+    calls = reg._calls  # type: ignore[attr-defined]
+
+    async def dead(settings, path, body):  # noqa: ANN001
+        calls.append(path)
+        return {"_error": "unreachable (ConnectTimeout)"}
+
+    monkeypatch.setattr(tracxn_mod, "_tracxn_post", dead)
+    r = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    assert r.json()["resolved"] is False
+    assert "could not be reached" in r.json()["note"]
+    assert "ConnectTimeout" in r.json()["note"]
+    n = len(calls)
+    # Not cached: the next open asks again.
+    r2 = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r2.json()["resolved"] is False
+    assert len(calls) == n + 1
+
+
+async def test_the_fan_out_runs_concurrently(reg: AsyncClient, monkeypatch):
+    import asyncio as _aio
+
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+    inflight = {"now": 0, "peak": 0}
+
+    async def slow(settings, path, body):  # noqa: ANN001
+        inflight["now"] += 1
+        inflight["peak"] = max(inflight["peak"], inflight["now"])
+        await _aio.sleep(0.02)
+        inflight["now"] -= 1
+        return CANNED.get(path, {"result": []})
+
+    monkeypatch.setattr(tracxn_mod, "_tracxn_post", slow)
+    r = await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    assert r.json()["resolved"] is True
+    assert inflight["peak"] > 1
