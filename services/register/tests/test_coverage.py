@@ -282,8 +282,8 @@ async def test_entity_create_field_names_are_pinned(client: AsyncClient):
 
     assert set(EntityCreate.model_fields) == {
         "code", "legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
-        "sector", "sub_sector", "lens", "state", "location", "register_status",
-        "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
+        "sector", "sub_sector", "lens", "state", "location", "city", "country", "address",
+        "register_status", "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
     }
     # And the body the orchestrator actually sends is accepted.
     r = await client.post("/v1/entities", json={

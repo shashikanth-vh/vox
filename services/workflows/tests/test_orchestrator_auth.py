@@ -145,8 +145,8 @@ async def test_conversion_rejects_null_string_lead_id(monkeypatch):
 # the two cannot drift apart silently.
 _ENTITY_CREATE_FIELDS = {
     "code", "legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
-    "sector", "sub_sector", "lens", "state", "location", "register_status", "lifecycle",
-    "promoter_group_code", "about", "toi", "notes", "tags",
+    "sector", "sub_sector", "lens", "state", "location", "city", "country", "address",
+    "register_status", "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
 }
 
 
