@@ -96,7 +96,7 @@ def fingerprint(panorama: dict[str, Any], news: list[dict[str, Any]],
                 rows: list[dict[str, Any]], day: str) -> str:
     """What a grade would be computed from: the records, the Data Register LISTING
     (each file's id and checksum — a replaced file changes it), the news, the day
-    (days-in-stage moves daily). Equal fingerprints ? the same grade.
+    (days-in-stage moves daily). Equal fingerprints → the same grade.
 
     Built from the listing, not the files' text, so a regrade with nothing new is
     answered before any file is downloaded or read — seconds, not minutes."""
@@ -225,7 +225,7 @@ def report_markdown(g: dict[str, Any]) -> str:
         lines.append(f"| {p.get('key')}. {p.get('name')} | {p.get('weight')}% | "
                      f"{p.get('score')}/10 | {pts} | {ev} |")
     lines += ["", "Bands: GREEN ≥ 70 · AMBER 45–69 · RED < 45, scored over the pillars "
-              "that have data. Any hard trigger ? RED. No financials or banking ? never "
+              "that have data. Any hard trigger → RED. No financials or banking → never "
               "GREEN (PROVISIONAL).", ""]
     if c:
         lines += ["## Confidence", "",
@@ -292,7 +292,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
     docs_total = int(getattr(settings, "risk_grade_docs_total_chars", 160_000))
     cache: dict[str, tuple[float, dict]] = {}
     inflight: dict[str, asyncio.Future] = {}
-    # company key ? (fingerprint of what the last grade read, that grade)
+    # company key → (fingerprint of what the last grade read, that grade)
     last_read: dict[str, tuple[str, dict]] = {}
 
     async def _identity(request: Request) -> tuple[Any, str, Any]:
@@ -487,7 +487,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         p, err = await _panorama(request, caller, who, entity_id, company)
         if err is not None:
             return None, err
-        assert p is not None                  # no error ? the panorama was read
+        assert p is not None                  # no error → the panorama was read
         hit = cache.get(_key(entity_id, company, p.get("restricted") or []))
         if not hit or time.monotonic() - hit[0] > _TTL_S:
             return None, problem(404, "No grade yet",
@@ -540,7 +540,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         p, err = await _panorama(request, caller, who, payload.entity_id, payload.company)
         if err is not None:
             return err
-        assert p is not None                  # no error ? the panorama was read
+        assert p is not None                  # no error → the panorama was read
         key = _key(payload.entity_id, payload.company, p.get("restricted") or [])
         hit = cache.get(key)
         if hit and not payload.refresh and time.monotonic() - hit[0] < _TTL_S:
