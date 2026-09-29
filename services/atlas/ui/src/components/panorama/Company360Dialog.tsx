@@ -294,7 +294,7 @@ export function Company360Chip({ onClick }: { onClick: () => void }) {
   );
 }
 
-type Tab = 'engagements' | 'people' | 'documents' | 'news' | 'risk' | 'prospect';
+type Tab = 'engagements' | 'people' | 'documents' | 'news' | 'risk';
 
 // ---------- the dialog ----------------------------------------------------------
 
@@ -751,6 +751,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                             <tbody>
                               {rows.map((x) => { const b = lenderBucket(x.status);
                                 const why = x.last_reply || x.note || x.last_chase;
+                                const looksDeclined = b !== 'dead' && /declin|not feasible|cannot proceed|can't proceed|not interested|no to\b|pass(ed)? on/i.test(why || '');
                                 const w = x.response_date ? `${daysAgo(x.response_date)} d since reply`
                                   : x.chased_date ? `chased ${daysAgo(x.chased_date)} d ago`
                                   : x.since || x.updated_at ? `${daysAgo(x.since || x.updated_at)} d` : '—';
@@ -761,7 +762,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                                       sx={{ height: 18, fontSize: 10, color: b === 'dead' ? tokens.bad : b === 'advanced' ? STAGE_COLOR.done : tokens.tealHi,
                                         borderColor: b === 'dead' ? tokens.bad : b === 'advanced' ? STAGE_COLOR.done : tokens.tealHi }} /></td>
                                     <td style={{ whiteSpace: 'nowrap' }}>{x.amount_cr != null ? fmtCr(x.amount_cr) : '—'}</td>
-                                    <td style={{ color: why ? INK : tokens.warn, fontSize: 11.2, whiteSpace: 'pre-wrap' }}>{why || (b === 'dead' ? 'no reason recorded — log the reply' : 'no reply recorded')}</td>
+                                    <td style={{ color: why ? INK : tokens.warn, fontSize: 11.2, whiteSpace: 'pre-wrap' }}>{why || (b === 'dead' ? 'no reason recorded — log the reply' : 'no reply recorded')}
+                                      {looksDeclined && <span style={{ color: tokens.warn }}> · reads like a decline — update the status?</span>}</td>
                                     <td style={{ color: tokens.muted, whiteSpace: 'nowrap' }}>{b === 'dead' ? '—' : w}</td>
                                   </tr>); })}
                             </tbody>
@@ -878,7 +880,6 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <TabBtn id="documents" label={`Documents · ${p.stats.documents}`} />
               <TabBtn id="news" label={`News · ${news ? news.length : '…'}`} />
               <TabBtn id="risk" label={grade ? `Risk report · ${grade.score}` : 'Risk report'} />
-              {p.prospect && <TabBtn id="prospect" label="Prospect universe" />}
             </Box>
             <Box sx={{ p: '12px 14px', display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
 
@@ -1007,14 +1008,6 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     {gradeBusy ? <CircularProgress size={15} /> : 'Grade risk'}</Button>
                 </Box>)}</Panel>
 
-              {p.prospect && <Panel id="prospect" title="Prospect universe">
-                <Typography sx={{ fontSize: 12.2, color: INK }}><b>{p.prospect.prospect_no}</b>{!live && !p.leads.length ? ` · ${p.prospect.status.replace(/_/g, ' ')}` : ''}{p.prospect.lead_count ? ` · ${p.prospect.lead_count} lead(s) from this row` : ''}</Typography>
-                <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
-                  {(p.prospect.verticals || []).map((v) => <Chip key={v} size="small" color="primary" variant="outlined" label={v} sx={{ height: 20, fontSize: 10.6 }} />)}
-                  {(p.prospect.sub_sectors || []).map((v) => <Chip key={v} size="small" variant="outlined" label={v} sx={{ height: 20, fontSize: 10.6 }} />)}
-                </Box>
-                {p.prospect.remarks && <Typography sx={{ fontSize: 12, color: INK }}>{p.prospect.remarks}</Typography>}
-              </Panel>}
             </Box>
           </Card>
 
