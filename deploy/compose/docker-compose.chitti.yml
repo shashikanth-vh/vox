@@ -213,8 +213,10 @@ services:
       - docrag_data:/data/docrag
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
-    # OpenDataLoader's JVM is capped at 1 GB; embeddings and Python on top.
-    mem_limit: 4g
+    # OpenDataLoader's JVM is capped at 1 GB; embeddings and Python on top. 4 GB was
+    # not enough: a batch of large scans held ~4.5 GB and the worker was OOM-killed
+    # in a loop (29 Sep). Set DOCRAG_INGEST_WORKERS=1 in .env.chitti to lower the peak.
+    mem_limit: 8g
     cpus: 2
 
   chitti-nginx:

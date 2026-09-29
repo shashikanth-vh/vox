@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, IconButton, TextField,
+  Alert, Box, Button, Chip, CircularProgress, Dialog, IconButton,
   Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -8,9 +8,8 @@ import DownloadIcon from '@mui/icons-material/Download';
 import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import { tokens } from '../../theme';
 import { apiErr } from '../../api/http';
-import { panoramaService, type DocAskResult, type IndexResult, type Panorama,
-  type PanoramaLine, type TracxnFinancials, type TracxnSeries, type RiskGrade }
-  from '../../services/panoramaService';
+import { panoramaService, type Panorama, type PanoramaLine, type TracxnFinancials,
+  type TracxnSeries, type RiskGrade } from '../../services/panoramaService';
 import { BAND_COLOR, RiskGradeChip, RiskGradeDetails } from './RiskGrade';
 import { documentsService } from '../../services/documentsService';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
@@ -24,7 +23,7 @@ import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
  * order), then MONEY (each product line, every lender and where it stands),
  * then the NUMBERS (filed financials from Tracxn with derived ratios), and
  * only then the depth tabs — engagements, people, documents, news and the
- * risk report. Every card is built from PRISM's own records, so it renders
+ * risk report (which reads the documents itself, so there is no ask-box). Every card is built from PRISM's own records, so it renders
  * for every company; the risk grade (a model reading) sits beside it, never
  * under it. Where a card has nothing it says what is missing and where it
  * would come from.
@@ -53,18 +52,6 @@ const SEV_BG: Record<Severity, string> = {
   RED: tokens.bad, AMBER: tokens.warn, GREEN: tokens.ok, BLUE: '#1F6FA8',
 };
 
-const ASK_PRESETS: [string, string][] = [
-  ['Key financials', 'What are the key financials — revenue, EBITDA, PAT, net '
-    + 'worth and borrowings — with figures and the years they belong to?'],
-  ['Promoters & shareholding', 'Who are the promoters and directors, and what '
-    + 'is the shareholding pattern, including any pledge of shares?'],
-  ['Registrations', 'List the company’s registrations and identifiers: '
-    + 'CIN, PAN and GST numbers with their states and validity.'],
-  ['Banking & CIBIL', 'What do the banking and CIBIL documents show — '
-    + 'accounts, limits, scores, overdues and any adverse remarks?'],
-  ['Compliance', 'Which compliance filings and certificates are present, and '
-    + 'what is their status or validity?'],
-];
 
 // ---------- small formatters ------------------------------------------------
 
@@ -97,20 +84,6 @@ function pct(n: number): string {
   return `${n >= 0 ? '+' : '−'}${Math.abs(n).toLocaleString('en-IN',
     { maximumFractionDigits: 0 })}%`;
 }
-/** DocRAG passages carry the page's own markup; read tables as rows of cells. */
-function tidyAnswer(text: string): string {
-  if (!/<\/?(table|tr|td|th|br|p|b|i)\b/i.test(text)) return text.replace(/\*\*/g, '');
-  const cell = (c: string) => c.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ').trim();
-  return text
-    .replace(/<table[\s\S]*?<\/table>/gi, (tbl) => [...tbl.matchAll(/<tr[\s\S]*?<\/tr>/gi)]
-      .map((m) => [...m[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => cell(c[1])))
-      .filter((r) => r.some(Boolean))
-      .map((r) => r.join('   ·   ')).join('\n'))
-    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, '')
-    .replace(/\*\*/g, '').replace(/\n{3,}/g, '\n\n').trim();
-}
-
 // Lender statuses, read the way the desk means them.
 const DEAD_RE = /declin|dropp|reject|withdr|not interested|pass/i;
 const ADV_RE = /ip received|in.?principle|sanction|approv|term sheet|disburs|credit approved/i;
@@ -170,43 +143,58 @@ function Bullet({ children, dot }: { children: React.ReactNode; dot?: string }) 
   );
 }
 
-/** One small-multiple: thin rounded bars, newest value labelled, first/last
- *  years only; negatives hang below a zero line in the same colour. */
-function MiniBars({ label, series, color }: {
-  label: string; series: TracxnSeries; color: string;
+/** A grouped bar chart for one card: up to two series that share a scale
+ *  (EBITDA with PAT; net worth with liabilities), every bar labelled with its
+ *  value, every financial year labelled, negatives below a zero line. */
+function BarChart({ title, unit, series, years }: {
+  title: string; unit?: string | null;
+  series: { label: string; color: string; points: { year: number; value: number; fy?: string | null }[] }[];
+  years: number[];
 }) {
-  const pts = series.points.slice(-6);
-  if (!pts.length) return null;
-  const W = 168, H = 66, top = 12, bottom = 52;
-  const hi = Math.max(0, ...pts.map((x) => x.value));
-  const lo = Math.min(0, ...pts.map((x) => x.value));
+  const live = series.filter((sr) => sr.points.length);
+  if (!live.length || !years.length) return null;
+  const W = 252, H = 124, top = 20, bottom = 104, L = 6, R = 6;
+  const vals = live.flatMap((sr) => sr.points.filter((x) => years.includes(x.year)).map((x) => x.value));
+  const hi = Math.max(0, ...vals), lo = Math.min(0, ...vals);
   const span = hi - lo || 1;
   const y = (v: number) => top + ((hi - v) / span) * (bottom - top);
   const zero = y(0);
-  const step = W / pts.length;
-  const last = pts[pts.length - 1];
+  const group = (W - L - R) / years.length;
+  const bw = Math.min(22, (group * 0.72) / live.length);
+  const at = (sr: typeof live[number], yr: number) => sr.points.find((x) => x.year === yr) || null;
+  const fy = (yr: number) => `FY${String(yr).slice(2)}`;
   return (
     <Box sx={{ minWidth: 0 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
-        <Box sx={{ width: 7, height: 7, borderRadius: 99, bgcolor: color, flexShrink: 0 }} />
-        <Typography sx={{ fontSize: 10.2, fontWeight: 700, color: tokens.muted,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {label}{series.unit ? ` · ${series.unit}` : ''}</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.3 }}>
+        <Typography sx={{ fontSize: 10.4, fontWeight: 800, color: '#44535B', letterSpacing: '.04em' }}>{title}</Typography>
+        {live.map((sr) => (
+          <Box key={sr.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Box sx={{ width: 7, height: 7, borderRadius: 99, bgcolor: sr.color }} />
+            <Typography sx={{ fontSize: 10, color: tokens.muted }}>{sr.label}</Typography>
+          </Box>))}
+        <Box sx={{ flex: 1 }} />
+        {unit && <Typography sx={{ fontSize: 9.6, color: tokens.muted }}>{unit}</Typography>}
       </Box>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
-        <line x1={0} x2={W} y1={zero} y2={zero} stroke="#E7ECEF" strokeWidth={1} />
-        {pts.map((pt, i) => {
-          const x = i * step + step / 2;
-          const yv = y(pt.value);
-          return <rect key={pt.year} x={x - 2.5} y={Math.min(yv, zero)} width={5}
-            height={Math.max(2, Math.abs(yv - zero))} rx={2.5} fill={color} />;
+        {[0.25, 0.5, 0.75, 1].map((f) => { const gy = top + (1 - f) * (bottom - top);
+          return <line key={f} x1={L} x2={W - R} y1={gy} y2={gy} stroke="#F0F3F5" strokeWidth={1} />; })}
+        <line x1={L} x2={W - R} y1={zero} y2={zero} stroke="#C9D2D7" strokeWidth={1} />
+        {years.map((yr, gi) => {
+          const gx = L + gi * group + (group - bw * live.length - 3 * (live.length - 1)) / 2;
+          return (
+            <g key={yr}>
+              {live.map((sr, si) => { const pt = at(sr, yr); if (!pt) return null;
+                const x = gx + si * (bw + 3); const yv = y(pt.value);
+                const h = Math.max(1.5, Math.abs(yv - zero));
+                return (
+                  <g key={sr.label}>
+                    <rect x={x} y={Math.min(yv, zero)} width={bw} height={h} rx={2} fill={sr.color} />
+                    <text x={x + bw / 2} y={pt.value >= 0 ? Math.min(yv, zero) - 3 : Math.max(yv, zero) + 9}
+                      textAnchor="middle" fontSize="7.6" fontWeight="700" fill={INK}>{finNum(pt.value)}</text>
+                  </g>); })}
+              <text x={L + gi * group + group / 2} y={H - 4} textAnchor="middle" fontSize="8.4" fill="#7B8A92">{fy(yr)}</text>
+            </g>);
         })}
-        <text x={(pts.length - 1) * step + step / 2}
-          y={Math.min(y(last.value), zero) - 3} textAnchor="middle"
-          fontSize="8.8" fontWeight="700" fill={INK}>{finNum(last.value)}</text>
-        {pts.map((pt, i) => (i === 0 || i === pts.length - 1) ? (
-          <text key={pt.year} x={i * step + step / 2} y={H - 2} textAnchor="middle"
-            fontSize="7.6" fill="#7B8A92">{pt.fy || pt.year}</text>) : null)}
       </svg>
     </Box>
   );
@@ -261,36 +249,33 @@ type Ev = { at: number; date: string; label: string; color: string; big?: boolea
 
 function Timeline({ events }: { events: Ev[] }) {
   if (!events.length) return null;
-  const W = 1000, H = 132, L = 46, R = 46, Y = 64;
-  const t0 = events[0].at, t1 = events[events.length - 1].at;
-  const x = (t: number) => t1 === t0 ? W / 2 : L + ((t - t0) / (t1 - t0)) * (W - L - R);
-  // Keep neighbours a readable distance apart: nudge labels that would collide.
-  const xs: number[] = [];
-  events.forEach((e) => {
-    let px = x(e.at);
-    const prev = xs[xs.length - 1];
-    if (prev != null && px - prev < 92) px = prev + 92;
-    xs.push(px);
-  });
-  const overflow = xs[xs.length - 1] - (W - R);
-  const scale = overflow > 0 ? (W - L - R) / (xs[xs.length - 1] - L) : 1;
-  const fx = (px: number) => L + (px - L) * scale;
-  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  // Facts in ORDER, equally spaced: the dates carry the time, the axis does
+  // not have to — one 2019 incorporation must not squeeze a busy month into
+  // a smear. Labels cycle through four tiers so neighbours never overlap.
+  const n = events.length;
+  // Nothing is hidden behind an ellipsis: the gap between facts is sized to the
+  // longest label (the card scrolls sideways), and the full text rides a tooltip.
+  const longest = Math.max(...events.map((e) => e.label.length), 18);
+  const step = Math.min(300, Math.max(118, Math.round(longest * 6.4) + 20));
+  const W = Math.max(720, 120 + step * (n - 1)), H = 168, L = 60, R = 60, Y = 84;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
-      <line x1={L - 10} x2={W - R + 10} y1={Y} y2={Y} stroke="#DCE3E6" strokeWidth={2} />
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block' }}>
+      <line x1={L - 12} x2={W - 48} y1={Y} y2={Y} stroke="#DCE3E6" strokeWidth={2} />
       {events.map((e, i) => {
-        const cx = fx(xs[i]);
-        const below = i % 2 === 0;
-        const ly = below ? Y + 24 : Y - 30;
-        const dy = below ? Y + 38 : Y - 16;
+        const cx = n > 1 ? L + i * step : W / 2;
+        void R;
+        const tier = i % 4;                       // 0 above near, 1 below near, 2 above far, 3 below far
+        const above = tier === 0 || tier === 2;
+        const far = tier >= 2;
+        const stem = far ? 46 : 18;
+        const ty = above ? Y - stem : Y + stem;
         return (
           <g key={i}>
-            <line x1={cx} x2={cx} y1={Y} y2={below ? Y + 12 : Y - 12} stroke="#DCE3E6" />
+            <line x1={cx} x2={cx} y1={Y} y2={ty + (above ? 6 : -6)} stroke="#DCE3E6" />
             <circle cx={cx} cy={Y} r={e.big ? 7 : 5} fill={e.color} />
-            <text x={cx} y={ly} textAnchor="middle" fontSize="9.5" fill="#7B8A92">{e.date}</text>
-            <text x={cx} y={dy} textAnchor="middle" fontSize="10.2"
-              fontWeight={e.big ? 700 : 500} fill={INK}>{clip(e.label, 24)}</text>
+            <text x={cx} y={above ? ty - 12 : ty + 22} textAnchor="middle" fontSize="9.4" fill="#7B8A92">{e.date}</text>
+            <text x={cx} y={above ? ty : ty + 10} textAnchor="middle" fontSize="10.2"
+              fontWeight={e.big ? 700 : 500} fill={INK}>{e.label}<title>{`${e.date} — ${e.label}`}</title></text>
           </g>);
       })}
     </svg>
@@ -322,14 +307,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [news, setNews] = useState<Article[] | null>(null);
   const [newsErr, setNewsErr] = useState('');
   const [tab, setTab] = useState<Tab>('engagements');
+  const [briefOpen, setBriefOpen] = useState(false);
   const [newsSev, setNewsSev] = useState<Severity | null>(null);
-  const [ask, setAsk] = useState('');
-  const [askBusy, setAskBusy] = useState(false);
-  const [askOut, setAskOut] = useState<DocAskResult | null>(null);
-  const [askErr, setAskErr] = useState('');
-  const [idxBusy, setIdxBusy] = useState(false);
-  const [idxOut, setIdxOut] = useState<IndexResult | null>(null);
-  const [idxErr, setIdxErr] = useState('');
   const [trx, setTrx] = useState<TracxnFinancials | null>(null);
   const [trxBusy, setTrxBusy] = useState(false);
   const [trxErr, setTrxErr] = useState('');
@@ -343,24 +322,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   useEffect(() => {
     if (!open) return;
     setP(null); setErr(''); setNews(null); setNewsErr(''); pRef.current = null;
-    setAsk(''); setAskOut(null); setAskErr('');
-    setIdxBusy(false); setIdxOut(null); setIdxErr('');
     setTrx(null); setTrxBusy(false); setTrxErr('');
     setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr(''); setDlBusy(false);
-    setTab('engagements'); setNewsSev(null);
+    setTab('engagements'); setNewsSev(null); setBriefOpen(false);
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => {
         if (!alive) return;
         setP(r); pRef.current = r;
-        // The index is housekeeping: the bridge uploads only what DocRAG lacks.
-        if (r.stats.documents > 0 && r.anchor.entity_id) {
-          setIdxBusy(true);
-          panoramaService.indexDocuments(r.anchor.entity_id, r.anchor.name)
-            .then((x) => { if (alive) setIdxOut(x); })
-            .catch((e) => { if (alive) setIdxErr(apiErr(e, 'index the documents')); })
-            .finally(() => { if (alive) setIdxBusy(false); });
-        }
         // Filings are fetched up front — they are the numbers card, not an
         // extra — but never without a CIN: the card explains itself instead.
         if (r.anchor.cin) {
@@ -391,15 +360,6 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
       .then(setTrx).catch((e) => setTrxErr(apiErr(e, 'refresh the market feed')))
       .finally(() => setTrxBusy(false));
   };
-  const runAsk = async (preset?: string) => {
-    const q = (preset ?? ask).trim();
-    if (!p || !q) return;
-    if (preset) setAsk(preset);
-    setAskBusy(true); setAskErr(''); setAskOut(null);
-    try { setAskOut(await panoramaService.askDocuments(p.anchor.name, q)); }
-    catch (e: any) { setAskErr(String(e?.message || e)); }
-    finally { setAskBusy(false); }
-  };
   const runGrade = async (refresh: boolean) => {
     if (!p) return;
     setGradeBusy(true); setGradeErr('');
@@ -411,14 +371,6 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     } catch (e: any) { setGradeErr(apiErr(e, 'grade this client')); }
     finally { setGradeBusy(false); }
   };
-  const runIndex = async () => {
-    if (!p?.anchor.entity_id) return;
-    setIdxBusy(true); setIdxErr(''); setIdxOut(null);
-    try { setIdxOut(await panoramaService.indexDocuments(p.anchor.entity_id, p.anchor.name)); setAskOut(null); }
-    catch (e: any) { setIdxErr(apiErr(e, 'index the documents')); }
-    finally { setIdxBusy(false); }
-  };
-
   // ---------- derived reading ----------------------------------------------
   const finState: 'live' | 'nocin' | 'busy' | 'unconfigured' | 'nofilings' | 'error' | 'idle'
     = trx?.resolved ? 'live'
@@ -436,9 +388,6 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const leverage = eqL && liabL && eqL.value ? liabL.value / eqL.value : null;
   const fin = p?.prospect;
   const hasFin = !!fin && (fin.revenue_cr != null || fin.ebitda_cr != null || fin.net_profit_cr != null);
-  const idxReady = idxOut ? (idxOut.ready ?? idxOut.indexed.length) : 0;
-  const idxStatus = idxBusy ? 'indexing for Q&A…' : idxErr ? 'Q&A indexing failed'
-    : idxOut ? `${idxReady} ready for Q&A${idxOut.skipped.length ? ` · ${idxOut.skipped.length} skipped` : ''}` : '';
   const live = !!p && (p.stats.deals_in_flight + p.stats.deals_done) > 0;
   const graded = (news || []).map((a) => ({ a, sev: (a.severity || classify(a.headline, live)[0]) as Severity }));
   const sevCounts = (['GREEN', 'BLUE', 'AMBER', 'RED'] as Severity[])
@@ -501,6 +450,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '', [p]);
 
   // ---------- render ----------------------------------------------------------
+  // Every panel is in the DOM; only the chosen one shows on screen, all of them
+  // on paper, each under its own heading.
+  const Panel = ({ id, title, children }: { id: Tab; title: string; children: React.ReactNode }) => (
+    <Box className="c360-panel" hidden={tab !== id} sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+      <Typography className="c360-panel-title" sx={{ display: 'none', fontSize: 10.5, fontWeight: 800,
+        letterSpacing: '.08em', color: '#44535B', textTransform: 'uppercase', mt: 1 }}>{title}</Typography>
+      {children}
+    </Box>
+  );
   const TabBtn = ({ id, label }: { id: Tab; label: string }) => (
     <Box component="button" onClick={() => setTab(id)}
       sx={{ background: 'none', border: 0, borderBottom: `2px solid ${tab === id ? tokens.tealHi : 'transparent'}`,
@@ -512,11 +470,24 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth fullScreen={small}
       PaperProps={{ className: 'c360-print', sx: { bgcolor: '#F4F6F7',
         borderRadius: small ? 0 : '14px', maxHeight: small ? '100vh' : '94vh' } }}>
+      {/* Print = the whole brief on paper: the dialog leaves its fixed frame, every
+          scroll region opens out, every tab prints under its own heading, and the
+          bars keep their colour. */}
       <style>{`@media print {
         body * { visibility: hidden; }
         .c360-print, .c360-print * { visibility: visible; }
-        .c360-print { position: absolute; inset: 0; max-height: none !important; }
+        .MuiDialog-root { position: static !important; }
+        .MuiDialog-container { height: auto !important; display: block !important; }
+        .c360-print { position: static !important; max-height: none !important; max-width: none !important;
+          width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+        .c360-body, .c360-body * { overflow: visible !important; max-height: none !important; }
+        .c360-body { padding: 8px 0 !important; }
+        .c360-panel[hidden] { display: block !important; }
+        .c360-panel-title { display: block !important; }
+        .c360-tabs { display: none !important; }
+        .c360-print * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         .no-print { display: none !important; }
+        @page { margin: 12mm; }
       }`}</style>
 
       {/* ---- header ------------------------------------------------------ */}
@@ -550,7 +521,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         </Box>
       </Box>
 
-      <Box sx={{ p: { xs: '12px 12px 16px', sm: '14px 20px 16px' }, overflowY: 'auto',
+      <Box className="c360-body" sx={{ p: { xs: '12px 12px 16px', sm: '14px 20px 16px' }, overflowY: 'auto',
         overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 1.4, minWidth: 0 }}>
         {err && <Alert severity="warning" sx={{ fontSize: 12.4 }}>{err}</Alert>}
         {!p && !err && <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -589,7 +560,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   {r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}</Bullet>)}
                 {p.leads.filter((l) => !l.converted).map((l) => <Bullet key={l.lead_no || 'ld'} dot={tokens.tealHi}>
                   <b>Lead {l.lead_no}</b>{l.temperature ? ` · ${l.temperature}` : ''}{l.rm ? ` · ${l.rm}` : ''}
-                  {l.next_action ? ` — ${l.next_action.slice(0, 90)}` : ''}</Bullet>)}
+                  {l.next_action ? ` — ${l.next_action}` : ''}</Bullet>)}
                 {!p.lending.length && !p.syndication.length && !p.asset_monetisation.length
                   && !p.leads.filter((l) => !l.converted).length && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>Nothing live on the register.</Typography>)}
@@ -646,7 +617,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   const pend = p.lending.find((r) => r.pending_with && r.stage !== 'Disbursed' && r.stage !== 'Rejected');
                   if (grade?.action) return grade.action;
                   if (pend) return `Lending ${pend.tracker_no} pending with ${pend.pending_with}`;
-                  if (l) return l.next_action!.slice(0, 80);
+                  if (l) return l.next_action!;
                   return 'Nothing pending on record';
                 })()}
               </Typography>
@@ -671,14 +642,24 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           </Box>
 
           {/* ---- brief line --------------------------------------------- */}
-          <Typography sx={{ fontSize: 12.6, color: INK, lineHeight: 1.6, px: 0.4 }}>{p.brief}</Typography>
+          <Typography sx={{ fontSize: 12.6, color: INK, lineHeight: 1.6, px: 0.4,
+            ...(briefOpen ? { maxHeight: 260, overflowY: 'auto', pr: 1 } : {}) }}>
+            {briefOpen ? (p.brief_full || p.brief) : p.brief}
+            {(p.brief_full || '') !== p.brief && (
+              <Typography component="span" className="no-print" onClick={() => setBriefOpen((v) => !v)}
+                sx={{ fontSize: 12.5, fontWeight: 700, color: tokens.tealHi, cursor: 'pointer', ml: 0.6,
+                  userSelect: 'none', '&:hover': { textDecoration: 'underline' } }}>
+                {briefOpen ? 'less' : 'more'}</Typography>)}
+          </Typography>
 
           {/* ---- timeline ---------------------------------------------- */}
           {events.length > 0 && (
             <Card>
               <Eyebrow right={<Typography sx={{ fontSize: 10.5, color: tokens.muted }}>every dated fact PRISM holds, in order</Typography>}>
                 Relationship timeline</Eyebrow>
-              <Box sx={{ overflowX: 'auto' }}><Box sx={{ minWidth: 640 }}><Timeline events={events} /></Box></Box>
+              {/* Wider than the card when the story is long — it scrolls sideways,
+                  newest facts on the right, and prints in full. */}
+              <Box sx={{ overflowX: 'auto', overflowY: 'hidden', pb: 0.5 }}><Timeline events={events} /></Box>
             </Card>)}
 
           {/* ---- money + numbers --------------------------------------- */}
@@ -696,7 +677,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       <span style={{ color: tokens.muted }}>{r.rm ? ` · ${r.rm}` : ''}{r.analyst ? ` / ${r.analyst}` : ''}</span>
                     </Typography>
                     <Ladder ladder={r.ladder} current={r.stage || null} />
-                    {r.remarks && <Typography sx={{ fontSize: 11.2, color: tokens.muted, mt: 0.4 }}>{r.remarks.slice(0, 200)}</Typography>}
+                    {r.remarks && <Typography sx={{ fontSize: 11.2, color: tokens.muted, mt: 0.4, whiteSpace: 'pre-wrap' }}>{r.remarks}</Typography>}
                   </Box>))}
                 {p.syndication.map((r) => { const v = lenderView(r); const n = v.ls.length || 1;
                   const rows = [...v.adv, ...v.prog, ...v.dead];
@@ -713,8 +694,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                             ['Advanced', v.adv.length, STAGE_COLOR.done], ['Declined / dropped', v.dead.length, tokens.bad]] as const).map(([lab, k, col]) => (
                             <Box key={lab} sx={{ display: 'contents' }}>
                               <Typography sx={{ fontSize: 11.4, color: INK }}>{lab}</Typography>
-                              <Box sx={{ height: 10, bgcolor: '#EEF4F3', borderRadius: 3, position: 'relative' }}>
-                                <Box sx={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${(k / n) * 100}%`, bgcolor: col, borderRadius: 3 }} />
+                              <Box sx={{ height: 10, bgcolor: '#EEF4F3', borderRadius: 3 }}>
+                                <Box sx={{ height: 10, width: `${(k / n) * 100}%`, bgcolor: col, borderRadius: 3 }} />
                               </Box>
                               <Typography sx={{ fontSize: 11.4, fontWeight: 700, textAlign: 'right', color: INK }}>{k}</Typography>
                             </Box>))}
@@ -738,7 +719,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                                       sx={{ height: 18, fontSize: 10, color: b === 'dead' ? tokens.bad : b === 'advanced' ? STAGE_COLOR.done : tokens.tealHi,
                                         borderColor: b === 'dead' ? tokens.bad : b === 'advanced' ? STAGE_COLOR.done : tokens.tealHi }} /></td>
                                     <td style={{ whiteSpace: 'nowrap' }}>{x.amount_cr != null ? fmtCr(x.amount_cr) : '—'}</td>
-                                    <td style={{ color: why ? INK : tokens.warn, fontSize: 11.2 }}>{why ? why.slice(0, 140) : (b === 'dead' ? 'no reason recorded — log the reply' : 'no reply recorded')}</td>
+                                    <td style={{ color: why ? INK : tokens.warn, fontSize: 11.2, whiteSpace: 'pre-wrap' }}>{why || (b === 'dead' ? 'no reason recorded — log the reply' : 'no reply recorded')}</td>
                                     <td style={{ color: tokens.muted, whiteSpace: 'nowrap' }}>{b === 'dead' ? '—' : w}</td>
                                   </tr>); })}
                             </tbody>
@@ -767,11 +748,18 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 const cell = (k: string, y: number) => series[k]?.points.find((x) => x.year === y) || null;
                 const fyLabel = (y: number) => SNAPSHOT_ROWS.map(([k]) => cell(k, y)?.fy).find(Boolean) || String(y);
                 const ratio = (num: string, den: string, y: number) => { const a = cell(num, y), b = cell(den, y); return a && b && b.value ? (a.value / Math.abs(b.value)) * 100 : null; };
-                const main = FIN_SERIES.filter(([k]) => series[k]?.points.length);
+                const chartYears = [...new Set(['revenue', 'ebitda', 'net_profit', 'bs_equity', 'bs_liability']
+                  .flatMap((k) => (series[k]?.points || []).map((x) => x.year)))].sort().slice(-5);
+                const sr = (k: string, label: string, color: string) => ({ label, color, points: series[k]?.points || [] });
+                const charts = [
+                  { title: 'Revenue', series: [sr('revenue', 'Revenue', FIN_SERIES[0][2])] },
+                  { title: 'Profitability', series: [sr('ebitda', 'EBITDA', FIN_SERIES[1][2]), sr('net_profit', 'PAT', FIN_SERIES[2][2])] },
+                  { title: 'Balance sheet', series: [sr('bs_equity', 'Net worth', '#1B7A45'), sr('bs_liability', 'Liabilities', '#B45309')] },
+                ].filter((c) => c.series.some((x) => x.points.length));
                 return <>
-                  {main.length > 0 && (
-                    <Box sx={{ display: 'grid', gap: 1.2, mb: 1, gridTemplateColumns: `repeat(${Math.min(main.length, 3)}, minmax(0,1fr))` }}>
-                      {main.map(([k, lab, col]) => <MiniBars key={k} label={lab} series={series[k]} color={col} />)}
+                  {charts.length > 0 && (
+                    <Box sx={{ display: 'grid', gap: 1.4, mb: 1.2, gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: `repeat(${Math.min(charts.length, 3)}, minmax(0,1fr))` } }}>
+                      {charts.map((c) => <BarChart key={c.title} title={c.title} unit={series.revenue?.unit || '₹ Cr'} series={c.series} years={chartYears} />)}
                     </Box>)}
                   {years.length > 0 ? (
                     <Box sx={{ overflowX: 'auto' }}>
@@ -842,7 +830,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
 
           {/* ---- depth tabs ---------------------------------------------- */}
           <Card sx={{ p: 0 }}>
-            <Box sx={{ display: 'flex', gap: 0.2, borderBottom: `1px solid ${tokens.line}`, px: 1, overflowX: 'auto' }}>
+            <Box className="c360-tabs" sx={{ display: 'flex', gap: 0.2, borderBottom: `1px solid ${tokens.line}`, px: 1, overflowX: 'auto' }}>
               <TabBtn id="engagements" label={`Engagements · ${p.leads.filter((l) => !l.converted).length + p.lending.length + p.syndication.length + p.asset_monetisation.length}`} />
               <TabBtn id="people" label={`People · ${(trx?.board?.length || 0) + p.contacts.length}`} />
               <TabBtn id="documents" label={`Documents · ${p.stats.documents}`} />
@@ -852,7 +840,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             </Box>
             <Box sx={{ p: '12px 14px', display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
 
-              {tab === 'engagements' && <>
+              <Panel id="engagements" title="Engagements">
                 {p.leads.map((l) => (
                   <Box key={l.lead_no || Math.random()} sx={{ display: 'flex', gap: 1.1 }}>
                     <Box sx={{ width: 8, height: 8, mt: '5px', borderRadius: 99, bgcolor: l.converted ? STAGE_COLOR.dead : tokens.tealHi, flexShrink: 0 }} />
@@ -870,7 +858,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 {p.syndication.map((r) => (
                   <Box key={r.tracker_no || 's'}>
                     <Typography sx={{ fontSize: 12.8, color: INK }}><b>Syndication {r.tracker_no}</b> — {r.status || '—'}{r.amount_cr != null ? ` · ${fmtCr(r.amount_cr)}` : ''}<span style={{ color: tokens.muted }}>{r.created_at ? ` · since ${fmtDate(r.created_at)}` : ''}</span></Typography>
-                    {(r.lenders || []).map((x) => <Typography key={x.name} sx={{ fontSize: 11.4, color: tokens.muted, pl: 1.5 }}>{x.name} — {x.status || '—'}{x.amount_cr != null ? ` · ${fmtCr(x.amount_cr)}` : ''}{x.last_reply ? ` · ${x.last_reply.slice(0, 120)}` : ''}</Typography>)}
+                    {(r.lenders || []).map((x) => <Typography key={x.name} sx={{ fontSize: 11.4, color: tokens.muted, pl: 1.5 }}>{x.name} — {x.status || '—'}{x.amount_cr != null ? ` · ${fmtCr(x.amount_cr)}` : ''}{x.last_reply ? ` · ${x.last_reply}` : ''}</Typography>)}
                   </Box>))}
                 {p.asset_monetisation.map((r) => (
                   <Typography key={r.tracker_no || 'a'} sx={{ fontSize: 12.8, color: INK }}><b>Asset monetisation {r.tracker_no}</b> — {r.status || '—'}{r.indicative_value_cr != null ? ` · ${fmtCr(r.indicative_value_cr)}` : ''}{r.investor ? ` · ${r.investor}` : ''}</Typography>))}
@@ -880,14 +868,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     {p.interactions.map((i, n) => (
                       <Box key={n} sx={{ flexShrink: 0 }}>
                         <Typography sx={{ fontSize: 12.4, color: INK }}>{i.type} · {fmtDate(i.occurred_at)}{i.by ? ` · ${i.by}` : ''}{i.lender ? ` · ${i.lender}` : ''}</Typography>
-                        {(i.summary || i.notes) && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>{(i.summary || i.notes || '').slice(0, 220)}</Typography>}
+                        {(i.summary || i.notes) && <Typography sx={{ fontSize: 11.4, color: tokens.muted, whiteSpace: 'pre-wrap' }}>{i.summary || i.notes}</Typography>}
                       </Box>))}
                     {!p.interactions.length && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>Nothing logged yet.</Typography>}
                   </Box>
                 </Box>
-              </>}
+              </Panel>
 
-              {tab === 'people' && <>
+              <Panel id="people" title="People">
                 {(trx?.board || []).length > 0 && <>
                   <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted }}>BOARD · Tracxn</Typography>
                   {(trx!.board || []).map((m) => <Typography key={m.name} sx={{ fontSize: 12.2, color: INK }}><b>{m.name}</b>{m.designation ? ` · ${m.designation}` : ''}{m.since ? ` · since ${String(m.since).slice(0, 4)}` : ''}</Typography>)}
@@ -907,12 +895,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 {p.prospect && ((p.prospect.emails || []).length > 0 || (p.prospect.phones || []).length > 0) && (
                   <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>Prospect universe: {[...(p.prospect.emails || []), ...(p.prospect.phones || [])].join(' · ')}</Typography>)}
                 {!(trx?.board || []).length && finState !== 'live' && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>Board and shareholding arrive with the Tracxn filings{finState === 'nocin' ? ' once a CIN is on record' : ''}.</Typography>}
-              </>}
+              </Panel>
 
-              {tab === 'documents' && <>
+              <Panel id="documents" title="Documents">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>{p.stats.documents} on the Data Register{idxStatus ? ` · ${idxStatus}` : ''}</Typography>
-                  {idxBusy && <CircularProgress size={10} />}
+                  <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>{p.stats.documents} on the Data Register</Typography>
                   {p.checklist && p.checklist.required_total > 0 && <Typography sx={{ fontSize: 11.4, color: missing.length ? tokens.warn : tokens.ok }}>· required {p.checklist.required_on_file}/{p.checklist.required_total}</Typography>}
                   <Box sx={{ flex: 1 }} />
                   {p.documents.length > 0 && p.anchor.entity_id && (
@@ -944,36 +931,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     </Box>));
                 })()}
                 {!p.documents.length && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>Nothing on the Data Register yet.</Typography>}
-                <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column', gap: 0.7, mt: 0.6 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted }}>ASK THE DOCUMENTS</Typography>
-                    <Box sx={{ flex: 1 }} />
-                    {idxErr && p.anchor.entity_id && <Button size="small" variant="text" onClick={runIndex} disabled={idxBusy} sx={{ fontSize: 11, py: 0, minWidth: 0 }}>retry indexing</Button>}
-                  </Box>
-                  {idxOut && idxOut.skipped.length > 0 && (
-                    <Alert severity="info" sx={{ fontSize: 11.2, py: 0 }}>{idxOut.skipped.length} file(s) not indexed: {idxOut.skipped.slice(0, 3).map((x) => `${x.file} — ${x.reason}`).join('; ')}{idxOut.skipped.length > 3 ? '; …' : ''}</Alert>)}
-                  {idxOut?.note && (idxOut.fresh ?? 0) > 0 && <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>{idxOut.note}</Typography>}
-                  {idxErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>{idxErr}</Typography>}
-                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                    {ASK_PRESETS.map(([label, q]) => <Chip key={label} size="small" clickable label={label} disabled={askBusy || idxBusy} onClick={() => runAsk(q)}
-                      sx={{ height: 22, fontSize: 10.8, fontWeight: 600, color: tokens.tealHi, bgcolor: '#F0F8F6', border: `1px solid ${tokens.tealHi}` }} />)}
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 0.8 }}>
-                    <TextField size="small" fullWidth value={ask} placeholder="…or ask anything about these files" onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') runAsk(); }} />
-                    <Button size="small" variant="outlined" onClick={() => runAsk()} disabled={askBusy || idxBusy || !ask.trim()}>{askBusy ? <CircularProgress size={15} /> : 'Ask'}</Button>
-                  </Box>
-                  {askOut?.noDocuments && <Alert severity="info" sx={{ fontSize: 11.6, py: 0 }}>{p.stats.documents > 0 ? 'None of this company’s files could be indexed for Q&A — readable kinds are PDF, Excel, images, and zips of those.' : 'No documents on the Data Register yet — upload some, and they are indexed for Q&A the next time this opens.'}</Alert>}
-                  {askOut?.answer && (
-                    <Box sx={{ bgcolor: '#F6FAF9', border: '1px solid #D6E7E3', borderRadius: '10px', p: '9px 11px' }}>
-                      <Typography sx={{ fontSize: 12.2, color: INK, whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto' }}>{tidyAnswer(askOut.answer).slice(0, 2400)}</Typography>
-                      {askOut.citations.length > 0 && <Typography sx={{ fontSize: 10.5, color: tokens.tealHi, fontWeight: 600, mt: 0.5 }}>cited · {askOut.citations.map((c) => [c.doc, c.where].filter(Boolean).join(' ')).join(' · ')}</Typography>}
-                      {askOut.mode === 'extractive' && <Typography sx={{ fontSize: 10, color: tokens.muted, mt: 0.4 }}>Matching passages shown — written summaries switch on with the answer model.</Typography>}
-                    </Box>)}
-                  {askErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>Document AI did not answer: {askErr}</Typography>}
-                </Box>
-              </>}
+              </Panel>
 
-              {tab === 'news' && <>
+              <Panel id="news" title="News">
                 {sevCounts.filter((x) => x.n > 0).length > 1 && (
                   <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
                     {sevCounts.filter((x) => x.n > 0).map(({ s, n }) => (
@@ -993,9 +953,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 {news !== null && !news.length && !newsErr && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>No mentions in the last 30 days (PULSE radar).</Typography>}
                 {news === null && !newsErr && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>Searching the radar…</Typography>}
                 {newsErr && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>News radar did not answer: {newsErr}</Typography>}
-              </>}
+              </Panel>
 
-              {tab === 'risk' && (grade ? <RiskGradeDetails grade={grade} onRegrade={gradeBusy ? undefined : () => runGrade(true)} /> : (
+              <Panel id="risk" title="Risk report">{grade ? <RiskGradeDetails grade={grade} onRegrade={gradeBusy ? undefined : () => runGrade(true)} /> : (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted, flex: 1 }}>
                     Grades this client RED / AMBER / GREEN from its Register footprint, indexed documents and 30-day news, using the ATLAS client rubric. A desk aid, not a credit decision.
@@ -1003,16 +963,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   </Typography>
                   <Button size="small" variant="outlined" disabled={gradeBusy || (news === null && !newsErr)} onClick={() => runGrade(false)}>
                     {gradeBusy ? <CircularProgress size={15} /> : 'Grade risk'}</Button>
-                </Box>))}
+                </Box>)}</Panel>
 
-              {tab === 'prospect' && p.prospect && <>
+              {p.prospect && <Panel id="prospect" title="Prospect universe">
                 <Typography sx={{ fontSize: 12.2, color: INK }}><b>{p.prospect.prospect_no}</b>{!live && !p.leads.length ? ` · ${p.prospect.status.replace(/_/g, ' ')}` : ''}{p.prospect.lead_count ? ` · ${p.prospect.lead_count} lead(s) from this row` : ''}</Typography>
                 <Box sx={{ display: 'flex', gap: 0.6, flexWrap: 'wrap' }}>
                   {(p.prospect.verticals || []).map((v) => <Chip key={v} size="small" color="primary" variant="outlined" label={v} sx={{ height: 20, fontSize: 10.6 }} />)}
                   {(p.prospect.sub_sectors || []).map((v) => <Chip key={v} size="small" variant="outlined" label={v} sx={{ height: 20, fontSize: 10.6 }} />)}
                 </Box>
                 {p.prospect.remarks && <Typography sx={{ fontSize: 12, color: INK }}>{p.prospect.remarks}</Typography>}
-              </>}
+              </Panel>}
             </Box>
           </Card>
 

@@ -2,41 +2,6 @@ import { db } from '../api/atlasStore';
 import { localMinute, localDay } from '../api/time';
 import { api, errText, listAll, USE_REAL_API } from '../api/http';
 import { writeAudit } from './auditService';
-import { panoramaService } from './panoramaService';
-
-// A file that lands on the register is indexed for the 360's ask-box right
-// away, so it is readable by the time anyone opens the company — not a minute
-// after. Coalesced per company: a run of uploads is one indexing pass, and the
-// bridge only sends what DocRAG does not already hold. Best-effort: a failure
-// here is retried by the next 360 open, never surfaced on the upload.
-const pendingIndex = new Map<string, ReturnType<typeof setTimeout>>();
-function scheduleIndex(entityId: string, code: string): void {
-  const company = String((db().clients as any)?.[code]?.name || '').trim();
-  if (!company) return;
-  const prev = pendingIndex.get(entityId);
-  if (prev) clearTimeout(prev);
-  pendingIndex.set(entityId, setTimeout(() => {
-    pendingIndex.delete(entityId);
-    panoramaService.indexDocuments(entityId, company).catch((e) => {
-      console.warn('[docrag] post-upload indexing deferred to the next 360 open:', e?.message || e);
-    });
-  }, 2000));
-}
-
-/**
- * The Data Register — the company's document file.
- *
- * This used to write to `db().docs` and an audit line and nothing else: no HTTP call of
- * any kind. The dialog looked and behaved exactly as it does now — ticks, progress bar,
- * "Replace" — while the register never received a single file, and anything over 400 KB
- * was not even stored locally, just named. Every document was lost on refresh.
- *
- * It is now the register's own document plane. Documents belong to the COMPANY (the
- * entity), which is what the drawer this dialog opens from is showing, so the subject is
- * the entity and the checklist's section/item become `section` and `slot_key` — the same
- * coordinates `GET /v1/entities/{id}/data-register` reports completeness against.
- */
-
 export interface DocEntry {
   /** Register document id — present for anything actually on file. */
   id?: string;
@@ -162,7 +127,6 @@ export const documentsService = {
           || `The register refused the upload (HTTP ${e?.response?.status ?? '?'}).` };
       }
       writeAudit(by, 'Document uploaded', code, `${sectionTitle} · ${title} (${file.name})`);
-      scheduleIndex(entityId, code);
       return { ok: true };
     }
     // Mock mode: the session store, exactly as the prototype behaved.
