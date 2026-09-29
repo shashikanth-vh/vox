@@ -267,6 +267,14 @@ async def test_the_index_bridge_uploads_through_the_client_that_trusts_the_ai_ho
 
     class _DocRag:
         posted: list[str] = []
+        listed: list[str] = []
+
+        # The bridge lists first (to skip what DocRAG already holds) — through
+        # the SAME trusting client, on the same edge.
+        async def get(self, url, **kw):
+            self.listed.append(str(url))
+            return httpx.Response(200, json={"items": []},
+                                  request=httpx.Request("GET", str(url)))
 
         async def post(self, url, **kw):
             self.posted.append(str(url))
@@ -279,6 +287,7 @@ async def test_the_index_bridge_uploads_through_the_client_that_trusts_the_ai_ho
     assert r.status_code == 200, r.text
     assert [i["file"] for i in r.json()["indexed"]] == ["GST.pdf"]
     assert app.state.docrag_http.posted == ["https://ai-host:8443/docrag/v1/documents"]
+    assert app.state.docrag_http.listed == ["https://ai-host:8443/docrag/v1/documents"]
 
 
 async def test_the_report_renders_the_grade_on_screen_even_after_a_restart(monkeypatch):

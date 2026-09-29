@@ -58,3 +58,20 @@ def test_member_count_guard_refuses_a_bomb_shape():
     files, skipped = unpack_zip(blob, "bomb.zip")
     assert files == []
     assert "51 files" in skipped[0]["reason"]
+
+
+def test_already_indexed_matches_only_this_company_prefix():
+    from app.panorama_bridge import already_indexed
+
+    listing = {"items": [
+        {"id": "a1", "filename": "Aadhi Vishwa Energy — UDYAM.pdf"},
+        {"id": "a2", "filename": "Aadhi Vishwa Energy — kyc.zip/pan.pdf"},
+        {"id": "b1", "filename": "Aadhi Vishwa Energy LLP — UDYAM.pdf"},
+        {"id": "c1", "name": "Other Co — UDYAM.pdf"},
+        {"filename": "Aadhi Vishwa Energy — no-id.pdf"},
+        "junk",
+    ]}
+    got = already_indexed(listing, "Aadhi Vishwa Energy")
+    assert got == {"UDYAM.pdf": "a1", "kyc.zip/pan.pdf": "a2"}
+    assert already_indexed({}, "Aadhi Vishwa Energy") == {}
+    assert already_indexed({"items": None}, "X") == {}

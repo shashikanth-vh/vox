@@ -107,6 +107,10 @@ export interface IndexResult {
   total_on_register: number;
   indexed: { file: string; doc_id: string | null; duplicate: boolean }[];
   skipped: { file: string; reason: string }[];
+  /** Files DocRAG now holds for this company (uploaded now or earlier). */
+  ready?: number;
+  /** Uploaded on THIS pass — these are still being read in the background. */
+  fresh?: number;
   note: string | null;
 }
 

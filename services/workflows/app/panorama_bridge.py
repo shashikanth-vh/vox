@@ -99,6 +99,21 @@ class IndexDocumentsIn(BaseModel):
     company: str = Field(min_length=1, max_length=300)
 
 
+def already_indexed(listing: Any, company: str) -> dict[str, str]:
+    """DocRAG name (minus the company prefix) → id, for every file the bridge has
+    already uploaded for this company. The 360 indexes on every open, so the
+    common case must cost one listing, not a re-upload of every file."""
+    prefix = f"{company} — "
+    out: dict[str, str] = {}
+    for d in ((listing or {}).get("items") or []):
+        if not isinstance(d, dict) or not d.get("id"):
+            continue
+        name = str(d.get("filename") or d.get("name") or "")
+        if name.startswith(prefix):
+            out[name[len(prefix):]] = str(d["id"])
+    return out
+
+
 def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                           caller_context: Any, problem: Any,
                           reg_headers: Any) -> None:
@@ -163,14 +178,26 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
         # DocRAG behind the AI host's private-CA edge needs the client that trusts
         # that CA (the CAM's); the default client fails every upload on TLS.
         docrag_http = getattr(request.app.state, "docrag_http", None) or http
+        docrag_headers = {"X-API-Key": settings.docrag_api_key,
+                          "X-Tenant": request.headers.get("X-Tenant",
+                                                          settings.register_tenant)}
+
+        # What is already there is not fetched again. A listing that fails is
+        # not fatal: we upload and let DocRAG's own byte-dedupe answer.
+        known: dict[str, str] = {}
+        try:
+            lst = await docrag_http.get(f"{docrag_url}/v1/documents",
+                                        headers=docrag_headers, timeout=30.0)
+            if lst.status_code < 300:
+                known = already_indexed(lst.json(), payload.company)
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("panorama_index_docrag_list_failed", extra={"error": str(exc)})
 
         async def _upload(display_name: str, data: bytes, ctype: str) -> None:
             try:
                 up = await docrag_http.post(
                     f"{docrag_url}/v1/documents",
-                    headers={"X-API-Key": settings.docrag_api_key,
-                             "X-Tenant": request.headers.get(
-                                 "X-Tenant", settings.register_tenant)},
+                    headers=docrag_headers,
                     files={"file": (f"{payload.company} — {display_name}", data,
                                     ctype or "application/octet-stream")},
                     timeout=float(getattr(settings, "docrag_timeout_s", 600.0)))
@@ -195,20 +222,33 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                             "duplicate": bool(body.get("duplicate"))})
 
         try:
-            await _walk(items, _fetch, _upload, skipped)
+            await _walk(items, _fetch, _upload, skipped, known=known, indexed=indexed)
         except Exception as exc:  # noqa: BLE001 - the last resort must NAME itself
             log.exception("panorama_index_failed")
             return problem(500, "Indexing failed",
                            f"{exc.__class__.__name__}: {exc}")
 
+        fresh = [x for x in indexed if not x.get("duplicate")]
         return {"company": payload.company, "total_on_register": len(items),
                 "indexed": indexed, "skipped": skipped,
-                "note": ("Files are processed in the background — the first "
+                "ready": len(indexed), "fresh": len(fresh),
+                "note": ("Fresh files are read in the background — the first "
                          "answers may take a minute while pages are read.")
-                if indexed else None}
+                if fresh else None}
 
     async def _walk(items: list, _fetch: Any, _upload: Any,
-                    skipped: list) -> None:
+                    skipped: list, known: dict[str, str] | None = None,
+                    indexed: list | None = None) -> None:
+        known = known or {}
+
+        def _have(name: str) -> bool:
+            if name in known:
+                if indexed is not None:
+                    indexed.append({"file": name, "doc_id": known[name],
+                                    "duplicate": True})
+                return True
+            return False
+
         for d in items:
             fname = d.get("original_filename") or f"{d.get('title', 'document')}"
             suffix = Path(fname).suffix.lower()
@@ -220,12 +260,15 @@ def mount_panorama_bridge(app: Any, settings: Any, *, denied: Any, verified_emai
                 inner, inner_skips = unpack_zip(blob, fname)
                 skipped.extend(inner_skips)
                 for name, data, _sfx in inner:
-                    await _upload(f"{fname}/{name}", data, "")
+                    if not _have(f"{fname}/{name}"):
+                        await _upload(f"{fname}/{name}", data, "")
                 continue
             if suffix not in _SUPPORTED:
                 skipped.append({"file": fname,
                                 "reason": f"{suffix or 'no extension'} is not "
                                           f"readable by the document AI"})
+                continue
+            if _have(fname):
                 continue
             blob, ctype, why = await _fetch(d.get("id"))
             if blob is None:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, IconButton, TextField,
-  Tooltip, Typography,
+  Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -139,7 +139,30 @@ function fmtDay(iso: string | null | undefined): string {
     : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/** A thin proportional bar — the composition of a number at a glance
+ *  (in flight vs booked vs on hold; good vs bad news). Empty segments vanish. */
+function StackBar({ segs, height = 5 }: {
+  segs: { value: number; color: string }[]; height?: number;
+}) {
+  const live = segs.filter((x) => x.value > 0);
+  const total = live.reduce((a, x) => a + x.value, 0);
+  if (!total) return null;
+  return (
+    <Box sx={{ display: 'flex', gap: '2px', width: '100%', height, borderRadius: 3,
+      overflow: 'hidden' }}>
+      {live.map((x, i) => (
+        <Box key={i} sx={{ flex: `${x.value} 0 0`, bgcolor: x.color, minWidth: 3 }} />))}
+    </Box>
+  );
+}
+
+// Product-line stage colors, the same three everywhere a line is drawn.
+const STAGE_COLOR = { flight: CHART_TEAL, done: '#1B7A45', hold: '#B45309' };
+
+function Tile({ label, value, sub, bar }: {
+  label: string; value: string; sub?: string;
+  bar?: { value: number; color: string }[];
+}) {
   return (
     <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: '11px',
       p: '10px 13px', display: 'flex', flexDirection: 'column', gap: 0.3, minWidth: 0 }}>
@@ -147,8 +170,32 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
         color: tokens.muted }}>{label}</Typography>
       <Typography sx={{ fontSize: 19, fontWeight: 800, color: '#17252B',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</Typography>
+      {bar && <Box sx={{ my: '2px' }}><StackBar segs={bar} /></Box>}
       {sub && <Typography sx={{ fontSize: 10.8, color: tokens.muted, whiteSpace: 'nowrap',
         overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</Typography>}
+    </Box>
+  );
+}
+
+/** The single-year figures the prospect universe captured, as bars on one
+ *  scale — enough to see the shape (thin margin, loss) without a feed. */
+function FallbackBars({ rows }: { rows: [label: string, value: number | null, color: string][] }) {
+  const live = rows.filter((r) => r[1] != null) as [string, number, string][];
+  const max = Math.max(1, ...live.map((r) => Math.abs(r[1])));
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+      {live.map(([lab, v, col]) => (
+        <Box key={lab} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography sx={{ fontSize: 10.8, fontWeight: 700, color: tokens.muted,
+            width: 58, flexShrink: 0 }}>{lab}</Typography>
+          <Box sx={{ flex: 1, height: 7, bgcolor: '#EEF1F3', borderRadius: 4, minWidth: 0 }}>
+            <Box sx={{ width: `${Math.max(2, (Math.abs(v) / max) * 100)}%`, height: 7,
+              borderRadius: 4, bgcolor: col, opacity: v < 0 ? 0.55 : 1 }} />
+          </Box>
+          <Typography sx={{ fontSize: 11.4, fontWeight: 800, color: '#17252B',
+            width: 84, textAlign: 'right', flexShrink: 0 }}>
+            {v < 0 ? '−' : ''}{fmtCr(Math.abs(v))}</Typography>
+        </Box>))}
     </Box>
   );
 }
@@ -173,7 +220,7 @@ function Section({ id, title, badge, summary, open, onToggle, children }: {
           : <ChevronRightIcon sx={{ fontSize: 17, color: tokens.muted }} />}
       </Box>
       {open && <Box sx={{ p: '0 14px 13px', display: 'flex', flexDirection: 'column',
-        gap: 1 }}>{children}</Box>}
+        gap: 1, minWidth: 0 }}>{children}</Box>}
     </Box>
   );
 }
@@ -241,6 +288,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const [gradeBusy, setGradeBusy] = useState(false);
   const [gradeErr, setGradeErr] = useState('');
 
+  const small = useMediaQuery('(max-width:700px)');
+
   useEffect(() => {
     if (!open) return;
     setP(null); setErr(''); setNews(null); setNewsErr('');
@@ -252,6 +301,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     let alive = true;
     panoramaService.get({ entityId, company })
       .then((r) => { if (!alive) return; setP(r);
+        // The ask-box's index is housekeeping, not a decision — it runs itself.
+        // The bridge only uploads what DocRAG does not already hold, so a
+        // re-open costs one listing.
+        if (r.stats.documents > 0 && r.anchor.entity_id) {
+          setIdxBusy(true);
+          panoramaService.indexDocuments(r.anchor.entity_id, r.anchor.name)
+            .then((x) => { if (alive) setIdxOut(x); })
+            .catch((e) => { if (alive) setIdxErr(apiErr(e, 'index the documents')); })
+            .finally(() => { if (alive) setIdxBusy(false); });
+        }
         // A grade computed earlier (by anyone, for this role's view) shows at once;
         // a new one is only ever computed on request — it is a model call.
         panoramaService.riskGrade(r.anchor.entity_id, r.anchor.name)
@@ -276,7 +335,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   useEffect(() => {
     if (!open || !p || !openSections.financials) return;
     if (trx || trxBusy || trxErr) return;
-    if (!p.anchor.entity_id && !p.anchor.cin) return;
+    // No CIN anywhere (master, leads, prospect row) → nothing to look up. The
+    // card explains itself instead of asking a paid API a question it cannot
+    // answer.
+    if (!p.anchor.cin) return;
     let alive = true;
     setTrxBusy(true);
     panoramaService.financials({ entityId: p.anchor.entity_id, cin: p.anchor.cin })
@@ -320,6 +382,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     finally { setGradeBusy(false); }
   };
 
+  // Only reached from "retry" after a failed automatic pass.
   const runIndex = async () => {
     if (!p?.anchor.entity_id) return;
     setIdxBusy(true); setIdxErr(''); setIdxOut(null);
@@ -329,6 +392,23 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     } catch (e: any) { setIdxErr(apiErr(e, 'index the documents')); }
     finally { setIdxBusy(false); }
   };
+  const idxReady = idxOut ? (idxOut.ready ?? idxOut.indexed.length) : 0;
+  const idxStatus = idxBusy ? 'indexing for Q&A…'
+    : idxErr ? 'Q&A indexing failed'
+    : idxOut ? `${idxReady} ready for Q&A${idxOut.skipped.length
+        ? ` · ${idxOut.skipped.length} skipped` : ''}`
+    : '';
+
+  // What the FINANCIALS card is in, and why — one word the badge, summary and
+  // body all agree on.
+  const finState: 'live' | 'nocin' | 'busy' | 'unconfigured' | 'nofilings'
+    | 'error' | 'idle' = trx?.resolved ? 'live'
+    : !p?.anchor.cin ? 'nocin'
+    : trxBusy && !trx ? 'busy'
+    : trxErr && /TRACXN_ACCESS_TOKEN/.test(trxErr) ? 'unconfigured'
+    : trxErr ? 'error'
+    : trx && !trx.resolved ? 'nofilings'
+    : 'idle';
 
   const inPrism = !!p && (p.leads.length > 0 || (p.stats.deal_count ?? 0) > 0
     || p.stats.live_deals > 0);
@@ -341,9 +421,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     : '', [p]);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth fullScreen={small}
       PaperProps={{ className: 'c360-print', sx: { bgcolor: '#F4F6F7',
-        borderRadius: '14px', maxHeight: '94vh' } }}>
+        borderRadius: small ? 0 : '14px', maxHeight: small ? '100vh' : '94vh' } }}>
       {/* Print: only the dialog, expanded, on white. */}
       <style>{`@media print {
         body * { visibility: hidden; }
@@ -379,8 +459,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         </Box>
       </Box>
 
-      <Box sx={{ p: '14px 20px 16px', overflowY: 'auto', display: 'flex',
-        flexDirection: 'column', gap: 1.4 }}>
+      <Box sx={{ p: { xs: '12px 12px 16px', sm: '14px 20px 16px' }, overflowY: 'auto',
+        overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 1.4,
+        minWidth: 0 }}>
         {err && <Alert severity="warning" sx={{ fontSize: 12.4 }}>{err}</Alert>}
         {!p && !err && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -388,7 +469,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
 
         {p && <>
           <Box sx={{ display: 'grid', gap: 1.2,
-            gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(5, 1fr)' } }}>
+            gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))',
+              sm: 'repeat(3, minmax(0, 1fr))', md: 'repeat(5, minmax(0, 1fr))' } }}>
             <Tile label="OPEN LEADS" value={String(p.stats.open_leads)}
               sub={p.stats.leads_converted
                 ? `${p.stats.leads_converted} became deal(s)` : undefined} />
@@ -397,12 +479,18 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               value={p.stats.deal_count != null
                 ? `${p.stats.deal_count} · ${p.stats.live_deals}`
                 : String(p.stats.live_deals)}
+              bar={[{ value: p.stats.deals_in_flight, color: STAGE_COLOR.flight },
+                { value: p.stats.deals_done, color: STAGE_COLOR.done },
+                { value: p.stats.deals_on_hold, color: STAGE_COLOR.hold }]}
               sub={[
                 p.stats.deals_in_flight ? `${p.stats.deals_in_flight} in flight` : '',
                 p.stats.deals_done ? `${p.stats.deals_done} disbursed` : '',
                 p.stats.deals_on_hold ? `${p.stats.deals_on_hold} on hold` : '',
               ].filter(Boolean).join(' · ') || undefined} />
             <Tile label="EXPOSURE"
+              bar={[{ value: p.stats.exposure_ask_cr || 0, color: STAGE_COLOR.flight },
+                { value: p.stats.booked_cr || 0, color: STAGE_COLOR.done },
+                { value: p.stats.on_hold_cr || 0, color: STAGE_COLOR.hold }]}
               value={p.stats.exposure_ask_cr != null ? fmtCr(p.stats.exposure_ask_cr)
                 : p.stats.booked_cr != null ? fmtCr(p.stats.booked_cr)
                 : p.stats.on_hold_cr != null ? fmtCr(p.stats.on_hold_cr) : '—'}
@@ -418,7 +506,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             <Tile label="LAST TOUCH" value={fmtDay(p.stats.last_touch)}
               sub={p.interactions[0]?.by || undefined} />
             <Tile label="NEWS · 30 DAYS" value={news ? String(news.length) : '…'}
-              sub="via PULSE radar" />
+              bar={news ? (() => {
+                const live = (p.stats.deals_in_flight + p.stats.deals_done) > 0;
+                const sevs = news.map((a) => a.severity || classify(a.headline, live)[0]);
+                return (['GREEN', 'BLUE', 'AMBER', 'RED'] as Severity[]).map((s) => ({
+                  value: sevs.filter((x) => x === s).length, color: SEV_BG[s] }));
+              })() : undefined}
+              sub={news === null ? (newsErr ? 'radar unavailable' : 'searching…')
+                : 'via PULSE radar'} />
           </Box>
 
           <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`,
@@ -447,11 +542,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           </Box>
 
           <Box sx={{ display: 'grid', gap: 1.4, alignItems: 'start',
-            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2 }}>
+            gridTemplateColumns: { xs: 'minmax(0, 1fr)',
+              md: 'minmax(0, 1fr) minmax(0, 1fr)' } }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2, minWidth: 0 }}>
               <Section id="engagements" title="ENGAGEMENTS"
                 open={!!openSections.engagements} onToggle={toggle}
                 summary={`${p.stats.open_leads} open lead(s) · ${p.stats.live_deals} live deal(s)`}>
+                <Box sx={{ maxHeight: 420, overflowY: 'auto', display: 'flex',
+                  flexDirection: 'column', gap: 1, pr: 0.5 }}>
                 {p.leads.filter((l) => !l.converted).map((l) => (
                   <Box key={l.lead_no || Math.random()} sx={{ display: 'flex', gap: 1.1 }}>
                     <Box sx={{ width: 8, height: 8, mt: '5px', borderRadius: 99,
@@ -512,6 +610,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   && !p.asset_monetisation.length && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
                     No live product lines.</Typography>)}
+                </Box>
               </Section>
 
               <Section id="contacts" title="KEY CONTACTS"
@@ -538,8 +637,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       .summary || p.interactions[0].notes || p.interactions[0].type)
                       .slice(0, 90))} · ${p.interactions.length} recent`
                   : 'none logged'}>
+                <Box sx={{ maxHeight: 300, overflowY: 'auto', display: 'flex',
+                  flexDirection: 'column', gap: 1, pr: 0.5 }}>
                 {p.interactions.map((i, n) => (
-                  <Box key={n}>
+                  <Box key={n} sx={{ flexShrink: 0 }}>
                     <Typography sx={{ fontSize: 12.6, color: '#17252B' }}>
                       {i.type} · {fmtDay(i.occurred_at)}
                       {i.by ? ` · ${i.by}` : ''}</Typography>
@@ -547,6 +648,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
                         {(i.summary || i.notes || '').slice(0, 160)}</Typography>)}
                   </Box>))}
+                </Box>
                 {!p.interactions.length && <Typography sx={{ fontSize: 11.6,
                   color: tokens.muted }}>Nothing logged yet.</Typography>}
               </Section>
@@ -564,7 +666,14 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       a.severity || classify(a.headline, live)[0]);
                     const worst: Severity | null = sevs.includes('RED') ? 'RED'
                       : sevs.includes('AMBER') ? 'AMBER' : null;
-                    return worst ? <SevPill s={worst} /> : null;
+                    const mix = (['GREEN', 'BLUE', 'AMBER', 'RED'] as Severity[])
+                      .map((s) => ({ value: sevs.filter((x) => x === s).length,
+                        color: SEV_BG[s] }));
+                    return <>
+                      {worst ? <SevPill s={worst} /> : null}
+                      {news.length > 0 && <Box sx={{ width: 64, flexShrink: 0 }}>
+                        <StackBar segs={mix} height={5} /></Box>}
+                    </>;
                   })()}
                 </> : undefined}
                 open={!!openSections.news} onToggle={toggle}
@@ -643,19 +752,28 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 </Section>)}
             </Box>
 
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2, minWidth: 0 }}>
               <Section id="financials" title="FINANCIALS"
-                badge={trx?.resolved
+                badge={finState === 'live'
                   ? <Chip size="small" label="Tracxn · live" sx={{ height: 19,
                       fontSize: 10, fontWeight: 700, color: '#fff',
                       bgcolor: CHART_TEAL }} />
+                  : finState === 'nocin'
+                  ? <Chip size="small" label="CIN needed" sx={{ height: 19,
+                      fontSize: 10, fontWeight: 700, color: '#B45309',
+                      border: '1px solid #B45309', bgcolor: '#FDF3E7' }} />
+                  : finState === 'unconfigured'
+                  ? <Chip size="small" variant="outlined" label="feed not connected"
+                      sx={{ height: 19, fontSize: 10, color: tokens.muted,
+                        borderStyle: 'dashed' }} />
+                  : finState === 'nofilings'
+                  ? <Chip size="small" variant="outlined" label="no filings"
+                      sx={{ height: 19, fontSize: 10, color: tokens.muted }} />
                   : hasFin
                   ? <Chip size="small" label="from prospect universe" sx={{ height: 19,
                       fontSize: 10, color: tokens.tealHi,
                       border: `1px solid ${tokens.tealHi}`, bgcolor: '#F0F8F6' }} />
-                  : <Chip size="small" label="market feed soon" sx={{ height: 19,
-                      fontSize: 10, color: '#B45309', border: '1px solid #B45309',
-                      bgcolor: '#FDF3E7' }} />}
+                  : undefined}
                 open={!!openSections.financials} onToggle={toggle}
                 summary={(() => {
                   const rev = trx?.series?.revenue?.points;
@@ -664,23 +782,44 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     return `Revenue ${finNum(l.value)}${trx?.series?.revenue?.unit
                       ? ` ${trx.series.revenue.unit}` : ''} (FY${l.year})`;
                   }
-                  return hasFin ? `Revenue ${fmtCr(fin!.revenue_cr)}`
-                    : 'filings, board & shareholding from the market feed';
+                  if (finState === 'nocin') {
+                    return 'no CIN on record — add it on the lead or client master';
+                  }
+                  if (finState === 'unconfigured') return 'market feed not connected on this server';
+                  if (finState === 'nofilings') return `Tracxn has no filings for CIN ${p.anchor.cin}`;
+                  return hasFin ? `Revenue ${fmtCr(fin!.revenue_cr)} · prospect universe`
+                    : 'filings, board & shareholding — expand to fetch';
                 })()}>
-                {trxBusy && !trx && (
+                {finState === 'busy' && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <CircularProgress size={15} />
                     <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
-                      Asking the market feed…</Typography>
+                      Asking the market feed for CIN {p.anchor.cin}…</Typography>
                   </Box>)}
-                {/* 409s carry the remedy in the detail — not configured, or no
-                    CIN anywhere. Say it, then fall through to what we DO have. */}
-                {trxErr && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
-                  {trxErr}</Typography>}
-                {trx && !trx.resolved && (
-                  <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-                    {trx.note || 'Tracxn has no filings for this CIN.'}
-                    {trx.cin ? ` (CIN ${trx.cin})` : ''}</Typography>)}
+                {/* Every empty state says WHY, and what would fill it. */}
+                {finState === 'nocin' && (
+                  <Typography sx={{ fontSize: 11.8, color: '#17252B', lineHeight: 1.55 }}>
+                    Filings, board and shareholding come from Tracxn, looked up by
+                    the company’s <b>CIN</b>. There is no CIN on record for
+                    {' '}{p.anchor.name} yet, so nothing was requested. Add it under
+                    {' '}<b>Company details</b> on the lead, or <b>Profile</b> on the
+                    client master (Masters ▸ Clients), and this card fills itself.
+                  </Typography>)}
+                {finState === 'unconfigured' && (
+                  <Typography sx={{ fontSize: 11.8, color: '#17252B', lineHeight: 1.55 }}>
+                    The Tracxn market feed is not connected on this server
+                    (TRACXN_ACCESS_TOKEN is not set), so nothing was requested.
+                    CIN on record: {p.anchor.cin}.
+                  </Typography>)}
+                {finState === 'nofilings' && (
+                  <Typography sx={{ fontSize: 11.8, color: '#17252B', lineHeight: 1.55 }}>
+                    Tracxn has no legal entity for CIN <b>{p.anchor.cin}</b>
+                    {trx?.note ? ` — ${trx.note}` : ''}. Check the CIN on record;
+                    a corrected one is looked up again on the next open.
+                  </Typography>)}
+                {finState === 'error' && (
+                  <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>
+                    {trxErr}</Typography>)}
 
                 {trx?.resolved && (() => {
                   const s = trx.series || {};
@@ -759,77 +898,76 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   </>;
                 })()}
 
-                {!trx?.resolved && hasFin && (
-                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 1 }}>
-                    {([['Revenue', fin!.revenue_cr], ['EBITDA', fin!.ebitda_cr],
-                      ['PAT', fin!.net_profit_cr]] as const).map(([lab, v]) => (
-                      <Box key={lab}>
-                        <Typography sx={{ fontSize: 10.5, fontWeight: 700,
-                          color: tokens.muted }}>{lab}</Typography>
-                        <Typography sx={{ fontSize: 15, fontWeight: 800,
-                          color: '#17252B' }}>{fmtCr(v)}</Typography>
-                      </Box>))}
-                    {fin!.founded_year && <Typography sx={{ gridColumn: '1 / -1',
-                      fontSize: 11, color: tokens.muted }}>
-                      Founded {fin!.founded_year} · figures from the prospect
-                      universe</Typography>}
+                {finState !== 'live' && hasFin && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6,
+                    mt: finState === 'idle' || finState === 'busy' ? 0 : 0.6 }}>
+                    <Typography sx={{ fontSize: 10, fontWeight: 800,
+                      letterSpacing: '.06em', color: tokens.muted }}>
+                      AS CAPTURED IN THE PROSPECT UNIVERSE</Typography>
+                    <FallbackBars rows={[['Revenue', fin!.revenue_cr, FIN_SERIES[0][2]],
+                      ['EBITDA', fin!.ebitda_cr, FIN_SERIES[1][2]],
+                      ['PAT', fin!.net_profit_cr, FIN_SERIES[2][2]]]} />
+                    <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
+                      single year, as captured{fin!.founded_year
+                        ? ` · founded ${fin!.founded_year}` : ''}</Typography>
                   </Box>)}
-                {!trx?.resolved && !hasFin && !trxBusy && !trxErr && (
+                {finState === 'idle' && !hasFin && (
                   <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-                    {(!p.anchor.entity_id && !p.anchor.cin)
-                      ? 'Add the company’s CIN — on the lead, the client master or '
-                        + 'the prospect row — and the Tracxn market feed lights up here.'
-                      : 'Market data (multi-year revenue, EBITDA, PAT, board, '
-                        + 'shareholding) renders here when the feed is connected; '
-                        + 'the key stays server-side.'}</Typography>)}
+                    Fetching filings for CIN {p.anchor.cin}…</Typography>)}
               </Section>
 
               <Section id="documents" title="DOCUMENTS"
-                badge={<Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
-                  {p.stats.documents} on the Data Register</Typography>}
+                badge={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6,
+                  minWidth: 0 }}>
+                  <Typography sx={{ fontSize: 10.5, color: tokens.muted,
+                    whiteSpace: 'nowrap' }}>
+                    {p.stats.documents} on the Data Register
+                    {idxStatus ? ` · ${idxStatus}` : ''}</Typography>
+                  {idxBusy && <CircularProgress size={10} />}
+                </Box>}
                 open={!!openSections.documents} onToggle={toggle}
                 summary={p.documents.slice(0, 2).map((d) => d.title).join(' · ')
                   || 'none uploaded'}>
-                <Box sx={{ display: 'flex', gap: 0.7, flexWrap: 'wrap' }}>
-                  {p.documents.slice(0, 6).map((d) => (
+                {/* Every file, in a box that scrolls rather than a "+19 more". */}
+                <Box sx={{ display: 'flex', gap: 0.7, flexWrap: 'wrap', maxHeight: 96,
+                  overflowY: 'auto', pr: 0.5 }}>
+                  {p.documents.map((d) => (
                     <Chip key={d.title + (d.uploaded_at || '')} size="small"
                       label={d.filename || d.title}
-                      sx={{ height: 22, fontSize: 11, bgcolor: '#EEF4F3',
+                      title={[d.section, d.doc_type, d.uploaded_by].filter(Boolean).join(' · ')}
+                      sx={{ height: 22, fontSize: 11, bgcolor: '#EEF4F3', maxWidth: 260,
                         color: tokens.tealHi, fontWeight: 600 }} />))}
-                  {p.documents.length > 6 && <Chip size="small"
-                    label={`+${p.documents.length - 6} more`}
-                    sx={{ height: 22, fontSize: 11 }} />}
+                  {!p.documents.length && <Typography sx={{ fontSize: 11.6,
+                    color: tokens.muted }}>Nothing on the Data Register yet.</Typography>}
                 </Box>
                 <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column',
                   gap: 0.7 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Typography sx={{ fontSize: 10.5, fontWeight: 700,
-                      color: tokens.muted }}>ASK THE INDEXED DOCUMENTS</Typography>
+                      color: tokens.muted }}>ASK THE DOCUMENTS</Typography>
                     <Box sx={{ flex: 1 }} />
-                    {p.stats.documents > 0 && p.anchor.entity_id && (
+                    {idxErr && p.anchor.entity_id && (
                       <Button size="small" variant="text" onClick={runIndex}
-                        disabled={idxBusy} sx={{ fontSize: 11, py: 0 }}>
-                        {idxBusy ? <CircularProgress size={13} />
-                          : `Index ${p.stats.documents} register file(s) for Q&A`}
-                      </Button>)}
+                        disabled={idxBusy} sx={{ fontSize: 11, py: 0, minWidth: 0 }}>
+                        retry indexing</Button>)}
                   </Box>
-                  {idxOut && (
-                    <Alert severity={idxOut.indexed.length ? 'success' : 'warning'}
-                      sx={{ fontSize: 11.6, py: 0 }}>
-                      Indexed {idxOut.indexed.length} of {idxOut.total_on_register}
-                      {idxOut.indexed.some((x) => x.duplicate) ? ' (some already were)' : ''}
-                      {idxOut.skipped.length
-                        ? ` · skipped ${idxOut.skipped.length}: ${idxOut.skipped
-                          .slice(0, 3).map((s) => s.reason).join('; ')}` : ''}
-                      {idxOut.note ? ` — ${idxOut.note}` : ''}
+                  {/* Only what needs saying: a skip and its reason, or a failure.
+                      A clean pass is the badge's "N ready for Q&A". */}
+                  {idxOut && idxOut.skipped.length > 0 && (
+                    <Alert severity="info" sx={{ fontSize: 11.2, py: 0 }}>
+                      {idxOut.skipped.length} file(s) not indexed: {idxOut.skipped
+                        .slice(0, 3).map((x) => `${x.file} — ${x.reason}`).join('; ')}
+                      {idxOut.skipped.length > 3 ? '; …' : ''}
                     </Alert>)}
+                  {idxOut?.note && (idxOut.fresh ?? 0) > 0 && (
+                    <Typography sx={{ fontSize: 10.5, color: tokens.muted }}>
+                      {idxOut.note}</Typography>)}
                   {idxErr && <Typography sx={{ fontSize: 11.2, color: tokens.muted }}>
                     {idxErr}</Typography>}
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                     {ASK_PRESETS.map(([label, q]) => (
                       <Chip key={label} size="small" clickable label={label}
-                        disabled={askBusy} onClick={() => runAsk(q)}
+                        disabled={askBusy || idxBusy} onClick={() => runAsk(q)}
                         sx={{ height: 22, fontSize: 10.8, fontWeight: 600,
                           color: tokens.tealHi, bgcolor: '#F0F8F6',
                           border: `1px solid ${tokens.tealHi}` }} />))}
@@ -840,15 +978,16 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                       onChange={(e) => setAsk(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') runAsk(); }} />
                     <Button size="small" variant="outlined" onClick={() => runAsk()}
-                      disabled={askBusy || !ask.trim()}>
+                      disabled={askBusy || idxBusy || !ask.trim()}>
                       {askBusy ? <CircularProgress size={15} /> : 'Ask'}</Button>
                   </Box>
                   {askOut?.noDocuments && (
                     <Alert severity="info" sx={{ fontSize: 11.6, py: 0 }}>
-                      No files indexed for this company yet
-                      {p.stats.documents > 0 && p.anchor.entity_id
-                        ? ' — press “Index register file(s) for Q&A” above, then ask again.'
-                        : ' — upload documents first, then ask again.'}</Alert>)}
+                      {p.stats.documents > 0
+                        ? 'None of this company’s files could be indexed for Q&A — '
+                          + 'readable kinds are PDF, Excel, images, and zips of those.'
+                        : 'No documents on the Data Register yet — upload some, and '
+                          + 'they are indexed for Q&A the next time this opens.'}</Alert>)}
                   {askOut?.answer && (
                     <Box sx={{ bgcolor: '#F6FAF9', border: '1px solid #D6E7E3',
                       borderRadius: '10px', p: '9px 11px' }}>
