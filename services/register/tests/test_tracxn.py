@@ -237,3 +237,21 @@ async def test_the_fan_out_runs_concurrently(reg: AsyncClient, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["resolved"] is True
     assert inflight["peak"] > 1
+
+
+async def test_cached_only_never_spends_and_serves_any_age(reg: AsyncClient, monkeypatch):
+    monkeypatch.setattr(get_settings(), "tracxn_access_token", "test-token")
+    calls = reg._calls  # type: ignore[attr-defined]
+    r = await reg.get(f"/v1/panorama/financials?cin={CIN}&cached_only=true", headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["resolved"] is False and r.json()["cached"] is False
+    assert r.json()["endpoints"] == len(tracxn_mod._ENDPOINTS)
+    assert calls == []                         # nothing was asked of Tracxn
+    # An explicit fetch fills the larder…
+    assert (await reg.get(f"/v1/panorama/financials?cin={CIN}", headers=ADMIN)).status_code == 200
+    n = len(calls)
+    # …and cached_only serves it even past the TTL, still without a call.
+    monkeypatch.setattr(get_settings(), "tracxn_cache_days", 0)
+    r2 = await reg.get(f"/v1/panorama/financials?cin={CIN}&cached_only=true", headers=ADMIN)
+    assert r2.json()["resolved"] is True and r2.json()["fetched_now"] == 0
+    assert len(calls) == n

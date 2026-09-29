@@ -43,7 +43,8 @@ async def reg() -> AsyncIterator[AsyncClient]:
         async with sm() as session:
             await session.execute(text(
                 "TRUNCATE interactions, documents, lending_tracker, leads, deals, "
-                "prospects, entities CASCADE"))
+                "prospects, covenants, ews_cases, sanction_terms, cp_cs_checklists, "
+                "entities CASCADE"))
             await session.commit()
         await dispose_engine()
 
@@ -195,3 +196,77 @@ async def test_panorama_by_name_without_a_master(reg: AsyncClient):
     assert p["anchor"]["entity_id"] is None
     assert p["anchor"]["matched_by"] == "name-only"
     assert "no client master yet" in p["brief"]
+
+
+async def test_post_disbursement_and_promoter_group_ride_the_panorama(reg: AsyncClient):
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from app.models import Entity
+    from app.models.covenants import Covenant, EwsCase
+    from app.models.cpcs import CpcsChecklist
+    from app.models.sanction import SanctionTerms
+
+    eid = await _build_company(reg)
+    r = await reg.patch(f"/v1/entities/{eid}", headers=ADMIN,
+                        json={"promoter_group_code": "SIDGRP", "pan": "AAACS1234F",
+                              "gstin": "29AAACS1234F1Z5"})
+    assert r.status_code == 200, r.text
+    sib = await reg.post("/v1/entities", headers=ADMIN, json={
+        "code": "SDLPWR", "legal_name": "Siddapur Power Private Limited",
+        "sector": "Renewables", "promoter_group_code": "SIDGRP"})
+    assert sib.status_code == 201, sib.text
+    sl = await reg.post("/v1/lending", headers=ADMIN, json={
+        "entity_id": sib.json()["id"], "stage": "Diligence", "amount_cr": 5.0})
+    assert sl.status_code == 201, sl.text
+
+    live = (await reg.get(f"/v1/panorama?entity_id={eid}", headers=ADMIN)).json()
+    lend_id = [x for x in live["lending"] if x["stage"] == "Note Circulated"]
+    assert lend_id
+    sm = get_sessionmaker()
+    async with sm() as session:
+        ent = (await session.execute(select(Entity).where(Entity.id == eid))).scalar_one()
+        tid = ent.tenant_id
+        from app.models import LendingTracker
+        line = (await session.execute(select(LendingTracker).where(
+            LendingTracker.entity_id == eid, LendingTracker.stage == "Note Circulated"))).scalar_one()
+        session.add(Covenant(tenant_id=tid, entity_id=eid, lending_id=line.id,
+                             name="DSCR", metric="DSCR", operator=">=", threshold=1.2,
+                             frequency="Quarterly", first_due_on=date(2026, 12, 31),
+                             breach_severity="Amber"))
+        session.add(EwsCase(tenant_id=tid, entity_id=eid, source="covenant",
+                            source_ref="cov/1", severity="Red", status="Open",
+                            title="DSCR below 1.0 in Q2", assigned_to="Chetan Malik"))
+        session.add(SanctionTerms(tenant_id=tid, lending_id=str(line.id), amount_cr=12.0,
+                                  rate_pct=11.5, tenor_months=60, emi_amount=263000.0,
+                                  repayment_start=date(2026, 11, 1)))
+        session.add(CpcsChecklist(tenant_id=tid, lending_id=str(line.id), status="Draft",
+                                  items=[{"key": "br", "label": "Board resolution",
+                                          "required": True, "status": "Complete"},
+                                         {"key": "ins", "label": "Insurance assignment",
+                                          "required": True, "status": "Pending"},
+                                         {"key": "opt", "label": "Optional note",
+                                          "required": False, "status": "Pending"}]))
+        await session.commit()
+
+    p = (await reg.get(f"/v1/panorama?entity_id={eid}", headers=ADMIN)).json()
+    a = p["anchor"]
+    assert a["pan"] == "AAACS1234F" and a["gstin"] == "29AAACS1234F1Z5"
+    assert a["promoter_group_code"] == "SIDGRP"
+    pd = p["post_disbursement"]
+    assert pd["covenants"][0]["name"] == "DSCR" and pd["covenants"][0]["threshold"] == 1.2
+    assert pd["covenants"][0]["first_due_on"] == "2026-12-31"
+    assert pd["ews"][0]["severity"] == "Red" and pd["ews"][0]["status"] == "Open"
+    assert pd["sanction_terms"][0]["rate_pct"] == 11.5
+    assert pd["sanction_terms"][0]["tenor_months"] == 60
+    c = pd["cpcs"][0]
+    assert (c["items_total"], c["items_done"]) == (3, 1)
+    assert c["required_pending"] == ["Insurance assignment"]
+    # The brief leads with the open early-warning case.
+    assert "Early warning (Red): DSCR below 1.0 in Q2." in p["brief"]
+    # Sister company under the same promoters, with what we carry on it.
+    g = p["group"]
+    assert g["code"] == "SIDGRP"
+    assert [m["name"] for m in g["members"]] == ["Siddapur Power Private Limited"]
+    assert g["members"][0]["ask_cr"] == 5.0 and g["members"][0]["ews_open"] == 0

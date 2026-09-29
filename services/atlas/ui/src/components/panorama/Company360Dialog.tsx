@@ -314,6 +314,11 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   open: boolean; entityId?: string | null; company?: string; onClose: () => void;
 }) {
   const small = useMediaQuery('(max-width:700px)');
+  // A sister company (promoter group) opens IN this dialog; × or "back" returns.
+  const [target, setTarget] = useState<{ entityId?: string | null; company?: string } | null>(null);
+  const effEntityId = target ? target.entityId : entityId;
+  const effCompany = target ? target.company : company;
+  const close = () => { setTarget(null); onClose(); };
   const [p, setP] = useState<Panorama | null>(null);
   const [err, setErr] = useState('');
   const [news, setNews] = useState<Article[] | null>(null);
@@ -338,15 +343,15 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     setGrade(null); setGradeBusy(false); setGradeErr(''); setDlErr(''); setDlBusy(false);
     setTab('engagements'); setNewsSev(null); setBriefOpen(false);
     let alive = true;
-    panoramaService.get({ entityId, company })
+    panoramaService.get({ entityId: effEntityId, company: effCompany })
       .then((r) => {
         if (!alive) return;
         setP(r); pRef.current = r;
-        // Filings are fetched up front — they are the numbers card, not an
-        // extra — but never without a CIN: the card explains itself instead.
+        // Filings: the register's CACHE only. Tracxn bills per call, so a fetch
+        // is always someone's decision — the card offers it, and says the cost.
         if (r.anchor.cin) {
           setTrxBusy(true);
-          panoramaService.financials({ entityId: r.anchor.entity_id, cin: r.anchor.cin })
+          panoramaService.financials({ entityId: r.anchor.entity_id, cin: r.anchor.cin, cachedOnly: true })
             .then((x) => { if (alive) setTrx(x); })
             .catch((e) => { if (alive) setTrxErr(apiErr(e, 'reach the market feed')
               || 'The market feed did not answer.'); })
@@ -363,15 +368,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
       })
       .catch((e) => { if (alive) setErr(apiErr(e, 'load the company 360')); });
     return () => { alive = false; };
-  }, [open, entityId, company]);
+  }, [open, effEntityId, effCompany]);
 
-  const refreshTrx = () => {
+  // The one place Tracxn is spent: on request, refresh or first fetch alike.
+  const fetchTrx = (refresh: boolean) => {
     if (!p || trxBusy || !p.anchor.cin) return;
     setTrxBusy(true); setTrxErr('');
-    panoramaService.financials({ entityId: p.anchor.entity_id, cin: p.anchor.cin, refresh: true })
-      .then(setTrx).catch((e) => setTrxErr(apiErr(e, 'refresh the market feed')))
+    panoramaService.financials({ entityId: p.anchor.entity_id, cin: p.anchor.cin, refresh })
+      .then(setTrx).catch((e) => setTrxErr(apiErr(e, refresh ? 'refresh the market feed' : 'reach the market feed')))
       .finally(() => setTrxBusy(false));
   };
+  const refreshTrx = () => fetchTrx(true);
   const runGrade = async (refresh: boolean) => {
     if (!p) return;
     setGradeBusy(true); setGradeErr('');
@@ -384,13 +391,22 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
     finally { setGradeBusy(false); }
   };
   // ---------- derived reading ----------------------------------------------
-  const finState: 'live' | 'nocin' | 'busy' | 'unconfigured' | 'nofilings' | 'error' | 'idle'
+  const finState: 'live' | 'nocin' | 'busy' | 'unconfigured' | 'notfetched' | 'nofilings' | 'error' | 'idle'
     = trx?.resolved ? 'live'
     : !p?.anchor.cin ? 'nocin'
     : trxBusy && !trx ? 'busy'
     : trxErr && /TRACXN_ACCESS_TOKEN/.test(trxErr) ? 'unconfigured'
     : trxErr ? 'error'
+    : trx && trx.cached === false ? 'notfetched'
     : trx && !trx.resolved ? 'nofilings' : 'idle';
+  const pdz = p?.post_disbursement;
+  const openEws = (pdz?.ews || []).filter((e) => e.status !== 'Closed');
+  const sevColor = (sev: string) => /red/i.test(sev) ? tokens.bad : /amber/i.test(sev) ? tokens.warn : '#1F6FA8';
+  const today = new Date().toISOString().slice(0, 10);
+  const nextCov = (pdz?.covenants || []).filter((c) => c.first_due_on && c.first_due_on >= today)
+    .sort((a, b) => (a.first_due_on! < b.first_due_on! ? -1 : 1))[0] || null;
+  const cpPending = (pdz?.cpcs || []).flatMap((c) => c.required_pending);
+  const grp = p?.group && p.group.members.length ? p.group : null;
   const series = trx?.series || {};
   const last = (k: string) => { const pts = series[k]?.points; return pts?.length ? pts[pts.length - 1] : null; };
   const prev = (k: string) => { const pts = series[k]?.points; return pts && pts.length > 1 ? pts[pts.length - 2] : null; };
@@ -473,6 +489,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         p.documents.find((d) => (d.uploaded_at || '').slice(0, 10) === k)?.uploaded_by));
     graded.slice(0, 3).forEach(({ a, sev }) => add(a.when, `News: ${a.headline}`, SEV_BG[sev], false,
       [SEV_LABEL[sev], a.source].filter(Boolean).join(' · ')));
+    (p.post_disbursement?.ews || []).forEach((e) => {
+      add(e.opened_at, `Early warning opened · ${e.severity}`, sevColor(e.severity), true, e.title + (e.summary ? `\n${e.summary}` : ''), e.assigned_to);
+      add(e.closed_at, `Early warning closed${e.disposition ? ` · ${e.disposition}` : ''}`, '#7B8A92', false, e.title);
+    });
     if (grade) add(grade.generated_at, `Graded ${grade.label} · ${grade.score}`, BAND_COLOR[grade.rating], true,
       grade.verdict, grade.generated_by);
     out.sort((a, b) => a.at - b.at);
@@ -522,7 +542,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   );
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth fullScreen={small}
+    <Dialog open={open} onClose={close} maxWidth="lg" fullWidth fullScreen={small}
       PaperProps={{ className: 'c360-print', sx: { bgcolor: '#F4F6F7',
         borderRadius: small ? 0 : '14px', maxHeight: small ? '100vh' : '94vh' } }}>
       {/* Print = the whole brief on paper: the dialog leaves its fixed frame, every
@@ -550,15 +570,23 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         bgcolor: '#fff', borderBottom: `1px solid ${tokens.line}` }}>
         <Box sx={{ minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            {target && <Chip size="small" clickable label={`← back to ${company || 'company'}`}
+              onClick={() => setTarget(null)} sx={{ height: 21, fontSize: 10.8 }} />}
             <Typography sx={{ fontSize: 18, fontWeight: 800, color: INK }}>
-              {p?.anchor.name || company || '…'}</Typography>
+              {p?.anchor.name || effCompany || '…'}</Typography>
             {p?.anchor.sector && <Chip size="small" variant="outlined" color="primary"
               label={p.anchor.sector} sx={{ height: 21, fontSize: 10.8 }} />}
             {p?.anchor.state && <Chip size="small" variant="outlined"
-              label={p.anchor.state} sx={{ height: 21, fontSize: 10.8 }} />}
+              label={[p.anchor.city, p.anchor.state].filter(Boolean).join(', ')} sx={{ height: 21, fontSize: 10.8 }} />}
+            {p?.anchor.lifecycle && <Chip size="small" label={p.anchor.lifecycle}
+              sx={{ height: 21, fontSize: 10.8, bgcolor: '#EEF4F3', color: tokens.tealHi, fontWeight: 700 }} />}
+            {openEws.length > 0 && <Chip size="small" label={`Early warning · ${openEws[0].severity}`}
+              sx={{ height: 21, fontSize: 10.8, fontWeight: 800, color: '#fff', bgcolor: sevColor(openEws[0].severity) }} />}
           </Box>
           <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-            {[p?.anchor.cin,
+            {[p?.anchor.cin ? `CIN ${p.anchor.cin}` : null,
+              p?.anchor.pan ? `PAN ${p.anchor.pan}` : null,
+              p?.anchor.gstin ? `GSTIN ${p.anchor.gstin}` : null,
               trx?.legal_entity?.incorporated ? `incorporated ${fmtDate(trx.legal_entity.incorporated)}` : null,
               p?.since ? `first activity ${fmtDate(p.since)}` : null,
               p?.owners?.length ? `owners: ${p.owners.join(', ')}` : null,
@@ -572,7 +600,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             canGrade={!!p && (news !== null || !!newsErr)} onGrade={runGrade} />
           <Button size="small" variant="contained" startIcon={<DownloadIcon />}
             onClick={() => window.print()}>Download</Button>
-          <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
+          <IconButton size="small" onClick={close}><CloseIcon fontSize="small" /></IconButton>
         </Box>
       </Box>
 
@@ -625,7 +653,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               </Box>
             </Card>
 
-            <Card stripe={grade ? BAND_COLOR[grade.rating] : '#B45309'}>
+            <Card stripe={openEws.length ? sevColor(openEws[0].severity) : grade ? BAND_COLOR[grade.rating] : '#B45309'}>
               <Eyebrow right={grade ? <Chip size="small" label={`${grade.label} · ${grade.score}/100`}
                 sx={{ height: 18, fontSize: 10, fontWeight: 800, color: '#fff', bgcolor: BAND_COLOR[grade.rating] }} /> : undefined}>
                 How they’re doing</Eyebrow>
@@ -636,6 +664,10 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     : 'Not graded yet'}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.4 }}>
+                {openEws.map((e, i) => (
+                  <Bullet key={i} dot={sevColor(e.severity)}>
+                    <b>Early warning ({e.severity}):</b> {e.title}
+                    {e.assigned_to ? ` · with ${e.assigned_to}` : ''}{e.opened_at ? ` · since ${fmtDay(e.opened_at)}` : ''}</Bullet>))}
                 {finState === 'live' && revL ? (
                   <Bullet dot={FIN_SERIES[0][2]}>Revenue <b>{fmtCr(revL.value)}</b> {revL.fy || revL.year}
                     {growth != null ? ` · ${pct(growth)} YoY` : ''}
@@ -644,6 +676,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   <Bullet dot="#B45309">Filings not fetched — <b>no CIN on record</b>; add it on the lead or client master.</Bullet>
                 ) : finState === 'unconfigured' ? (
                   <Bullet dot="#9AA8AF">Market feed not connected on this server.</Bullet>
+                ) : finState === 'notfetched' ? (
+                  <Bullet dot="#9AA8AF">Filings not fetched from Tracxn yet — fetch them from the Financial snapshot when needed (it spends API calls).</Bullet>
                 ) : finState === 'nofilings' ? (
                   <Bullet dot="#9AA8AF">{trx?.note || `Tracxn has no filings for CIN ${p.anchor.cin}.`}</Bullet>
                 ) : finState === 'busy' ? (
@@ -703,6 +737,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 ) : p.checklist && p.checklist.required_total > 0 ? (
                   <Bullet dot={tokens.ok}>Data Register complete — {p.checklist.required_on_file}/{p.checklist.required_total} required on file</Bullet>
                 ) : null}
+                {nextCov && <Bullet dot={tokens.warn}><b>Covenant due {fmtDay(nextCov.first_due_on)}:</b> {nextCov.name}
+                  {nextCov.metric ? ` (${nextCov.metric} ${nextCov.operator || ''} ${nextCov.threshold ?? ''})` : ''}</Bullet>}
+                {cpPending.length > 0 && <Bullet dot={tokens.warn}><b>CP/CS pending ({cpPending.length}):</b> {cpPending.join(', ')}</Bullet>}
                 {grade?.conditions?.[0] && <Bullet dot="#1F6FA8"><b>Condition:</b> {grade.conditions[0]}</Bullet>}
               </Box>
             </Card>
@@ -810,6 +847,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
               <Eyebrow right={finState === 'live'
                 ? <Chip size="small" label="Tracxn · filings" sx={{ height: 18, fontSize: 10, fontWeight: 700, color: '#fff', bgcolor: CHART_TEAL }} />
                 : finState === 'nocin' ? <Chip size="small" label="CIN needed" sx={{ height: 18, fontSize: 10, fontWeight: 700, color: '#B45309', border: '1px solid #B45309', bgcolor: '#FDF3E7' }} />
+                : finState === 'notfetched' ? <Chip size="small" variant="outlined" label="not fetched" sx={{ height: 18, fontSize: 10, color: tokens.muted, borderStyle: 'dashed' }} />
                 : finState === 'busy' ? <CircularProgress size={12} /> : undefined}>
                 Financial snapshot</Eyebrow>
               {finState === 'live' && (() => {
@@ -872,7 +910,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   </Box>
                 </>;
               })()}
-              {finState === 'busy' && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>Asking the market feed for CIN {p.anchor.cin}…</Typography>}
+              {finState === 'busy' && <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>{trx ? 'Fetching filings from Tracxn…' : 'Checking the register’s cache…'}</Typography>}
+              {finState === 'notfetched' && (
+                <Box className="no-print" sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
+                  <Typography sx={{ fontSize: 11.8, color: INK, lineHeight: 1.55 }}>
+                    Filed financials, board and shareholding are available from Tracxn for CIN <b>{p.anchor.cin}</b>,
+                    but have not been fetched yet. Tracxn charges per call, so nothing is fetched until you ask;
+                    once fetched, the answer is kept and re-fetched only on Refresh.
+                  </Typography>
+                  <Box><Button size="small" variant="outlined" onClick={() => fetchTrx(false)} disabled={trxBusy}
+                    startIcon={<DownloadIcon />}>Fetch filings from Tracxn · ~{trx?.endpoints || 15} API calls</Button></Box>
+                </Box>)}
               {finState === 'nocin' && (
                 <Typography sx={{ fontSize: 11.8, color: INK, lineHeight: 1.55 }}>
                   Filings, board and shareholding come from Tracxn, looked up by the company’s <b>CIN</b>. There is no CIN on record for {p.anchor.name} yet, so nothing was requested. Add it under <b>Company details</b> on the lead, or <b>Profile</b> on the client master, and this card fills itself.
@@ -896,6 +944,98 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                   Audited financials still to request: {missing.filter((m) => /financ|audit|itr|cma|provisional/i.test(m.label || m.section || '')).map((m) => m.label).join(', ')}.</Typography>)}
             </Card>
           </Box>
+
+          {/* ---- post-disbursement: what a disbursed line lives under --------- */}
+          {pdz && (pdz.covenants.length + pdz.ews.length + pdz.sanction_terms.length + pdz.cpcs.length) > 0 && (
+            <Card stripe={openEws.length ? sevColor(openEws[0].severity) : STAGE_COLOR.done}>
+              <Eyebrow right={<Typography sx={{ fontSize: 10.5, color: tokens.muted }}>sanction terms · CP/CS · covenants · early warnings</Typography>}>
+                Post-disbursement</Eyebrow>
+              <Box sx={{ display: 'grid', gap: 1.6, gridTemplateColumns: { xs: 'minmax(0,1fr)', md: 'minmax(0,1fr) minmax(0,1fr)' } }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  {pdz.sanction_terms.map((t, i) => (
+                    <Box key={i}>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted }}>SANCTION TERMS{p.lending.length > 1 && t.tracker_no ? ` · ${lendName(p.lending.find((r) => r.tracker_no === t.tracker_no) || p.lending[0])}` : ''}</Typography>
+                      <Typography sx={{ fontSize: 12.4, color: INK, lineHeight: 1.6 }}>
+                        {[t.amount_cr != null ? fmtCr(t.amount_cr) : null,
+                          t.rate_pct != null ? `${t.rate_pct}% ${t.rate_kind?.toLowerCase() || ''}${t.spread_pct != null ? ` + ${t.spread_pct}%` : ''}` : null,
+                          t.tenor_months != null ? `${t.tenor_months} months` : null,
+                          t.emi_amount != null ? `${t.schedule_kind || 'EMI'} ₹${Math.round(t.emi_amount).toLocaleString('en-IN')}` : null,
+                          t.repayment_start ? `repayments from ${fmtDate(t.repayment_start)}` : null,
+                          t.moratorium_months ? `${t.moratorium_months}-month moratorium` : null,
+                          t.penal_rate_pct != null ? `penal ${t.penal_rate_pct}%` : null].filter(Boolean).join(' · ')}
+                      </Typography>
+                    </Box>))}
+                  {pdz.cpcs.map((c, i) => (
+                    <Box key={i}>
+                      <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted }}>CP / CS CHECKLIST · v{c.version} · {c.status}</Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.4 }}>
+                        <Box sx={{ flex: 1, height: 7, bgcolor: '#EEF1F3', borderRadius: 4 }}>
+                          <Box sx={{ width: `${c.items_total ? (c.items_done / c.items_total) * 100 : 0}%`, height: 7, borderRadius: 4, bgcolor: c.required_pending.length ? tokens.warn : STAGE_COLOR.done }} />
+                        </Box>
+                        <Typography sx={{ fontSize: 11.4, fontWeight: 700, color: INK, whiteSpace: 'nowrap' }}>{c.items_done} / {c.items_total} done</Typography>
+                      </Box>
+                      {c.required_pending.length > 0 && <Typography sx={{ fontSize: 11.4, color: tokens.warn, mt: 0.3 }}>Pending (required): {c.required_pending.join(' · ')}</Typography>}
+                      {(c.prepared_by || c.approved_by) && <Typography sx={{ fontSize: 10.8, color: tokens.muted }}>{[c.prepared_by ? `prepared by ${c.prepared_by}` : null, c.approved_by ? `approved by ${c.approved_by}` : null].filter(Boolean).join(' · ')}</Typography>}
+                    </Box>))}
+                  {!pdz.sanction_terms.length && !pdz.cpcs.length && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>No sanction terms or CP/CS checklist recorded on the lines.</Typography>}
+                </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  {pdz.ews.length > 0 && <>
+                    <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted }}>EARLY-WARNING CASES · {openEws.length} open</Typography>
+                    {pdz.ews.map((e, i) => (
+                      <Box key={i} sx={{ borderLeft: `3px solid ${e.status === 'Closed' ? '#C9D2D7' : sevColor(e.severity)}`, pl: 1 }}>
+                        <Typography sx={{ fontSize: 12.2, color: INK }}><b>{e.title}</b> · {e.severity} · {e.status}{e.disposition ? ` (${e.disposition})` : ''}</Typography>
+                        <Typography sx={{ fontSize: 11, color: tokens.muted }}>{[e.source, e.opened_at ? `opened ${fmtDate(e.opened_at)}` : null, e.assigned_to ? `with ${e.assigned_to}` : null, e.closed_at ? `closed ${fmtDate(e.closed_at)}` : null].filter(Boolean).join(' · ')}</Typography>
+                        {e.summary && <Typography sx={{ fontSize: 11.4, color: INK, whiteSpace: 'pre-wrap' }}>{e.summary}</Typography>}
+                      </Box>))}
+                  </>}
+                  {pdz.covenants.length > 0 && <>
+                    <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '.06em', color: tokens.muted, mt: pdz.ews.length ? 0.6 : 0 }}>COVENANTS · {pdz.covenants.length}</Typography>
+                    {pdz.covenants.map((c, i) => (
+                      <Typography key={i} sx={{ fontSize: 12, color: INK }}>
+                        <b>{c.name}</b>{c.metric ? ` · ${c.metric} ${c.operator || ''} ${c.threshold ?? ''}` : ''}{c.frequency ? ` · ${c.frequency.toLowerCase()}` : ''}
+                        {c.first_due_on ? ` · ${c.first_due_on >= today ? 'next due' : 'first due'} ${fmtDate(c.first_due_on)}` : ''}
+                        <span style={{ color: sevColor(c.breach_severity) }}> · breach → {c.breach_severity}</span>
+                      </Typography>))}
+                  </>}
+                  {!pdz.ews.length && !pdz.covenants.length && <Typography sx={{ fontSize: 11.4, color: tokens.muted }}>No covenants or early-warning cases on this company.</Typography>}
+                </Box>
+              </Box>
+            </Card>)}
+
+          {/* ---- promoter group: one credit risk across sister companies ------ */}
+          {grp && (
+            <Card stripe="#6D5FD3">
+              <Eyebrow right={<Typography sx={{ fontSize: 10.5, color: tokens.muted }}>same promoters · click a company to open its brief</Typography>}>
+                Promoter group · {grp.code}</Eyebrow>
+              {(() => {
+                const askAll = (p.stats.exposure_ask_cr || 0) + grp.members.reduce((a, m) => a + (m.ask_cr || 0), 0);
+                const bookedAll = (p.stats.booked_cr || 0) + grp.members.reduce((a, m) => a + (m.booked_cr || 0), 0);
+                const ewsAll = openEws.length + grp.members.reduce((a, m) => a + m.ews_open, 0);
+                return <Typography sx={{ fontSize: 13.4, fontWeight: 800, color: INK, mb: 0.8 }}>
+                  {grp.members.length + 1} companies · {fmtCr(bookedAll)} booked · {fmtCr(askAll)} in market
+                  {ewsAll ? <span style={{ color: tokens.bad }}> · {ewsAll} open early warning{ewsAll > 1 ? 's' : ''}</span> : ''}
+                </Typography>;
+              })()}
+              <Box sx={{ overflowX: 'auto' }}>
+                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.8,
+                  '& th, & td': { padding: '4px 6px', borderBottom: `1px solid ${tokens.line}`, textAlign: 'right', whiteSpace: 'nowrap' },
+                  '& th:first-of-type, & td:first-of-type': { textAlign: 'left' },
+                  '& thead th': { fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase', color: tokens.muted, fontWeight: 700 } }}>
+                  <thead><tr><th>Company</th><th>Sector</th><th>In market</th><th>Booked</th><th>Early warnings</th></tr></thead>
+                  <tbody>
+                    <tr><td style={{ fontWeight: 700, color: INK }}>{p.anchor.name} <span style={{ color: tokens.muted, fontWeight: 400 }}>(this brief)</span></td><td>{p.anchor.sector || '—'}</td><td>{p.stats.exposure_ask_cr != null ? fmtCr(p.stats.exposure_ask_cr) : '—'}</td><td>{p.stats.booked_cr != null ? fmtCr(p.stats.booked_cr) : '—'}</td><td style={{ color: openEws.length ? tokens.bad : tokens.muted }}>{openEws.length || '—'}</td></tr>
+                    {grp.members.map((m) => (
+                      <tr key={m.entity_id}>
+                        <td><Typography component="span" onClick={() => setTarget({ entityId: m.entity_id, company: m.name })}
+                          sx={{ fontSize: 11.8, fontWeight: 700, color: tokens.tealHi, cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>{m.name}</Typography></td>
+                        <td>{m.sector || '—'}</td><td>{m.ask_cr != null ? fmtCr(m.ask_cr) : '—'}</td><td>{m.booked_cr != null ? fmtCr(m.booked_cr) : '—'}</td>
+                        <td style={{ color: m.ews_open ? tokens.bad : tokens.muted }}>{m.ews_open || '—'}</td>
+                      </tr>))}
+                  </tbody>
+                </Box>
+              </Box>
+            </Card>)}
 
           {/* ---- depth tabs ---------------------------------------------- */}
           <Card sx={{ p: 0 }}>

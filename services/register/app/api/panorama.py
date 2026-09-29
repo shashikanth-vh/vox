@@ -222,6 +222,81 @@ async def company_panorama(
         AssetMonetisation, "asset_monetisation", "asset_monetisation",
         AssetMonetisation.entity_id == eid)
 
+    # ---- post-disbursement: what a disbursed line lives under ------------------
+    # Covenants and early-warning cases hang off the company (deals view); the
+    # sanction terms and CP/CS checklist off each lending line (lending view),
+    # reached only through lines the caller could already see.
+    from app.models.covenants import Covenant, EwsCase
+    from app.models.cpcs import CpcsChecklist
+    from app.models.sanction import SanctionTerms
+
+    covs = [] if eid is None else await rows(
+        Covenant, "deals", "covenants", Covenant.entity_id == eid,
+        Covenant.is_active.is_(True), order=Covenant.first_due_on.asc().nulls_last())
+    ews = [] if eid is None else await rows(
+        EwsCase, "deals", "ews", EwsCase.entity_id == eid,
+        order=EwsCase.created_at.desc(), limit=20)
+    lend_ids = [str(r.id) for r in lending]
+    terms: list[Any] = []
+    cpcs: list[Any] = []
+    if lend_ids:
+        terms = (await ctx.session.execute(select(SanctionTerms).where(
+            SanctionTerms.tenant_id == ctx.tenant_id, SanctionTerms.deleted_at.is_(None),
+            SanctionTerms.lending_id.in_(lend_ids)))).scalars().all()
+        cpcs = (await ctx.session.execute(select(CpcsChecklist).where(
+            CpcsChecklist.tenant_id == ctx.tenant_id, CpcsChecklist.deleted_at.is_(None),
+            CpcsChecklist.lending_id.in_(lend_ids))
+            .order_by(CpcsChecklist.checklist_version.desc()))).scalars().all()
+    tracker_of = {str(r.id): r.tracker_no for r in lending}
+
+    def _cpcs_view(c: Any) -> dict[str, Any]:
+        items = [i for i in (c.items or []) if isinstance(i, dict)]
+        done_words = {"complete", "completed", "done", "met", "waived", "satisfied", "received"}
+
+        def is_done(i: dict) -> bool:
+            return bool(i.get("done")) or str(i.get("status") or "").lower() in done_words
+        pending = [str(i.get("label") or i.get("key") or "item") for i in items
+                   if i.get("required", True) and not is_done(i)]
+        return {"lending_id": c.lending_id, "tracker_no": tracker_of.get(c.lending_id),
+                "status": c.status, "version": c.checklist_version,
+                "items_total": len(items), "items_done": sum(1 for i in items if is_done(i)),
+                "required_pending": pending[:12],
+                "prepared_by": c.prepared_by, "approved_by": c.approved_by}
+
+    # ---- promoter group: sister companies and what we carry on them -----------
+    group: dict[str, Any] | None = None
+    gcode = getattr(ent, "promoter_group_code", None) if ent is not None else None
+    if gcode and access("lending") is not Access.NONE:
+        sibs = (await ctx.session.execute(select(Entity).where(
+            Entity.tenant_id == ctx.tenant_id, Entity.deleted_at.is_(None),
+            Entity.promoter_group_code == gcode, Entity.id != ent.id)
+            .order_by(Entity.legal_name).limit(12))).scalars().all()
+        members: list[dict[str, Any]] = []
+        for sib in sibs:
+            sl = (await ctx.session.execute(select(LendingTracker).where(
+                LendingTracker.tenant_id == ctx.tenant_id, LendingTracker.deleted_at.is_(None),
+                LendingTracker.entity_id == sib.id))).scalars().all()
+            ss = (await ctx.session.execute(select(SyndicationTracker).where(
+                SyndicationTracker.tenant_id == ctx.tenant_id,
+                SyndicationTracker.deleted_at.is_(None),
+                SyndicationTracker.entity_id == sib.id))).scalars().all()
+            ask = sum((_num(r.amount_cr) or 0) for r in sl
+                      if _bucket(r.stage, LENDING_DEAD, LENDING_DONE) == "flight")
+            ask += sum((_num(r.amount_cr) or 0) for r in ss
+                       if _bucket(r.status, SYN_DEAD, SYN_DONE) == "flight")
+            booked = sum((_num(r.disbursed_amount) or _num(r.amount_cr) or 0) for r in sl
+                         if _bucket(r.stage, LENDING_DEAD, LENDING_DONE) == "done")
+            booked += sum((_num(r.amount_cr) or 0) for r in ss
+                          if _bucket(r.status, SYN_DEAD, SYN_DONE) == "done")
+            open_ews = (await ctx.session.execute(select(func.count()).select_from(EwsCase).where(
+                EwsCase.tenant_id == ctx.tenant_id, EwsCase.deleted_at.is_(None),
+                EwsCase.entity_id == sib.id, EwsCase.status != "Closed"))).scalar_one()
+            members.append({"entity_id": str(sib.id), "name": sib.display_name or sib.legal_name,
+                            "sector": sib.sector, "ask_cr": round(ask, 2) if ask else None,
+                            "booked_cr": round(booked, 2) if booked else None,
+                            "ews_open": int(open_ews)})
+        group = {"code": gcode, "members": members}
+
     # ---- the timeline: interactions ride the deals/leads views ----------------
     inter_view = "deals" if access("deals") is not Access.NONE else "leads"
     inters = [] if eid is None else await rows(
@@ -303,6 +378,10 @@ async def company_panorama(
         bits.append(f"{display} — no client master yet; showing what carries the name.")
     # The desk's names: nothing on the UI shows a tracker number, so the brief
     # names a line by product and amount, never by code.
+    for e in ews:
+        if e.status != "Closed":
+            bits.append(f"Early warning ({e.severity}): {e.title}.")
+            break
     _KIND = {"lending": "Lending", "syndication": "Platform deal",
              "am": "Asset monetisation"}
 
@@ -434,7 +513,37 @@ async def company_panorama(
             or (prospect.state if prospect else None),
             "domain": (prospect.domain if prospect else None),
             "about": getattr(ent, "about", None),
+            "pan": getattr(ent, "pan", None), "gstin": getattr(ent, "gstin", None),
+            "lifecycle": getattr(ent, "lifecycle", None),
+            "city": getattr(ent, "city", None),
+            "tags": getattr(ent, "tags", None) or [],
+            "promoter_group_code": gcode,
         },
+        "post_disbursement": {
+            "covenants": [{
+                "name": c.name, "type": c.covenant_type, "description": c.description,
+                "metric": c.metric, "operator": c.operator, "threshold": _num(c.threshold),
+                "frequency": c.frequency, "first_due_on": _iso(c.first_due_on),
+                "grace_days": c.grace_days, "breach_severity": c.breach_severity,
+                "tracker_no": tracker_of.get(str(c.lending_id)) if c.lending_id else None,
+            } for c in covs],
+            "ews": [{
+                "title": e.title, "severity": e.severity, "status": e.status,
+                "source": e.source, "summary": e.summary, "opened_at": _iso(e.created_at),
+                "assigned_to": e.assigned_to, "disposition": e.disposition,
+                "closed_at": _iso(e.closed_at),
+            } for e in ews],
+            "sanction_terms": [{
+                "tracker_no": tracker_of.get(t.lending_id), "amount_cr": _num(t.amount_cr),
+                "rate_kind": t.rate_kind, "rate_pct": _num(t.rate_pct),
+                "spread_pct": _num(t.spread_pct), "tenor_months": t.tenor_months,
+                "emi_amount": _num(t.emi_amount), "repayment_start": _iso(t.repayment_start),
+                "moratorium_months": t.moratorium_months, "schedule_kind": t.schedule_kind,
+                "penal_rate_pct": _num(t.penal_rate_pct),
+            } for t in terms],
+            "cpcs": [_cpcs_view(c) for c in cpcs],
+        },
+        "group": group,
         "restricted": restricted,
         "stats": {
             "open_leads": len(open_leads),

@@ -331,6 +331,11 @@ async def panorama_financials(
     refresh: bool = Query(default=False,
                           description="Force a refetch past the cache (spends "
                                       "Tracxn calls)."),
+    cached_only: bool = Query(default=False,
+                              description="Never call Tracxn: answer from the "
+                                          "cache whatever its age, or say nothing "
+                                          "is cached. The 360 opens this way — a "
+                                          "fetch is always someone's decision."),
 ) -> dict[str, Any]:
     from app.core.config import get_settings
     from app.core.errors import ConflictError
@@ -351,6 +356,14 @@ async def panorama_financials(
     cached = {c.endpoint: c for c in (await ctx.session.execute(
         select(TracxnCache).where(TracxnCache.tenant_id == ctx.tenant_id,
                                   TracxnCache.cin == the_cin))).scalars()}
+    if cached_only:
+        if "legalentity" not in cached:
+            return {"cin": the_cin, "configured": True, "resolved": False,
+                    "cached": False, "fetched_now": 0,
+                    "note": "Not fetched from Tracxn yet.",
+                    "endpoints": len(_ENDPOINTS)}
+        # Serve the larder whatever its age: age is shown, spending is explicit.
+        ttl = timedelta(days=36500)
 
     async def get_payload(key: str, body: dict) -> tuple[dict | None, bool]:
         row = cached.get(key)

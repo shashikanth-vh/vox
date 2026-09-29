@@ -51,7 +51,30 @@ export interface Panorama {
                            label: string | null }[]; note?: string };
   anchor: { entity_id: string | null; matched_by: string; name: string;
             cin: string | null; sector: string | null; sub_sector: string | null;
-            state: string | null; domain: string | null; about: string | null };
+            state: string | null; domain: string | null; about: string | null;
+            pan?: string | null; gstin?: string | null; lifecycle?: string | null;
+            city?: string | null; tags?: string[]; promoter_group_code?: string | null };
+  /** What a disbursed line lives under. */
+  post_disbursement?: {
+    covenants: { name: string; type: string | null; description: string | null;
+                 metric: string | null; operator: string | null; threshold: number | null;
+                 frequency: string | null; first_due_on: string | null; grace_days: number;
+                 breach_severity: string; tracker_no: string | null }[];
+    ews: { title: string; severity: string; status: string; source: string;
+           summary: string | null; opened_at: string | null; assigned_to: string | null;
+           disposition: string | null; closed_at: string | null }[];
+    sanction_terms: { tracker_no: string | null; amount_cr: number | null; rate_kind: string;
+                      rate_pct: number | null; spread_pct: number | null;
+                      tenor_months: number | null; emi_amount: number | null;
+                      repayment_start: string | null; moratorium_months: number;
+                      schedule_kind: string; penal_rate_pct: number | null }[];
+    cpcs: { tracker_no: string | null; status: string; version: number; items_total: number;
+            items_done: number; required_pending: string[]; prepared_by: string | null;
+            approved_by: string | null }[];
+  };
+  /** Sister companies under the same promoters, and what we carry on them. */
+  group?: { code: string; members: { entity_id: string; name: string; sector: string | null;
+            ask_cr: number | null; booked_cr: number | null; ews_open: number }[] } | null;
   restricted: string[];
   stats: { open_leads: number; leads_converted: number;
            deal_count: number | null; live_deals: number;
@@ -105,6 +128,9 @@ export interface TracxnFinancials {
   shareholders?: { name: string; pct: number }[];
   fetched_now?: number;
   fetched_at?: string;
+  /** cached_only answer: false = nothing in the larder yet. */
+  cached?: boolean;
+  endpoints?: number;
 }
 
 export interface DocAskResult {
@@ -231,11 +257,12 @@ export const panoramaService = {
    *  record — both carry a human remedy in the error detail, and the card
    *  falls back to prospect figures rather than going blank. */
   financials(q: { entityId?: string | null; cin?: string | null;
-                  refresh?: boolean }): Promise<TracxnFinancials> {
+                  refresh?: boolean; cachedOnly?: boolean }): Promise<TracxnFinancials> {
     const params: Record<string, string> = {};
     if (q.entityId) params.entity_id = q.entityId;
     if (q.cin) params.cin = q.cin;
     if (q.refresh) params.refresh = 'true';
+    if (q.cachedOnly) params.cached_only = 'true';
     return api.get<TracxnFinancials>('/panorama/financials', params);
   },
 
