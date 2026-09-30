@@ -128,11 +128,14 @@ function Eyebrow({ children, right }: { children: React.ReactNode; right?: React
   );
 }
 
-function Card({ children, stripe, sx }: {
-  children: React.ReactNode; stripe?: string; sx?: any;
+function Card({ children, stripe, sx, flow }: {
+  children: React.ReactNode; stripe?: string; sx?: any; flow?: boolean;
 }) {
+  // On paper a card stays whole (no page break through a chart or a table);
+  // `flow` is for the one card that is longer than a page and must break.
   return (
-    <Box sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: '12px',
+    <Box className={flow ? 'c360-flow' : 'c360-card'}
+      sx={{ bgcolor: '#fff', border: `1px solid ${tokens.line}`, borderRadius: '12px',
       p: '12px 14px', minWidth: 0, borderTop: stripe ? `3px solid ${stripe}` : undefined,
       ...sx }}>{children}</Box>
   );
@@ -264,7 +267,7 @@ function Ladder({ ladder, current }: { ladder: string[]; current: string | null 
 
 type Ev = { at: number; date: string; label: string; color: string; big?: boolean; detail?: string; who?: string };
 
-function Timeline({ events }: { events: Ev[] }) {
+function Timeline({ events, fit }: { events: Ev[]; fit?: boolean }) {
   if (!events.length) return null;
   // Facts in ORDER, equally spaced: the dates carry the time, the axis does
   // not have to — one 2019 incorporation must not squeeze a busy month into
@@ -272,9 +275,11 @@ function Timeline({ events }: { events: Ev[] }) {
   const n = events.length;
   // Nothing is hidden behind an ellipsis: the gap between facts is sized to the
   // longest label (the card scrolls sideways), and the full text rides a tooltip.
+  // `fit` (paper) keeps a row within a fixed 720 wide frame instead.
   const longest = Math.max(...events.map((e) => e.label.length), 18);
-  const step = Math.min(300, Math.max(118, Math.round(longest * 6.4) + 20));
-  const W = Math.max(720, 120 + step * (n - 1)), H = 168, L = 60, R = 60, Y = 84;
+  const step = fit ? (n > 1 ? Math.floor(600 / (n - 1)) : 0)
+    : Math.min(300, Math.max(118, Math.round(longest * 6.4) + 20));
+  const W = fit ? 720 : Math.max(720, 120 + step * (n - 1)), H = 168, L = 60, R = 60, Y = 84;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block' }}>
       <line x1={L - 12} x2={W - 48} y1={Y} y2={Y} stroke="#DCE3E6" strokeWidth={2} />
@@ -576,7 +581,17 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           bars keep their colour. */}
       <style>{`@media print {
         body * { visibility: hidden; }
+        /* The app under the dialog is hidden but still took its height: the
+           first page opened with a blank half. The dialog is a portal beside
+           #root, so #root can go entirely. */
+        #root, .MuiBackdrop-root { display: none !important; }
         .c360-print, .c360-print * { visibility: visible; }
+        .c360-card { break-inside: avoid; page-break-inside: avoid; }
+        .c360-print .MuiChip-root { height: auto !important; max-width: none !important; }
+        .c360-print .MuiChip-label { white-space: normal !important; }
+        .c360-timeline-screen { display: none !important; }
+        .c360-timeline-print { display: block !important; }
+        .c360-timeline-print svg { width: 100% !important; height: auto !important; }
         .MuiDialog-root { position: static !important; }
         .MuiDialog-container { height: auto !important; display: block !important; }
         .c360-print { position: static !important; max-height: none !important; max-width: none !important;
@@ -799,7 +814,13 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                 Relationship timeline</Eyebrow>
               {/* Wider than the card when the story is long — it scrolls sideways,
                   newest facts on the right, and prints in full. */}
-              <Box sx={{ overflowX: 'auto', overflowY: 'hidden', pb: 0.5 }}><Timeline events={events} /></Box>
+              <Box className="c360-timeline-screen" sx={{ overflowX: 'auto', overflowY: 'hidden', pb: 0.5 }}><Timeline events={events} /></Box>
+              {/* Paper cannot scroll: the same facts in rows of six, each row
+                  scaled to the page width, so the last fact is never cut off. */}
+              <Box className="c360-timeline-print" sx={{ display: 'none' }}>
+                {Array.from({ length: Math.ceil(events.length / 6) }, (_, r) => (
+                  <Timeline key={r} events={events.slice(r * 6, r * 6 + 6)} fit />))}
+              </Box>
             </Card>)}
 
           {/* ---- financial trend: the charts get the full width -------------- */}
@@ -1075,7 +1096,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
             </Card>)}
 
           {/* ---- depth tabs ---------------------------------------------- */}
-          <Card sx={{ p: 0 }}>
+          <Card flow sx={{ p: 0 }}>
             <Box className="c360-tabs" sx={{ display: 'flex', gap: 0.2, borderBottom: `1px solid ${tokens.line}`, px: 1, overflowX: 'auto' }}>
               <TabBtn id="engagements" label={`Engagements · ${p.leads.filter((l) => !l.converted).length + p.lending.length + p.syndication.length + p.asset_monetisation.length}`} />
               <TabBtn id="people" label={`People · ${(trx?.board?.length || 0) + p.contacts.length}`} />
