@@ -86,6 +86,15 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
   const segStartRef = useRef(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const waveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The level meter is REAL: an analyser on the microphone stream drives the
+  // bars, so a microphone that goes quiet (muted, taken by another app, wrong
+  // input device) shows as a flat line while the clock still runs — the
+  // 1 Oct 2026 take that ran 63 s and held 0.78 s of sound looked fine on a
+  // decorative waveform. quietSince times the silence for the warning.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const quietSinceRef = useRef(0);
+  const [micWarn, setMicWarn] = useState('');
   const gpsRef = useRef<{ lat?: number; lng?: number }>({});
   const gpsWatchRef = useRef<number | null>(null);
   const elapsedRef = useRef(0);
@@ -165,7 +174,26 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     }, 1000);
     if (waveRef.current) clearInterval(waveRef.current);
     waveRef.current = setInterval(() => {
-      setBars(Array.from({ length: BARS }, () => 4 + Math.round(Math.random() * 26)));
+      const an = analyserRef.current;
+      if (!an) return;                                   // no analyser: bars stay as they are
+      const buf = new Uint8Array(an.fftSize);
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+      const rms = Math.sqrt(sum / buf.length);           // 0 silence … ~0.3 loud speech
+      const h = 4 + Math.min(26, Math.round(rms * 220));
+      setBars((prev) => [...prev.slice(1), h]);
+      const now = Date.now();
+      if (rms < 0.004) {
+        if (!quietSinceRef.current) quietSinceRef.current = now;
+        else if (now - quietSinceRef.current > 8000) {
+          setMicWarn('No sound is reaching the recorder — the microphone has gone quiet. '
+            + 'Check it is not muted or taken by another app; if the bars stay flat, stop and record again.');
+        }
+      } else {
+        quietSinceRef.current = 0;
+        setMicWarn((w) => (w.startsWith('No sound') ? '' : w));
+      }
     }, 140);
   };
   const stopWave = () => { if (waveRef.current) { clearInterval(waveRef.current); waveRef.current = null; } };
@@ -201,6 +229,24 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
           (p) => { gpsRef.current = { lat: p.coords.latitude, lng: p.coords.longitude }; },
           () => {}, { maximumAge: 30_000 }) ?? null;
       } catch { /* no location service — the take records without coordinates */ }
+      // Listen to the microphone ourselves, beside the recorder: the bars show
+      // the real level, and the track tells us when the browser loses it.
+      quietSinceRef.current = 0; setMicWarn('');
+      try {
+        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx: AudioContext = new Ctx();
+        const an = ctx.createAnalyser();
+        an.fftSize = 1024;
+        ctx.createMediaStreamSource(stream).connect(an);
+        void ctx.resume().catch(() => {});
+        audioCtxRef.current = ctx; analyserRef.current = an;
+      } catch { analyserRef.current = null; }
+      stream.getAudioTracks().forEach((t) => {
+        t.onmute = () => setMicWarn('The microphone went quiet — the browser reports it muted, usually '
+          + 'because another app took it. If the bars stay flat, stop and record again.');
+        t.onunmute = () => setMicWarn('');
+        t.onended = () => setMicWarn('The microphone was disconnected. Stop and record again.');
+      });
       let rec: MediaRecorder;
       try {
         // 32 kbps opus is transparent for speech; the browser default (~128k)
@@ -279,6 +325,9 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     const rec = recRef.current;
     if (rec && rec.state !== 'inactive') rec.stop();
     rec?.stream.getTracks().forEach((t) => t.stop());
+    analyserRef.current = null;
+    void audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
   };
 
   const finish = async () => {
@@ -290,6 +339,27 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     const stopped = new Promise<void>((resolve) => { rec.onstop = () => resolve(); });
     stopStream();
     await stopped;
+    // A take whose bytes do not match its clock is a microphone that went quiet:
+    // 32 kbps opus is ~4 KB per second, a muted track yields next to nothing.
+    // Say so BEFORE the upload — a 63 s take holding 0.78 s of sound once went
+    // all the way to the transcriber and came back as "nothing was heard".
+    const totalBytes = chunksRef.current.reduce((a, b) => a + b.size, 0);
+    const secs = elapsedRef.current;
+    if (secs >= 5 && totalBytes < 700 * secs) {
+      const heard = Math.round(totalBytes / 4000);
+      const keep = window.confirm(
+        `Only about ${heard} second${heard === 1 ? '' : 's'} of sound reached the recorder in this `
+        + `${secs}-second take — the microphone went quiet partway. Upload it anyway?\n\n`
+        + 'Cancel keeps it here: check the microphone (muted? taken by another app? the wrong '
+        + "input device in the browser's site settings) and record again, or tap Send again.");
+      if (!keep) {
+        finishingRef.current = false;
+        setErr(`Only ${heard}s of sound in a ${secs}s take: the microphone went quiet. `
+          + 'Check the mic and record again, or tap Send again to upload it as is.');
+        setPhase('error');
+        return;
+      }
+    }
     const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
     const common = {
       mode: (mode === 'B' ? 'live' : 'post_meeting') as 'live' | 'post_meeting',
@@ -548,6 +618,10 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
           <span className="rec-meta-discard" onClick={() => setDiscardOpen(true)}>
             <Ic i="i-trash" /> Discard</span>
         </div>
+        {micWarn && live && (
+          <div style={{ color: 'var(--warn)', fontSize: 12, lineHeight: 1.45, margin: '-18px 6px 16px',
+            textAlign: 'center' }}>{micWarn}</div>
+        )}
 
         {(phase === 'idle' || phase === 'error') && engines.includes('regional') && !dual && (
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 6 }}>
@@ -575,6 +649,12 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
               <div className="circle"><div className="dot" /></div>
               <div className="lbl">{phase === 'error' && chunksRef.current.length ? 'Send again' : 'Record'}</div>
             </button>
+          </div>
+        )}
+        {phase === 'error' && chunksRef.current.length > 0 && (
+          <div style={{ textAlign: 'center', marginTop: 4 }}>
+            <button className="btn btn-ghost" style={{ width: 'auto', padding: '6px 14px', fontSize: 12.5 }}
+              onClick={discardConfirm}>Discard this take and record again</button>
           </div>
         )}
         {live && (
