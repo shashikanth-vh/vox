@@ -34,6 +34,15 @@ from app.vocx.core.search import InteractionSearch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+
+def _dual_engines() -> bool:
+    """Both structuring engines read every take when the box can serve both.
+    VOCX_DUAL_ENGINES=0 switches back to one engine per take (the recorder's
+    picker returns) without a rebuild."""
+    if not (os.environ.get("SARVAM_API_KEY") or "").strip():
+        return False
+    return (os.environ.get("VOCX_DUAL_ENGINES") or "1").strip().lower() not in ("0", "false", "no", "off")
+
 # Input bounds: a 30-minute meeting is ~4-6k words; these caps are generous while keeping
 # a malformed client (or an attack) from parking megabytes in the extraction path.
 MAX_TRANSCRIPT_CHARS = 40_000
@@ -841,7 +850,8 @@ class VocxApp:
 
             self._vox_runner = PipelineRunner(register, transcribe, ask_model,
                                               alert=lambda m: self.log.error("ADMIN ALERT: %s", m),
-                                              known_names=known_names)
+                                              known_names=known_names,
+                                              dual_engines=_dual_engines())
         return self._vox_runner
 
     def _vox_follow_up(self, body: bytes):
@@ -1201,6 +1211,9 @@ class VocxApp:
         engines = ["default"] + (["regional"] if os.environ.get("SARVAM_API_KEY") else [])
         return {"ok": True, "stt": stt, "stt_backend": backend,
                 "engines": engines,
+                # True = every take is read by both engines and the reviewer
+                # swipes between the readings; the record screen hides its picker.
+                "dual_engines": _dual_engines(),
                 "audio_store": getattr(astore, "kind", None) or "off",
                 "google_configured": google_configured, "extraction": extraction,
                 "calendar_enabled": gcfg.get("calendar_enabled", True),

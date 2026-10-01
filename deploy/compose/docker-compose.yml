@@ -322,6 +322,11 @@ services:
       VOCX_STRUCTURE_PROVIDER: "${VOCX_STRUCTURE_PROVIDER:-anthropic}"
       SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
       SARVAM_MODEL: "${SARVAM_MODEL:-}"
+      # With SARVAM_API_KEY set, BOTH engines read every take and the reviewer
+      # swipes between the two readings and approves one (the approved engine is
+      # counted — /v1/vox/engine-stats). VOCX_DUAL_ENGINES=0 returns to one
+      # engine per take with the recorder's picker.
+      VOCX_DUAL_ENGINES: "${VOCX_DUAL_ENGINES:-1}"
       SARVAM_BASE_URL: "${SARVAM_BASE_URL:-}"
       # Sarvam tuning (all optional; the code defaults are the production
       # posture). REASONING_EFFORT: unset/off omits the field — its PRESENCE

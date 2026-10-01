@@ -61,7 +61,9 @@ _RAW: list[tuple[str, str, str]] = [
     # recorder-or-authority on each row (defence in depth). Erasure is the
     # irreversible one, so it rides the delete gate (Admin).
     ("POST",   r"^/v1/vox/(conversations|consents)$", "log_interaction"),
-    ("POST",   r"^/v1/vox/conversations/[^/]+/(edits|approve)$", "log_interaction"),
+    # `choose` is the reviewer picking one of the two engines' readings — the
+    # same write authority as editing the report.
+    ("POST",   r"^/v1/vox/conversations/[^/]+/(edits|approve|choose)$", "log_interaction"),
     # Erase is LIFECYCLE-dependent — a recorder deletes their own draft, only Admin
     # erases an approved record — and the split lives in the register handler, which
     # sees the row. Classifying it delete_row here 403'd every draft delete at the

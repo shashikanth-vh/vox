@@ -69,7 +69,13 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
     setEngine(e);
     try { localStorage.setItem('vox.engine', e); } catch { /* private mode */ }
   };
-  useEffect(() => { void voxService.engines().then(setEngines); }, []);
+  // When both engines read every take there is nothing to pick here: the
+  // reviewer chooses between the two readings on the review screen instead.
+  const [dual, setDual] = useState(false);
+  useEffect(() => {
+    void voxService.engines().then(setEngines);
+    void voxService.dualEngines().then(setDual);
+  }, []);
   const [recovered, setRecovered] = useState<StoredTake | null>(null);
   const [err, setErr] = useState('');
   const [bars, setBars] = useState<number[]>(() => Array.from({ length: BARS }, () => 4));
@@ -543,7 +549,7 @@ export default function VoxRecordScreen({ onClose, onCaptured }: {
             <Ic i="i-trash" /> Discard</span>
         </div>
 
-        {(phase === 'idle' || phase === 'error') && engines.includes('regional') && (
+        {(phase === 'idle' || phase === 'error') && engines.includes('regional') && !dual && (
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 6 }}>
             {(['default', 'regional'] as const).map((e) => (
               <button key={e} type="button" className="chip" title={ENGINE_UI[e].vendor}

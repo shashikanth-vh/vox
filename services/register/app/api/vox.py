@@ -86,6 +86,12 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         "interaction_id": str(c.interaction_id) if c.interaction_id else None,
         "recording_mode": c.recording_mode,
         "engine": c.engine,
+        # The second reading's presence and the reviewer's pick travel on every
+        # row shape; the second report itself only on the full read.
+        "engine_alt": c.engine_alt,
+        "alt_error": c.alt_error,
+        "chosen_engine": c.chosen_engine,
+        "approved_engine": c.approved_engine,
         "capture_id": c.capture_id,
         "status": c.status,
         "processing_stage": c.processing_stage,
@@ -118,6 +124,7 @@ def _row_dict(c: VoxConversation, *, full: bool) -> dict[str, Any]:
         out["raw_transcript"] = c.raw_transcript
         out["transcript_segments"] = c.transcript_segments
         out["structured_report"] = c.structured_report
+        out["structured_report_alt"] = c.structured_report_alt
         out["corrected_transcript"] = c.corrected_transcript
     return out
 
@@ -709,6 +716,11 @@ class PipelineIn(BaseModel):
     raw_transcript: str | None = None
     transcript_segments: list | None = None
     structured_report: dict | None = None
+    # The other engine's reading of the same transcript (both run per take),
+    # or the reason it has none. Lands beside the primary, never instead of it.
+    structured_report_alt: dict | None = None
+    engine_alt: str | None = Field(default=None, pattern="^(default|regional)$")
+    alt_error: str | None = None
     entity_candidates: list[str] | None = None
     language_detected: str | None = Field(default=None, max_length=40)
     prompt_version: str | None = Field(default=None, max_length=20)
@@ -741,6 +753,16 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
     if payload.status == "ready":
         # arriving clean: a fresh success clears the previous attempt's error
         row.processing_error = None
+    if payload.structured_report_alt is not None:
+        row.structured_report_alt = payload.structured_report_alt
+        row.engine_alt = payload.engine_alt or row.engine_alt
+        row.alt_error = None
+        # A fresh pair of readings reopens the choice: the reviewer swipes again.
+        row.chosen_engine = None
+    elif payload.alt_error is not None:
+        row.alt_error = payload.alt_error[:2000]
+        row.structured_report_alt = None
+        row.engine_alt = payload.engine_alt or row.engine_alt
     if payload.structured_report is not None:
         incoming = payload.structured_report
         # A regeneration re-applies the reviewer's overridden cells on top of the
@@ -1001,6 +1023,11 @@ async def regenerate_conversation(conversation_id: str,
     if payload and payload.engine:
         row.engine = payload.engine
     row.structured_report = None
+    # Both readings are rebuilt from the corrected text; the old pick is void.
+    row.structured_report_alt = None
+    row.engine_alt = None
+    row.alt_error = None
+    row.chosen_engine = None
     row.status = "processing"
     row.processing_stage = "structuring"
     row.updated_by = ctx.actor
@@ -1013,6 +1040,91 @@ async def regenerate_conversation(conversation_id: str,
     await ctx.session.flush()
     await ctx.session.refresh(row)
     return _row_dict(row, full=True)
+
+
+# ------------------------------------------------------------- choose a reading
+
+class ChooseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    engine: str = Field(pattern="^(default|regional)$")
+
+
+async def _rewrite_use_cases(ctx: RequestContext, row: VoxConversation) -> None:
+    detected = (row.structured_report or {}).get("detected_use_cases") or []
+    await ctx.session.execute(delete(VoxConversationUseCase).where(
+        VoxConversationUseCase.conversation_id == row.id))
+    for uc in dict.fromkeys(u for u in detected if isinstance(u, str)):
+        if uc in _USE_CASES:
+            ctx.session.add(VoxConversationUseCase(conversation_id=row.id, use_case=uc))
+
+
+@router.post("/v1/vox/conversations/{conversation_id}/choose")
+async def choose_reading(conversation_id: str, payload: ChooseIn,
+                         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The reviewer swiped between the two engines' readings and picked one.
+
+    structured_report always holds the CHOSEN reading (every later path — edits,
+    approve, the timeline sync — reads only that), so picking the other engine
+    swaps the two reports and the two engine names. Picking again is allowed
+    while the row is in review; approval freezes it."""
+    row = await _get_row(ctx, conversation_id, for_update=True)
+    if not _may_edit(ctx, row):
+        raise ForbiddenError("Only the recorder or Management/Admin may choose a reading.")
+    if row.status != "ready":
+        raise ConflictError(f"A reading can be chosen only while the conversation is "
+                            f"ready for review (this one is {row.status}).")
+    primary = row.engine or "default"
+    if payload.engine == primary:
+        pass
+    elif row.structured_report_alt is not None and payload.engine == row.engine_alt:
+        row.structured_report, row.structured_report_alt = (
+            row.structured_report_alt, row.structured_report)
+        row.engine, row.engine_alt = row.engine_alt, primary
+        _denormalise(row)
+        await _rewrite_use_cases(ctx, row)
+    else:
+        raise ConflictError(f"There is no {payload.engine} reading on this conversation.")
+    row.chosen_engine = payload.engine
+    row.updated_by = ctx.actor
+    ctx.session.add(AuditLog(tenant_id=ctx.tenant_id, actor=ctx.actor, action="vox.choose",
+                             resource_type="vox_conversations", resource_id=str(row.id),
+                             request_id=request_id_ctx.get(),
+                             changes={"engine": payload.engine, "other": row.engine_alt}))
+    await ctx.session.flush()
+    await ctx.session.refresh(row)
+    return _row_dict(row, full=True)
+
+
+@router.get("/v1/vox/engine-stats")
+async def engine_stats(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The scoreboard: of the takes where BOTH engines read the transcript,
+    which reading did the reviewers approve? Counted over approved rows only,
+    all time and by month, so the firm can retire the losing model on evidence."""
+    both = (VoxConversation.tenant_id == ctx.tenant_id,
+            VoxConversation.status == "submitted",
+            VoxConversation.engine_alt.is_not(None),
+            VoxConversation.approved_engine.is_not(None))
+    totals = (await ctx.session.execute(
+        select(VoxConversation.approved_engine, func.count())
+        .where(*both).group_by(VoxConversation.approved_engine))).all()
+    month = func.to_char(VoxConversation.updated_at, "YYYY-MM")
+    monthly = (await ctx.session.execute(
+        select(month, VoxConversation.approved_engine, func.count())
+        .where(*both).group_by(month, VoxConversation.approved_engine)
+        .order_by(month.desc()).limit(48))).all()
+    by_month: dict[str, dict[str, int]] = {}
+    for m, eng, n in monthly:
+        by_month.setdefault(m, {"default": 0, "regional": 0})[eng] = n
+    approved = {"default": 0, "regional": 0}
+    for eng, n in totals:
+        approved[eng] = n
+    total = approved["default"] + approved["regional"]
+    return {
+        "dual_runs_approved": total,
+        "approved": approved,
+        "share": {k: (round(100 * v / total) if total else None) for k, v in approved.items()},
+        "by_month": [{"month": m, **c} for m, c in sorted(by_month.items(), reverse=True)],
+    }
 
 
 # ------------------------------------------------------------------ approve / erase
@@ -1057,6 +1169,10 @@ async def approve_conversation(conversation_id: str,
 
     row.status = "submitted"
     row.updated_by = ctx.actor
+    # The reading that was approved — the scoreboard entry. With two readings on
+    # the row this is the reviewer's pick (or the primary if they never swiped);
+    # with one reading it still records which engine wrote it.
+    row.approved_engine = row.chosen_engine or row.engine or "default"
     # The reviewed lane remarks become the product lines' current status (lending
     # remarks / syndication latest remarks / asset-mon notes) — audited, replace.
     await _sync_lane_remarks(ctx, row)
@@ -1066,6 +1182,9 @@ async def approve_conversation(conversation_id: str,
                              resource_type="vox_conversations", resource_id=str(row.id),
                              request_id=request_id_ctx.get(),
                              changes={"recorder": row.recorder_email,
+                                      "engine_approved": row.approved_engine,
+                                      **({"engine_other": row.engine_alt}
+                                         if row.engine_alt else {}),
                                       **({"created_lead_id": created_lead_id}
                                          if created_lead_id else {})}))
     await ctx.session.flush()

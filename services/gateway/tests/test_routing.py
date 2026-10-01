@@ -71,6 +71,9 @@ def test_capability_routes_map_to_operations():
     unauthorized user is stopped at the door (each backend still enforces its own final
     authorization)."""
     assert operation_for("POST", "/vocx/v1/touchpoints") == "log_interaction"
+    # Picking one of the two engines' readings is a report write, like edits/approve.
+    for tail in ("edits", "approve", "choose"):
+        assert operation_for("POST", f"/v1/vox/conversations/abc/{tail}") == "log_interaction"
     assert operation_for("POST", "/pulse/v1/scan") == "run_news_scan"
     assert operation_for("POST", "/pulse/v1/items") == "run_news_scan"
     # Every schedule mutation is the same gated capability — the update lane arrived

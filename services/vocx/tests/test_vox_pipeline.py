@@ -971,3 +971,60 @@ def test_transcribe_segments_names_the_model_only_when_chosen(tmp_path):
     assert seen == [None, "small"]
     out = transcribe_segments([str(p)], Legacy())      # no TypeError
     assert out["text"] == "t"
+
+
+# ------------------------------------------------------------ two readings
+
+def _model_by_vendor(model, system, user):
+    """The same transcript read twice: the Sarvam path answers with a different
+    quantum so the two readings are tellable apart."""
+    data = json.loads(_valid_model_json())
+    if model.startswith("sarvam"):
+        data["lending"]["requirement_quantum_cr"] = {"value": 40, "confidence": "medium"}
+    return json.dumps(data)
+
+
+def test_dual_engines_write_both_readings_beside_each_other():
+    reg = FakeRegister(engine="default")
+    runner = PipelineRunner(reg, good_transcribe, _model_by_vendor, dual_engines=True)
+    row = runner.process("c1")
+    assert row["status"] == "ready"
+    assert row["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 25
+    assert row["engine_alt"] == "regional"
+    assert row["structured_report_alt"]["lending"]["requirement_quantum_cr"]["value"] == 40
+    assert "alt_error" not in row
+    # one patch carries both readings — never a half-written pair
+    both = [p for p in reg.patches if "structured_report" in p]
+    assert len(both) == 1 and "structured_report_alt" in both[0]
+
+
+def test_dual_engines_honour_a_regional_primary():
+    reg = FakeRegister(engine="regional")
+    runner = PipelineRunner(reg, good_transcribe, _model_by_vendor, dual_engines=True)
+    row = runner.process("c1")
+    assert row["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 40
+    assert row["engine_alt"] == "default"
+    assert row["structured_report_alt"]["lending"]["requirement_quantum_cr"]["value"] == 25
+
+
+def test_a_failed_second_reading_is_a_note_and_the_take_still_lands():
+    def flaky(model, system, user):
+        if model.startswith("sarvam"):
+            raise RuntimeError("429 rate limited")
+        return _valid_model_json()
+    reg = FakeRegister()
+    runner = PipelineRunner(reg, good_transcribe, flaky, dual_engines=True)
+    row = runner.process("c1")
+    assert row["status"] == "ready"
+    assert row["structured_report"]["detected_use_cases"] == ["lending"]
+    assert "structured_report_alt" not in row
+    assert row["engine_alt"] == "regional"
+    assert "429" in row["alt_error"]
+
+
+def test_single_engine_mode_writes_no_second_reading():
+    reg = FakeRegister()
+    runner = PipelineRunner(reg, good_transcribe, _model_by_vendor)
+    row = runner.process("c1")
+    assert row["status"] == "ready"
+    assert "structured_report_alt" not in row and "engine_alt" not in row

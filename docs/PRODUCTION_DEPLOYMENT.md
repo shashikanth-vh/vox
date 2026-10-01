@@ -86,7 +86,8 @@ your deploy ritual backs it up and restores it). New knobs join the existing one
 | `PGBACKUP_KEEP` | Days of nightly DB dumps to keep | `14` |
 | `GOOGLE_SSO_CLIENT_ID`, `UI_DEX_URL`, service keys, signing secrets… | as before — see the comments in `docker-compose.prod-posture.yml` | |
 | `DOCRAG_FRONT_KEY` / `DOCRAG_QDRANT_API_KEY` | DocRAG's inbound key (gateway-injected) and its own Qdrant's key | `compose-docrag-*` — **override** |
-| `SARVAM_API_KEY` | DocRAG: OCR for scanned pages + generative answers (documents leave the VM for Sarvam). Also what makes scanned CAM documents readable. | empty = off |
+| `SARVAM_API_KEY` | DocRAG: OCR for scanned pages + generative answers (documents leave the VM for Sarvam). Also what makes scanned CAM documents readable. And VOCX's "Regional model": with it set, every voice note is read by both models and the reviewer swipes between the two readings and approves one; `GET /v1/vox/engine-stats` is the running score. | empty = off |
+| `VOCX_DUAL_ENGINES` | `0` returns VOCX to one model per note (the recorder's Default/Regional picker comes back). | `1` |
 | `WORKFLOWS_CAM_LLM_API_KEY` | CAM workbench engine key — AWS Bedrock, model `WORKFLOWS_CAM_ENGINE` (default `bedrock:zai.glm-5`) | empty = offline stub drafts |
 | `CHITTI_RISK_GRADE_MODEL` (`.env.chitti`) | Company 360 risk grade: the model Chitti runs the ATLAS client rubric on (with `CHITTI_LLM_API_KEY`; document evidence from the local DocRAG via `DOCRAG_FRONT_KEY`). The services host reaches it through the existing `GATEWAY_CHITTI_URL` / `CHITTI_GATEWAY_KEY`. | `zai.glm-5` |
 

@@ -155,6 +155,17 @@ class VoxConversation(RegisterBase):
     # structuring pass and on every regenerate; the exact model that ran is in
     # the report metadata, so the screen stays neutral while the record is precise.
     engine: Mapped[str | None] = mapped_column(String(20))
+    # Both engines run on every take (when the box serves both): the OTHER
+    # engine's reading lives here, the reviewer swipes between the two and
+    # approves one. chosen_engine is the pick while the row is in review;
+    # approved_engine is set at approval and is the long-run scoreboard that
+    # decides which model the firm keeps. alt_error says why a second reading
+    # is missing (the engine failed) so the screen never shows a silent gap.
+    structured_report_alt: Mapped[dict | None] = mapped_column(JSONB)
+    engine_alt: Mapped[str | None] = mapped_column(String(20))
+    alt_error: Mapped[str | None] = mapped_column(Text)
+    chosen_engine: Mapped[str | None] = mapped_column(String(20))
+    approved_engine: Mapped[str | None] = mapped_column(String(20))
 
     # Set (with an audit row) when an authorised erasure hard-deleted the content;
     # the consent record and this marker are what remain.

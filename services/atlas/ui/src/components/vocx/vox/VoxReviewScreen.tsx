@@ -18,8 +18,9 @@ import { useAuth } from '../../../auth/AuthContext';
 import { getSession } from '../../../auth/session';
 import { referenceService } from '../../../services/referenceService';
 import { ENGINE_UI, needsYou, voxService } from '../../../services/voxService';
-import type { VoxCell, VoxConversation, VoxRegistry, VoxReport } from '../../../services/voxService';
+import type { VoxCell, VoxConversation, VoxEngineStats, VoxRegistry, VoxReport } from '../../../services/voxService';
 import { AuthAudio, Ic } from './VoxApp';
+import VoxCompareDeck from './VoxCompareDeck';
 
 type SubView = 'auto' | 'atlas' | 'submitted';
 
@@ -135,8 +136,10 @@ function buildPrintHtml(row: VoxConversation, report: VoxReport | null,
     ['Business lines', lanes.join(' · ')],
     ['Recording', [row.recording_mode === 'live' ? 'Live meeting' : 'Post-meeting note', dur]
       .filter(Boolean).join(' · ')],
-    ['Engine', (row as any).engine === 'regional' ? 'Regional' :
-      ((row as any).engine === 'default' ? 'Default' : '')],
+    ['Engine', (() => {
+      const e = row.approved_engine || row.chosen_engine || row.engine;
+      return e === 'regional' ? 'Regional' : e === 'default' ? 'Default' : '';
+    })()],
     ['Location', pdfVal(common.location?.value)],
     ['GPS', (row.latitude != null && row.longitude != null)
       ? `${Math.abs(row.latitude).toFixed(4)}°${row.latitude >= 0 ? 'N' : 'S'}, `
@@ -214,6 +217,11 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
   const [engines, setEngines] = useState<string[]>(['default']);
   const [reEngine, setReEngine] = useState<string>('default');
   useEffect(() => { void voxService.engines().then(setEngines); }, []);
+  /** Both engines read the take: the swipe deck shows until a reading is
+   *  chosen (null = follow the row), and can be reopened from the review. */
+  const [compare, setCompare] = useState<boolean | null>(null);
+  const [stats, setStats] = useState<VoxEngineStats | null>(null);
+  const [approveAfterPick, setApproveAfterPick] = useState(false);
   const [registry, setRegistry] = useState<VoxRegistry | null>(null);
   const [report, setReport] = useState<VoxReport | null>(null);
   const [dirty, setDirty] = useState<Record<string, VoxCell>>({});
@@ -282,6 +290,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       setRow(r);
       setReEngine(((r as any).engine as string) || 'default');
       setReport((prev) => prev ?? (r.structured_report as VoxReport) ?? null);
+      if (r.engine_alt && !stats) voxService.engineStats().then(setStats).catch(() => {});
       return r;
     } catch (e: any) { setErr(String(e?.message || e)); return null; }
   }, [conversationId]);
@@ -647,6 +656,30 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
     } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
   };
 
+  /** The reviewer swiped and picked a reading. The register makes it THE
+   *  report (swapping if it was the other engine's); the local copy follows,
+   *  and with thenApprove the normal approval runs on it — link screen and
+   *  unreviewed-field check included — once the fresh report is on screen. */
+  const pickReading = async (engine: string, thenApprove: boolean) => {
+    setBusy(true); setErr('');
+    try {
+      const r = await voxService.choose(conversationId, engine);
+      setRow(r);
+      setReport((r.structured_report as VoxReport) ?? null);
+      setDirty({});
+      setConfirmed(new Set());
+      setCompare(false);
+      if (thenApprove) setApproveAfterPick(true);
+    } catch (e: any) { setErr(String(e?.message || e)); } finally { setBusy(false); }
+  };
+  useEffect(() => {
+    if (approveAfterPick && row?.chosen_engine && report) {
+      setApproveAfterPick(false);
+      void approve();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approveAfterPick, row?.chosen_engine, report]);
+
   /** The mock's "Add to Calendar", for real: create the event on the RM's
    *  connected Google Calendar with the 1-day-before reminder. Not connected is
    *  a state, not an error — the auth tab opens and the .ics still downloads so
@@ -789,6 +822,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
           </div>
         </div>
       </div>
+    );
+  }
+
+  /* ------------------------------------------------ two readings: swipe, pick */
+  if (sub === 'auto' && row.status === 'ready' && row.structured_report && row.structured_report_alt
+      && (compare ?? !row.chosen_engine)) {
+    return (
+      <VoxCompareDeck row={row} registry={registry} stats={stats} busy={busy}
+        onPick={(engine, thenApprove) => void pickReading(engine, thenApprove)}
+        onBack={row.chosen_engine ? () => setCompare(false) : onBack} />
     );
   }
 
@@ -963,6 +1006,15 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               ? <>Linked to {entityName || leadName || 'the register'} · on the timeline · searchable by anyone at Evam</>
               : <>In the firm's memory · searchable by anyone at Evam · not on any timeline yet — link a company any time</>}
           </div>
+          {row.engine_alt && row.approved_engine && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', margin: '10px 0 0', textAlign: 'center', lineHeight: 1.5 }}>
+              You approved the <b style={{ color: 'var(--text)' }}>{ENGINE_UI[row.approved_engine]?.label || row.approved_engine}</b> reading.
+              {stats && stats.dual_runs_approved > 0 && (
+                <> Running score: {ENGINE_UI.default.label} {stats.approved.default} · {ENGINE_UI.regional.label} {stats.approved.regional}
+                  {stats.share.default != null ? ` (${stats.share.default}% / ${stats.share.regional}%)` : ''}.</>
+              )}
+            </div>
+          )}
           {followUp && (
             <div className="followup-card">
               <div className="fu-eyebrow">Follow-up detected</div>
@@ -1220,6 +1272,20 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         <div className={`status-pill ${approvedRow || row.erased_at ? 'approved' : 'ready'}`}>
           {row.erased_at ? 'Erased' : approvedRow ? (editUnlocked ? 'Approved · editing' : 'Approved') : 'Ready for review'}
         </div>
+        {row.engine_alt && (
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', margin: '-4px 0 10px', display: 'flex',
+            gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>
+              {row.structured_report_alt
+                ? <>{ENGINE_UI[(approvedRow ? row.approved_engine : row.chosen_engine) || row.engine || 'default']?.label || 'This'} reading{approvedRow ? ' approved' : ' chosen'}</>
+                : <>Only one reading: the {ENGINE_UI[row.engine_alt]?.label || row.engine_alt} did not finish{row.alt_error ? ` (${row.alt_error.slice(0, 80)})` : ''}</>}
+            </span>
+            {!approvedRow && row.structured_report_alt && (
+              <button className="btn btn-ghost" style={{ width: 'auto', padding: '2px 10px', fontSize: 11.5 }}
+                onClick={() => setCompare(true)}>Compare the two readings</button>
+            )}
+          </div>
+        )}
         {approvedRow && editUnlocked && (
           <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 9,
             color: 'var(--warn)', letterSpacing: '0.06em', margin: '2px 0 6px' }}>
@@ -1400,7 +1466,12 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                       + 'machine-generated original stays on record. Your own confirmed field '
                       + 'values survive the rebuild.'}
                 </div>
-                {engines.includes('regional') && (
+                {row.engine_alt && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 2px 10px' }}>
+                    Both models re-read the corrected text; you pick between the two readings again.
+                  </div>
+                )}
+                {engines.includes('regional') && !row.engine_alt && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center',
                                 margin: '0 2px 10px', fontSize: 12 }}>
                     <span style={{ color: 'var(--muted)' }}>Re-analyse with:</span>

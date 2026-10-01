@@ -58,6 +58,16 @@ export interface VoxConversation {
    *  raw_transcript is evidence and never changes. */
   corrected_transcript?: string | null;
   structured_report?: VoxReport | null;
+  /** Vendor-blind structuring engine of structured_report ("default" | "regional"). */
+  engine?: string | null;
+  /** The OTHER engine's reading of the same transcript, when both ran. The
+   *  reviewer swipes between the two and approves one; choose() swaps the pick
+   *  into structured_report. alt_error says why a second reading is missing. */
+  structured_report_alt?: VoxReport | null;
+  engine_alt?: string | null;
+  alt_error?: string | null;
+  chosen_engine?: string | null;
+  approved_engine?: string | null;
   audio_ref?: string | null;
   audio_deleted_at?: string | null;
   erased_at?: string | null;
@@ -77,6 +87,14 @@ export interface VoxRegistry {
 let specCache: { registry: VoxRegistry; prompt_version: string } | null = null;
 
 let enginesCache: string[] | null = null;
+let dualCache: boolean | null = null;
+
+export interface VoxEngineStats {
+  dual_runs_approved: number;
+  approved: { default: number; regional: number };
+  share: { default: number | null; regional: number | null };
+  by_month: { month: string; default: number; regional: number }[];
+}
 
 /** Picker presentation for the structuring engines. The chip stays short and
  *  vendor-blind (the record screen is phone-width and the field A/B judges
@@ -188,6 +206,7 @@ export const voxService = {
     try {
       const r = await vocxClient.get('/v1/capabilities');
       const list = (r.data?.engines as string[]) || ['default'];
+      dualCache = !!r.data?.dual_engines;
       enginesCache = list.length ? list : ['default'];
     } catch { enginesCache = ['default']; }
     return enginesCache;
@@ -263,6 +282,25 @@ export const voxService = {
     corrected_transcript?: string;
   }): Promise<VoxConversation & { changed: number }> {
     return api.post(`/vox/conversations/${id}/edits`, payload);
+  },
+
+  /** True when every take is read by BOTH engines and the reviewer swipes
+   *  between the readings (the record screen then has no picker). */
+  async dualEngines(): Promise<boolean> {
+    if (dualCache === null) await this.engines();
+    return !!dualCache;
+  },
+
+  /** The reviewer's pick between the two readings. The chosen one becomes
+   *  structured_report (swapped if it was the other engine's). */
+  choose(id: string, engine: string): Promise<VoxConversation> {
+    return api.post(`/vox/conversations/${id}/choose`, { engine });
+  },
+
+  /** The scoreboard: of approved takes that both engines read, which reading
+   *  won — all time and by month. */
+  engineStats(): Promise<VoxEngineStats> {
+    return api.get('/vox/engine-stats');
   },
 
   approve(id: string): Promise<VoxConversation> {

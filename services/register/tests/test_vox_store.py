@@ -1167,3 +1167,133 @@ async def test_the_engine_choice_rides_the_row_and_switches_on_regenerate(client
                            headers=RECORDER)
     assert r2.status_code == 200, r2.text
     assert r2.json()["engine"] == "default"
+
+
+# ------------------------------------------------- two readings, one approved
+
+async def test_both_readings_land_and_the_reviewer_picks_by_swapping(client: AsyncClient):
+    """Both engines read the same transcript: the second reading lands beside the
+    first, choosing the OTHER engine swaps it into structured_report (every
+    later path reads only that), the pick is audited, and approval records the
+    winner. Filter columns follow the chosen report."""
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}", engine="default")
+    alt = _report(quantum=40)
+    alt["common"]["sector"] = {"value": "Infrastructure", "confidence": "high"}
+    r = await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline",
+                           json={"status": "processing"})
+    assert r.status_code == 200, r.text
+    r = await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={
+        "status": "ready", "structured_report": _report(), "raw_transcript": "forty megawatt",
+        "structured_report_alt": alt, "engine_alt": "regional",
+        "prompt_version": "v1", "registry_version": "v1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["engine"] == "default" and body["engine_alt"] == "regional"
+    assert body["chosen_engine"] is None
+    assert body["structured_report_alt"]["lending"]["requirement_quantum_cr"]["value"] == 40
+    assert body["sector"] == "Renewables"
+
+    # The listing row says a second reading exists without carrying it.
+    one = (await client.get(f"/v1/vox/conversations/{row['id']}", headers=RECORDER)).json()
+    assert one["engine_alt"] == "regional"
+    assert "structured_report_alt" in one
+
+    # Pick the regional reading: the reports swap, the filters follow.
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": "regional"}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    picked = r.json()
+    assert picked["chosen_engine"] == "regional"
+    assert picked["engine"] == "regional" and picked["engine_alt"] == "default"
+    assert picked["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 40
+    assert picked["structured_report_alt"]["lending"]["requirement_quantum_cr"]["value"] == 25
+    assert picked["sector"] == "Infrastructure"
+
+    # Change of mind: back to default swaps again.
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": "default"}, headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert r.json()["engine"] == "default"
+    assert r.json()["structured_report"]["lending"]["requirement_quantum_cr"]["value"] == 25
+    assert r.json()["sector"] == "Renewables"
+
+    # Approve: the winner is written on the row and in the audit.
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": "regional"}, headers=RECORDER)
+    approved = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["approved_engine"] == "regional"
+    # And no more swapping once approved.
+    late = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                             json={"engine": "default"}, headers=RECORDER)
+    assert late.status_code == 409
+
+
+async def test_choose_refuses_an_engine_that_has_no_reading(client: AsyncClient):
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, row["id"])
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": "regional"}, headers=RECORDER)
+    assert r.status_code == 409
+    # The primary itself is always choosable (a no-op pick).
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": "default"}, headers=RECORDER)
+    assert r.status_code == 200 and r.json()["chosen_engine"] == "default"
+
+
+async def test_a_failed_second_engine_is_a_note_not_a_block(client: AsyncClient):
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={"status": "processing"})
+    r = await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={
+        "status": "ready", "structured_report": _report(), "raw_transcript": "x",
+        "engine_alt": "regional", "alt_error": "SarvamError: 429 rate limited"})
+    assert r.status_code == 200, r.text
+    assert r.json()["alt_error"].startswith("SarvamError")
+    assert r.json()["structured_report_alt"] is None
+    approved = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+    assert approved.json()["approved_engine"] == "default"
+
+
+async def test_regenerate_clears_both_readings_and_the_pick(client: AsyncClient):
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}", engine="default")
+    await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={"status": "processing"})
+    await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={
+        "status": "ready", "structured_report": _report(), "raw_transcript": "x",
+        "structured_report_alt": _report(40), "engine_alt": "regional"})
+    await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                      json={"engine": "regional"}, headers=RECORDER)
+    r = await client.post(f"/v1/vox/conversations/{row['id']}/regenerate", headers=RECORDER)
+    assert r.status_code == 200, r.text
+    assert r.json()["structured_report_alt"] is None
+    assert r.json()["engine_alt"] is None
+    assert r.json()["chosen_engine"] is None
+
+
+async def test_the_scoreboard_counts_only_dual_runs_that_were_approved(client: AsyncClient):
+    """Three approved takes: two with both readings (one each way) and one with a
+    single reading. The scoreboard counts the two, by engine and by month."""
+    async def dual(pick: str) -> None:
+        row = await _make(client, capture_id=f"cap-{uuid.uuid4()}", engine="default")
+        await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={"status": "processing"})
+        await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json={
+            "status": "ready", "structured_report": _report(), "raw_transcript": "x",
+            "structured_report_alt": _report(40), "engine_alt": "regional"})
+        await client.post(f"/v1/vox/conversations/{row['id']}/choose",
+                          json={"engine": pick}, headers=RECORDER)
+        r = await client.post(f"/v1/vox/conversations/{row['id']}/approve", headers=RECORDER)
+        assert r.status_code == 200, r.text
+
+    before = (await client.get("/v1/vox/engine-stats", headers=RECORDER)).json()
+    await dual("default")
+    await dual("regional")
+    single = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    await _to_ready(client, single["id"])
+    await client.post(f"/v1/vox/conversations/{single['id']}/approve", headers=RECORDER)
+
+    after = (await client.get("/v1/vox/engine-stats", headers=RECORDER)).json()
+    assert after["dual_runs_approved"] == before["dual_runs_approved"] + 2
+    assert after["approved"]["default"] == before["approved"]["default"] + 1
+    assert after["approved"]["regional"] == before["approved"]["regional"] + 1
+    assert after["share"]["default"] is not None
+    this_month = next(m for m in after["by_month"] if m["month"] == after["by_month"][0]["month"])
+    assert this_month["default"] >= 1 and this_month["regional"] >= 1

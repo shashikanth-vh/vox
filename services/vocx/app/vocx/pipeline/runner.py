@@ -84,7 +84,8 @@ class PipelineRunner:
                  ask_model: Callable[[str, str, str], str],
                  alert: Callable[[str], None] | None = None,
                  timeouts: dict[str, float] | None = None,
-                 known_names: Callable[[], str | None] | None = None):
+                 known_names: Callable[[], str | None] | None = None,
+                 dual_engines: bool = False):
         self.register = register
         self.transcribe = transcribe
         self.ask_model = ask_model
@@ -94,6 +95,11 @@ class PipelineRunner:
         # company names) handed to structuring. A provider failure must never
         # fail the pipeline — the glossary improves extraction, it doesn't gate it.
         self.known_names = known_names
+        # Both engines read every take (the box serves both): the reviewer swipes
+        # between the two readings and approves one. The second reading is a
+        # bonus, never a gate — if it fails, the take still reaches ready with
+        # the primary reading and a note saying why there is only one.
+        self.dual_engines = dual_engines
 
     # -------------------------------------------------------------- the one entry
 
@@ -189,25 +195,59 @@ class PipelineRunner:
             except Exception as exc:  # noqa: BLE001 — context, not a gate
                 log.warning("known-names provider failed (continuing without): %s", exc)
         t0 = time.monotonic()
-        out = _run_with_timeout(
-            lambda: structure_transcript(
+
+        def run(engine: str | None) -> dict:
+            return structure_transcript(
                 transcript,
                 mode=row.get("recording_mode") or "post_meeting",
                 ask_model=self.ask_model,
                 capture_ts=row.get("created_at"),
                 known_names=glossary,
                 recorder=row.get("recorder_name") or None,
-                engine=row.get("engine") or None,
-            ),
-            "structure", self.timeouts["structure"])
+                engine=engine,
+            )
+
+        primary = (row.get("engine") or "default").strip().lower()
+        other = "regional" if primary == "default" else "default"
+        alt_box: dict[str, Any] = {}
+        alt_thread: threading.Thread | None = None
+        if self.dual_engines:
+            # The second reading runs BESIDE the first, not after it: the review
+            # screen waits for the slower engine, never for the sum of both.
+            def _alt() -> None:
+                try:
+                    alt_box["out"] = run(other)
+                except BaseException as exc:  # noqa: BLE001 — a note, not a failure
+                    alt_box["error"] = exc
+            alt_thread = threading.Thread(target=_alt, daemon=True, name="vox-structure-alt")
+            alt_thread.start()
+
+        out = _run_with_timeout(lambda: run(primary if row.get("engine") else None),
+                                "structure", self.timeouts["structure"])
         log.info("conversation %s structured by %s in %.1fs",
                  cid, out["model"], time.monotonic() - t0)
         report = out["report"]
-        return self.register.patch(
-            cid,
+        fields: dict[str, Any] = dict(
             structured_report=report,
             entity_candidates=report.get("entity_candidates") or [],
             prompt_version=out["prompt_version"],
             registry_version=out["registry_version"],
             processing_stage="structured",
         )
+        if alt_thread is not None:
+            # Whatever budget the primary left is the second reading's; a
+            # straggler is abandoned (daemon thread) and noted, never waited on.
+            alt_thread.join(max(5.0, self.timeouts["structure"] - (time.monotonic() - t0)))
+            if "out" in alt_box:
+                fields["structured_report_alt"] = alt_box["out"]["report"]
+                fields["engine_alt"] = other
+                log.info("conversation %s also read by %s (%s) in %.1fs",
+                         cid, other, alt_box["out"]["model"], time.monotonic() - t0)
+            else:
+                exc = alt_box.get("error")
+                detail = (f"{type(exc).__name__}: {exc}" if exc is not None
+                          else f"{other} reading exceeded the structuring budget")
+                log.warning("conversation %s: second reading (%s) failed: %s", cid, other, detail)
+                fields["engine_alt"] = other
+                fields["alt_error"] = detail[:2000]
+        return self.register.patch(cid, **fields)
