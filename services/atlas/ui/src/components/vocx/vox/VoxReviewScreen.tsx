@@ -788,26 +788,43 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   if (sub === 'auto' && (row.status === 'processing_failed' || row.status === 'failed_permanently')) {
     const permanent = row.status === 'failed_permanently';
+    // Three different stories, told apart by the pipeline's own words: nothing
+    // was heard (transcription completed, no words — a microphone problem, not
+    // a server one), the clip could not be read (STT refused it), or the report
+    // could not be written (model/structuring).
+    const perr = row.processing_error || '';
+    const silent = /nothing was heard/i.test(perr);
+    const sttRefused = /STT rejected|STT service|unreachable/i.test(perr) && !row.raw_transcript;
+    const transcribedOk = !!row.raw_transcript || silent;
     return (
       <div className="app-body no-tabs">
         <div className="proc-stage">
-          <div className="proc-title">Couldn't finish</div>
-          <div className="proc-sub">Your recording is safe — nothing is lost</div>
+          <div className="proc-title">{silent ? 'Nothing was heard' : "Couldn't finish"}</div>
+          <div className="proc-sub">{silent ? 'The recording holds no words we could make out' : 'Your recording is safe — nothing is lost'}</div>
           <div className="proc-steps">
             <div className="proc-step done"><div className="proc-icon"><Ic i="i-check" /></div>
-              <div className="proc-txt"><div className="name">Uploaded</div><div className="meta">Audio stored</div></div></div>
-            <div className={`proc-step ${row.raw_transcript ? 'done' : 'failed'}`}>
-              <div className="proc-icon">{row.raw_transcript ? <Ic i="i-check" /> : '✕'}</div>
+              <div className="proc-txt"><div className="name">Uploaded</div><div className="meta">Audio stored{row.duration_seconds ? ` · ${mmss(row.duration_seconds)}` : ''}</div></div></div>
+            <div className={`proc-step ${transcribedOk ? (silent ? 'failed' : 'done') : 'failed'}`}>
+              <div className="proc-icon">{transcribedOk && !silent ? <Ic i="i-check" /> : '✕'}</div>
               <div className="proc-txt"><div className="name">Transcribed</div>
-                <div className="meta">{row.raw_transcript ? 'Verbatim text stored' : 'Did not complete'}</div></div></div>
-            <div className="proc-step failed"><div className="proc-icon">✕</div>
-              <div className="proc-txt"><div className="name">Writing the report failed</div>
-                <div className="meta">{(row.processing_error || '').slice(0, 70)} · attempt {row.retry_count || 0} of 5</div></div></div>
+                <div className="meta">{silent ? 'Completed — no words heard' : row.raw_transcript ? 'Verbatim text stored'
+                  : sttRefused ? (perr.replace(/^HTTPStatusError:\s*/, '').slice(0, 90)) : 'Did not complete'}</div></div></div>
+            {!silent && (
+              <div className="proc-step failed"><div className="proc-icon">✕</div>
+                <div className="proc-txt"><div className="name">{sttRefused ? 'No report without a transcript' : 'Writing the report failed'}</div>
+                  <div className="meta">{sttRefused ? '' : perr.slice(0, 70)}{sttRefused ? '' : ' · '}attempt {row.retry_count || 0} of 5</div></div></div>
+            )}
           </div>
           <div className="proc-fail-note">
-            <strong>The audio and transcript are saved.</strong> {permanent
-              ? 'Five retries are spent — an admin has been alerted; a retry from here is still allowed.'
-              : "We'll keep retrying in the background, or you can retry now. This conversation is waiting in your Queue."}
+            {silent ? (
+              <><strong>Play the audio back from the Queue.</strong> If it is silent, the browser recorded from the
+                wrong microphone or a muted one — check the input in the browser's site settings and record again.
+                If you can hear speech in it, retry: the speech-to-text will listen again.</>
+            ) : (
+              <><strong>The audio and transcript are saved.</strong> {permanent
+                ? 'Five retries are spent — an admin has been alerted; a retry from here is still allowed.'
+                : "We'll keep retrying in the background, or you can retry now. This conversation is waiting in your Queue."}</>
+            )}
           </div>
           <div style={{ padding: '0 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <button className="btn btn-primary" disabled={busy} onClick={async () => {

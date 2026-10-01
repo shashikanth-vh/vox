@@ -1028,3 +1028,16 @@ def test_single_engine_mode_writes_no_second_reading():
     row = runner.process("c1")
     assert row["status"] == "ready"
     assert "structured_report_alt" not in row and "engine_alt" not in row
+
+
+def test_a_silent_take_says_nothing_was_heard_not_report_failed():
+    """Transcription that completes with no words is a microphone story, not a
+    structuring failure: the row's error names it, with the take's length."""
+    def silent_transcribe(audio_ref):
+        return {"text": "", "segments": [], "language": None}
+    reg = FakeRegister(duration_seconds=62)
+    runner = PipelineRunner(reg, silent_transcribe, good_model)
+    row = runner.process("c1")
+    assert row["status"] == "processing_failed"
+    assert "nothing was heard in this 62 second recording" in row["processing_error"]
+    assert "microphone" in row["processing_error"]

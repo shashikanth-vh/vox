@@ -187,7 +187,15 @@ class PipelineRunner:
             transcript = (transcript_for_structuring(segments) if segments
                           else (row.get("raw_transcript") or ""))
         if not transcript.strip():
-            raise StructuringError("structure: the transcript is empty")
+            # Transcription DID complete — it heard no words. Say that, with the
+            # length of the take, instead of "writing the report failed": the
+            # remedy is a microphone check and a fresh take, not a retry.
+            dur = int(row.get("duration_seconds") or 0)
+            raise StructuringError(
+                f"transcribe: nothing was heard in this {dur} second recording — "
+                f"the speech-to-text returned no words. Play the audio back; if it is "
+                f"silent, check the microphone (and which input the browser uses) and "
+                f"record again.")
         glossary = None
         if self.known_names is not None:
             try:
