@@ -822,8 +822,8 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
                 If you can hear speech in it, retry: the speech-to-text will listen again.</>
             ) : (
               <><strong>The audio and transcript are saved.</strong> {permanent
-                ? 'Five retries are spent — an admin has been alerted; a retry from here is still allowed.'
-                : "We'll keep retrying in the background, or you can retry now. This conversation is waiting in your Queue."}</>
+                ? 'Five retries are spent and an admin has been alerted. Retry now starts a fresh five once the cause is fixed.'
+                : 'Tap Retry now when you are ready. This conversation is waiting in your Queue.'}</>
             )}
           </div>
           <div style={{ padding: '0 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>

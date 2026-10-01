@@ -103,18 +103,28 @@ class PipelineRunner:
 
     # -------------------------------------------------------------- the one entry
 
-    def process(self, conversation_id: str) -> dict:
+    def process(self, conversation_id: str, *, reopen: bool = False) -> dict:
         """Advance the conversation as far as it can go this run. Returns the
         final row. Safe to call repeatedly — a ready/submitted row is untouched,
-        a failed row consumes one retry, a half-done row resumes."""
+        a failed row consumes one retry, a half-done row resumes.
+
+        ``reopen`` is the human decision on a PERMANENTLY failed row: a person
+        tapping Retry gives it a fresh five strikes and runs it again. Without
+        it the parked row stays parked (no zombie retries)."""
         row = self.register.get(conversation_id)
         status = row.get("status")
 
         if status in ("ready", "submitted"):
             return row                                   # nothing to do — idempotent
         if status == "failed_permanently":
-            return row                                   # a human decision reopens it
-        if status == "processing_failed":
+            if not reopen:
+                return row                               # a human decision reopens it
+            # Seen in production on 1 Oct 2026: a note that spent its five on the
+            # broken STT decoder could not be retried after the fix — the Queue's
+            # Retry returned the row untouched and the card did nothing.
+            row = self.register.patch(conversation_id, status="processing",
+                                      retry_reset=True)
+        elif status == "processing_failed":
             if (row.get("retry_count") or 0) >= MAX_RETRIES:
                 row = self.register.patch(conversation_id, status="failed_permanently")
                 self.alert(f"VOX conversation {conversation_id} failed permanently "

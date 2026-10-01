@@ -1163,10 +1163,10 @@ class VocxApp:
                     pass
                 if slow:
                     with self._vox_slow_workers, self._vox_workers:
-                        self.vox_runner().process(cid)
+                        self.vox_runner().process(cid, reopen=True)
                 else:
                     with self._vox_workers:
-                        self.vox_runner().process(cid)
+                        self.vox_runner().process(cid, reopen=True)
             except Exception:  # noqa: BLE001 — the runner logs; the set must clear
                 self.log.exception("VOX pipeline run for %s crashed", cid)
             finally:

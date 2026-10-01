@@ -1297,3 +1297,19 @@ async def test_the_scoreboard_counts_only_dual_runs_that_were_approved(client: A
     assert after["share"]["default"] is not None
     this_month = next(m for m in after["by_month"] if m["month"] == after["by_month"][0]["month"])
     assert this_month["default"] >= 1 and this_month["regional"] >= 1
+
+
+async def test_a_manual_retry_resets_the_strikes_on_a_permanently_failed_row(client: AsyncClient):
+    row = await _make(client, capture_id=f"cap-{uuid.uuid4()}")
+    for payload in ({"status": "processing"},
+                    {"status": "processing_failed", "processing_error": "STT down", "retry_increment": True},
+                    {"status": "failed_permanently"}):
+        r = await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline", json=payload)
+        assert r.status_code == 200, r.text
+    assert r.json()["retry_count"] == 1
+    r = await client.patch(f"/v1/vox/conversations/{row['id']}/pipeline",
+                           json={"status": "processing", "retry_reset": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "processing"
+    assert r.json()["retry_count"] == 0
+    assert r.json()["processing_error"] is None

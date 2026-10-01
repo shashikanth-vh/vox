@@ -711,6 +711,8 @@ class PipelineIn(BaseModel):
     processing_stage: str | None = Field(default=None, max_length=40)
     processing_error: str | None = None
     retry_increment: bool = False
+    # A person's manual retry of a permanently failed row: the strikes start over.
+    retry_reset: bool = False
     audio_ref: str | None = Field(default=None, max_length=512)
     duration_seconds: int | None = Field(default=None, ge=0, le=6000)
     raw_transcript: str | None = None
@@ -744,6 +746,9 @@ async def advance_pipeline(conversation_id: str, payload: PipelineIn,
             row.status = payload.status
     if payload.retry_increment:
         row.retry_count = (row.retry_count or 0) + 1
+    if payload.retry_reset:
+        row.retry_count = 0
+        row.processing_error = None
     for field in ("processing_stage", "processing_error", "audio_ref", "duration_seconds",
                   "raw_transcript", "transcript_segments", "entity_candidates",
                   "language_detected", "prompt_version", "registry_version"):

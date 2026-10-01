@@ -48,6 +48,9 @@ class FakeRegister:
             self.row["status"] = status
         if fields.pop("retry_increment", False):
             self.row["retry_count"] += 1
+        if fields.pop("retry_reset", False):
+            self.row["retry_count"] = 0
+            self.row["processing_error"] = None
         if status == "ready":
             self.row["processing_error"] = None
         self.row.update(fields)
@@ -709,7 +712,7 @@ def test_pipeline_workers_are_bounded(monkeypatch):
     gate = threading.Lock()
 
     class SlowRunner:
-        def process(self, cid):
+        def process(self, cid, **kw):
             with gate:
                 peak["now"] += 1
                 peak["max"] = max(peak["max"], peak["now"])
@@ -905,7 +908,7 @@ def test_long_takes_leave_one_worker_for_the_notes(monkeypatch):
             def get(cid):
                 return {"duration_seconds": 5400 if cid.startswith("long") else 300}
 
-        def process(self, cid):
+        def process(self, cid, **kw):
             running.append(cid)
             order.append(("start", cid))
             gate.wait(timeout=10)
@@ -1041,3 +1044,32 @@ def test_a_silent_take_says_nothing_was_heard_not_report_failed():
     assert row["status"] == "processing_failed"
     assert "nothing was heard in this 62 second recording" in row["processing_error"]
     assert "microphone" in row["processing_error"]
+
+
+def test_a_manual_retry_reopens_a_permanently_failed_take():
+    """Five strikes spent on a broken decoder, decoder fixed, person taps Retry:
+    the row reopens with a fresh count and goes all the way to ready. (It used
+    to return untouched — the Queue card did nothing.)"""
+    reg = FakeRegister(status="failed_permanently", retry_count=MAX_RETRIES,
+                       processing_error="HTTPStatusError: STT rejected the clip (400)")
+    runner = PipelineRunner(reg, good_transcribe, good_model)
+    # without the human decision the row stays parked
+    assert runner.process("c1")["status"] == "failed_permanently"
+    row = runner.process("c1", reopen=True)
+    assert row["status"] == "ready"
+    assert row["retry_count"] == 0
+    assert row["processing_error"] is None
+    assert row["structured_report"]["detected_use_cases"] == ["lending"]
+
+
+def test_a_reopened_take_that_fails_again_gets_a_fresh_five():
+    calls = {"n": 0}
+    def dead_transcribe(audio_ref):
+        calls["n"] += 1
+        raise RuntimeError("STT still down")
+    reg = FakeRegister(status="failed_permanently", retry_count=MAX_RETRIES)
+    runner = PipelineRunner(reg, dead_transcribe, good_model)
+    row = runner.process("c1", reopen=True)
+    assert row["status"] == "processing_failed"      # not permanently: the count restarted
+    assert row["retry_count"] == 0
+    assert "STT still down" in row["processing_error"]
