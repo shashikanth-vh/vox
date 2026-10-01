@@ -136,11 +136,17 @@ def _check_block(registry: dict, block: str, data: Any, errors: list[str]) -> No
         if not isinstance(cell, dict) or "value" not in cell or "confidence" not in cell:
             errors.append(f"{where}: every field is {{value, confidence}}")
             continue
-        extra_keys = set(cell) - {"value", "confidence", "user_override"}
+        extra_keys = set(cell) - {"value", "confidence", "user_override", "evidence"}
         if extra_keys:
             errors.append(f"{where}: unexpected keys {sorted(extra_keys)}")
         if "user_override" in cell and key != "opportunity_score":
             errors.append(f"{where}: user_override belongs to opportunity_score only")
+        # The words the value was read from (prompt v3). Optional on the wire —
+        # older prompts and the edit path never carry it — but when present it
+        # is a short string or null, never a structure the reader cannot quote.
+        ev = cell.get("evidence")
+        if ev is not None and (not isinstance(ev, str) or len(ev) > 400):
+            errors.append(f"{where}: evidence must be a short transcript quote (string) or null")
         conf = cell["confidence"]
         if conf not in _CONFIDENCES:
             errors.append(f"{where}: confidence {conf!r} not in {_CONFIDENCES}")
@@ -356,10 +362,19 @@ def build_tool_schema(registry_version: str | None = None) -> dict:
         props: dict = {"value": value_schema(fdef),
                        "confidence": ({"enum": ["n/a"]} if judgement
                                       else {"enum": ["high", "medium", "low", "n/a"]})}
+        # The quote behind the value. Required on every fact field so the
+        # forced call cannot skip it; null is the honest answer when nothing
+        # in the transcript supports a value (and then the value is null too —
+        # the evidence guard enforces that on the far side).
+        props["evidence"] = {"type": ["string", "null"], "maxLength": 400,
+                             "description": ("The exact transcript words (at most 25) the "
+                                             "value was read from; null when no words "
+                                             "support it. Judgement fields: null.")}
         if fdef["key"] == "opportunity_score":
             props["user_override"] = {"type": "boolean"}
         return {"type": "object", "properties": props,
-                "required": ["value", "confidence"], "additionalProperties": False}
+                "required": ["value", "confidence"] + ([] if judgement else ["evidence"]),
+                "additionalProperties": False}
 
     def block(defs: list[dict]) -> dict:
         return {"type": "object",

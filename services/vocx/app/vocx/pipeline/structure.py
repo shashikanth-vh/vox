@@ -89,7 +89,8 @@ def build_prompt(registry_version: str | None = None) -> str:
         + "\n\n--- REGISTRY (the field blocks to fill) ---\n"
         + json.dumps(registry, ensure_ascii=False)
         + "\n\n--- CONTRACT SHAPE ---\n"
-        + "Every field is {\"value\": ..., \"confidence\": \"high|medium|low|n/a\"}. "
+        + "Every field is {\"value\": ..., \"confidence\": \"high|medium|low|n/a\", "
+          "\"evidence\": \"<the transcript words the value came from, or null>\"}. "
           "Top level: detected_use_cases, common, one block per detected use case, "
           "entity_candidates. Absent means absent. When you chose a subsector, also "
           "fill top-level \"subsector_details\" with THAT subsector's canonical data "
@@ -347,12 +348,20 @@ def _scrub_cell(fdef: dict, cell: dict) -> None:
             del cell["unit"]
         elif u in ("cr", "crore", "crores", "inr", "rs", "rupees", "inr_cr", "rs_cr"):
             del cell["unit"]
-    keep = {"value", "confidence", "unit"}
+    keep = {"value", "confidence", "unit", "evidence"}
     if fdef.get("key") == "opportunity_score":
         keep.add("user_override")
     for k in list(cell):
         if k not in keep:
             del cell[k]
+    # evidence is a quote or nothing: a model that hands back a list or an
+    # object there has not quoted, and the guard must see "no evidence".
+    if "evidence" in cell and not isinstance(cell["evidence"], str):
+        del cell["evidence"]
+    elif isinstance(cell.get("evidence"), str):
+        cell["evidence"] = cell["evidence"].strip()[:400] or None
+        if cell["evidence"] is None:
+            del cell["evidence"]
     conf = cell.get("confidence")
     if isinstance(conf, str) and conf not in ("high", "medium", "low", "n/a"):
         cell["confidence"] = _CONF_MAP.get(_canon(conf), conf)
@@ -818,7 +827,11 @@ _SARVAM_RULES = (
     "recorder', 'the narrator') into a summary or note — not even beside the "
     "name ('Tech and Pallavi met', NEVER 'Tech (narrator)' or 'the recorder "
     "(Tech)'). Dates are YYYY-MM-DD; amounts are "
-    "plain numbers denominated in crore (50 lakh = 0.5). Return ONLY one "
+    "plain numbers denominated in crore (50 lakh = 0.5). Every fact cell "
+    "carries \"evidence\": the exact transcript words (at most 25) the value "
+    "was read from, or null when nothing supports it — and then the value is "
+    "null too. A rupee figure belongs to ONE product line unless the speaker "
+    "ties the same amount to a second one. Return ONLY one "
     "JSON object — no prose, no thinking, no code fences.")
 
 
@@ -863,7 +876,10 @@ _SARVAM_FIELD_EXTRAS = {
                                "the own-book portion; otherwise the full "
                                "requirement"),
     "deal_size_cr": (" — the amount to syndicate: the syndicated portion "
-                     "when a split was spoken, else the full requirement"),
+                     "when a split was spoken, else the full requirement ONLY "
+                     "when the speaker takes that requirement to syndication; "
+                     "null when the syndicated loan's size was never spoken, "
+                     "however many lenders were named"),
     "asset_location": (" — the location as spoken, even shorthand or a site "
                        "code (e.g. 'AMPY (2.5 into 4 sites)')"),
     # Lane discipline, seen violated live: the asset-for-sale's site rode
@@ -1310,7 +1326,7 @@ def _structure_sarvam(transcript: str, ask: Callable[[str, str], str],
         f"{_SARVAM_RULES}\n"
         "Shape: {\"detected_use_cases\": [...], \"entity_candidates\": [...], "
         "\"common\": {<key>: {\"value\": ..., \"confidence\": "
-        "\"high\"|\"medium\"|\"low\"|\"n/a\"}}}\n"
+        "\"high\"|\"medium\"|\"low\"|\"n/a\", \"evidence\": \"<words>\"|null}}}\n"
         f"detected_use_cases: the subset of {ucs} the conversation is actually "
         "about — include one ONLY when that specific ask was spoken (an asset "
         "sale alone is asset_monetisation, not lending). A funding "
@@ -1476,6 +1492,7 @@ def structure_transcript(
     known_names: str | None = None,
     recorder: str | None = None,
     engine: str | None = None,
+    lender_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the structuring stage. ``ask_model(model, system, user)`` is injected so
     the pipeline is testable without a network and swappable without a rewrite.
@@ -1619,6 +1636,18 @@ def structure_transcript(
     except Exception as exc:  # noqa: BLE001 — a guard never fails the take
         log.warning("output guards skipped: %s", exc)
         guard_notes = []
+    # Evidence discipline: a fact with no transcript words behind it drops to
+    # low and is flagged; one rupee figure sits in one lane; lender names are
+    # resolved against the desk's list or flagged as unknown.
+    from .evidence import amount_lane_guard, evidence_guard
+    from .names import resolve_lender_names
+    for guard in (lambda: evidence_guard(report, work_transcript, registry_version),
+                  lambda: amount_lane_guard(report),
+                  lambda: resolve_lender_names(report, lender_names)):
+        try:
+            guard_notes.extend(guard())
+        except Exception as exc:  # noqa: BLE001 — a guard never fails the take
+            log.warning("output guard skipped: %s", exc)
 
     # Server-side data-quality nudges merge into the model's own flags (deduplicated,
     # order preserved) — flags never block, they steer the review.

@@ -14,7 +14,11 @@ import { api } from '../api/http';
 import vocxClient, { vocxError } from '../api/vocxClient';
 
 export type Confidence = 'high' | 'medium' | 'low' | 'n/a';
-export interface VoxCell { value: any; confidence: Confidence; user_override?: boolean }
+export interface VoxCell {
+  value: any; confidence: Confidence; user_override?: boolean;
+  /** The transcript words the value was read from (prompt v3); absent on older takes. */
+  evidence?: string | null;
+}
 export type VoxReport = Record<string, any> & {
   detected_use_cases?: string[];
   common?: Record<string, VoxCell>;
@@ -328,6 +332,8 @@ const JUDGEMENT_OR_SYSTEM = new Set([
 
 export interface NeedsYouItem {
   fieldPath: string;
+  /** "heard as": the quote behind the value, when the reading carried one. */
+  evidence?: string | null;
   label: string;
   confidence: Confidence;
   /** Which block the field belongs to — the strip's right-hand tag. */
@@ -358,7 +364,7 @@ export function needsYou(registry: VoxRegistry, report: VoxReport): NeedsYouItem
       if (cell.confidence === 'low' || cell.confidence === 'medium') {
         out.push({ fieldPath: `${blockKey}.${def.key}`, label: def.label,
                    confidence: cell.confidence, blockLabel,
-                   valueShort: shortValue(cell.value) });
+                   valueShort: shortValue(cell.value), evidence: cell.evidence || null });
       }
     }
   };

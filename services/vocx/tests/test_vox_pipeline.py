@@ -111,7 +111,7 @@ def test_a_note_reaches_ready_with_a_validated_report():
     assert row["status"] == "ready"
     assert row["processing_stage"] == "ready"
     assert row["structured_report"]["detected_use_cases"] == ["lending"]
-    assert row["prompt_version"] == "v2" and row["registry_version"] == "v2"
+    assert row["prompt_version"] == "v3" and row["registry_version"] == "v2"
     assert row["entity_candidates"] == ["Suryodaya"]
     # the null-sector-on-lending nudge arrived server-side
     flags = row["structured_report"]["common"]["data_quality_flags"]["value"]
@@ -1073,3 +1073,28 @@ def test_a_reopened_take_that_fails_again_gets_a_fresh_five():
     assert row["status"] == "processing_failed"      # not permanently: the count restarted
     assert row["retry_count"] == 0
     assert "STT still down" in row["processing_error"]
+
+
+def test_dual_readings_are_reconciled_and_the_lender_list_reaches_the_resolver():
+    """The runner hands the structured lender list from the known-names provider
+    to structuring (name resolution), and when the two readings disagree on a
+    fact both are capped at medium and flagged."""
+    def by_vendor(model, system, user):
+        data = json.loads(_valid_model_json())
+        if model.startswith("sarvam"):
+            data["lending"]["requirement_quantum_cr"] = {"value": 40, "confidence": "high"}
+            data["lending"]["existing_bankers"] = {"value": "Kotak Bank", "confidence": "high"}
+        return json.dumps(data)
+    reg = FakeRegister(engine="default")
+    runner = PipelineRunner(reg, good_transcribe, by_vendor, dual_engines=True,
+                            known_names=lambda: {"block": "KNOWN NAMES: Kotak Mahindra Bank",
+                                                 "lenders": ["Kotak Mahindra Bank", "Axis Bank"]})
+    row = runner.process("c1")
+    assert row["status"] == "ready"
+    a, b = row["structured_report"], row["structured_report_alt"]
+    assert a["lending"]["requirement_quantum_cr"]["confidence"] == "medium"
+    assert b["lending"]["requirement_quantum_cr"]["confidence"] == "medium"
+    flags = a["common"]["data_quality_flags"]["value"]
+    assert any("disagree" in f and "'25'" in f and "'40'" in f for f in flags)
+    assert b["lending"]["existing_bankers"]["value"] == "Kotak Mahindra Bank"
+    assert any("'Kotak Bank' → 'Kotak Mahindra Bank'" in f for f in b["common"]["data_quality_flags"]["value"])

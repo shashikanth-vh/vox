@@ -36,7 +36,7 @@ const dotCls = (conf?: string) =>
   conf === 'high' ? 'hi' : conf === 'medium' ? 'md' : conf === 'low' ? 'lo' : 'na';
 
 export type Verdict = 'same' | 'worded' | 'differs';
-type Line = { path: string; label: string; text: string; conf?: string; other: string; verdict: Verdict };
+type Line = { path: string; label: string; text: string; conf?: string; other: string; verdict: Verdict; evidence?: string | null };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const num = (s: string): number | null => {
@@ -94,7 +94,7 @@ export function readingLines(registry: VoxRegistry, mine: VoxReport, other: VoxR
       const otherText = readingText(theirs[def.key]?.value);
       if (!text && !otherText) continue;
       out.push({ path: `${blockKey}.${def.key}`, label: def.label || label(def.key), text,
-        conf: cell?.confidence, other: otherText,
+        conf: cell?.confidence, other: otherText, evidence: cell?.evidence || null,
         verdict: other ? compareField(def, cell?.value, theirs[def.key]?.value) : 'same' });
     }
   };
@@ -162,6 +162,9 @@ function ReadingCard({ engine, registry, mine, other, otherEngine, view, needs }
           <div style={{ fontSize: 13.5, marginTop: 2, whiteSpace: 'pre-wrap' }}>
             {l.text || <span style={{ color: 'var(--muted)' }}>— not captured</span>}
           </div>
+          {l.evidence && l.verdict !== 'same' && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginTop: 2 }}>heard as “{l.evidence}”</div>
+          )}
           {l.verdict !== 'same' && (
             <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)', background: 'var(--bg-3)',
               borderRadius: 8, padding: '6px 8px' }}>

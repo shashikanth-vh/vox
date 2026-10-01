@@ -55,7 +55,7 @@ def test_thin_use_cases_ship_common_only():
 
 def test_the_canonical_prompt_exists_with_its_anchor_rules():
     prompt = " ".join(load_prompt().split())  # anchors may span the spec's line breaks
-    assert latest_prompt_version() == "v2"
+    assert latest_prompt_version() == "v3"
     for anchor in (
         "Never fabricate",
         "party_role",

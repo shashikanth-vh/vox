@@ -1253,10 +1253,16 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
 
   const formRow = (blockKey: string, def: any) => {
     const cells = (blockKey === 'common' ? common : (report as any)?.[blockKey]) || {};
-    const conf = (cells[def.key] as VoxCell | undefined)?.confidence;
+    const cellOf = cells[def.key] as VoxCell | undefined;
+    const conf = cellOf?.confidence;
+    const heard = cellOf?.evidence;
     return (
       <div className="form-row" key={def.key} id={`vox-${blockKey}.${def.key}`}>
-        <div className="fr-label">{def.label} <span className={`conf-dot ${dotCls(conf)}`} /></div>
+        <div className="fr-label">{def.label} <span className={`conf-dot ${dotCls(conf)}`} />
+          {heard && (conf === 'low' || conf === 'medium') && (
+            <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginLeft: 6 }}
+              title="The transcript words this value was read from">heard as “{heard}”</span>)}
+        </div>
         {fieldControl(blockKey, def)}
       </div>
     );
@@ -1357,7 +1363,9 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
             {strip.map((n) => (
               <div key={n.fieldPath} className="ns-item" onClick={() => jump(n.fieldPath)}>
                 <span className={`ns-dot ${n.confidence === 'low' ? 'lo' : 'md'}`} />
-                <span className="ns-field">{n.label} — {n.valueShort}</span>
+                <span className="ns-field">{n.label} — {n.valueShort}
+                  {n.evidence && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>heard as: “{n.evidence}”</span>}
+                </span>
                 <span className="ns-where">{n.blockLabel}</span>
                 <span className="ns-jump"><Ic i="i-chev-r" /></span>
               </div>

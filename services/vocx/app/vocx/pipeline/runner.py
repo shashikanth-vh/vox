@@ -207,9 +207,17 @@ class PipelineRunner:
                 f"silent, check the microphone (and which input the browser uses) and "
                 f"record again.")
         glossary = None
+        lender_names: list[str] | None = None
         if self.known_names is not None:
             try:
-                glossary = self.known_names()
+                got = self.known_names()
+                # The provider hands back the rendered block, or a dict with the
+                # block AND the structured lender list the name resolver needs.
+                if isinstance(got, dict):
+                    glossary = got.get("block")
+                    lender_names = list(got.get("lenders") or []) or None
+                else:
+                    glossary = got
             except Exception as exc:  # noqa: BLE001 — context, not a gate
                 log.warning("known-names provider failed (continuing without): %s", exc)
         t0 = time.monotonic()
@@ -223,6 +231,7 @@ class PipelineRunner:
                 known_names=glossary,
                 recorder=row.get("recorder_name") or None,
                 engine=engine,
+                lender_names=lender_names,
             )
 
         primary = (row.get("engine") or "default").strip().lower()
@@ -257,7 +266,23 @@ class PipelineRunner:
             # straggler is abandoned (daemon thread) and noted, never waited on.
             alt_thread.join(max(5.0, self.timeouts["structure"] - (time.monotonic() - t0)))
             if "out" in alt_box:
-                fields["structured_report_alt"] = alt_box["out"]["report"]
+                alt_report = alt_box["out"]["report"]
+                # A fact the two readings disagree on cannot be high confidence:
+                # cap it at medium on both and flag it, so it reaches the
+                # reviewer's "needs you" strip (pipeline.reconcile).
+                try:
+                    from .reconcile import reconcile_readings
+                    pretty = {"default": "Default", "regional": "Regional"}
+                    disagreements = reconcile_readings(
+                        report, alt_report, names=(pretty.get(primary, primary),
+                                                   pretty.get(other, other)))
+                    if disagreements:
+                        log.info("conversation %s: the two readings disagree on %d field(s)",
+                                 cid, len(disagreements))
+                except Exception as exc:  # noqa: BLE001 — a comparison never fails the take
+                    log.warning("reading reconciliation skipped: %s", exc)
+                fields["structured_report"] = report
+                fields["structured_report_alt"] = alt_report
                 fields["engine_alt"] = other
                 log.info("conversation %s also read by %s (%s) in %.1fs",
                          cid, other, alt_box["out"]["model"], time.monotonic() - t0)
