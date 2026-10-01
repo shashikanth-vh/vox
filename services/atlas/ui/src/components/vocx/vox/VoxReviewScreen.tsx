@@ -847,7 +847,14 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
       && (compare ?? !row.chosen_engine)) {
     return (
       <VoxCompareDeck row={row} registry={registry} stats={stats} busy={busy}
+        transcript={row.corrected_transcript || row.raw_transcript || ''}
         onPick={(engine, thenApprove) => void pickReading(engine, thenApprove)}
+        onFixTranscript={(engine) => void pickReading(engine, false).then(() => {
+          // straight into the transcript editor: a misheard name is fixed once
+          // and BOTH models re-read the corrected text
+          setFixDraft(row.corrected_transcript || row.raw_transcript || '');
+          setFixingTranscript(true); setTranscriptOpen(false);
+        })}
         onBack={row.chosen_engine ? () => setCompare(false) : onBack} />
     );
   }
