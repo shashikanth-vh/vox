@@ -1509,9 +1509,19 @@ export default function CommonTable<T extends Record<string, any>>(
     },
 
     // Compact top toolbar: short, small icons, vertically centred.
+    // 48px, not the 36px this started at, so the revealed search box is fully visible
+    // and sits in the bar rather than flush against its edge.
+    //
+    // It has to be a CONSTANT height — growing the bar when the box opens would shove the
+    // whole table down as it appears. That works because MRT renders the row carrying the
+    // search field and the icons `position:absolute` (unless the bar is stacked: the page
+    // passed `toolbarLeft`, or the viewport is tablet-or-narrower), so the row adds no
+    // height of its own and MRT's `overflow:hidden` crops whatever falls past this value.
+    // 8px of MRT's row padding + the theme's 32px small outlined field = 40px, leaving
+    // 8px below the field instead of cutting off its lower edge.
     muiTopToolbarProps: {
       sx: {
-        minHeight: 36,
+        minHeight: 48,
         "& .MuiBox-root": { alignItems: "center" },
         "& .MuiIconButton-root": { padding: "4px" },
         "& .MuiSvgIcon-root": { fontSize: 18 },
@@ -1529,7 +1539,7 @@ export default function CommonTable<T extends Record<string, any>>(
         "& .MuiSvgIcon-root": { fontSize: "19px !important" },
         "& .MuiIconButton-root": { padding: "3px" },
         // Pull the whole pagination block up (moves as one, so it stays aligned).
-        "& .MuiTablePagination-root": { overflow: "visible", mt: "-9px" },
+        "& .MuiTablePagination-root": { overflow: "visible", mt: "-12px" },
         "& .MuiTablePagination-toolbar": {
           minHeight: 30,
           alignItems: "center",
@@ -1621,9 +1631,30 @@ export default function CommonTable<T extends Record<string, any>>(
         </Tooltip>
       </Box>
     ),
-    renderTopToolbarCustomActions: toolbarLeft
-      ? () => <>{toolbarLeft}</>
-      : undefined,
+    // The page's left-hand toolbar content, as ONE flex item.
+    //
+    // The Box is what keeps a multi-part `toolbarLeft` together. MRT's toolbar row is
+    // `justify-content:space-between`, and a fragment's children land in it as separate
+    // flex items — so Leads' [Add lead, Show converted] became three items with the
+    // icons, and space-between pushed the switch into the middle of the bar instead of
+    // leaving it beside the button. Grouped, the whole cluster is the row's left item
+    // and lines up on one edge. (The phone branch above already groups it the same way.)
+    //
+    // Rendered even when a page supplies nothing, for two reasons. MRT decides the
+    // toolbar's LAYOUT from whether this prop exists: given custom actions it keeps the
+    // row holding the search field and the icons in flow (`position:relative`); without
+    // them that row is `position:absolute`, and at tablet widths it flips between the
+    // two as the search box opens and closes (its `stackAlertBanner` reads
+    // `showGlobalFilter && isTablet`) — every toggle moved the row in or out of flow,
+    // which is the flicker the icons showed on the grids with no Add button (Deals,
+    // Activity, Audit). And an empty Box is still the row's left-hand item, holding the
+    // icons against the right edge; with no item there, space-between would slide them
+    // left. MRT's own fallback is a bare <span> for that second reason.
+    renderTopToolbarCustomActions: () => (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+        {toolbarLeft}
+      </Box>
+    ),
 
     enableExpanding: enableExpand,
   });

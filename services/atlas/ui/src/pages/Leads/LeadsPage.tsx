@@ -61,7 +61,7 @@ export default function LeadsPage() {
         toolbarLeft={<>
           {can(user.roles, 'addLead') && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add lead</Button>}
           {mgmt && (
-            <FormControlLabel sx={{ ml: 1, '& .MuiTypography-root': { fontSize: 12.5 } }}
+            <FormControlLabel sx={{ '& .MuiTypography-root': { fontSize: 12.5 } }}
               control={<Switch size="small" checked={showConverted}
                 onChange={(e) => setShowConverted(e.target.checked)} />}
               label="Show converted" />
