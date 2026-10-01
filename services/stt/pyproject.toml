@@ -21,7 +21,11 @@ dependencies = [
 # engine); the Docker image installs .[whisper] and bakes the model at build time.
 # requests: faster_whisper.utils imports it at module level but does not always get
 # it transitively (huggingface_hub >= 1.0 uses httpx) — declare it explicitly.
-whisper = ["faster-whisper==1.1.1", "requests==2.32.3"]
+# av (PyAV) is pinned below 15: faster-whisper 1.1.1 only says av>=11, and an
+# image rebuild on 1 Oct 2026 resolved PyAV 18, whose av.open() no longer takes
+# the metadata_errors keyword faster-whisper passes — every clip was refused
+# with "TypeError: open() got an unexpected keyword argument 'metadata_errors'".
+whisper = ["faster-whisper==1.1.1", "av==14.2.0", "requests==2.32.3"]
 dev = ["pytest==8.3.4", "pytest-asyncio==0.25.0", "httpx==0.28.1", "ruff==0.8.4", "mypy==1.14.0"]
 
 [build-system]

@@ -16,6 +16,15 @@ COPY services/stt/pyproject.toml services/stt/README.md ./
 RUN pip install ".[whisper]"
 COPY services/stt/app ./app
 RUN pip install ".[whisper]"
+# Prove the DECODE path at build time: a generated one-second WAV through
+# faster-whisper's own decoder. A PyAV/faster-whisper mismatch (the unpinned
+# av that reached 18.x and dropped the metadata_errors keyword) fails the
+# image build here, not every clip in production.
+RUN python -c "import io, struct, wave; from faster_whisper.audio import decode_audio; \
+    b = io.BytesIO(); w = wave.open(b, 'wb'); w.setnchannels(1); w.setsampwidth(2); \
+    w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h', 0) for _ in range(16000))); \
+    w.close(); b.seek(0); a = decode_audio(b); assert len(a) == 16000, len(a); \
+    import av; print('decode ok · av', av.__version__)"
 
 # Bake the models. The default size serves every request that doesn't choose;
 # STT_EXTRA_MODELS (comma/space list) bakes additional sizes selectable per

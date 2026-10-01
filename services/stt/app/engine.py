@@ -150,6 +150,16 @@ class FasterWhisperEngine:
                     parts.append(seg.text)
                     segs.append({"start": round(seg.start, 2), "end": round(seg.end, 2),
                                  "text": seg.text.strip()})
+            except (TypeError, AttributeError, ImportError, NameError) as exc:
+                # A Python-level fault inside the decoder is THIS BUILD's problem,
+                # never the clip's: on 1 Oct 2026 an unpinned PyAV 18 made
+                # av.open() refuse faster-whisper's metadata_errors keyword and
+                # every recording was answered "could not be transcribed" (400),
+                # which read as bad audio. It is a deployment fault: 503, say so.
+                raise ModelUnavailable(
+                    f"the decoder in this image is broken, not the clip: "
+                    f"{type(exc).__name__}: {exc}. Check the faster-whisper / av (PyAV) "
+                    f"pins in services/stt/pyproject.toml and rebuild the stt image.") from exc
             except Exception as exc:                  # noqa: BLE001 - re-raised, typed
                 raise AudioUndecodable(
                     f"the {len(audio)} byte clip ({sniff_container(audio)}) could not be "

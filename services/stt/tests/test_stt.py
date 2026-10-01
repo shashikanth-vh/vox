@@ -155,3 +155,43 @@ def test_engine_knows_its_baked_sizes_and_falls_back():
     assert e.known_sizes() == {"medium", "small", "large-v3"}
     s2 = Settings(model_size="small")
     assert FasterWhisperEngine(s2).known_sizes() == {"small"}
+
+
+# ------------------------------------------------- decoder fault vs bad clip
+
+class _Model:
+    """Stands in for a loaded WhisperModel: `transcribe` raises what we tell it."""
+    def __init__(self, exc):
+        self.exc = exc
+
+    def transcribe(self, *a, **k):
+        raise self.exc
+
+
+def _real_engine(exc):
+    from app.config import Settings
+    from app.engine import FasterWhisperEngine
+    eng = FasterWhisperEngine(Settings())
+    eng._models[eng.s.model_size] = _Model(exc)   # skip the (offline) model load
+    return eng
+
+
+def test_a_library_fault_in_the_decoder_is_a_503_not_a_bad_clip():
+    """1 Oct 2026: an unpinned PyAV 18 made av.open() refuse faster-whisper's
+    metadata_errors keyword, and every recording came back 400 'could not be
+    transcribed' — read by everyone as a bad clip. A TypeError (or any Python-level
+    fault) inside the decoder is this BUILD's fault and must say so, as a 503."""
+    eng = _real_engine(TypeError("open() got an unexpected keyword argument 'metadata_errors'"))
+    with pytest.raises(ModelUnavailable) as err:
+        eng.transcribe(b"\x1a\x45\xdf\xa3" + b"\x00" * 100)
+    assert "decoder in this image is broken" in str(err.value)
+    assert "metadata_errors" in str(err.value)
+    assert "pyproject" in str(err.value)
+
+
+def test_a_clip_the_decoder_cannot_read_is_still_a_400():
+    eng = _real_engine(ValueError("Invalid data found when processing input"))
+    with pytest.raises(AudioUndecodable) as err:
+        eng.transcribe(b"\x1a\x45\xdf\xa3" + b"\x00" * 100)
+    assert "WebM/Matroska" in str(err.value)
+    assert "Invalid data" in str(err.value)
