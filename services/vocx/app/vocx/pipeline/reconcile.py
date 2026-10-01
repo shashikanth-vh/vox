@@ -50,6 +50,11 @@ def _differs(fdef: dict, a: Any, b: Any) -> bool:
     if ftype == "list":
         la = a if isinstance(a, list) else [a]
         lb = b if isinstance(b, list) else [b]
+        if fdef.get("control") == "chips" or fdef.get("closed_set"):
+            # a closed set of tags: one reading ticking an extra tag is wording,
+            # not a contradiction — the extra tag shows in "the other says"
+            sa, sb = {_norm(x) for x in la if _norm(x)}, {_norm(x) for x in lb if _norm(x)}
+            return not (sa <= sb or sb <= sa)
         if len(la) != len(lb):
             return True
         fa = sorted(_norm(x).split(" ")[0] for x in la if _norm(x))
@@ -58,6 +63,15 @@ def _differs(fdef: dict, a: Any, b: Any) -> bool:
     na, nb = _norm(a), _norm(b)
     if na == nb:
         return False
+    # one reading says more than the other about the same thing ("Whitefield"
+    # inside "Whitefield, Bangalore"): wording, not a contradiction
+    if (na in nb or nb in na) and min(len(na), len(nb)) >= 4:
+        return False
+    # the same number on both sides ("approximately ₹120 crore" / "120 crores")
+    xa = re.findall(r"\d+(?:\.\d+)?", na)
+    xb = re.findall(r"\d+(?:\.\d+)?", nb)
+    if xa and xb:
+        return xa != xb
     # a long free-text field is prose in disguise: the same number inside both
     # (an amount, a size) is one fact worded twice
     if len(na) > 60 or len(nb) > 60:
@@ -86,6 +100,8 @@ def reconcile_readings(primary: dict, alt: dict, registry_version: str | None = 
         key = fdef["key"]
         if key in PROSE or fdef.get("judgement") or fdef.get("system"):
             continue
+        if key == "opportunity_score":
+            continue            # an AI suggestion either way; the score guard already flags it
         ca = (primary.get(block) or {}).get(key) if isinstance(primary.get(block), dict) else None
         cb = (alt.get(block) or {}).get(key) if isinstance(alt.get(block), dict) else None
         if not isinstance(ca, dict) and not isinstance(cb, dict):

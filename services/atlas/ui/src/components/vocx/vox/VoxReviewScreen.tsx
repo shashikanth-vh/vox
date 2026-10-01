@@ -1709,7 +1709,10 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
               )}
               {flags.length > 0 && (
                 <div className="atlas-detail" style={{ marginTop: 14 }}>
-                  <span className="k">Data quality:</span> {flags.join(' · ')}
+                  <span className="k">Data quality:</span>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {flags.map((f, i) => <li key={i} style={{ margin: '2px 0' }}>{f}</li>)}
+                  </ul>
                 </div>
               )}
               <div className="audit-strip" style={{ marginTop: 16 }}>

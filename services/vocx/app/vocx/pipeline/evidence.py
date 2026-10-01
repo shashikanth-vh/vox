@@ -66,6 +66,68 @@ def quote_supported(evidence: str | None, transcript: str) -> bool:
     return hit / len(toks) >= 0.6
 
 
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+         "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+
+def _number_words(n: int) -> list[str]:
+    """'85' -> ['eighty five', 'eighty-five']; '120' -> ['one hundred and twenty', 'hundred twenty',
+    'one twenty']. Whisper writes some numbers as words, and a quote-less value
+    must still be found in the transcript it was read from."""
+    if n < 0 or n > 999:
+        return []
+    out: list[str] = []
+    if n < 20:
+        out.append(_ONES[n])
+    elif n < 100:
+        t, o = divmod(n, 10)
+        out += [f"{_TENS[t]} {_ONES[o]}" if o else _TENS[t], f"{_TENS[t]}-{_ONES[o]}" if o else _TENS[t]]
+    else:
+        h, rest = divmod(n, 100)
+        tail = _number_words(rest) if rest else []
+        for r in (tail or [""]):
+            out += [f"{_ONES[h]} hundred{' and ' + r if r else ''}", f"{_ONES[h]} hundred {r}".strip(),
+                    f"hundred {r}".strip() if h == 1 else f"{_ONES[h]} hundred {r}".strip()]
+            if h == 1 and r:
+                out.append(f"one {r}")
+    return [x.strip() for x in out if x.strip()]
+
+
+def value_supported(value: Any, transcript: str) -> bool:
+    """When a cell carries no quote, the VALUE itself may still be plainly in the
+    transcript — a number as digits or words, a name, a place. Only a value
+    found nowhere is an unquoted fact."""
+    if not transcript:
+        return False
+    tr = re.sub(r"\s+", " ", transcript).lower()
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        if value == int(value):
+            n = int(value)
+            if re.search(rf"(?<![\d.]){n}(?![\d])", tr):
+                return True
+            return any(w in tr for w in _number_words(n))
+        return str(value) in tr or str(value).rstrip("0").rstrip(".") in tr
+    if isinstance(value, list):
+        items = [x for x in value if x not in (None, "")]
+        if not items:
+            return False
+        # a list of names with one misheard entry is still the list that was
+        # spoken: most of it must be there, not every item
+        return sum(1 for x in items if value_supported(x, transcript)) / len(items) >= 0.6
+    if isinstance(value, dict):
+        return any(value_supported(x, transcript) for x in value.values())
+    text = str(value)
+    toks = _tokens(text)
+    if not toks:
+        return False
+    have = set(_tokens(tr))
+    return sum(1 for t in toks if t in have) / len(toks) >= 0.6
+
+
 def _absent(v: Any) -> bool:
     return v is None or v == [] or v == "" or v == "not_specified"
 
@@ -126,13 +188,18 @@ def evidence_guard(report: dict, transcript: str,
             if ev is not None:
                 # a quote the transcript never said is worse than none
                 cell.pop("evidence", None)
+            # No usable quote: the value itself may still be plainly in the
+            # transcript (a reading that quotes some cells and not others — the
+            # batched Regional path does this). Only a value found nowhere drops.
+            if value_supported(cell.get("value"), transcript):
+                continue
             cell["confidence"] = "low"
             label = labels.get((block, key), key)
             notes.append(f"{label}: no transcript words behind '{_short(cell.get('value'))}' — confirm")
     return notes
 
 
-_SYN_WORDS = re.compile(r"syndicat|consortium|arrang|club|participat|lenders?\b|banks?\b", re.IGNORECASE)
+_SYN_WORDS = re.compile(r"syndicat|consortium|arrang|club|participat|co-?lend|lenders?\b|banks?\b", re.IGNORECASE)
 
 
 def amount_lane_guard(report: dict) -> list[str]:

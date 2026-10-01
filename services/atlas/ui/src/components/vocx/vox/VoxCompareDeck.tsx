@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ENGINE_UI, needsYou } from '../../../services/voxService';
+import { ENGINE_UI } from '../../../services/voxService';
 import type { VoxConversation, VoxEngineStats, VoxRegistry, VoxReport } from '../../../services/voxService';
 
 const ACRONYMS = new Set(['ppa', 'epc', 'spv', 'ipp', 'ev', 'bess', 'lc', 'nbfc']);
@@ -60,9 +60,14 @@ export function compareField(def: any, mine: any, theirs: any): Verdict {
     return x !== null && y !== null && Math.abs(x - y) < 1e-9 ? 'same' : 'differs';
   }
   if (ctl === 'date' || ctl === 'dropdown') return 'differs';
-  if (ctl === 'chips') {
-    const sa = new Set(norm(a).split(' ')), sb = new Set(norm(b).split(' '));
-    return [...sa].every((t) => sb.has(t)) && [...sb].every((t) => sa.has(t)) ? 'same' : 'differs';
+  if (ctl === 'chips' || def.closed_set) {
+    // a closed set of tags: one reading ticking an extra tag is wording, not a
+    // contradiction — the extra tag shows in "the other says"
+    const la = (Array.isArray(mine) ? mine : [mine]).map((x) => norm(readingText(x))).filter(Boolean);
+    const lb = (Array.isArray(theirs) ? theirs : [theirs]).map((x) => norm(readingText(x))).filter(Boolean);
+    const sa = new Set(la), sb = new Set(lb);
+    const sub = la.every((t) => sb.has(t)) || lb.every((t) => sa.has(t));
+    return sub ? (la.length === lb.length ? 'same' : 'worded') : 'differs';
   }
   if (ctl === 'list' || Array.isArray(mine) || Array.isArray(theirs)) {
     if (PROSE.has(def.key)) return 'worded';
@@ -75,6 +80,10 @@ export function compareField(def: any, mine: any, theirs: any): Verdict {
   }
   if (ctl === 'action_items' || ctl === 'lender_updates') return 'worded';
   if (PROSE.has(def.key) || ctl === 'textarea') return 'worded';
+  // one reading says more than the other about the same thing ("Whitefield"
+  // inside "Whitefield, Bangalore"): wording, not a contradiction
+  const na = norm(a), nb = norm(b);
+  if ((na.includes(nb) || nb.includes(na)) && Math.min(na.length, nb.length) >= 4) return 'worded';
   // free text: the same number inside both (a quantum, a size) is one fact worded twice
   const x = num(a), y = num(b);
   if (x !== null && y !== null && Math.abs(x - y) < 1e-9) return 'worded';
@@ -89,6 +98,8 @@ export function readingLines(registry: VoxRegistry, mine: VoxReport, other: VoxR
     const cells = (blockKey === 'common' ? mine.common : (mine as any)[blockKey]) || {};
     const theirs = (blockKey === 'common' ? other?.common : (other as any)?.[blockKey]) || {};
     for (const def of defs || []) {
+      // the flags list and the AI score are not readings to pick between
+      if (def.key === 'data_quality_flags' || def.key === 'opportunity_score') continue;
       const cell = cells[def.key];
       const text = readingText(cell?.value);
       const otherText = readingText(theirs[def.key]?.value);
@@ -155,7 +166,7 @@ function ReadingCard({ engine, registry, mine, other, otherEngine, view, needs }
             textTransform: 'uppercase', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {l.label}
             {l.conf && l.conf !== 'n/a' && <span className={`conf-dot ${dotCls(l.conf)}`} title={l.conf} />}
-            {(l.conf === 'low' || l.conf === 'medium') && <span className="chip" style={CHIP_WARN}>confirm</span>}
+            {l.conf === 'low' && !PROSE.has(l.path.split('.')[1]) && <span className="chip" style={CHIP_WARN}>confirm</span>}
             {l.verdict === 'differs' && <span className="chip" style={CHIP_WARN}>disagree</span>}
             {l.verdict === 'worded' && <span className="chip">worded differently</span>}
           </div>
@@ -198,7 +209,13 @@ export default function VoxCompareDeck({ row, registry, stats, busy, transcript,
     { engine: primary, report: row.structured_report as VoxReport, other: row.structured_report_alt as VoxReport, otherEngine: alt, needs: 0 },
     { engine: alt, report: row.structured_report_alt as VoxReport, other: row.structured_report as VoxReport, otherEngine: primary, needs: 0 },
   ];
-  cards.forEach((c) => { c.needs = needsYou(registry, c.report).length; });
+  // "to confirm" on the deck is what a person must actually decide: a fact
+  // read at LOW confidence, or a fact the two models disagree on. Mediums and
+  // prose stay in the review's optional strip, not in this count.
+  cards.forEach((c) => {
+    const ls = readingLines(registry, c.report, c.other);
+    c.needs = ls.filter((l) => l.verdict === 'differs' || (l.conf === 'low' && !PROSE.has(l.path.split('.')[1]))).length;
+  });
   // Default on the left whichever engine was primary, so the swipe always reads
   // the same way: Default ← → Regional.
   cards.sort((a) => (a.engine === 'default' ? -1 : 1));

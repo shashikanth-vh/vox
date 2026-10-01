@@ -44,15 +44,15 @@ def test_a_fact_without_words_behind_it_drops_to_low_and_is_flagged():
     report = {
         "common": {"location": _cell("Whitefield, Bangalore", "high", "met Rohan Maitha at the Whitefield office")},
         "lending": {"requirement_quantum_cr": _cell(2, "high", "two crore working capital loan")},
-        "syndication": {"deal_size_cr": _cell(2, "high"),                                  # no quote
-                        "probable_lenders": _cell("Axis Bank, Kotak", "high", "nothing like this was said")},
+        "syndication": {"deal_size_cr": _cell(7, "high"),                                  # no quote, no 7 anywhere
+                        "existing_lenders": _cell("Nowhere Bank", "high", "nothing like this was said")},
     }
     notes = evidence_guard(report, TRANSCRIPT)
     assert report["common"]["location"]["confidence"] == "high"
     assert report["lending"]["requirement_quantum_cr"]["confidence"] == "high"
     assert report["syndication"]["deal_size_cr"]["confidence"] == "low"
-    assert report["syndication"]["probable_lenders"]["confidence"] == "low"
-    assert "evidence" not in report["syndication"]["probable_lenders"]       # a false quote is dropped
+    assert report["syndication"]["existing_lenders"]["confidence"] == "low"
+    assert "evidence" not in report["syndication"]["existing_lenders"]       # a false quote is dropped
     assert any("Deal size" in n or "deal_size" in n for n in notes)
     assert any("no transcript words behind" in n for n in notes)
 
@@ -99,7 +99,7 @@ def test_the_lane_guard_stands_down_without_evidence_and_with_distinct_amounts()
 # --------------------------------------------------------- two readings
 
 def test_a_disagreement_caps_both_readings_at_medium_and_flags_it():
-    a = {"common": {"location": _cell("Whitefield, Bangalore"), "sector": _cell("Renewables"),
+    a = {"common": {"location": _cell("Electronic City"), "sector": _cell("Renewables"),
                     "meeting_summary": _cell("Pallavi met Rohan…", "n/a"),
                     "data_quality_flags": {"value": [], "confidence": "n/a"}},
          "syndication": {"deal_size_cr": _cell(None, "n/a"),
@@ -188,3 +188,49 @@ def test_the_scrub_keeps_a_quote_and_drops_a_structure():
     _scrub_cell({"key": "requirement_quantum_cr", "type": "number"}, cell2)
     assert "evidence" not in cell2
     assert json.dumps(cell)  # serialisable
+
+
+# ------------------------------------------------ relaxations, 1 Oct take 2
+
+def test_a_value_plainly_in_the_transcript_survives_without_a_quote():
+    """The batched Regional path quotes some cells and not others: a quantum of
+    2 with 'two crore' in the transcript, a turnover of 85 with 'eighty five
+    crore', a name list that is all there — none of these are unquoted facts."""
+    report = {
+        "common": {"location": _cell("Whitefield", "high", "a quote the transcript never said"),
+                   "attendees_counterparty": _cell(["Rohan Maitha", "Pallavi", "Someone Else"], "high")},
+        "lending": {"requirement_quantum_cr": _cell(2, "high"), "company_turnover_cr": _cell(85, "high"),
+                    "existing_bankers": _cell("Nowhere Bank", "high")},
+        "asset_monetisation": {"deal_size": _cell("120 crores", "high", "valued at about one hundred and twenty crore")},
+    }
+    notes = evidence_guard(report, TRANSCRIPT)
+    assert report["lending"]["requirement_quantum_cr"]["confidence"] == "high"      # 'two crore'
+    assert report["lending"]["company_turnover_cr"]["confidence"] == "high"         # 'eighty five crore'
+    assert report["common"]["attendees_counterparty"]["confidence"] == "high"
+    assert report["common"]["location"]["confidence"] == "high"                    # value itself is there
+    assert "evidence" not in report["common"]["location"]                          # the false quote went
+    assert report["lending"]["existing_bankers"]["confidence"] == "low"
+    assert len(notes) == 1 and "Nowhere Bank" in notes[0]
+
+
+def test_number_words_cover_the_spoken_forms():
+    from app.vocx.pipeline.evidence import _number_words, value_supported
+    assert "eighty five" in _number_words(85) and "eighty-five" in _number_words(85)
+    assert "one hundred and twenty" in _number_words(120)
+    assert value_supported(120, "valued at one hundred and twenty crore")
+    assert value_supported(2.5, "two point five, i.e. 2.5 crore")
+    assert not value_supported(7, "nothing with that number")
+
+
+def test_wording_is_not_a_disagreement():
+    a = {"common": {"location": _cell("Whitefield, Bangalore"), "opportunity_score": _cell(None, "n/a")},
+         "asset_monetisation": {"deal_size": _cell("approximately ₹120 crore"),
+                                "offer_components": _cell(["land", "ppa", "connectivity"])}}
+    b = {"common": {"location": _cell("Whitefield"), "opportunity_score": _cell(4, "medium")},
+         "asset_monetisation": {"deal_size": _cell("120 crores"),
+                                "offer_components": _cell(["entire_project", "land", "ppa", "connectivity"])}}
+    assert reconcile_readings(a, b) == []
+    assert a["common"]["location"]["confidence"] == "high"
+    c = {"asset_monetisation": {"offer_components": _cell(["land", "modules"])}}
+    d = {"asset_monetisation": {"offer_components": _cell(["ppa", "connectivity"])}}
+    assert any("Offer components" in f or "offer_components" in f for f in reconcile_readings(c, d))
