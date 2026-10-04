@@ -97,3 +97,30 @@ def test_the_cli_runs_on_an_export_file(tmp_path, capsys):
     assert "lending.requirement_quantum_cr" in out and "medium:1" in out
     assert vox_learn.main(["mine", str(p), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["proposals"] == []
+
+
+def test_swapped_names_and_ordinary_words_are_not_proposed_blind():
+    rows = [
+        _row("a", {"syndication": {"probable_lenders": _c("Godrej Capital")}},
+             [{"field_path": "syndication.probable_lenders", "old_value": _c("Aditya Birla Capital"), "new_value": _c("Godrej Capital")},
+              {"field_path": "syndication.lender_updates",
+               "old_value": {"value": [{"lender": "Godrej Capital", "kind": "chase", "note": ""}], "confidence": "high"},
+               "new_value": {"value": [{"lender": "Aditya Birla Capital", "kind": "chase", "note": ""}], "confidence": "high"}}],
+             raw="the Greenfield team and Kenra Bank", fixed="the Greenpill team and Canara Bank"),
+        _row("b", {}, [], raw="met Greenfield again with Kenra Bank", fixed="met Greenpill again with Canara Bank"),
+    ]
+    m = vox_learn.mine(rows, min_count=1)
+    heard = {p["heard"]: p for p in m["proposals"]}
+    assert "Aditya Birla Capital" not in heard and "Godrej Capital" not in heard   # a swap, dropped
+    assert heard["Kenra Bank"]["canonical"] == "Canara Bank" and "risky" not in heard["Kenra Bank"]
+    assert heard["Greenfield"]["risky"].startswith("ordinary word")
+
+
+def test_cases_show_the_transcript_behind_a_missed_field():
+    rows = [_row("a", {"lending": {"requirement_quantum_cr": _c(2)}},
+                 [{"field_path": "lending.requirement_quantum_cr", "old_value": _c(None, "n/a"), "new_value": _c(2)}],
+                 raw="They need a two crore working capital loan. Revenue is eighty five crore. Weather was fine.")]
+    cs = vox_learn.cases(rows, "lending.requirement_quantum_cr", "missed")
+    assert len(cs) == 1 and cs[0]["kind"] == "missed" and cs[0]["approved"] == 2
+    assert any("two crore" in h for h in cs[0]["transcript_hints"])
+    assert not any("Weather" in h for h in cs[0]["transcript_hints"])

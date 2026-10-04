@@ -325,33 +325,35 @@ export default function VoxCompareDeck({ row, registry, stats, busy, transcript,
         )}
       </div>
 
-      {/* The deck CHOOSES; the review confirms and approves. Two selection
-          buttons, the reading in view filled, the other outlined; either one
-          picks that reading and opens the review on it. */}
-      <div className="review-action-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>
-          Select the reading to take into the review
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {cards.map((c) => {
+      {/* The deck CHOOSES; the review confirms and approves. One compact
+          segmented row — the reading in view filled, the other outlined — and
+          a one-line caption for the one in view. Tapping either side takes
+          that reading into the review. */}
+      <div className="review-action-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '8px 10px' }}>
+        <div style={{ display: 'flex', borderRadius: 10, overflow: 'hidden', border: '1.5px solid var(--line-2)' }}>
+          {cards.map((c, i) => {
             const cu = ENGINE_UI[c.engine] || { label: c.engine, vendor: '' };
             const active = c.engine === current.engine;
             return (
               <button key={c.engine} type="button" disabled={busy}
                 onClick={() => onPick(c.engine, false)}
-                style={{ flex: 1, borderRadius: 10, padding: '11px 10px', cursor: 'pointer', font: 'inherit',
-                  textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+                style={{ flex: 1, padding: '9px 8px', cursor: 'pointer', font: 'inherit', border: 'none',
+                  borderLeft: i ? '1.5px solid var(--line-2)' : 'none',
                   background: active ? 'var(--accent)' : 'transparent',
-                  color: active ? '#001912' : 'var(--text)',
-                  border: active ? '1.5px solid var(--accent)' : '1.5px solid var(--line-2)' }}>
-                <span style={{ fontWeight: 700, fontSize: 14 }}>{active ? '✓ ' : ''}Select {cu.label}</span>
-                <span style={{ fontSize: 11.5, opacity: active ? 0.85 : 0.75 }}>
-                  {c.needs ? `${c.needs} to confirm · then approve` : 'nothing to confirm · then approve'}
-                </span>
+                  color: active ? '#001912' : 'var(--text)', fontWeight: 700, fontSize: 13.5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {active ? '✓ ' : ''}{cu.label}
+                {c.needs > 0 && (
+                  <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 9, padding: '1px 6px',
+                    background: active ? 'rgba(0,0,0,.15)' : 'var(--bg-3)',
+                    color: active ? '#001912' : 'var(--warn)' }}>{c.needs}</span>)}
               </button>
             );
           })}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', textAlign: 'center' }}>
+          Tap a reading to open it in the review
+          {current.needs ? ` · ${ui.label}: ${current.needs} field${current.needs === 1 ? '' : 's'} to confirm, then approve` : ` · ${ui.label}: nothing to confirm, then approve`}
         </div>
       </div>
     </div>

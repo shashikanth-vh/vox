@@ -10,6 +10,9 @@ so it runs on the box against the export deploy/vox-export.sh writes.
       model wrote), so this needs no model calls and spends nothing.
 
   python3 vox_learn.py mine vox_export.jsonl [--min-count 2] [--json]
+  python3 vox_learn.py cases vox_export.jsonl lending.requirement_quantum_cr [--kind missed|invented|wrong|all]
+      The notes behind one scorecard cell, with the transcript sentences that
+      carry a number or the approved words — to see WHY the model missed.
       Reviewer corrections turned into proposed name fixes: pairs of
       (heard → corrected) from transcript corrections and from edits to the
       lender/attendee fields, ranked by how often they recur. The output is a
@@ -170,6 +173,12 @@ _NAME_FIELDS = ("lending.existing_bankers", "syndication.existing_lenders", "syn
 _SPLIT_RE = re.compile(r"\s*(?:,|;|/|&|\band\b)\s*", re.IGNORECASE)
 _WORD_RE = re.compile(r"[A-Za-z][\w&.'-]*")
 _STOP = {"the", "and", "of", "for", "to", "a", "in", "on", "at", "is", "was", "with"}
+# Words a mishearing can look like but that occur in ordinary finance speech:
+# an alias on these would rewrite real sentences. Flagged, never auto-adopted.
+_ORDINARY = {"greenfield", "brownfield", "best", "vc", "alliance", "capital", "finance", "bank",
+             "credit", "trust", "union", "federal", "first", "national", "central", "general",
+             "mass", "maaz", "amar", "latina", "ammo", "a-1", "best", "cost", "light", "power",
+             "energy", "solar", "wind", "green", "project", "plant", "india", "indian"}
 
 
 def _names_of(value: Any) -> list[str]:
@@ -272,12 +281,24 @@ def mine(rows: list[dict], min_count: int = 2) -> dict:
         key = next((kk for kk in folded if kk[0] == k[0] and kk[1].lower() == c.lower()), None) or (h, c)
         folded[key] = folded.get(key, 0) + n
         srcs.setdefault(key, set()).update(sources[(h, c)])
+    # a pair that also occurs the other way round is a reviewer swapping two
+    # real names on one note (an attribution fix), never a mishearing
+    rev = {(c.lower(), h.lower()) for (h, c) in folded}
+    folded = {k: n for k, n in folded.items() if (k[0].lower(), k[1].lower()) not in rev}
     ranked = sorted(folded.items(), key=lambda kv: (-kv[1], kv[0][0].lower()))
     # a one-word "heard" that is also an ordinary word would rewrite normal
     # English everywhere the alias table runs — flag it for the reviewer
+    def risk(h: str) -> str | None:
+        w = h.strip()
+        if w.lower() in _ORDINARY:
+            return "ordinary word — would rewrite normal speech"
+        if len(w.split()) == 1 and w.islower():
+            return "single lowercase word — check it cannot occur in normal speech"
+        if len(w.split()) == 1 and len(w) <= 3:
+            return "very short — may be an unrelated acronym elsewhere"
+        return None
     proposals = [{"heard": h, "canonical": c, "count": n, "examples": sorted(srcs[(h, c)])[:4],
-                  **({"risky": "single ordinary word — check it cannot occur in normal speech"}
-                     if len(h.split()) == 1 and h.islower() else {})}
+                  **({"risky": risk(h)} if risk(h) else {})}
                  for (h, c), n in ranked if n >= min_count]
     singles = [{"heard": h, "canonical": c, "count": n, "examples": sorted(srcs[(h, c)])[:2]}
                for (h, c), n in ranked if n < min_count]
@@ -309,6 +330,49 @@ def print_mine(m: dict) -> None:
     print(json.dumps(m["canonical_aliases"], ensure_ascii=False, indent=2))
 
 
+# ------------------------------------------------------------------- cases
+
+def cases(rows: list[dict], field: str, kind: str = "missed", limit: int = 10) -> list[dict]:
+    """Show the notes behind one scorecard cell: what the model wrote, what the
+    reviewer approved, and the transcript sentences that carry a number or the
+    approved words — so a 'missed' can be read as 'it was spoken' or 'it was
+    not'. Nothing is rewritten; this is for looking."""
+    block, key = field.split(".", 1)
+    out: list[dict] = []
+    for row in rows:
+        approved = row.get("structured_report") or {}
+        model = model_report(row)
+        ac = _cell((approved.get(block) or {}).get(key)) if isinstance(approved.get(block), dict) else None
+        mc = _cell((model.get(block) or {}).get(key)) if isinstance(model.get(block), dict) else None
+        if ac is None:
+            continue
+        av, mv = ac.get("value"), (mc or {}).get("value")
+        if _same(av, mv):
+            continue
+        k = "missed" if (_absent(mv) and not _absent(av)) else "invented" if (not _absent(mv) and _absent(av)) else "wrong"
+        if kind != "all" and k != kind:
+            continue
+        text = row.get("corrected_transcript") or row.get("raw_transcript") or ""
+        sents = re.split(r"(?<=[.!?])\s+", text)
+        words = [w for w in re.findall(r"[A-Za-z]{4,}", str(av))][:4]
+        picked = [x for x in sents if re.search(r"\d|crore|lakh|lac\b", x, re.I)
+                  or any(w.lower() in x.lower() for w in words)][:4]
+        out.append({"id": str(row.get("id"))[:8], "kind": k, "model": mv,
+                    "model_confidence": (mc or {}).get("confidence"), "approved": av,
+                    "transcript_hints": [x.strip()[:220] for x in picked]})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def print_cases(cs: list[dict], field: str) -> None:
+    print(f"{field}: {len(cs)} case(s)")
+    for c in cs:
+        print(f"\n[{c['id']}] {c['kind']} · model: {c['model']!r} ({c['model_confidence']}) → approved: {c['approved']!r}")
+        for h in c["transcript_hints"]:
+            print(f"    … {h}")
+
+
 # -------------------------------------------------------------------- main
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -317,8 +381,18 @@ def main(argv: Iterable[str] | None = None) -> int:
     s1 = sub.add_parser("scorecard"); s1.add_argument("export"); s1.add_argument("--json", action="store_true")
     s2 = sub.add_parser("mine"); s2.add_argument("export"); s2.add_argument("--json", action="store_true")
     s2.add_argument("--min-count", type=int, default=2)
+    s3 = sub.add_parser("cases"); s3.add_argument("export"); s3.add_argument("field")
+    s3.add_argument("--kind", choices=["missed", "invented", "wrong", "all"], default="missed")
+    s3.add_argument("--limit", type=int, default=10); s3.add_argument("--json", action="store_true")
     args = ap.parse_args(list(argv) if argv is not None else None)
     rows = load(args.export)
+    if args.cmd == "cases":
+        cs = cases(rows, args.field, args.kind, args.limit)
+        if args.json:
+            print(json.dumps(cs, indent=2, ensure_ascii=False))
+        else:
+            print_cases(cs, args.field)
+        return 0
     if args.cmd == "scorecard":
         sc = scorecard(rows)
         print(json.dumps(sc, indent=2) if args.json else "", end="")

@@ -67,6 +67,28 @@ _SEED_ALIASES: dict[str, str] = {
     "land-tightened documents": "land-title documents",
     "land tightened documents": "land title documents",
     "reprimand obligations": "repayment obligations",
+    # Mined from 359 approved production notes (vox_learn.py mine, 4 Oct 2026):
+    # every pair below recurred in reviewer corrections and is a garble that
+    # cannot occur in ordinary speech. Ordinary words the miner also proposed
+    # ("Greenfield", "best", "VC") were deliberately NOT adopted.
+    "Avam": "Evam",
+    "Avom": "Evam",
+    "Evom": "Evam",
+    "AEM": "Evam",
+    "Avam Finance": "Evam Finance",
+    "Kenra Bank": "Canara Bank",
+    "Kendra Bank": "Canara Bank",
+    "Mass Financial": "Mas Financial",
+    "Indersind Bank": "IndusInd Bank",
+    "ICSF": "ICICI",
+    "Inframate": "Inframat",
+    "Infra-Met": "Inframat",
+    "Inframed": "Inframat",
+    "Khaza": "Karza",
+    "RCDO": "Arcedo",
+    "ASIM Infra": "Aseem Infra",
+    "ARAM": "AEREM",
+    "Aritya Billa": "Aditya Birla",
 }
 
 _LENDER_SUFFIX = ("Bank", "Finance", "Capital")

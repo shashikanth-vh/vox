@@ -37,6 +37,10 @@ LENDER_GLOSSARY: tuple[str, ...] = (
     "PFC (Power Finance Corporation)", "REC (Rural Electrification Corporation)",
     "IREDA (Indian Renewable Energy Development Agency)", "NaBFID", "SIDBI",
     "NABARD", "EXIM Bank", "HUDCO", "IIFCL", "NIIF",
+    # Lenders the desk's reviewers kept writing that the glossary lacked
+    # (vox_learn.py mine over 359 approved notes, 4 Oct 2026).
+    "Godrej Capital", "AU Small Finance Bank", "Mizuho Bank", "Siemens Financial Services",
+    "Mas Financial Services", "HSBC", "Aseem Infrastructure Finance", "Geocredit",
 )
 
 # How many tenant names the block will carry. The register can hold thousands
@@ -60,7 +64,6 @@ def build_known_names_block(company_names: Iterable[str] | None = None,
     know; they lead the block because a mandate lender outranks a generic
     bank when a mangled name could read as either.
     """
-    lenders = " · ".join(LENDER_GLOSSARY)
     lines = [
         "KNOWN NAMES (runtime context — not part of the transcript):",
     ]
@@ -78,7 +81,12 @@ def build_known_names_block(company_names: Iterable[str] | None = None,
     if fi:
         lines.append("Lenders on this desk's own book (use THESE spellings): "
                      + " · ".join(fi))
-    lines.append(f"Lenders commonly discussed: {lenders}")
+    # The common roster never repeats a name the desk's own book already
+    # carries (its spelling wins): one name, one line.
+    def _short(entry: str) -> str:
+        return entry.split(" (", 1)[0].strip().lower()
+    roster = [e for e in LENDER_GLOSSARY if _short(e) not in seen_l]
+    lines.append("Lenders commonly discussed: " + " · ".join(roster))
     seen: set[str] = set()
     companies: list[str] = []
     for n in company_names or ():
