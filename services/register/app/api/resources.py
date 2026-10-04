@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.lead_rules import lead_company_to_master as _lead_company_to_master
+from app.api.lead_rules import lead_post_write as _lead_post_write
 from app.api.lead_rules import lead_pre_delete as _lead_pre_delete
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
@@ -112,6 +113,8 @@ _SPECS: list[ResourceSpec] = [
         subject_type="Lead", view_name="leads",
         # A Converted lead is history its deal continues — it cannot be deleted.
         pre_delete=_lead_pre_delete,
+        # A new lead links the prospects that name its company (B41).
+        post_write=_lead_post_write,
         # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.
         # A lead's company reaches the client master AT CREATION: canonical match →
         # link, genuinely new → a Prospect master row (see app.api.lead_rules).

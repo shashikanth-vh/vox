@@ -32,7 +32,7 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
   // are selectable (the new lead attaches to them — a linked lead converts
   // into a second deal under the SAME company, never a GREENPILLREN-2), open
   // leads warn. Fuzzy, because "greenphill" must still find "Greenpill".
-  const [clientHits, setClientHits] = useState<{ code: string; name: string; rm?: string; entityId?: string }[]>([]);
+  const [clientHits, setClientHits] = useState<{ code: string; name: string; rm?: string; entityId?: string; liveDeal?: boolean; dealNo?: string }[]>([]);
   const [leadHits, setLeadHits] = useState<string[]>([]);
   const [linked, setLinked] = useState<{ code: string; name: string; entityId: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,7 +60,7 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
       lookupTimer.current = setTimeout(() => {
         void leadsService.lookup(name).then((r) => {
           if (seq !== lookupSeq.current) return;
-          setClientHits(r.clients.slice(0, 3).map((c) => ({ code: c.code, name: c.name, entityId: c.entityId })));
+          setClientHits(r.clients.slice(0, 3).map((c) => ({ code: c.code, name: c.name, entityId: c.entityId, rm: c.dealRm, liveDeal: c.liveDeal, dealNo: c.dealNo })));
           setLeadHits(r.leads.slice(0, 2).map((l) => leadWarning(l.company, l.leadNo, l.rm)));
         });
       }, 300);
@@ -142,12 +142,18 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
           </Alert>
         )}
         {!linked && clientHits.map((c) => (
-          <Alert key={c.code} severity="info" icon={false}
+          <Alert key={c.code} severity={c.liveDeal ? 'warning' : 'info'} icon={false}
             sx={{ mt: 1, py: 0, fontSize: 12, cursor: c.entityId ? 'pointer' : 'default' }}
             onClick={() => linkTo(c)}
             action={c.entityId ? <Button size="small" onClick={() => linkTo(c)}>Attach</Button> : undefined}>
-            Existing client: <b>{c.name}</b> ({c.code}{c.rm ? ` · RM ${c.rm}` : ''}) — same
-            company? Attach the lead to it.
+            {c.liveDeal ? (<>
+              {/* A company already being worked: a second lead only splits its story (B07). */}
+              <b>{c.name}</b> ({c.code}) already has a live deal{c.dealNo ? ` ${c.dealNo}` : ''}{c.rm ? ` with RM ${c.rm}` : ''}.
+              Add a product line on that deal from <b>Deals</b> instead, or attach this lead if it is a new ask.
+            </>) : (<>
+              Existing client: <b>{c.name}</b> ({c.code}{c.rm ? ` · RM ${c.rm}` : ''}) — same
+              company? Attach the lead to it.
+            </>)}
           </Alert>
         ))}
         {leadHits.map((d, i) => <Alert key={i} severity="warning" sx={{ mt: 1, py: 0, fontSize: 12 }}>{d}</Alert>)}

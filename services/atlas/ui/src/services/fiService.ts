@@ -5,6 +5,7 @@ import { syndicationService } from './syndicationService';
 import { writeAudit } from './auditService';
 import type { TableQuery } from './types';
 import type { FiRow, FiDeal, FiLedgerRow } from '../pages/FIMaster/fi.types';
+import { SYN_TERM, SYN_CLOSED } from './syndicationService';
 
 interface FiEng { pursued: number; sanc: number; ip: number; decl: number; live: number; cos: FiDeal[] }
 
@@ -77,7 +78,11 @@ export const fiService = {
       if (l.st === 'Sanctioned') e.sanc++;
       if (l.st === 'IP Received') e.ip++;
       if (l.st === 'Declined') e.decl++;
-      if (l.st && !['Sanctioned', 'Declined'].includes(l.st)) e.live++;
+      // Live = still in play on a mandate that is itself still in play: a bank on
+      // a dropped or sanctioned-elsewhere mandate, or one we put On Hold or Dropped,
+      // is not a live engagement (B31).
+      if (l.st && !['Sanctioned', 'Declined', 'Dropped', 'On Hold'].includes(l.st)
+        && !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status)) e.live++;
       e.cos.push({ co: db().clients?.[r.code]?.name || r.code, code: r.code, st: l.st, resp: l.resp, amt: Number(r.amt) || 0 });
     }));
     return db().lenders.map((f: any, i: number) => {
@@ -97,7 +102,8 @@ export const fiService = {
         st: l.st, resp: l.resp, note: l.note, synStatus: r.status, rm: r.rm, an: r.an,
       });
     }));
-    const closed = (x: FiLedgerRow) => x.st === 'Declined' || x.st === 'Sanctioned';
+    const closed = (x: FiLedgerRow) => ['Declined', 'Sanctioned', 'Dropped'].includes(x.st || '')
+      || SYN_TERM.includes(x.synStatus || '') || SYN_CLOSED.includes(x.synStatus || '');
     return { rows, active: rows.filter((x) => !closed(x)), past: rows.filter(closed) };
   },
 

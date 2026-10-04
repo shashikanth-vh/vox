@@ -72,7 +72,9 @@ export default function PushToDealsDialog({ lead, onClose, onDone }: { lead: Lea
       if (alive && r) setRun({ returned: r.returned, workflowId: r.workflowId });
     });
     setFlags({ lend: false, syn: true, am: false });
-    setCl((p) => ({ ...p, sector: ref.getRefSync('Sector').includes(lead.sector) ? lead.sector : 'Other', lens: lead.lens || 'Mitigation', temp: lead.temp || 'Warm', source: lead.source || 'BDRM', sourceDetail: lead.sourceDetail || '' }));
+    setCl((p) => ({ ...p, sector: ref.getRefSync('Sector').includes(lead.sector) ? lead.sector : 'Other', lens: lead.lens || 'Mitigation', temp: lead.temp || 'Warm', source: lead.source || 'BDRM', sourceDetail: lead.sourceDetail || '',
+      // The State is asked for again here; the lead's own answer is the default (B39).
+      state: lead.state || '' }));
     return () => { alive = false; };   // a slow lookup must not land on the next lead
   }, [lead]);
 

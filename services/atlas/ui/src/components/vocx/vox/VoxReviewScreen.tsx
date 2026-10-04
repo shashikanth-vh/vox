@@ -604,7 +604,7 @@ export default function VoxReviewScreen({ conversationId, onBack, onQueue, onDos
         .map((a) => String(a?.action ?? '').trim()).filter(Boolean);
       const nextAction = (String((c.next_steps as any)?.value ?? '').trim()
         || acts[0]
-        || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
+        || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : ''));
       // summary is the 300-char headline; a meeting summary that outgrows it goes
       // WHOLE into notes — the drawer's "more" expansion shows it in full instead
       // of ending mid-sentence at the column cap.

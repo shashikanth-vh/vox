@@ -307,9 +307,11 @@ async def test_stage_edits_stamp_the_stage_date(client: AsyncClient):
     """The Lending page's promise, made true at the register: a write that CHANGES
     the stage stamps stage_updated_at with today; a same-stage write keeps the
     standing date; an explicit date in the payload (imports, corrections) wins."""
-    from datetime import UTC, datetime
 
-    today = datetime.now(UTC).date().isoformat()
+    # The register stamps the DESK's day (Asia/Kolkata), not the UTC day.
+    from app.core.clock import tenant_today
+
+    today = tenant_today().isoformat()
     eid = (await client.post("/v1/entities",
                              json={"code": "STAMP", "legal_name": "STAMP"})).json()["id"]
 

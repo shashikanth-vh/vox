@@ -118,6 +118,7 @@ export function toLeadRow(r: any): Lead {
     next: r?.next_action || '',
     nextDate: r?.next_action_date || '',
     conv: r?.conv || '',
+    convertedDealId: r?.converted_deal_id || undefined,
     createdAt: r?.created_at || r?.last_interaction_date || '',
     notes: r?.notes || '',
   };
@@ -215,14 +216,14 @@ export const leadsService = {
    * its cache. Mock mode answers from the local store with that same rule.
    */
   async lookup(name: string): Promise<{
-    clients: { entityId: string; code: string; name: string }[];
+    clients: { entityId: string; code: string; name: string; liveDeal?: boolean; dealNo?: string; dealRm?: string }[];
     leads: { leadNo: string; company: string; rm?: string }[];
   }> {
     if (!USE_REAL_API) return { clients: [], leads: [] };
     try {
       const r = await api.get<any>('/lead-lookup', { name });
       return {
-        clients: (r?.clients || []).map((c: any) => ({ entityId: c.entity_id, code: c.code, name: c.name })),
+        clients: (r?.clients || []).map((c: any) => ({ entityId: c.entity_id, code: c.code, name: c.name, liveDeal: !!c.live_deal, dealNo: c.deal_no || undefined, dealRm: c.deal_rm || undefined })),
         leads: (r?.leads || []).map((l: any) => ({ leadNo: l.lead_no, company: l.company, rm: l.rm })),
       };
     } catch { return { clients: [], leads: [] }; }

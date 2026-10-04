@@ -234,7 +234,7 @@ export default function VoxReview({ conversationId, onClose, onFiled }: {
             .map((a) => String(a?.action ?? '').trim()).filter(Boolean);
           const nextAction = (String((cc.next_steps as any)?.value ?? '').trim()
             || acts[0]
-            || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : '')).slice(0, 300);
+            || (fuDate ? `Follow-up on ${fuDate}${fuTime ? ` ${fuTime}` : ''}` : ''));
           const fullSummary = ((cc.meeting_summary as any)?.value as string)
             || kdp[0] || 'VOX conversation';
           const tp = await vocxClient.post('/v1/touchpoints', {

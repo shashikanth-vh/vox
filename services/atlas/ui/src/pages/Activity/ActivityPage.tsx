@@ -35,18 +35,13 @@ export default function ActivityPage() {
   const [view, setView] = useState<ActivityRow | null>(null);
   // Unpaged stream, only for the KPI chips and the area filter list — the table pages server-side.
   const { data: all = [] } = useQuery({ queryKey: ['activity', 'all'], queryFn: () => activityService.listAll() });
-
-  const kpi = useMemo(() => {
-    const today = all[0]?.t ? all[0].t.slice(0, 10) : '';
-    const who = new Set<string>(), ents = new Set<string>();
-    let nToday = 0;
-    all.forEach((e) => {
-      if (e.t && e.t.slice(0, 10) === today) nToday++;
-      if (e.by) who.add(e.by);
-      if (e.code) ents.add(e.code);
-    });
-    return { total: all.length, today: nToday, people: who.size, companies: ents.size };
-  }, [all]);
+  // The chips come from the register's own count over the whole trail (B36), not
+  // from whichever rows the first page happened to hold.
+  const { data: stats } = useQuery({ queryKey: ['activity', 'stats'], queryFn: () => activityService.stats(), staleTime: 30_000 });
+  const kpi = useMemo(() => ({
+    total: stats?.total ?? all.length, today: stats?.today ?? 0,
+    people: stats?.people ?? 0, companies: stats?.records ?? 0,
+  }), [stats, all.length]);
 
   // No "All" chip — clicking the active chip clears the filter. 'System' isn't a
   // business area anyone filters by, so it's left out of the chip row.

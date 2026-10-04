@@ -51,8 +51,10 @@ export default function ChittiWidget() {
   }, []);
 
   const fabSize = useCallback(() => ({ w: FAB, h: FAB }), []);
+  // Bottom-left on a desktop: every grid pins its action buttons to the bottom-right,
+  // exactly where the bubble used to sit (B51). Phones keep it right, above the tab bar.
   const fabInitial = useCallback((vw: number, vh: number) => ({
-    x: vw - FAB - 24,
+    x: window.innerWidth <= MOBILE_MAX ? vw - FAB - 24 : 24,
     y: vh - FAB - (window.innerWidth <= MOBILE_MAX ? BOTTOM_NAV + 20 : 24),
   }), []);
   const fabDrag = useDraggable({

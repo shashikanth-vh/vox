@@ -28,6 +28,7 @@ from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.db.base import AuditLog
 from app.models import (
+    Counterparty,
     Deal,
     Document,
     DocumentChecklistItem,
@@ -248,6 +249,19 @@ async def add_syndication_lender(
                                 syndication_id)
     data = payload.model_dump(exclude_unset=False)
     data["syndication_id"] = syndication_id
+    # The typed name is matched to the FI master (name or short name, any case)
+    # so the row carries the counterparty link the UI never set (B14). A name
+    # the master does not know stays free text, exactly as before.
+    if not data.get("counterparty_id") and data.get("lender_name"):
+        wanted = str(data["lender_name"]).strip().lower()
+        hit = (await ctx.session.execute(
+            select(Counterparty.id).where(
+                Counterparty.tenant_id == ctx.tenant_id, Counterparty.deleted_at.is_(None),
+                or_(func.lower(Counterparty.name) == wanted,
+                    func.lower(func.coalesce(Counterparty.short_name, "")) == wanted))
+            .limit(1))).scalar()
+        if hit is not None:
+            data["counterparty_id"] = hit
     obj = await _synlender_repo.create(ctx.session, ctx.tenant_id, ctx.actor, data)
     return s.SyndicationLenderRead.model_validate(obj)
 
@@ -715,7 +729,10 @@ async def read_audit(
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
-) -> list[dict]:
+    offset: int = Query(default=0, ge=0),
+    with_total: bool = Query(default=False, description="Answer {items, total} instead of a bare list"),
+    resource_ids: str | None = Query(default=None, description="Comma list: the trail of several records at once"),
+) -> Any:
     # RBAC guardrail: the audit view is Admin-only (immutable even in the live matrix).
     if ctx.user is not None:
         from app.authz.engine import view_access
@@ -730,6 +747,9 @@ async def read_audit(
         conds.append(AuditLog.resource_type == resource_type)
     if resource_id:
         conds.append(AuditLog.resource_id == resource_id)
+    if resource_ids:
+        ids = [x.strip() for x in resource_ids.split(",") if x.strip()][:50]
+        conds.append(AuditLog.resource_id.in_(ids))
     if actor:
         conds.append(AuditLog.actor == actor)
     if action:
@@ -738,9 +758,14 @@ async def read_audit(
         conds.append(AuditLog.at >= since)
     if until:
         conds.append(AuditLog.at < until)
+    total = None
+    if with_total:
+        total = (await ctx.session.execute(
+            select(func.count()).select_from(AuditLog).where(*conds))).scalar_one()
     rows = (
         await ctx.session.execute(
-            select(AuditLog).where(*conds).order_by(AuditLog.at.desc()).limit(limit)
+            select(AuditLog).where(*conds).order_by(AuditLog.at.desc())
+            .offset(offset).limit(limit)
         )
     ).scalars().all()
     # The forensic view keeps its raw fields, but each row also carries the SAME
@@ -753,7 +778,7 @@ async def read_audit(
     interaction_bits = await _interaction_bits(ctx.session, ctx.tenant_id, list(rows))
     lender_bits = await _lender_bits(ctx.session, ctx.tenant_id, list(rows))
     vox_bits = await _vox_bits(ctx.session, ctx.tenant_id, list(rows))
-    return [
+    items = [
         {
             "id": r.id, "at": r.at.isoformat(), "actor": r.actor, "action": r.action,
             "resource_type": r.resource_type, "resource_id": r.resource_id,
@@ -766,6 +791,10 @@ async def read_audit(
         }
         for r in rows
     ]
+    # Paged callers (B37) get the envelope; everyone else keeps the bare list.
+    if with_total:
+        return {"items": items, "total": int(total or 0), "offset": offset, "limit": limit}
+    return items
 
 
 # --------------------------------------------------------------------------- #

@@ -61,15 +61,28 @@ export function toAuditRow(r: any): AuditRow {
 }
 
 export const auditService = {
+  /** The recent trail of several records at once (an entity, its deal, its lines) —
+   *  what the company drawer's "Recent audit" shows (B35). */
+  async forRecords(ids: string[], limit = 8): Promise<AuditRow[]> {
+    const clean = ids.filter(Boolean);
+    if (!clean.length) return [];
+    return withFallback<AuditRow[]>(
+      async () => asRows(await api.get<any>('/audit', { resource_ids: clean.join(','), limit }), 'audit').map(toAuditRow),
+      async () => (db().audit || []).filter((a: any) => clean.includes(a.resourceId)).slice(0, limit),
+    );
+  },
   async list(q: TableQuery) {
     return withFallback(
       async () => {
-        const data = await api.get<any>('/audit', { limit: AUDIT_LIMIT });
-        const raw = asRows(data, 'audit');
-        // No silent truncation — a full batch means older entries are not shown.
-        if (raw.length >= AUDIT_LIMIT) console.warn('[audit] /audit returned the %s-row cap — older entries are not listed.', AUDIT_LIMIT);
-        // Paged client-side: with no total and no cursor, the batch IS the dataset.
-        return applyQuery(raw.map(toAuditRow), { ...q, searchFields: ['act', 'code', 'detail', 'by'] });
+        // Paged at the register (B37): the grid's page size, an offset cursor, an
+        // exact total — the trail is no longer cut at the first 200 rows.
+        const size = Math.min(Math.max(1, q.pageSize || 25), 1000);
+        const offset = q.cursor ? Math.max(0, parseInt(q.cursor, 10) || 0) : (q.pageIndex || 0) * size;
+        const data = await api.get<any>('/audit', { limit: size, offset, with_total: 'true' });
+        const rows = asRows(data, 'audit').map(toAuditRow);
+        const total = Number(data?.total) || rows.length;
+        const next = offset + rows.length;
+        return { rows, total, nextCursor: next < total && rows.length === size ? String(next) : null };
       },
       async () => {
         await delay();

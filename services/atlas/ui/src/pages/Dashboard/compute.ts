@@ -210,18 +210,24 @@ export function computeDashboard(person?: string): DashboardV11 {
 
   // ---- deal velocity ----
   // Order + set mirrors v16 velocityRows (IM → First response is a placeholder row).
-  const trans: Record<string, number[]> = { 'Lead → Deal': [], 'Deal → CAM/IM': [], 'IM → First response': [], 'IM → Sanction': [], 'Sanction → Documentation': [], 'Documentation → Disbursement': [] };
+  // The lending stages as the register names them (B10): the old needles looked
+  // for 'Documentation', a stage that does not exist, and matched a lead to its
+  // deal on free text that live data never carries. Days are between the FIRST
+  // time a line reached each stage, from the history the register now keeps.
+  const trans: Record<string, number[]> = { 'Lead → Deal': [], 'Data Awaited → Diligence': [], 'Diligence → Note Circulated': [], 'Note Circulated → Sanctioned': [], 'Sanctioned → Disbursed': [] };
   lending.forEach((r: any) => {
-    const h = r.h || [];
-    const find = (needles: string[]) => h.find((x: any) => needles.some((s) => String(x.stage || '').includes(s)));
-    const g = (a: string[], b: string[], label: string) => { const A = find(a), B = find(b); if (A && B) { const dd = (new Date(B.t).getTime() - new Date(A.t).getTime()) / 864e5; if (dd >= 0) trans[label].push(dd); } };
-    g(['Diligence'], ['Note'], 'Deal → CAM/IM');
-    g(['Note'], ['Sanction'], 'IM → Sanction');
-    g(['Sanction'], ['Documentation'], 'Sanction → Documentation');
-    g(['Documentation'], ['Disbursed'], 'Documentation → Disbursement');
+    const h: any[] = (r.h || []).filter((x: any) => x && x.t);
+    const first = (stage: string) => h.find((x: any) => x.stage === stage);
+    const g = (a: string, b: string, label: string) => { const A = first(a), B = first(b); if (A && B) { const dd = (new Date(B.t).getTime() - new Date(A.t).getTime()) / 864e5; if (dd >= 0) trans[label].push(dd); } };
+    g('Data Awaited', 'Diligence', 'Data Awaited → Diligence');
+    g('Diligence', 'Note Circulated', 'Diligence → Note Circulated');
+    g('Note Circulated', 'Sanctioned', 'Note Circulated → Sanctioned');
+    g('Sanctioned', 'Disbursed', 'Sanctioned → Disbursed');
   });
+  const dealByApiId = new Map<string, any>();
+  deals.forEach((d: any) => { if (d.apiId) dealByApiId.set(String(d.apiId), d); });
   leads.filter((l: any) => l.status === 'Converted' && l.createdAt).forEach((l: any) => {
-    const d = deals.find((x: any) => x.code === l.conv);
+    const d = (l.convertedDealId && dealByApiId.get(String(l.convertedDealId))) || deals.find((x: any) => x.code === l.conv);
     if (d && d.createdAt) { const diff = (new Date(d.createdAt).getTime() - new Date(l.createdAt).getTime()) / 864e5; if (diff >= 0) trans['Lead → Deal'].push(diff); }
   });
   const velocity: VelRow[] = Object.entries(trans).map(([stage, v]) => ({ stage, n: v.length, median: median(v), p75: p75(v) }));

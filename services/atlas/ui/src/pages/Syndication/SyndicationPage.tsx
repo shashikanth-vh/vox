@@ -11,6 +11,7 @@ import ChaseView from './ChaseView';
 import MatrixView from './MatrixView';
 import SynRegisterView from './SynRegisterView';
 import CompanyDrawer from '../Deals/CompanyDrawer';
+import { hydrateBook } from '../../services/bookHydration';
 import AddProductDialog from '../Deals/AddProductDialog';
 import BankLedgerDialog from '../FIMaster/BankLedgerDialog';
 import { tokens } from '../../theme';
@@ -33,6 +34,9 @@ export default function SyndicationPage() {
   // Platform build: the three views read the local store synchronously, so pull the
   // register's rows AND the FI master into it once on entry, then re-render. The FI
   // master supplies the matrix columns + add-lender choices for a fresh mandate.
+  // The drawer reads the company profile from the store; this page only hydrated
+  // the FI master, so a drawer opened here showed a blank profile (B29).
+  useEffect(() => { void hydrateBook(); }, []);
   useEffect(() => {
     let alive = true;
     fiService.hydrate().then(() => {
@@ -66,7 +70,9 @@ export default function SyndicationPage() {
         <SynRegisterView onOpenBank={(n) => setBank(n)} />
       )}
 
-      <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
+      {/* Opened from the chase list or the matrix the drawer lands on the Platform
+          Deals section — the lender list is what this page is about (B30). */}
+      <CompanyDrawer code={open} focus="syn" onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
       {/* v12 openBank — the by-bank register opens a lender's full deal ledger. */}
       <BankLedgerDialog bankName={bank} onClose={() => setBank(null)} onOpenCompany={(c) => { setBank(null); setOpen(c); }} />

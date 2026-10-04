@@ -75,12 +75,16 @@ export function SelectFld({ label, value, onChange, options, disabled, required,
      impossible to tell two colleagues apart in. The handle stays in the record and
      stays visible beside the name, so what gets written is never a mystery either. */
   const show = (o: string) => (labels?.[o] ? `${labels[o]} · ${o}` : o);
+  // What the record holds is always offered, even when the list has moved on
+  // ('Others' where the list now says 'Other', a status the desk no longer sets):
+  // a select that cannot show its own value reads as blank and saves as blank (B28).
+  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <FieldShell label={label} required={required}>
       <TextField select value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)}
         fullWidth size="small" sx={CONTROL_SX}>
         {blank && <MenuItem value="">—</MenuItem>}
-        {options.map((o) => <MenuItem key={o} value={o}>{show(o)}</MenuItem>)}
+        {opts.map((o) => <MenuItem key={o} value={o}>{show(o)}</MenuItem>)}
       </TextField>
     </FieldShell>
   );

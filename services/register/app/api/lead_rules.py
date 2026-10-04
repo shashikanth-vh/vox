@@ -139,3 +139,55 @@ async def lead_pre_delete(ctx: Any, obj_id: Any) -> None:
         raise ForbiddenError(
             f"Lead {row.lead_no or obj_id} is Converted — it is the history its deal "
             "continues from and cannot be deleted. Work on the deal instead.")
+
+
+async def link_prospects_to_company(session: Any, tenant_id: Any, name: str,
+                                    entity_id: Any, lead_id: Any = None) -> int:
+    """Prospects that name this company get the client link (and the lead they
+    spawned, when known). The prospect universe was a list beside the register —
+    a company that was already a client or an open lead still read "uncontacted"
+    there (B41). Matching is the shared canonical rule; a prospect already linked
+    to another company is left alone. Returns how many rows were linked."""
+    from evam_backend_core.company_identity import canonical_name
+
+    from app.models import Prospect
+
+    wanted = canonical_name(str(name or ""))
+    if not wanted:
+        return 0
+    rows = (await session.execute(
+        select(Prospect).where(Prospect.tenant_id == tenant_id,
+                               Prospect.deleted_at.is_(None)))).scalars().all()
+    n = 0
+    for p in rows:
+        if canonical_name(p.name or "") != wanted:
+            continue
+        if p.entity_id is not None and str(p.entity_id) != str(entity_id):
+            continue
+        changed = False
+        if p.entity_id is None and entity_id is not None:
+            p.entity_id = entity_id
+            changed = True
+        if lead_id is not None:
+            ids = list(p.lead_ids or [])
+            if str(lead_id) not in ids:
+                ids.append(str(lead_id))
+                p.lead_ids = ids
+                changed = True
+            if p.status in ("uncontacted", "contacted", "interested"):
+                p.status = "lead_created"
+                changed = True
+        if changed:
+            n += 1
+    if n:
+        await session.flush()
+    return n
+
+
+async def lead_post_write(ctx: Any, obj: Any, event: str, previous: Any = None) -> None:
+    """ResourceSpec.post_write for leads: a created lead links the prospects that
+    name its company (B41)."""
+    if event != "create" or obj is None:
+        return
+    await link_prospects_to_company(ctx.session, ctx.tenant_id, obj.company,
+                                    obj.entity_id, obj.id)

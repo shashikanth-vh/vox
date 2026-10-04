@@ -35,4 +35,6 @@ async def lending_pre_write(ctx: Any, body: dict, obj_id: Any) -> None:
         if (current or "") == body["stage"]:
             return                       # same stage — the standing date stands
     # The DESK's day, not the UTC day — a stage moved at 1 am IST is today's move.
+    # (The stage HISTORY is the repository's: it appends {from, to, at, by} on
+    # every change — see evam_backend_core.crud; the UI now reads it.)
     body["stage_updated_at"] = tenant_today()

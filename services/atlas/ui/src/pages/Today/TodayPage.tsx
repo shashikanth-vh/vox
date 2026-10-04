@@ -71,10 +71,25 @@ function Section({ title, count, defaultOpen = false, children }: {
   );
 }
 
+// The AMBER lists are long by nature; the first twenty are shown and the rest
+// are one click away instead of silently cut off (B20).
+function Capped<T>({ rows, render, cap = 20 }: { rows: T[]; render: (r: T) => React.ReactNode; cap?: number }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, cap);
+  return (<>
+    {shown.map(render)}
+    {rows.length > cap && (
+      <Button size="small" onClick={() => setAll((v) => !v)} sx={{ mt: 0.5, textTransform: 'none', fontSize: 12.5 }}>
+        {all ? `Show the first ${cap} only` : `Show all ${rows.length}`}
+      </Button>
+    )}
+  </>);
+}
+
 export default function TodayPage() {
   const { user } = useAuth();
   const nav = useNavigate();
-  const { setSearch } = useSearch();
+  const { search, setSearch } = useSearch();
   const qc = useQueryClient();
   // Today is 'scoped' for every IC + Head (own book / own team) and 'full' only for
   // Admin + Management — the scoped roles see just their own worklist.
@@ -83,7 +98,19 @@ export default function TodayPage() {
   const [, force] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [addProd, setAddProd] = useState<string | null>(null);
-  const data = computeToday(person);
+  const base = computeToday(person);
+  // The header search narrows Today like every other page (B23): by company name,
+  // code, lead name or the next action, across every list on the screen.
+  const q = search.trim().toLowerCase();
+  const hit = (...bits: (string | undefined | null)[]) => !q || bits.some((x) => String(x || '').toLowerCase().includes(q));
+  const data = !q ? base : {
+    ...base,
+    due: base.due.filter((i) => hit(i.name, i.code, i.nextAction)),
+    contactRed: base.contactRed.filter((a) => hit(a.co, a.code)),
+    contactAmber: base.contactAmber.filter((a) => hit(a.co, a.code)),
+    stageRed: base.stageRed.filter((a) => hit(a.isLead, base.nameOf(a.code), a.code)),
+    stageAmber: base.stageAmber.filter((a) => hit(a.isLead, base.nameOf(a.code), a.code)),
+  };
   const refresh = () => { qc.invalidateQueries(); force((n) => n + 1); };
 
   // The approval rows name their COMPANY by looking the run's subject up in the local
@@ -409,8 +436,8 @@ export default function TodayPage() {
       {!!data.due.length && <Section title="Follow-ups due" count={data.due.length} defaultOpen>{data.due.map(dueRow)}</Section>}
       {!!data.contactRed.length && <Section title="Contact staleness — RED" count={data.contactRed.length} defaultOpen>{data.contactRed.map(contactRow)}</Section>}
       {!!data.stageRed.length && <Section title="Stage bottlenecks — RED" count={data.stageRed.length} defaultOpen>{data.stageRed.map(stageRow)}</Section>}
-      {!!data.contactAmber.length && <Section title="Contact staleness — AMBER" count={data.contactAmber.length}>{data.contactAmber.slice(0, 20).map(contactRow)}</Section>}
-      {!!data.stageAmber.length && <Section title="Stage bottlenecks — AMBER" count={data.stageAmber.length}>{data.stageAmber.slice(0, 20).map(stageRow)}</Section>}
+      {!!data.contactAmber.length && <Section title="Contact staleness — AMBER" count={data.contactAmber.length}><Capped rows={data.contactAmber} render={contactRow} /></Section>}
+      {!!data.stageAmber.length && <Section title="Stage bottlenecks — AMBER" count={data.stageAmber.length}><Capped rows={data.stageAmber} render={stageRow} /></Section>}
 
       {empty && (
         <Paper variant="outlined" sx={{ borderStyle: 'dashed', borderColor: tokens.line, borderRadius: 3.5, p: '42px 26px', textAlign: 'center', mt: 2 }}>

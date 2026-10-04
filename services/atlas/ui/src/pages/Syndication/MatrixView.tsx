@@ -50,6 +50,7 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
   // allocation (₹ Cr), Declined the reason, exactly what the register demands.
   const [pop, setPop] = useState<{ c: string; id: string; dealNo?: string; l: string; el: HTMLElement } | null>(null);
   const [target, setTarget] = useState('');
+  const [confirmAdd, setConfirmAdd] = useState(false);
   const [note, setNote] = useState('');
   const [amount, setAmount] = useState('');
   // Status-free remark editing (the manual tracker's Remarks column); null = closed.
@@ -142,7 +143,7 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
     setTarget(''); setNote(''); setAmount(''); setRemark(null);
     setPop({ c: r.code, id: r.id, dealNo: r.dealNo, l, el: e.currentTarget });
   };
-  const closePop = () => { setPop(null); setTarget(''); setNote(''); setAmount(''); setRemark(null); };
+  const closePop = () => { setPop(null); setTarget(''); setNote(''); setAmount(''); setRemark(null); setConfirmAdd(false); };
   const commit = (st: string) => {
     if (!pop) return;
     const row = syndicationService.lenderRow(pop.c, pop.l, pop.id);
@@ -450,10 +451,21 @@ export default function MatrixView({ onOpenCompany, person, onPerson }: { onOpen
                   </Box>
                 </Box>
               ))}
-              {!ro && !row && (
-                <Button fullWidth size="small" variant="contained" sx={{ mt: 1 }} onClick={() => commit('Identified')}>
+              {/* One tap used to write the lender row at once; a mis-tap on a dense
+                  matrix added a bank to a live mandate with nothing to undo (B32). */}
+              {!ro && !row && !confirmAdd && (
+                <Button fullWidth size="small" variant="contained" sx={{ mt: 1 }} onClick={() => setConfirmAdd(true)}>
                   Identify this lender
                 </Button>
+              )}
+              {!ro && !row && confirmAdd && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography sx={{ fontSize: 12.2, mb: 0.8 }}>Add <b>{pop.l}</b> to {clientsService.get(pop.c).name}'s mandate{pop.id ? ` ${pop.id}` : ''} as Identified?</Typography>
+                  <Box sx={{ display: 'flex', gap: 0.8, justifyContent: 'flex-end' }}>
+                    <Button size="small" onClick={() => setConfirmAdd(false)}>Cancel</Button>
+                    <Button size="small" variant="contained" onClick={() => { setConfirmAdd(false); commit('Identified'); }}>Add lender</Button>
+                  </Box>
+                </Box>
               )}
               {!ro && row && !target && nexts.length > 0 && (
                 <Box sx={{ borderTop: `1px solid ${tokens.line}`, mt: 0.8, pt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.7 }}>

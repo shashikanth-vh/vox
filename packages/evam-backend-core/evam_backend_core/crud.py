@@ -25,6 +25,7 @@ from sqlalchemy import (
     Date,
     Integer,
     Numeric,
+    String,
     and_,
     cast,
     exists,
@@ -375,7 +376,10 @@ class CRUDRepository(Generic[M]):
                 raise ValueError(
                     f"'{order_by}' is not a sortable column for {self.model.__name__}")
             col = getattr(self.model, order_by)
-            direction = col.desc() if order_desc else col.asc()
+            # Text sorts by letters, not by bytes: 'adani' sits between 'Aadhya' and
+            # 'Bharat', never after 'Zydus' because it starts lowercase (B27).
+            key = func.lower(col) if isinstance(col.type, String) else col
+            direction = key.desc() if order_desc else key.asc()
             stmt = (
                 select(self.model)
                 .where(and_(*conds))

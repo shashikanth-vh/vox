@@ -44,6 +44,10 @@ export default function LendingPage() {
   // Completed, Ready for Disbursement, Disbursed are reached through approvals). That
   // refusal has to be visible: the row must not advance on screen while the register
   // holds the line.
+  // The grid used to write a Stage the moment it was picked; one slip of the
+  // dropdown moved pipeline numbers with no second look (B01). The pick is held
+  // and asked about, and the register still refuses governed stages.
+  const [stageAsk, setStageAsk] = useState<{ row: LendingRow; stage: string } | null>(null);
   const stageTo = async (id: string, stage: string) => {
     setStageErr('');
     const r = await lendingService.updateStage(id, stage, user.full);
@@ -68,7 +72,7 @@ export default function LendingPage() {
       Cell: ({ row }) => (
         <TextField select size="small" value={row.original.stage} disabled={ro} variant="outlined"
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => { void stageTo(row.original.id, e.target.value); }}
+          onChange={(e) => { setStageAsk({ row: row.original, stage: e.target.value }); }}
           sx={{ minWidth: 130, '& .MuiOutlinedInput-input': { fontSize: 12, py: '5px' } }}>
           {referenceService.getRefSync('Lending Stage').map((o) => <MenuItem key={o} value={o}>{o}</MenuItem>)}
         </TextField>
@@ -104,6 +108,11 @@ export default function LendingPage() {
       />
       <CompanyDrawer code={open} onClose={() => setOpen(null)} onChanged={refresh} onAddProduct={(c) => setAddProd(c)} />
       <AddProductDialog code={addProd} onClose={() => setAddProd(null)} onDone={refresh} />
+      <ConfirmDialog open={!!stageAsk} title="Move this line?"
+        message={stageAsk ? `${stageAsk.row.code}${stageAsk.row._name ? ` · ${stageAsk.row._name}` : ''}: ${stageAsk.row.stage || '—'} → ${stageAsk.stage}. The stage date is stamped today and the dashboard moves with it.` : ''}
+        confirmLabel="Move stage" confirmColor="primary"
+        onCancel={() => setStageAsk(null)}
+        onConfirm={() => { const a = stageAsk; setStageAsk(null); if (a) void stageTo(a.row.id, a.stage); }} />
       <ConfirmDialog open={!!del} title="Delete lending row" message={`Delete ${del?._name}'s lending facility?`}
         onCancel={() => setDel(null)} onConfirm={() => {
           const d = del; setDel(null);

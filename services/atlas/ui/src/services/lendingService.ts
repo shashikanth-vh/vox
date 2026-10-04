@@ -35,6 +35,17 @@ export function toLendingRow(r: any): LendingRow {
     updated: localDay(r?.stage_updated_at || r?.updated_at || ''),
     sanc: r?.sanctioned_at ? localDay(String(r.sanctioned_at)) : null,
     pendingWith: r?.pending_with || '',
+    // The stage history the register keeps ({from, to, at, by}); the dashboard's
+    // funnel and velocity read it as {stage, t} (B10).
+    h: Array.isArray(r?.stage_history) && r.stage_history.length
+      ? [
+        // The line's birth stage is the first event's `from`, entered when the row
+        // was created — the register's history starts at the first MOVE.
+        ...(r.stage_history[0]?.from && !r.stage_history.some((x: any) => x?.to === r.stage_history[0].from)
+          ? [{ stage: String(r.stage_history[0].from), t: String(r.created_at || ''), by: String(r.created_by || '') }] : []),
+        ...r.stage_history.filter((x: any) => x && x.to).map((x: any) => ({ stage: String(x.to), t: String(x.at || ''), by: String(x.by || '') })),
+      ]
+      : undefined,
     createdAt: localDay(r?.created_at || ''),
     remarks: r?.remarks || '',
     proposedAmt: Number(r?.proposed_disbursement_amount) || 0,

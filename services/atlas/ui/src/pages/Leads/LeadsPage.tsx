@@ -31,6 +31,9 @@ export default function LeadsPage() {
   const mgmt = user.roles.some((r: string) => r === 'Management' || r === 'Admin');
   const [showConverted, setShowConverted] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ['leads'] });
+  // A push converts through the approval workflow, which lands a moment after the
+  // dialog closes; one refetch raced it and showed the lead still Active (B38).
+  const refreshAfterPush = () => { refresh(); [1500, 4000, 8000].forEach((ms) => setTimeout(refresh, ms)); };
 
   const columns = useMemo<MRT_ColumnDef<Lead>[]>(() => [
     { accessorKey: 'id', header: 'ID', size: 90, meta: { filterParam: 'lead_no' }, Cell: ({ cell }) => <CodeText code={cell.getValue<string>()} /> },
@@ -107,7 +110,7 @@ export default function LeadsPage() {
       />
       <AddLeadDialog open={addOpen} onClose={() => setAddOpen(false)} onSaved={refresh} />
       <LeadDrawer lead={edit} onClose={() => setEdit(null)} onChanged={refresh} onPush={(l) => setPush(l)} />
-      <PushToDealsDialog lead={push} onClose={() => setPush(null)} onDone={refresh} />
+      <PushToDealsDialog lead={push} onClose={() => setPush(null)} onDone={refreshAfterPush} />
       <ConfirmDialog open={!!del} title="Delete lead" message={`Delete ${del?.company}? This cannot be undone.`}
         onCancel={() => setDel(null)}
         onConfirm={async () => {

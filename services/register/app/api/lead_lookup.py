@@ -21,11 +21,11 @@ import re
 from typing import Any
 
 from fastapi import Depends, Query
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
-from app.models import Entity, Lead
+from app.models import AssetMonetisation, Deal, Entity, Lead, LendingTracker, SyndicationTracker
 
 router = api_router()
 
@@ -97,7 +97,30 @@ async def lead_lookup(
     clients = [{"entity_id": str(e.id), "code": e.code,
                 "name": e.display_name or e.legal_name}
                for e in ents
-               if alike(name, e.display_name) or alike(name, e.legal_name)]
+               if alike(name, e.display_name) or alike(name, e.legal_name)][:5]
+    # Is the company already being WORKED? A deal with a line that is neither
+    # closed nor dead means a second lead would only split the story (B07): the
+    # dialog warns and offers Add product on the existing deal instead.
+    for c in clients:
+        eid = c["entity_id"]
+        deals = (await ctx.session.execute(
+            select(Deal.id, Deal.deal_no, Deal.rm).where(
+                Deal.tenant_id == ctx.tenant_id, Deal.entity_id == eid,
+                Deal.deleted_at.is_(None)).order_by(Deal.created_at.desc()))).all()
+        live = False
+        for d in deals:
+            live = bool((await ctx.session.execute(select(
+                exists().where(LendingTracker.deal_id == d.id, LendingTracker.deleted_at.is_(None),
+                               LendingTracker.stage.notin_(("Rejected", "Dropped", "Disbursed")))
+                | exists().where(SyndicationTracker.deal_id == d.id, SyndicationTracker.deleted_at.is_(None),
+                                 SyndicationTracker.status.notin_(("Dropped", "Withdrawn", "Rejected", "Disbursed")))
+                | exists().where(AssetMonetisation.deal_id == d.id, AssetMonetisation.deleted_at.is_(None),
+                                 AssetMonetisation.status.notin_(("Dropped", "Closed")))))).scalar())
+            if live:
+                c["deal_no"], c["deal_rm"] = d.deal_no, d.rm
+                break
+        c["live_deal"] = live
+        c["deals"] = len(deals)
 
     rows = (await ctx.session.execute(
         select(Lead.lead_no, Lead.company, Lead.rm, Lead.status)
@@ -105,4 +128,4 @@ async def lead_lookup(
                Lead.status == "Active", Lead.converted_deal_id.is_(None)))).all()
     leads = [{"lead_no": r.lead_no, "company": r.company, "rm": r.rm, "status": r.status}
              for r in rows if alike(name, r.company)]
-    return {"clients": clients[:5], "leads": leads[:5]}
+    return {"clients": clients, "leads": leads[:5]}

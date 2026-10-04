@@ -228,3 +228,106 @@ async def test_deal_product_flags_follow_the_tracker_lines(client: AsyncClient):
 
     # The one-off recompute statement the deploy ships agrees with the hook.
     from app.api.deal_flags import sync_deal_flags  # noqa: F401  (import guard)
+
+
+# ---- second batch: B07, B10, B14, B27, B36/B37, B41, B47 -------------------
+async def test_lead_lookup_reports_a_live_deal(client: AsyncClient):
+    eid = await _entity(client, "Worked Co", "WORKEDCO")
+    d = await client.post("/v1/deals", headers=ADMIN, json={"entity_id": eid, "stage": "In Pipeline", "rm": "Shubh Dave"})
+    assert d.status_code == 201, d.text
+    r = await client.get("/v1/lead-lookup", params={"name": "worked co"}, headers=ADMIN)
+    c = r.json()["clients"][0]
+    assert c["live_deal"] is False and c["deals"] == 1        # a deal with no live line is not "worked"
+    ln = await client.post("/v1/lending", headers=ADMIN,
+                           json={"entity_id": eid, "deal_id": d.json()["id"], "stage": "Data Awaited"})
+    assert ln.status_code == 201, ln.text
+    c = (await client.get("/v1/lead-lookup", params={"name": "worked co"}, headers=ADMIN)).json()["clients"][0]
+    assert c["live_deal"] is True and c["deal_no"] == d.json()["deal_no"] and c["deal_rm"] == "Shubh Dave"
+
+
+async def test_a_stage_move_from_the_grid_is_written_to_the_history(client: AsyncClient):
+    eid = await _entity(client, "History Co")
+    ln = await client.post("/v1/lending", headers=ADMIN, json={"entity_id": eid, "stage": "Data Awaited"})
+    assert ln.status_code == 201, ln.text
+    assert ln.json()["stage_history"] in (None, [])      # history starts at the first move
+    moved = await client.patch(f"/v1/lending/{ln.json()['id']}", headers=ADMIN, json={"stage": "Diligence"})
+    assert moved.status_code == 200, moved.text
+    h = moved.json()["stage_history"]
+    assert [x["to"] for x in h] == ["Diligence"]
+    assert h[-1]["from"] == "Data Awaited" and h[-1]["by"] and h[-1]["at"]
+    # The same stage again writes nothing.
+    again = await client.patch(f"/v1/lending/{ln.json()['id']}", headers=ADMIN, json={"stage": "Diligence"})
+    assert len(again.json()["stage_history"]) == 1
+
+
+async def test_a_lender_row_links_to_the_fi_master_by_name(client: AsyncClient):
+    cp = await client.post("/v1/counterparties", headers=ADMIN,
+                           json={"name": "Mas Financial Services", "short_name": "MAS", "counterparty_type": "NBFC"})
+    assert cp.status_code == 201, cp.text
+    eid = await _entity(client, "Linked Lender Co")
+    syn = await client.post("/v1/syndication", headers=ADMIN, json={"entity_id": eid, "status": "Deal Sourced"})
+    sid = syn.json()["id"]
+    a = await client.post(f"/v1/syndication/{sid}/lenders", headers=ADMIN, json={"lender_name": "mas financial services", "status": "Identified"})
+    assert a.status_code == 201, a.text
+    assert a.json()["counterparty_id"] == cp.json()["id"]
+    b = await client.post(f"/v1/syndication/{sid}/lenders", headers=ADMIN, json={"lender_name": "MAS", "status": "Identified"})
+    assert b.json()["counterparty_id"] == cp.json()["id"]
+    c = await client.post(f"/v1/syndication/{sid}/lenders", headers=ADMIN, json={"lender_name": "Unknown Finance", "status": "Identified"})
+    assert c.json()["counterparty_id"] is None
+
+
+async def test_sorted_lists_ignore_case(client: AsyncClient):
+    for nm, code in (("adani Green", "ADANIG"), ("Bharat Solar", "BHARAT"), ("Zydus Power", "ZYDUS")):
+        assert (await client.post("/v1/leads", headers=ADMIN, json={"company": nm, "entity_id": await _entity(client, nm, code)})).status_code == 201
+    r = await client.get("/v1/leads", params={"order_by": "company", "order_dir": "asc"}, headers=ADMIN)
+    assert [x["company"] for x in _items(r.json())] == ["adani Green", "Bharat Solar", "Zydus Power"]
+
+
+async def test_activity_pages_by_offset_and_the_stats_count_the_whole_trail(client: AsyncClient):
+    eid = await _entity(client, "Busy Co")
+    for i in range(6):
+        assert (await client.post("/v1/leads", headers=ADMIN, json={"company": f"Busy Co {i}", "entity_id": eid})).status_code == 201
+    p1 = await client.get("/v1/activity", params={"limit": 4, "offset": 0, "with_total": "true"}, headers=ADMIN)
+    assert p1.status_code == 200, p1.text
+    body = p1.json()
+    assert len(body["items"]) == 4 and body["total"] >= 7 and body["offset"] == 0
+    p2 = await client.get("/v1/activity", params={"limit": 4, "offset": 4, "with_total": "true"}, headers=ADMIN)
+    assert {x["id"] for x in p2.json()["items"]}.isdisjoint({x["id"] for x in body["items"]})
+    only = await client.get("/v1/activity", params={"area": "Leads", "with_total": "true"}, headers=ADMIN)
+    assert only.json()["total"] >= 6 and all(x["area"] == "Leads" for x in only.json()["items"])
+    st = await client.get("/v1/activity/stats", headers=ADMIN)
+    assert st.status_code == 200 and st.json()["total"] == body["total"] and st.json()["today"] >= 7
+    assert st.json()["people"] >= 1 and st.json()["records"] >= 7
+    # The audit trail pages the same way, and still answers a bare list by default.
+    a1 = await client.get("/v1/audit", params={"limit": 3, "offset": 0, "with_total": "true"}, headers=ADMIN)
+    assert len(a1.json()["items"]) == 3 and a1.json()["total"] == body["total"]
+    bare = await client.get("/v1/audit", params={"limit": 2}, headers=ADMIN)
+    assert isinstance(bare.json(), list) and len(bare.json()) == 2
+    many = await client.get("/v1/audit", params={"resource_ids": f"{eid},nonsense"}, headers=ADMIN)
+    assert {x["resource_id"] for x in many.json()} == {eid}
+
+
+async def test_a_prospect_is_linked_when_its_company_gets_a_lead(client: AsyncClient):
+    p = await client.post("/v1/prospects", headers=ADMIN, json={"name": "Ecosoch Solar Pvt Ltd", "verticals": ["Solar"]})
+    assert p.status_code == 201, p.text
+    assert p.json()["status"] == "uncontacted"
+    lead = await client.post("/v1/leads", headers=ADMIN, json={"company": "EcoSoch Solar"})
+    assert lead.status_code == 201, lead.text
+    got = (await client.get(f"/v1/prospects/{p.json()['id']}", headers=ADMIN)).json()
+    assert got["entity_id"] == lead.json()["entity_id"]
+    assert got["lead_ids"] == [lead.json()["id"]] and got["status"] == "lead_created"
+    # A different company's lead leaves it alone.
+    other = await client.post("/v1/prospects", headers=ADMIN, json={"name": "Other Prospect"})
+    assert (await client.get(f"/v1/prospects/{other.json()['id']}", headers=ADMIN)).json()["lead_ids"] is None
+
+
+async def test_an_auto_approved_conversion_carries_no_approver_suffix(client: AsyncClient):
+    eid = await _entity(client, "Auto Co")
+    lead = await client.post("/v1/leads", headers=ADMIN, json={"company": "Auto Co", "entity_id": eid, "temperature": "Hot", "status": "Active"})
+    r = await client.post(f"/v1/leads/{lead.json()['id']}/convert", headers=ADMIN,
+                          json={"is_lending": True, "product_type": "Term Loan", "amount_cr": 5,
+                                "note": "Pushed from the grid", "approved_by": "auto-approval@policy"})
+    assert r.status_code == 200, r.text
+    deal = (await client.get(f"/v1/deals/{r.json()['deal_id']}", headers=ADMIN)).json()
+    assert deal["remarks"] == "Pushed from the grid"
+    assert "approved by" not in ((await client.get(f"/v1/leads/{lead.json()['id']}", headers=ADMIN)).json()["conv"] or "")

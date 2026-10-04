@@ -40,6 +40,8 @@ export default function CompanyDrawer({ code, onClose, onChanged, onAddProduct }
   // onAddProduct is optional — callers that have nowhere to route the flow (FI Master)
   // open the drawer without it, and the button hides.
   code: string | null; onClose: () => void; onChanged: () => void; onAddProduct?: (code: string) => void;
+  /** Which product section to land on when opened from that product's page. */
+  focus?: 'syn' | 'lend' | 'am';
 }) {
   const { user } = useAuth();
   // Section-level RBAC: write follows the vertical (Operations matrix). A Credit Head

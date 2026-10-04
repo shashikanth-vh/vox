@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.errors import ForbiddenError
 from app.core.router import api_router
@@ -588,6 +588,9 @@ async def read_activity(
     limit: int = Query(default=200, ge=1, le=500),
     since: datetime | None = Query(default=None),
     action: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    area: str | None = Query(default=None, description="One of the Area labels (Leads, Deals …)"),
+    with_total: bool = Query(default=False),
 ) -> dict[str, Any]:
     # Same gate as the Audit tab, read from the matrix rather than decided here.
     if ctx.user is not None:
@@ -607,8 +610,18 @@ async def read_activity(
         conds.append(AuditLog.at >= since)
     if action:
         conds.append(AuditLog.action == action)
+    if area:
+        # The Area chips narrow at the register, not over one capped page (B36).
+        types = [t for t, a in AREA_OF.items() if a == area]
+        conds.append(AuditLog.resource_type.in_(types) if types
+                     else AuditLog.resource_type.notin_(list(AREA_OF)))
+    total = None
+    if with_total:
+        total = (await ctx.session.execute(
+            select(func.count()).select_from(AuditLog).where(*conds))).scalar_one()
     rows = (await ctx.session.execute(
-        select(AuditLog).where(*conds).order_by(AuditLog.at.desc()).limit(limit)
+        select(AuditLog).where(*conds).order_by(AuditLog.at.desc())
+        .offset(offset).limit(limit)
     )).scalars().all()
 
     companies = await _companies_for(ctx.session, ctx.tenant_id, list(rows))
@@ -640,4 +653,33 @@ async def read_activity(
                     else ((r.changes or {}).get("label") or "")),
             "summary": _sentence(r.action, r.resource_type, r.changes, company, detail),
         })
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": total if total is not None else len(items),
+            "offset": offset, "limit": limit}
+
+
+@router.get("/v1/activity/stats", summary="The Activity Log's headline counts")
+async def activity_stats(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    """The KPI chips used to be computed in the browser over the first 200 rows
+    (B36). These are the whole trail: every row, today's rows on the desk's
+    calendar, distinct people, distinct records touched."""
+    if ctx.user is not None:
+        from app.authz.engine import view_access
+        from app.authz.matrix import Access
+
+        if view_access(ctx.user, "activity_log") is Access.NONE:
+            raise ForbiddenError("The activity log is Admin-only.")
+    from datetime import UTC, datetime, time
+
+    from app.core.clock import tenant_today, tenant_zone
+
+    day0 = datetime.combine(tenant_today(), time.min, tzinfo=tenant_zone()).astimezone(UTC)
+    base = AuditLog.tenant_id == ctx.tenant_id
+    total = (await ctx.session.execute(select(func.count()).select_from(AuditLog).where(base))).scalar_one()
+    today = (await ctx.session.execute(select(func.count()).select_from(AuditLog)
+                                       .where(base, AuditLog.at >= day0))).scalar_one()
+    people = (await ctx.session.execute(select(func.count(func.distinct(AuditLog.actor)))
+                                        .where(base, AuditLog.actor.isnot(None)))).scalar_one()
+    records = (await ctx.session.execute(
+        select(func.count(func.distinct(AuditLog.resource_id)))
+        .where(base, AuditLog.resource_id.isnot(None), AuditLog.resource_type != "session"))).scalar_one()
+    return {"total": int(total), "today": int(today), "people": int(people), "records": int(records)}

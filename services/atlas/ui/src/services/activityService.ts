@@ -159,18 +159,35 @@ export const activityService = {
     );
   },
 
+  /** The headline counts over the WHOLE trail (B36) — the chips used to be summed
+   *  in the browser over the first 200 rows. */
+  async stats(): Promise<{ total: number; today: number; people: number; records: number }> {
+    return withFallback(
+      () => api.get<any>('/activity/stats'),
+      async () => {
+        const all = enrich(); const today = all[0]?.t ? all[0].t.slice(0, 10) : '';
+        return { total: all.length, today: all.filter((e) => e.t && e.t.slice(0, 10) === today).length,
+          people: new Set(all.map((e) => e.by).filter(Boolean)).size, records: new Set(all.map((e) => e.code).filter(Boolean)).size };
+      },
+    );
+  },
+
   // Paged/sorted/filtered slice for the table. `area` narrows before querying.
   async list(q: TableQuery, area?: string): Promise<Paged<ActivityRow>> {
     return withFallback<Paged<ActivityRow>>(
       async () => {
-        // One capped read, then page/sort/filter locally: the trail is a bounded recent
-        // window (the endpoint caps at 500), and paging it server-side would cost the
-        // KPI chips their totals. `area` is the register's own grouping, so it narrows
-        // here exactly as any other column filter does.
-        const data = await api.get<any>('/activity', { limit: 500 });
-        const all = asRows(data, 'activity').map(fromActivityWire);
-        const rows = area ? all.filter((e) => e.area === area) : all;
-        return applyQuery(rows, { ...q, searchFields: ['text', 'by', 'area', 'code', 'company'] });
+        // Paged at the register (B37): the page size is the grid's, the cursor is the
+        // offset of the next page, and the total is exact. `area` narrows there too.
+        // The grid's prose filters walk the trail with a large page; the register caps
+        // one page at 500 rows, so a walked filter sees the latest 500.
+        const size = Math.min(Math.max(1, q.pageSize || 25), 500);
+        const offset = q.cursor ? Math.max(0, parseInt(q.cursor, 10) || 0) : (q.pageIndex || 0) * size;
+        const data = await api.get<any>('/activity', { limit: size, offset, with_total: 'true',
+          ...(area ? { area } : {}) });
+        const rows = asRows(data, 'activity').map(fromActivityWire);
+        const total = Number(data?.total) || rows.length;
+        const next = offset + rows.length;
+        return { rows, total, nextCursor: next < total && rows.length === size ? String(next) : null };
       },
       async () => {
         await delay();

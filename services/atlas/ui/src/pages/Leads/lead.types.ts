@@ -16,6 +16,8 @@ export interface Lead {
   next: string;
   nextDate?: string | null;
   conv: string;
+  /** The register id of the deal this lead became (set on conversion). */
+  convertedDealId?: string;
   createdAt: string;
   notes: string;
   /** The Register entity this lead hangs off — the id POST /v1/leads carries. */

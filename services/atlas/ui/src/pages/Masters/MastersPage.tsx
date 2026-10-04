@@ -3,6 +3,7 @@ import { ToggleButtonGroup, ToggleButton } from '@mui/material';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import GridViewIcon from '@mui/icons-material/GridView';
 import SubTabs, { type SubTab } from '../../components/common/SubTabs';
+import { useSearch } from '../../context/SearchContext';
 import ClientsPage from '../Clients/ClientsPage';
 import FIMasterPage from '../FIMaster/FIMasterPage';
 import EmployeesPage from '../Employees/EmployeesPage';
@@ -35,7 +36,9 @@ export default function MastersPage() {
   // The view toggle lives on the sub-tab line and drives FI Master / Employees.
   // (Clients has only a table, so no toggle there.) Reset to table on sub change.
   const [mode, setMode] = useState<'table' | 'cards'>('table');
-  const changeSub = (id: string) => { setSub(id); setMode('table'); };
+  // A term typed for the Clients tab must not filter the FI Master a click later (B24).
+  const { setSearch } = useSearch();
+  const changeSub = (id: string) => { setSub(id); setMode('table'); setSearch(''); };
   const hasToggle = active === 'fi' || active === 'emp';
 
   const toggle = hasToggle ? (

@@ -609,6 +609,10 @@ async def convert_lead(lead_id: uuid.UUID, payload: s.LeadConvertRequest,
     # The conversion's lineage already lives in remarks (the note), the lead's
     # converted_deal_id, and the audit trail. The approver joins the remarks.
     approver = (payload.approved_by or "").strip() or None
+    # A policy that auto-approves is not an approver anyone can ask about; the
+    # remark names a person only when a person decided (B47).
+    if approver and (approver.endswith("@policy") or approver.startswith("auto-approval")):
+        approver = None
     source = getattr(lead, "source", None) or "RM"
     source_detail = getattr(lead, "source_name", None) or None
     remarks = payload.note

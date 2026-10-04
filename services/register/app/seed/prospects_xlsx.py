@@ -472,8 +472,35 @@ async def apply_plan(session, tenant_id, actor: str, plan: dict) -> dict:
 
     from app.models import Prospect
 
+    # Companies already on the register, by the shared canonical name, so an
+    # imported prospect that is already a client (or an open lead) is born LINKED
+    # rather than reading "uncontacted" beside its own deal (B41).
+    from sqlalchemy import select as _select
+
+    from app.models import Entity, Lead
+
+    ents = (await session.execute(_select(Entity.id, Entity.legal_name, Entity.display_name)
+                                  .where(Entity.tenant_id == tenant_id, Entity.deleted_at.is_(None)))).all()
+    by_name: dict[str, Any] = {}
+    for e in ents:
+        for nm in (e.display_name, e.legal_name):
+            k = canonical_name(nm or "")
+            if k and k not in by_name:
+                by_name[k] = e.id
+    leads = (await session.execute(_select(Lead.id, Lead.company)
+                                   .where(Lead.tenant_id == tenant_id, Lead.deleted_at.is_(None),
+                                          Lead.status == "Active"))).all()
+    lead_by_name: dict[str, list[str]] = {}
+    for l in leads:
+        k = canonical_name(l.company or "")
+        if k:
+            lead_by_name.setdefault(k, []).append(str(l.id))
+
     created_ids: list[str] = []
     for cand in plan["new"]:
+        key = canonical_name(cand.name or "")
+        linked_entity = by_name.get(key)
+        linked_leads = lead_by_name.get(key) or []
         prospect = Prospect(
             tenant_id=tenant_id,
             prospect_no=await allocate_number(session, Prospect, tenant_id,
@@ -490,6 +517,8 @@ async def apply_plan(session, tenant_id, actor: str, plan: dict) -> dict:
             latest_valuation_cr=cand.latest_valuation_cr,
             latest_funded_on=cand.latest_funded_on,
             source=cand.source, import_batch=plan["batch"],
+            entity_id=linked_entity, lead_ids=linked_leads or None,
+            status="lead_created" if linked_leads else "uncontacted",
             created_by=actor, updated_by=actor,
         )
         session.add(prospect)
