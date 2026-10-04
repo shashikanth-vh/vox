@@ -76,6 +76,16 @@ export const auditService = {
       async () => {
         // Paged at the register (B37): the grid's page size, an offset cursor, an
         // exact total — the trail is no longer cut at the first 200 rows.
+        // The grid's own column funnels (When, Who, Action, Code, Company:
+        // meta.localFilter) ride in q.columnFilters and have no wire form, so a
+        // filtered or walked view keeps the one-batch read and matches locally, as
+        // before — now over the latest 1000 rows rather than 200.
+        const local = (q.columnFilters?.length ?? 0) > 0 || (q.pageSize ?? 0) > 1000;
+        if (local) {
+          const data = await api.get<any>('/audit', { limit: 1000 });
+          const all = asRows(data, 'audit').map(toAuditRow);
+          return applyQuery(all, { ...q, searchFields: ['act', 'code', 'detail', 'by'] });
+        }
         const size = Math.min(Math.max(1, q.pageSize || 25), 1000);
         const offset = q.cursor ? Math.max(0, parseInt(q.cursor, 10) || 0) : (q.pageIndex || 0) * size;
         const data = await api.get<any>('/audit', { limit: size, offset, with_total: 'true' });

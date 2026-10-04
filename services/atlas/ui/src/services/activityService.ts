@@ -180,6 +180,15 @@ export const activityService = {
         // offset of the next page, and the total is exact. `area` narrows there too.
         // The grid's prose filters walk the trail with a large page; the register caps
         // one page at 500 rows, so a walked filter sees the latest 500.
+        // The grid's own column funnels (Who, When, Code: meta.localFilter) ride in
+        // q.columnFilters and have no wire form, so a filtered or walked view keeps
+        // the one-batch read and matches locally, exactly as before.
+        const local = (q.columnFilters?.length ?? 0) > 0 || (q.pageSize ?? 0) > 500;
+        if (local) {
+          const data = await api.get<any>('/activity', { limit: 500, ...(area ? { area } : {}) });
+          const all = asRows(data, 'activity').map(fromActivityWire);
+          return applyQuery(all, { ...q, searchFields: ['text', 'by', 'area', 'code', 'company'] });
+        }
         const size = Math.min(Math.max(1, q.pageSize || 25), 500);
         const offset = q.cursor ? Math.max(0, parseInt(q.cursor, 10) || 0) : (q.pageIndex || 0) * size;
         const data = await api.get<any>('/activity', { limit: size, offset, with_total: 'true',
