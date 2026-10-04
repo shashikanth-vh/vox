@@ -53,11 +53,14 @@ class Settings(BaseServiceSettings):
     cam_llm_api_key: str = ""
     #   sarvam:<model>     Sarvam's OpenAI-compatible chat endpoint (the same key VOCX
     #                      and DocRAG use — SARVAM_API_KEY in compose). Plain JSON
-    #                      replies, ``max_tokens``, both auth headers; a reasoning
-    #                      model's budget is capped by sarvam_max_tokens.
+    #                      replies, ``max_tokens``, both auth headers. The output
+    #                      budget is the model's ceiling — 8192 for
+    #                      sarvam-105b-conversations (it refuses more with a 400);
+    #                      a long CAM is continued across requests, so the ceiling
+    #                      bounds one answer, not the draft.
     sarvam_api_key: str = ""
     sarvam_base_url: str = "https://api.sarvam.ai/v1"
-    sarvam_max_tokens: int = 16384
+    sarvam_max_tokens: int = 8192
     cam_max_completion_tokens: int = 32768
     cam_llm_timeout_s: float = 540.0
     # Sized for a REAL CAM: the reference Pinnacle CAM extracts to ~150k chars, and an

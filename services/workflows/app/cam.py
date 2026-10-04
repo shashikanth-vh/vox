@@ -427,7 +427,7 @@ def build_engine(settings: Any) -> CamEngine:
                or (getattr(settings, "cam_llm_api_key", "") or "").strip())
         if key:
             budget = min(int(getattr(settings, "cam_max_completion_tokens", 32768)),
-                         int(getattr(settings, "sarvam_max_tokens", 16384)))
+                         int(getattr(settings, "sarvam_max_tokens", 8192)))
             return OpenAICompatEngine(
                 model or "sarvam-105b-conversations",
                 getattr(settings, "sarvam_base_url", "") or "https://api.sarvam.ai/v1", key,

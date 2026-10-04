@@ -681,7 +681,7 @@ services:
       # VOCX and DocRAG already use — nothing else to set.
       WORKFLOWS_SARVAM_API_KEY: "${WORKFLOWS_SARVAM_API_KEY:-${SARVAM_API_KEY:-}}"
       WORKFLOWS_SARVAM_BASE_URL: "${SARVAM_BASE_URL:-https://api.sarvam.ai/v1}"
-      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-16384}"
+      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-8192}"
       # Re-mint the caller's signed context so a conversion writes as the human, not the key.
       WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       WORKFLOWS_LOG_JSON: "true"
@@ -790,7 +790,7 @@ services:
       # VOCX and DocRAG already use — nothing else to set.
       WORKFLOWS_SARVAM_API_KEY: "${WORKFLOWS_SARVAM_API_KEY:-${SARVAM_API_KEY:-}}"
       WORKFLOWS_SARVAM_BASE_URL: "${SARVAM_BASE_URL:-https://api.sarvam.ai/v1}"
-      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-16384}"
+      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-8192}"
       # CAM documents are read by DocRAG (OpenDataLoader + Sarvam OCR for scans). If DocRAG
       # is down the workbench falls back to its basic text pass and says so per document.
       WORKFLOWS_DOCRAG_URL: "http://docrag:8000"

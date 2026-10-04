@@ -369,7 +369,7 @@ def test_sarvam_engine_follows_config(monkeypatch):
     eng = cam_mod.build_engine(get_settings())
     assert isinstance(eng, cam_mod.OpenAICompatEngine) and eng.name == "sarvam:sarvam-105b-conversations"
     assert eng.base_url == "https://api.sarvam.ai/v1" and eng.token_param == "max_tokens"
-    assert eng.streaming is False and eng.max_tokens == 16384
+    assert eng.streaming is False and eng.max_tokens == 8192     # the model's ceiling
     # A bare "sarvam" picks the default model; no key at all means the stub.
     monkeypatch.setenv("WORKFLOWS_CAM_ENGINE", "sarvam")
     get_settings.cache_clear()
