@@ -263,7 +263,7 @@ export default function VoxCompareDeck({ row, registry, stats, busy, transcript,
         Both models read the same transcript. They agree on <b>{agree}</b> field{agree === 1 ? '' : 's'}
         {worded ? <>, word <b>{worded}</b> differently</> : ''}
         {differs ? <> and disagree on <b style={{ color: 'var(--warn)' }}>{differs}</b>, striped on each card</> : ''}.
-        Swipe to compare, then approve the one you trust — or take it into the review to confirm its fields first.
+        Swipe to compare, then select the one you trust: the review opens on it, with its fields to confirm and Approve.
       </div>
       {total > 0 && stats && (
         <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>
@@ -325,16 +325,34 @@ export default function VoxCompareDeck({ row, registry, stats, busy, transcript,
         )}
       </div>
 
-      <div className="review-action-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-        <button className="approve-pill" disabled={busy} onClick={() => onPick(current.engine, true)}>
-          <span>Approve the {ui.label} reading</span>
-        </button>
-        <button className="btn btn-ghost" style={{ width: '100%', padding: '8px' }} disabled={busy}
-          onClick={() => onPick(current.engine, false)}>
-          {current.needs
-            ? `Use this reading · confirm its ${current.needs} flagged field${current.needs === 1 ? '' : 's'} first`
-            : 'Use this reading, review the fields first'}
-        </button>
+      {/* The deck CHOOSES; the review confirms and approves. Two selection
+          buttons, the reading in view filled, the other outlined; either one
+          picks that reading and opens the review on it. */}
+      <div className="review-action-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'center' }}>
+          Select the reading to take into the review
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {cards.map((c) => {
+            const cu = ENGINE_UI[c.engine] || { label: c.engine, vendor: '' };
+            const active = c.engine === current.engine;
+            return (
+              <button key={c.engine} type="button" disabled={busy}
+                onClick={() => onPick(c.engine, false)}
+                style={{ flex: 1, borderRadius: 10, padding: '11px 10px', cursor: 'pointer', font: 'inherit',
+                  textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+                  background: active ? 'var(--accent)' : 'transparent',
+                  color: active ? '#001912' : 'var(--text)',
+                  border: active ? '1.5px solid var(--accent)' : '1.5px solid var(--line-2)' }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{active ? '✓ ' : ''}Select {cu.label}</span>
+                <span style={{ fontSize: 11.5, opacity: active ? 0.85 : 0.75 }}>
+                  {c.needs ? `${c.needs} to confirm · then approve` : 'nothing to confirm · then approve'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
