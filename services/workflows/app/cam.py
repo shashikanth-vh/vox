@@ -202,7 +202,8 @@ class StubEngine(CamEngine):
         asked = sum(1 for t in turns if t["role"] == "user")
         return ("# CAM (offline stub)\n\n"
                 "No LLM engine is configured (set WORKFLOWS_CAM_LLM_API_KEY for "
-                "bedrock:<model>, or WORKFLOWS_ANTHROPIC_API_KEY). This "
+                "bedrock:<model>, WORKFLOWS_SARVAM_API_KEY for sarvam:<model>, or "
+                "WORKFLOWS_ANTHROPIC_API_KEY). This "
                 f"placeholder proves the workbench lifecycle only. Turns so far: {asked}.")
 
 
@@ -290,13 +291,20 @@ class OpenAICompatEngine(CamEngine):
 
     def __init__(self, model: str, base_url: str, api_key: str, *,
                  max_tokens: int = 32768, timeout_s: float = 540.0,
-                 provider: str = "bedrock") -> None:
+                 provider: str = "bedrock", token_param: str = "max_completion_tokens",
+                 streaming: bool = True, extra_headers: dict[str, str] | None = None) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.max_tokens = max_tokens
         self.timeout_s = timeout_s
         self.name = f"{provider}:{model}"
+        # Dialect knobs: OpenAI's newer ``max_completion_tokens`` vs the classic
+        # ``max_tokens`` (Sarvam), whether to ask for SSE at all, and any second
+        # auth header a provider wants beside the bearer token.
+        self.token_param = token_param
+        self.streaming = streaming
+        self.extra_headers = dict(extra_headers or {})
 
     # A full CAM can run past one response's output limit. When the engine stops for
     # length, it is asked to continue from where it stopped (bounded), and the pieces
@@ -345,13 +353,16 @@ class OpenAICompatEngine(CamEngine):
         text_parts: list[str] = []
         finish = ""
         usage: dict[str, Any] | None = None
+        body_json: dict[str, Any] = {"model": self.model, "messages": messages,
+                                     self.token_param: self.max_tokens}
+        if self.streaming:
+            # The final stream event then carries the token counts.
+            body_json["stream"] = True
+            body_json["stream_options"] = {"include_usage": True}
         async with http.stream(
             "POST", f"{self.base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model, "messages": messages, "stream": True,
-                  # The final stream event then carries the token counts.
-                  "stream_options": {"include_usage": True},
-                  "max_completion_tokens": self.max_tokens},
+            headers={"Authorization": f"Bearer {self.api_key}", **self.extra_headers},
+            json=body_json,
             timeout=httpx.Timeout(self.timeout_s, connect=15.0),
         ) as r:
             if r.status_code >= 300:
@@ -407,6 +418,24 @@ def build_engine(settings: Any) -> CamEngine:
     spec = (getattr(settings, "cam_engine", "") or "anthropic:claude-haiku-4-5").strip()
     provider, _, model = spec.partition(":")
     anthropic_key = (getattr(settings, "anthropic_api_key", "") or "").strip()
+    if provider == "sarvam":
+        # The desk's "everything on Sarvam" posture: the key VOCX and DocRAG already
+        # hold serves the drafting engine too. Plain JSON (no SSE), ``max_tokens``,
+        # bearer plus Sarvam's own subscription header, and the completion budget
+        # capped where their models stop (sarvam_max_tokens).
+        key = ((getattr(settings, "sarvam_api_key", "") or "").strip()
+               or (getattr(settings, "cam_llm_api_key", "") or "").strip())
+        if key:
+            budget = min(int(getattr(settings, "cam_max_completion_tokens", 32768)),
+                         int(getattr(settings, "sarvam_max_tokens", 16384)))
+            return OpenAICompatEngine(
+                model or "sarvam-105b-conversations",
+                getattr(settings, "sarvam_base_url", "") or "https://api.sarvam.ai/v1", key,
+                max_tokens=budget,
+                timeout_s=float(getattr(settings, "cam_llm_timeout_s", 540.0)),
+                provider="sarvam", token_param="max_tokens", streaming=False,
+                extra_headers={"api-subscription-key": key})
+        return StubEngine()
     if provider in ("bedrock", "openai"):
         key = (getattr(settings, "cam_llm_api_key", "") or "").strip()
         if key and model:

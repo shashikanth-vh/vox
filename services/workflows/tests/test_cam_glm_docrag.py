@@ -341,3 +341,40 @@ async def test_extraction_uses_the_docrag_client_when_one_is_configured(monkeypa
         "source_doc_ids": ["pdf-1"], "prompt_doc_id": "prompt-1"})
     assert gen.status_code == 201, gen.text
     assert len(docrag.extract_calls) == 1 and not register.extract_calls
+
+
+# ------------------------------------------------------------------ Sarvam provider
+async def test_sarvam_engine_speaks_the_sarvam_dialect():
+    eng = cam_mod.OpenAICompatEngine("sarvam-105b-conversations", "https://api.sarvam.ai/v1", "sk",
+                                     max_tokens=4096, provider="sarvam", token_param="max_tokens",
+                                     streaming=False, extra_headers={"api-subscription-key": "sk"})
+    seen: dict = {}
+    out = await eng.generate(_fake_http(
+        ctype="application/json",
+        body=b'{"choices":[{"message":{"content":"1. KYC complete"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}',
+        seen=seen), "SYS", [{"role": "user", "content": "read the CPs"}])
+    assert out == "1. KYC complete" and eng.name == "sarvam:sarvam-105b-conversations"
+    assert seen["url"] == "https://api.sarvam.ai/v1/chat/completions"
+    assert seen["headers"] == {"Authorization": "Bearer sk", "api-subscription-key": "sk"}
+    req = seen["json"]
+    assert req["max_tokens"] == 4096 and "max_completion_tokens" not in req
+    assert "stream" not in req and "stream_options" not in req
+
+
+def test_sarvam_engine_follows_config(monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_CAM_ENGINE", "sarvam:sarvam-105b-conversations")
+    monkeypatch.setenv("WORKFLOWS_SARVAM_API_KEY", "sk")
+    monkeypatch.setenv("WORKFLOWS_CAM_LLM_API_KEY", "")
+    get_settings.cache_clear()
+    eng = cam_mod.build_engine(get_settings())
+    assert isinstance(eng, cam_mod.OpenAICompatEngine) and eng.name == "sarvam:sarvam-105b-conversations"
+    assert eng.base_url == "https://api.sarvam.ai/v1" and eng.token_param == "max_tokens"
+    assert eng.streaming is False and eng.max_tokens == 16384
+    # A bare "sarvam" picks the default model; no key at all means the stub.
+    monkeypatch.setenv("WORKFLOWS_CAM_ENGINE", "sarvam")
+    get_settings.cache_clear()
+    assert cam_mod.build_engine(get_settings()).name == "sarvam:sarvam-105b-conversations"
+    monkeypatch.setenv("WORKFLOWS_SARVAM_API_KEY", "")
+    get_settings.cache_clear()
+    assert isinstance(cam_mod.build_engine(get_settings()), cam_mod.StubEngine)
+    get_settings.cache_clear()

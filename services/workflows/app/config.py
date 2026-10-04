@@ -51,6 +51,13 @@ class Settings(BaseServiceSettings):
     anthropic_api_key: str = ""
     cam_llm_base_url: str = "https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1"
     cam_llm_api_key: str = ""
+    #   sarvam:<model>     Sarvam's OpenAI-compatible chat endpoint (the same key VOCX
+    #                      and DocRAG use — SARVAM_API_KEY in compose). Plain JSON
+    #                      replies, ``max_tokens``, both auth headers; a reasoning
+    #                      model's budget is capped by sarvam_max_tokens.
+    sarvam_api_key: str = ""
+    sarvam_base_url: str = "https://api.sarvam.ai/v1"
+    sarvam_max_tokens: int = 16384
     cam_max_completion_tokens: int = 32768
     cam_llm_timeout_s: float = 540.0
     # Sized for a REAL CAM: the reference Pinnacle CAM extracts to ~150k chars, and an
