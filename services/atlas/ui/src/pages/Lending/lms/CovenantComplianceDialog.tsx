@@ -9,6 +9,7 @@ import { useAuth } from '../../../auth/AuthContext';
 import { can } from '../../../auth/rbac';
 import { tokens } from '../../../theme';
 import type { LendingRow } from '../lending.types';
+import { today } from '../../../utils/format';
 
 /**
  * COVENANT COMPLIANCE — the loan's whole compliance ledger in one dialog (the same
@@ -138,7 +139,7 @@ export default function CovenantComplianceDialog({ row, open, onClose, onChanged
               {operate && ['Pending', 'Overdue'].includes(o.status) && act?.id !== o.id && (
                 <Button size="small" variant="outlined" disabled={!!busy}
                   onClick={() => setAct({ id: o.id, kind: 'result', actual: '',
-                    when: new Date().toISOString().slice(0, 10), ref: '', note: '' })}
+                    when: today(), ref: '', note: '' })}
                   sx={{ textTransform: 'none', fontSize: 11.5, py: 0.1 }}>
                   Record result…
                 </Button>

@@ -1,4 +1,4 @@
-import { db, nowStamp } from '../api/atlasStore';
+import { db, nowStamp, today } from '../api/atlasStore';
 import { writeAudit } from './auditService';
 import { PULSE_URL } from '../api/axiosClient';
 import { authHeaders } from '../auth/session';
@@ -658,7 +658,7 @@ export const newsService = {
   exportCsv(by: string) {
     const q = (v: any) => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     const head = ['id', 'code', 'company', 'term', 'severity', 'category', 'headline', 'source', 'when', 'url', 'verdict', 'mode'];
-    const day = new Date().toISOString().slice(0, 10);
+    const day = today();
     const csv = 'EVAM — News Radar,' + day + '\n\n' + head.join(',') + '\n'
       + news().map((n) => [n.id, n.code, coName(n.code), n.term, n.severity,
         n.category, n.headline, n.source, n.when, n.url, n.verdict || '', n.mode].map(q).join(',')).join('\n');

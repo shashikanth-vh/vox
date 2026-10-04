@@ -8,6 +8,7 @@ import { api, errText, isRegisterId } from '../../api/http';
 import { camService } from '../../services/camService';
 import type { PendingWorkflow } from '../../services/workflowService';
 import { tokens } from '../../theme';
+import { today } from '../../utils/format';
 
 /**
  * Close one covenant period from its reminder: the RM/analyst called the borrower, the
@@ -30,7 +31,7 @@ export default function CovenantResultDialog({ w, onClose, onDone }: {
 
   useEffect(() => {
     if (!open) return;
-    setSubmittedOn(new Date().toISOString().slice(0, 10));
+    setSubmittedOn(today());
     setActual(''); setNote(''); setFile(null); setErr(''); setBusy(false);
   }, [open]);
 

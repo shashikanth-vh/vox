@@ -14,11 +14,11 @@ touch the stage, or repeats the current stage, never restamps.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 
+from app.core.clock import tenant_today
 from app.models.trackers import LendingTracker
 
 
@@ -34,4 +34,5 @@ async def lending_pre_write(ctx: Any, body: dict, obj_id: Any) -> None:
         )).scalar()
         if (current or "") == body["stage"]:
             return                       # same stage — the standing date stands
-    body["stage_updated_at"] = datetime.now(UTC).date()
+    # The DESK's day, not the UTC day — a stage moved at 1 am IST is today's move.
+    body["stage_updated_at"] = tenant_today()

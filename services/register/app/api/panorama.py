@@ -31,6 +31,7 @@ from fastapi import Query
 from sqlalchemy import func, select
 
 from app.api.tracxn import real_cin
+from app.core.clock import tenant_date
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -299,9 +300,23 @@ async def company_panorama(
 
     # ---- the timeline: interactions ride the deals/leads views ----------------
     inter_view = "deals" if access("deals") is not Access.NONE else "leads"
+    # By the company link OR by subject: an interaction logged against the lead
+    # or a tracker line BEFORE that row was linked to the entity carries no
+    # entity_id, yet it is this company's conversation — the drawer merges the
+    # same three sources, and the 360 must tell the same story (B34). Forty,
+    # not ten: the card shows the latest, the brief reads them all.
+    from sqlalchemy import or_, tuple_
+
+    subjects = [("Lead", l.id) for l in leads] + [("Deal", d.id) for d in deals] + \
+        [("Lending", r.id) for r in lending] + [("Syndication", r.id) for r in synd] + \
+        [("AssetMonetisation", r.id) for r in am]
+    inter_cond = [Interaction.entity_id == eid]
+    if subjects:
+        inter_cond.append(tuple_(Interaction.subject_type, Interaction.subject_id)
+                          .in_(subjects))
     inters = [] if eid is None else await rows(
-        Interaction, inter_view, "interactions", Interaction.entity_id == eid,
-        order=Interaction.occurred_at.desc(), limit=10)
+        Interaction, inter_view, "interactions", or_(*inter_cond),
+        order=Interaction.occurred_at.desc(), limit=40)
 
     # ---- documents: the Data Register (clients view, company-scoped) ----------
     docs = [] if eid is None else await rows(
@@ -440,7 +455,7 @@ async def company_panorama(
               f"{len(converted)} lead(s) became deals.")
     if inters:
         i = inters[0]
-        when = i.occurred_at.date().isoformat() if i.occurred_at else ""
+        when = tenant_date(i.occurred_at).isoformat() if i.occurred_at else ""
         summ = _clip(i.summary or i.notes, 160)
         if summ:
             _both(f"Last touch {when}: {summ}",

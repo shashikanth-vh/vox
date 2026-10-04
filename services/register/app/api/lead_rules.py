@@ -122,3 +122,20 @@ async def lead_company_to_master(ctx: Any, body: dict) -> None:
                   for k in ("cin", "city", "state", "country", "address")})
     if eid is not None:
         body["entity_id"] = eid
+
+
+async def lead_pre_delete(ctx: Any, obj_id: Any) -> None:
+    """A Converted lead is the history its deal continues from — the Deals row,
+    the tracker lines and the interactions ported from it all point back at it.
+    Deleting it would orphan that story, so the register refuses (the row-lock
+    only guarded edits; DELETE never asked). Drop or delete the DEAL instead."""
+    from app.core.errors import ForbiddenError
+    from app.models import Lead
+
+    row = (await ctx.session.execute(
+        select(Lead.status, Lead.lead_no).where(Lead.id == obj_id,
+                                                Lead.tenant_id == ctx.tenant_id))).first()
+    if row is not None and (row.status or "") == "Converted":
+        raise ForbiddenError(
+            f"Lead {row.lead_no or obj_id} is Converted — it is the history its deal "
+            "continues from and cannot be deleted. Work on the deal instead.")

@@ -24,7 +24,7 @@ import { leadsService } from '../../services/leadsService';
 import { dealsService } from '../../services/dealsService';
 import { syndicationService } from '../../services/syndicationService';
 import { assetMonService } from '../../services/assetMonService';
-import { fmt } from '../../utils/format';
+import { fmt, today } from '../../utils/format';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
 import type { AttnRow, ContactRow, DueRow } from './compute';
 import { tokens } from '../../theme';
@@ -164,7 +164,7 @@ export default function TodayPage() {
     await Promise.all(inboxRows.map((n) => notificationsService.markRead(n.id)));
     await refetchInbox();
   };
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = today();
   const overdueOf = (t: TrancheItem) =>
     (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < todayISO).length;
   const settleBooking = async (t: TrancheItem, action: 'approve' | 'reject', note?: string) => {

@@ -37,6 +37,7 @@ from sqlalchemy import select, text
 
 from app.api.custom import _ensure_subject_scope
 from app.authz.engine import service_ctx
+from app.core.clock import tenant_today
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
@@ -223,7 +224,7 @@ async def expiry_sweep(payload: SweepIn,
     if service_ctx.get() not in _SWEEP_SERVICES:
         raise ForbiddenError(
             "The document expiry sweep runs under the workflow service principal only.")
-    today = datetime.now(UTC).date()
+    today = tenant_today()
     # 1. Mark lapsed documents Expired (idempotent: an already-Expired row no longer
     #    matches the status filter, so a re-run returns it in neither list). The status
     #    set is a module constant inlined as literals — no user input in the SQL text.

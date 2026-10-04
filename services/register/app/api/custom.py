@@ -22,6 +22,7 @@ from sqlalchemy import func, or_, select
 from app import authz
 from app import storage as storage_mod
 from app.core.config import get_settings
+from app.core.clock import tenant_date
 from app.core.errors import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -528,7 +529,7 @@ async def remove_interaction(
             .order_by(Interaction.occurred_at.desc())
         )).scalars().all()
         vals: dict[str, Any] = {"last_interaction_date":
-                                remaining[0].occurred_at.date() if remaining else None}
+                                tenant_date(remaining[0].occurred_at) if remaining else None}
         # Next action is only rolled back when the DELETED row is what stamped it —
         # a hand-typed next action on the lead is not this endpoint's to touch.
         lead = await load_subject(ctx.session, ctx.tenant_id, "Lead", subject_id)

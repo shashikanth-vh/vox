@@ -5,6 +5,7 @@ import { interactionService, type LeadRef } from '../../services/interactionServ
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
+import { today } from '../../utils/format';
 
 export default function LogInteractionDialog({ code, refType, lead, entityId, open, onClose, onDone }: {
   code: string; refType?: string;
@@ -16,8 +17,8 @@ export default function LogInteractionDialog({ code, refType, lead, entityId, op
 }) {
   const { user } = useAuth();
   const people: string[] = (db().people || []).map((p: any) => p.name);
-  const today = new Date().toISOString().slice(0, 10);
-  const [f, setF] = useState({ occurredAt: today, person: user.name, interactionType: '', notes: '', nextAction: '', nextActionDate: '' });
+  const todayISO = today();
+  const [f, setF] = useState({ occurredAt: todayISO, person: user.name, interactionType: '', notes: '', nextAction: '', nextActionDate: '' });
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
@@ -26,7 +27,7 @@ export default function LogInteractionDialog({ code, refType, lead, entityId, op
   // showing the last interaction that was logged.
   useEffect(() => {
     if (open) {
-      setF({ occurredAt: today, person: user.name, interactionType: '', notes: '', nextAction: '', nextActionDate: '' });
+      setF({ occurredAt: todayISO, person: user.name, interactionType: '', notes: '', nextAction: '', nextActionDate: '' });
       setErr(''); setSaving(false);
     }
   }, [open, code]);

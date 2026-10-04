@@ -3,6 +3,7 @@
 // section to that RM/Analyst's book (mirrors the template's dashScopeS).
 import { db } from '../../api/atlasStore';
 import { num } from '../../utils/format';
+import { referenceService } from '../../services/referenceService';
 import { SYN_TERM, SYN_CLOSED } from '../../services/syndicationService';
 
 export interface DrillRow { code: string; name: string; sector: string; amt: number; }
@@ -37,6 +38,10 @@ export interface DashboardV11 {
   bank: BankRow[];
 }
 
+// Sanctioned and not yet disbursed — the lending book's third state (see the
+// buckets below). Change this list to move a stage between the two tiles.
+export const LEND_SANCTIONED = ['Sanctioned', 'CP/CS Completed', 'Ready for Disbursement'];
+
 const median = (a: number[]): number | null => {
   if (!a.length) return null;
   const s = a.slice().sort((x, y) => x - y), m = Math.floor(s.length / 2);
@@ -48,10 +53,43 @@ const p75 = (a: number[]): number | null => {
   return s[Math.floor(s.length * 0.75)];
 };
 
+// ---- people: a stored rm/analyst is a HANDLE ("AT"), a full name ("Arun Tiwari")
+// or whatever an import carried ("chetan"); the roster (/v1/ref) knows the handle
+// and the label. Matching is normalised across all of them, so "?person=Chetan"
+// from the Employees page and a lead filed under "Chetan Malik" meet (B13), and
+// the RM table does not silently drop rows whose spelling differs (B44).
+const norm = (s: any) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+function rosterIndex(): { handles: string[]; keyToHandle: Map<string, string> } {
+  const handles: string[] = [...new Set([...(referenceService.getRefSync('RM') || []), ...(referenceService.getRefSync('Analyst') || [])])];
+  const labels = { ...referenceService.getRefLabels('Analyst'), ...referenceService.getRefLabels('RM') };
+  const keyToHandle = new Map<string, string>();
+  const firstTokens = new Map<string, string[]>();
+  handles.forEach((h) => {
+    const label = labels[h] || '';
+    [h, label].map(norm).filter(Boolean).forEach((k) => keyToHandle.set(k, h));
+    // "Chetan" for "Chetan Malik" — only when one person on the roster starts so.
+    const ft = norm(label || h).split(' ')[0];
+    if (ft) firstTokens.set(ft, [...(firstTokens.get(ft) || []), h]);
+  });
+  firstTokens.forEach((hs, ft) => { if (hs.length === 1 && !keyToHandle.has(ft)) keyToHandle.set(ft, hs[0]); });
+  return { handles, keyToHandle };
+}
+/** The roster handle a stored person value resolves to, or null when not on the roster. */
+export function resolvePerson(value: any, idx = rosterIndex()): string | null {
+  const n = norm(value);
+  if (!n) return null;
+  return idx.keyToHandle.get(n) ?? idx.keyToHandle.get(n.split(' ')[0]) ?? null;
+}
+
 export function computeDashboard(person?: string): DashboardV11 {
   const D = db();
   const cli = (code: string) => (D.clients && D.clients[code]) || { name: code, sector: 'Other', lens: '', state: '' };
-  const mine = (r: any) => !person || r.rm === person || r.an === person;
+  const idx = rosterIndex();
+  // The person asked for, as a roster handle when the roster knows them; a name the
+  // roster does not know still matches its own exact (normalised) spelling.
+  const who = person ? (resolvePerson(person, idx) ?? norm(person)) : '';
+  const same = (v: any) => !!norm(v) && ((resolvePerson(v, idx) ?? norm(v)) === who);
+  const mine = (r: any) => !person || same(r.rm) || same(r.an);
 
   const leads = (D.leads || []).filter(mine);
   const deals = (D.deals || []).filter(mine);
@@ -62,10 +100,18 @@ export function computeDashboard(person?: string): DashboardV11 {
   const drill = (r: any, valKey = 'amt'): DrillRow => ({ code: r.code, name: cli(r.code).name, sector: cli(r.code).sector || 'Other', amt: num(r[valKey]) });
 
   // ---- closed / pipeline buckets ----
+  // Lending has three money states, not two: DISBURSED (closed), SANCTIONED but
+  // not yet disbursed (its own tile under Closed Deals: Sanctioned, CP/CS
+  // Completed, Ready for Disbursement) and everything before sanction (pipeline).
+  // The Sanctioned tile and the Pipeline tile used to overlap on 'Sanctioned', so
+  // a ₹10 Cr sanction was counted twice (B12). The LIVE book — every line not
+  // disbursed, dropped or rejected — still feeds the sector / lens / geography
+  // charts, which describe where the work is, not a tile sum.
   const closedLend = lending.filter((r: any) => r.stage === 'Disbursed');
   const closedSyn = syn.filter((r: any) => SYN_CLOSED.includes(r.status));
   const closedAm = am.filter((a: any) => a.status === 'Closed');
-  const pipeLend = lending.filter((r: any) => !['Disbursed', 'Dropped', 'Rejected'].includes(r.stage));
+  const liveLend = lending.filter((r: any) => !['Disbursed', 'Dropped', 'Rejected'].includes(r.stage));
+  const pipeLend = liveLend.filter((r: any) => !LEND_SANCTIONED.includes(r.stage));
   const pipeSyn = syn.filter((r: any) => !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status));
   const pipeAm = am.filter((a: any) => !['Closed', 'Dropped'].includes(a.status));
 
@@ -83,7 +129,9 @@ export function computeDashboard(person?: string): DashboardV11 {
     conv: (closedN + pipeN) ? Math.round((closedN / (closedN + pipeN)) * 100) : 0,
     // Registry rows only — hydration seeds _shadow name-lookup entries for tracker
     // codes, which are not clients.
-    clients: Object.values(D.clients || {}).filter((c: any) => !c?._shadow).length,
+    // ...nor are the <code>-2 facility aliases hydration adds for a company's
+    // second deal — same company, one client (B06).
+    clients: Object.values(D.clients || {}).filter((c: any) => !c?._shadow && !c?.aliasOf).length,
     lenders: lenderSet.size,
     liveMandates: pipeSyn.length,
   };
@@ -99,24 +147,24 @@ export function computeDashboard(person?: string): DashboardV11 {
   const geoOf = (r: any) => cli(r.code).state || r.state || '(unspecified)';
 
   // ---- sector split: active pipeline + closed ----
-  const sector = cntBars([pipeLend, pipeSyn, pipeAm], secOf);
+  const sector = cntBars([liveLend, pipeSyn, pipeAm], secOf);
   const sectorClosed = cntBars([closedLend, closedSyn, closedAm], secOf);
 
   // ---- geography split: active pipeline + closed (counts) ----
-  const geoPipe = cntBars([pipeLend, pipeSyn, pipeAm], geoOf);
+  const geoPipe = cntBars([liveLend, pipeSyn, pipeAm], geoOf);
   const geoClosed = cntBars([closedLend, closedSyn, closedAm], geoOf);
 
   // ---- Mitigation & Adaptation breakup (all pipe + closed rows) ----
   const maMap = { Mitigation: 0, Adaptation: 0 };
-  [...pipeLend, ...pipeSyn, ...pipeAm, ...closedLend, ...closedSyn, ...closedAm]
+  [...liveLend, ...pipeSyn, ...pipeAm, ...closedLend, ...closedSyn, ...closedAm]
     .forEach((r: any) => { maMap[cli(r.code).lens === 'Adaptation' ? 'Adaptation' : 'Mitigation']++; });
   const ma: BarRow[] = [
     { label: 'Mitigation', value: maMap.Mitigation, note: maMap.Mitigation === 1 ? 'deal' : 'deals' },
     { label: 'Adaptation', value: maMap.Adaptation, note: maMap.Adaptation === 1 ? 'deal' : 'deals' },
   ];
 
-  // ---- sanctioned lending (Sanctioned / Documentation / Disbursed) ----
-  const sancRows = lending.filter((r: any) => ['Sanctioned', 'Documentation', 'Disbursed'].includes(r.stage));
+  // ---- sanctioned lending: sanctioned, not yet disbursed ----
+  const sancRows = lending.filter((r: any) => LEND_SANCTIONED.includes(r.stage));
 
   // ---- lending funnel: most advanced stage reached ----
   const LORDER: string[] = (D.ref && D.ref['Lending Stage']) || [];
@@ -136,7 +184,7 @@ export function computeDashboard(person?: string): DashboardV11 {
     lensMap[k] = lensMap[k] || { lens: k, lending: 0, syn: 0, am: 0, total: 0 };
     lensMap[k][line]++; lensMap[k].total++;
   };
-  pipeLend.forEach((r: any) => bumpLens(cli(r.code).lens, 'lending'));
+  liveLend.forEach((r: any) => bumpLens(cli(r.code).lens, 'lending'));
   pipeSyn.forEach((r: any) => bumpLens(cli(r.code).lens, 'syn'));
   pipeAm.forEach((r: any) => bumpLens(cli(r.code).lens, 'am'));
   const lens = Object.values(lensMap).sort((a, b) => b.total - a.total);
@@ -179,15 +227,16 @@ export function computeDashboard(person?: string): DashboardV11 {
   const velocity: VelRow[] = Object.entries(trans).map(([stage, v]) => ({ stage, n: v.length, median: median(v), p75: p75(v) }));
 
   // ---- lead touches by recency window ----
-  const leadIds = new Set(leads.map((l: any) => l.id));
+  // From each lead's own last-touch date (the register rolls every logged
+  // interaction onto it), not from an interactions list the book never loads —
+  // that list held only what this tab logged, so the tile read zero (B09).
   const now = Date.now();
   const buckets: Record<string, Set<string>> = { '7': new Set(), '15': new Set(), '30': new Set(), '90': new Set() };
-  (D.interactions || []).forEach((i: any) => {
-    const isLead = leadIds.has(i.refId) || i.refType === 'Lead' || !!i.portedFromLead;
-    if (!isLead || !i.occurredAt) return;
-    const days = (now - new Date(i.occurredAt).getTime()) / 864e5;
-    const key = leadIds.has(i.refId) ? i.refId : (i.portedFromLead || i.refId);
-    (['7', '15', '30', '90'] as const).forEach((w) => { if (days <= +w) buckets[w].add(key); });
+  leads.forEach((l: any) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(l.last || ''));
+    if (!m) return;
+    const days = (now - new Date(+m[1], +m[2] - 1, +m[3]).getTime()) / 864e5;
+    (['7', '15', '30', '90'] as const).forEach((w) => { if (days <= +w) buckets[w].add(l.id); });
   });
   const leadTouch: BarRow[] = [
     { label: 'Last 7d', value: buckets['7'].size, note: 'leads touched' },
@@ -206,29 +255,45 @@ export function computeDashboard(person?: string): DashboardV11 {
   const sourcing: BarRow[] = [...known.sort((a, b) => tax.indexOf(a[0]) - tax.indexOf(b[0])), ...unspecified].map(([label, value]) => ({ label, value }));
 
   // ---- RM origination ----
+  // One row per roster RM, matched by handle OR full name, then a row for every
+  // spelling the roster does not know ("chetan", a departed RM) and one for
+  // leads with no RM at all — nothing is dropped from the table (B44).
   const rmNames: string[] = (D.ref && D.ref.RM) || [];
-  const rm: RmRow[] = rmNames.filter((n) => !person || n === person).map((name) => {
-    const al = leads.filter((l: any) => l.status === 'Active' && l.rm === name);
-    const dl = deals.filter((d: any) => d.rm === name);
+  const rmKey = (v: any): string => {
+    const n = norm(v);
+    if (!n) return '(unassigned)';
+    const h = resolvePerson(v, idx);
+    return h && rmNames.includes(h) ? h : `${String(v).trim()} (not on roster)`;
+  };
+  const rmKeys = [...rmNames, ...new Set([...leads.map((l: any) => rmKey(l.rm)), ...deals.map((d: any) => rmKey(d.rm))].filter((k) => !rmNames.includes(k)))];
+  // Off-roster keys exist only because some scoped row carries them, so they
+  // always have a count; roster rows stay even at zero, as they always did.
+  const rm: RmRow[] = rmKeys.filter((n) => !person || n === who || !rmNames.includes(n)).map((name) => {
+    const isRm = (v: any) => rmKey(v) === name;
+    const al = leads.filter((l: any) => l.status === 'Active' && isRm(l.rm));
+    const dl = deals.filter((d: any) => isRm(d.rm));
     return {
-      name, sourced: leads.filter((l: any) => l.rm === name).length,
+      name: rmNames.includes(name) ? (referenceService.getRefLabels('RM')[name] || name) : name,
+      sourced: leads.filter((l: any) => isRm(l.rm)).length,
       activeLeads: al.length, hotLeads: al.filter((l: any) => l.temp === 'Hot').length,
-      converted: leads.filter((l: any) => l.rm === name && l.status === 'Converted').length,
+      converted: leads.filter((l: any) => isRm(l.rm) && l.status === 'Converted').length,
       pipeline: dl.filter((d: any) => d.lend || d.syn || d.am).length,
-      closed: closedLend.filter((r: any) => r.rm === name).length + closedSyn.filter((r: any) => r.rm === name).length + closedAm.filter((r: any) => r.rm === name).length,
+      closed: closedLend.filter((r: any) => isRm(r.rm)).length + closedSyn.filter((r: any) => isRm(r.rm)).length + closedAm.filter((r: any) => isRm(r.rm)).length,
     };
   });
 
   // ---- Analyst throughput ----
   const anNames: string[] = ((D.ref && D.ref.Analyst) || []).filter((a: string) => a !== 'Grishma');
-  const analyst: AnRow[] = anNames.filter((n) => !person || n === person).map((name) => ({
-    name,
-    activeLend: lending.filter((r: any) => r.an === name && !['Disbursed', 'Rejected', 'Dropped'].includes(r.stage)).length,
-    activeSyn: syn.filter((r: any) => r.an === name && !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status)).length,
-    activeAM: am.filter((a: any) => a.an === name && !['Closed', 'Dropped'].includes(a.status)).length,
-    closed: lending.filter((r: any) => r.an === name && r.stage === 'Disbursed').length + syn.filter((r: any) => r.an === name && SYN_CLOSED.includes(r.status)).length + am.filter((a: any) => a.an === name && a.status === 'Closed').length,
-    rejected: lending.filter((r: any) => r.an === name && ['Rejected', 'Dropped'].includes(r.stage)).length + syn.filter((r: any) => r.an === name && SYN_TERM.includes(r.status)).length,
-  }));
+  const analyst: AnRow[] = anNames.filter((n) => !person || n === who).map((name) => {
+    const isAn = (v: any) => resolvePerson(v, idx) === name || norm(v) === norm(name);
+    return {
+    name: referenceService.getRefLabels('Analyst')[name] || name,
+    activeLend: lending.filter((r: any) => isAn(r.an) && !['Disbursed', 'Rejected', 'Dropped'].includes(r.stage)).length,
+    activeSyn: syn.filter((r: any) => isAn(r.an) && !SYN_TERM.includes(r.status) && !SYN_CLOSED.includes(r.status)).length,
+    activeAM: am.filter((a: any) => isAn(a.an) && !['Closed', 'Dropped'].includes(a.status)).length,
+    closed: lending.filter((r: any) => isAn(r.an) && r.stage === 'Disbursed').length + syn.filter((r: any) => isAn(r.an) && SYN_CLOSED.includes(r.status)).length + am.filter((a: any) => isAn(a.an) && a.status === 'Closed').length,
+    rejected: lending.filter((r: any) => isAn(r.an) && ['Rejected', 'Dropped'].includes(r.stage)).length + syn.filter((r: any) => isAn(r.an) && SYN_TERM.includes(r.status)).length,
+  }; });
 
   // ---- bank engagement ----
   const banks: Record<string, BankRow> = {};

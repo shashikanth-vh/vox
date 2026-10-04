@@ -167,6 +167,9 @@ services:
       # Company-360 market feed (Tracxn). Empty = the FINANCIALS card stays a
       # "soon" card; set TRACXN_ACCESS_TOKEN in .env to light it up.
       REGISTER_TRACXN_ACCESS_TOKEN: "${TRACXN_ACCESS_TOKEN:-}"
+      # The desk's calendar: every date the register stamps itself (stage moved,
+      # last touch, sweeps) is this zone's day, not the UTC day.
+      REGISTER_TENANT_TIMEZONE: "${TENANT_TIMEZONE:-Asia/Kolkata}"
       # Verify an assignee's identity + role against the Access service before assigning.
       REGISTER_ACCESS_URL: "http://access:8000"
       REGISTER_ACCESS_API_KEY: "dev-local-key"

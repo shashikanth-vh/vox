@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import Depends, Query
 from sqlalchemy import select
 
+from app.core.clock import tenant_today
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
 from app.models import Entity, LendingTracker
@@ -78,7 +79,7 @@ async def list_follow_ups(
         scope_email: str | None = Query(default=None),
         serviced_only: bool = Query(default=False),
         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
-    today = date.today()
+    today = tenant_today()
     items: list[dict[str, Any]] = []
 
     # OWN-BOOK scoping (``scope_email``): an IC's reminders are their book, not the

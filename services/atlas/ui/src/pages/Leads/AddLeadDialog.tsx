@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Alert, IconButton, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { FieldGrid, TextFld, SelectFld } from '../../components/common/Field';
 import { referenceService } from '../../services/referenceService';
 import { leadsService } from '../../services/leadsService';
 import { db } from '../../api/atlasStore';
+import { USE_REAL_API } from '../../api/http';
 import { nameAlike, normName } from '../../utils/format';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -35,13 +36,36 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
   const [leadHits, setLeadHits] = useState<string[]>([]);
   const [linked, setLinked] = useState<{ code: string; name: string; entityId: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  // The live check is debounced and sequenced: a slow answer to an earlier
+  // keystroke must never overwrite the answer to the current name.
+  const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lookupSeq = useRef(0);
   useEffect(() => { if (open) { setF(blank); setClientHits([]); setLeadHits([]); setLinked(null); setErr(''); setSaving(false); } }, [open]);
 
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v, ...(k === 'sector' ? { lens: ADAPT_SECT.includes(v) ? 'Adaptation' : 'Mitigation' } : {}) }));
 
+  const leadWarning = (company: string, id: string, rm?: string) =>
+    `An active lead for this company already exists: ${company} (${id}${rm ? ` · RM ${rm}` : ''}) — adding another is allowed, but check first.`;
+
+  // LIVE mode asks the REGISTER, tenant-wide: the browser's cache held only the
+  // leads and clients this tab happened to load, and only the caller's own scope,
+  // so a company another BDRM already works never warned (B08). Mock mode keeps
+  // the local rule below.
   const checkDupes = (name: string) => {
     const q = normName(name);
     if (q.length < 3) { setClientHits([]); setLeadHits([]); return; }
+    if (USE_REAL_API) {
+      if (lookupTimer.current) clearTimeout(lookupTimer.current);
+      const seq = ++lookupSeq.current;
+      lookupTimer.current = setTimeout(() => {
+        void leadsService.lookup(name).then((r) => {
+          if (seq !== lookupSeq.current) return;
+          setClientHits(r.clients.slice(0, 3).map((c) => ({ code: c.code, name: c.name, entityId: c.entityId })));
+          setLeadHits(r.leads.slice(0, 2).map((l) => leadWarning(l.company, l.leadNo, l.rm)));
+        });
+      }, 300);
+      return;
+    }
     // Fuzzy on the DISTINCTIVE part of the name only: raw bigrams let the
     // corporate boilerplate dominate — "adani INDUSTRIES" scored a match with
     // "Veer Raj INDUSTRIES" on the strength of one generic word.
@@ -61,7 +85,7 @@ export default function AddLeadDialog({ open, onClose, onSaved }: { open: boolea
     setLeadHits(db().leads
       .filter((x: any) => x.status === 'Active' && !x.conv && alike(x.company))
       .slice(0, 2)
-      .map((x: any) => `An active lead for this company already exists: ${x.company} (${x.id}${x.rm ? ` · RM ${x.rm}` : ''}) — adding another is allowed, but check first.`));
+      .map((x: any) => leadWarning(x.company, x.id, x.rm)));
   };
 
   const linkTo = (c: { code: string; name: string; entityId?: string }) => {

@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import type { TrancheItem } from '../../services/lmsService';
-import { fmt } from '../../utils/format';
+import { fmt, today } from '../../utils/format';
 import { tokens } from '../../theme';
 
 /**
@@ -37,7 +37,7 @@ export default function BookingReviewDialog({ t, busy, onClose, onDecide }: {
   useEffect(() => { setNote(''); setErr(''); }, [t?.id]);
 
   if (!t) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const todayISO = today();
   const conds = t.conditions_open ?? [];
 
   const reject = () => {
@@ -79,7 +79,7 @@ export default function BookingReviewDialog({ t, busy, onClose, onDecide }: {
           </Typography>
         )}
         {conds.map((c) => {
-          const overdue = !!c.expiry_date && c.expiry_date < today;
+          const overdue = !!c.expiry_date && c.expiry_date < todayISO;
           return (
             <Box key={c.key} sx={{ display: 'flex', gap: 1, alignItems: 'baseline',
               py: 0.3, borderBottom: `1px dashed ${tokens.line}`,

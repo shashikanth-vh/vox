@@ -8,6 +8,9 @@ import { inScope, type RowScope } from '../auth/rbac';
 
 const ADAPT_SECT = ['Industrial Water', 'Water Treatment / WASH', 'Climate Data & IoT', 'Agri / Drone'];
 
+/** Every lead status that is not Converted (the register's Lead Status vocabulary). */
+export const LEAD_OPEN_STATUSES = ['Active', 'Dropped'];
+
 /** The create body accepted on POST {{baseUrl}}/v1/leads (api.json, "03 · Lead, ownership & interaction"). */
 export interface LeadInput {
   /** Omitted on create — the register allocates it and answers with what it chose. */
@@ -174,20 +177,25 @@ export const leadsService = {
         // Server-paged: `limit` is the table's page size and Next carries the cursor the
         // previous page returned, so exactly one page comes back and applyQuery must NOT
         // re-slice it. Search goes up as `q`; the total comes from with_total.
-        const data = await api.get<any>('/leads', toCursorParams(q));
+        const params = toCursorParams(q);
+        // The page promises "Converted leads leave this register automatically" — the
+        // register keeps them (the deal is their continuation). The REGISTER is asked
+        // to leave them out, as a status filter: trimming them off the returned page
+        // gave short pages and a footer total that drifted by the number trimmed
+        // (B19). A status facet the user picked is narrowed, never widened.
+        if (!opts?.includeConverted) {
+          const asked = String(params.status || '').split(',').filter(Boolean);
+          const kept = (asked.length ? asked : LEAD_OPEN_STATUSES).filter((x) => x !== 'Converted');
+          if (!kept.length) return { rows: [], total: 0, nextCursor: null };
+          params.status = kept.join(',');
+        }
+        const data = await api.get<any>('/leads', params);
         // Wire rows are snake_case, so they are mapped to Lead before the grid sees
         // them — otherwise every accessorKey (id, temp, last, next) reads undefined
         // and the ID column shows a raw UUID instead of lead_no.
         // No inScope here: the register already scoped this list (see auth/rbac.ts).
-        const all = asRows(data, 'leads').map(toLeadRow);
-        // The page promises "Converted leads leave this register automatically" — the
-        // register keeps them (the deal is their continuation), so the LIVE list drops
-        // them here, exactly as the mock path always did. Management's "Show
-        // converted" toggle lifts the filter for source-of-business analysis.
-        const rows = opts?.includeConverted ? all
-          : all.filter((l) => l.status !== 'Converted');
-        const total = Math.max(0, totalOf(data, all.length) - (all.length - rows.length));
-        return { rows, total, nextCursor: nextCursorOf(data) };
+        const rows = asRows(data, 'leads').map(toLeadRow);
+        return { rows, total: totalOf(data, rows.length), nextCursor: nextCursorOf(data) };
       },
       async () => {
         await delay();
@@ -199,6 +207,26 @@ export const leadsService = {
     );
   },
   find(id: string): Lead | undefined { return db().leads.find((l: Lead) => l.id === id); },
+
+  /**
+   * GET /v1/lead-lookup?name= — companies and open leads that look like this name,
+   * TENANT-WIDE (the point is to learn that someone else holds the company). The
+   * register applies the same normalised / fuzzy match the dialog used to run over
+   * its cache. Mock mode answers from the local store with that same rule.
+   */
+  async lookup(name: string): Promise<{
+    clients: { entityId: string; code: string; name: string }[];
+    leads: { leadNo: string; company: string; rm?: string }[];
+  }> {
+    if (!USE_REAL_API) return { clients: [], leads: [] };
+    try {
+      const r = await api.get<any>('/lead-lookup', { name });
+      return {
+        clients: (r?.clients || []).map((c: any) => ({ entityId: c.entity_id, code: c.code, name: c.name })),
+        leads: (r?.leads || []).map((l: any) => ({ leadNo: l.lead_no, company: l.company, rm: l.rm })),
+      };
+    } catch { return { clients: [], leads: [] }; }
+  },
 
   /**
    * GET {{baseUrl}}/v1/leads/{obj_id} — the single lead behind the row, read when the

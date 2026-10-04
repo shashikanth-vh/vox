@@ -46,6 +46,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.authz.engine import service_ctx
 from app.core.config import get_settings
+from app.core.clock import tenant_today
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
@@ -215,7 +216,7 @@ async def _settle_booked(ctx: RequestContext, line: LendingTracker,
     already = sum(float(r.amount) for r in booked_before)
     line.disbursed_amount = already + float(row.amount)
     if line.disbursement_date is None:
-        line.disbursement_date = row.disbursed_on or date.today()
+        line.disbursement_date = row.disbursed_on or tenant_today()
     if line.stage not in ("Disbursed", "CP/CS Completed"):
         history = list(line.stage_history or [])
         history.append({"from": line.stage, "to": "Disbursed",

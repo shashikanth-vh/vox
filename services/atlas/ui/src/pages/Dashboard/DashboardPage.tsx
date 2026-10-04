@@ -9,10 +9,9 @@ import type { BarRow, DrillRow, LensRow, VelRow, BankRow } from './compute';
 import { useAuth } from '../../auth/AuthContext';
 import { viewAccess } from '../../auth/rbac';
 import ExportBar from '../../components/common/ExportBar';
-import { fmt } from '../../utils/format';
+import { fmt, today } from '../../utils/format';
 import { tokens } from '../../theme';
 
-const today = () => new Date().toISOString().slice(0, 10);
 const sum = (a: DrillRow[]) => a.reduce((s, x) => s + x.amt, 0);
 
 // ---------- small building blocks ----------

@@ -61,6 +61,7 @@ class ResourceSpec:
         pre_write: Any = None,
         pre_delete: Any = None,
         enrich_create: Any = None,
+        post_write: Any = None,
     ) -> None:
         self.name = name
         self.prefix = prefix
@@ -107,6 +108,10 @@ class ResourceSpec:
         # referential invariants (an entity carrying live product rows must not be
         # deletable out from under them). It raises; it never deletes anything itself.
         self.pre_delete = pre_delete
+        # post_write(ctx, obj, event, previous=None) runs after a create / update /
+        # delete has landed in the session — for facts DERIVED from this row that
+        # live on another (a deal's product flags follow its tracker lines).
+        self.post_write = post_write
         # For a child resource with no entity_id of its own (syndication lenders), scope
         # by the PARENT line's company: (parent_model, fk_attr_name).
         self.parent_scope = parent_scope
@@ -499,6 +504,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             if spec.pre_write is not None:
                 await spec.pre_write(ctx, body, None)
             obj = await repo.create(ctx.session, ctx.tenant_id, ctx.actor, body)
+            if spec.post_write is not None:
+                await spec.post_write(ctx, obj, "create")
 
             # Spec: the creator AUTOMATICALLY owns the new line when they hold its
             # primary assignment role (a BDRM's new lead is assigned to them at birth,
@@ -729,9 +736,17 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
                 expected = _parse_if_match(if_match)
             if spec.pre_write is not None:
                 await spec.pre_write(ctx, data, obj_id)
+            # What the row pointed at BEFORE the write, for a derived fact that must
+            # also be refreshed on the row it left (a line moved to another deal).
+            before = None
+            if spec.post_write is not None and "deal_id" in data:
+                before = await repo.get(ctx.session, ctx.tenant_id, obj_id)
+                before = type("Prev", (), {"deal_id": getattr(before, "deal_id", None)})()
             obj = await repo.update(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, data, expected_version=expected
             )
+            if spec.post_write is not None:
+                await spec.post_write(ctx, obj, "update", before)
             response.headers["ETag"] = f'"{obj.version}"'
             return spec.read_schema.model_validate(obj)
 
@@ -757,9 +772,13 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             if spec.pre_delete is not None:
                 await spec.pre_delete(ctx, obj_id)
             expected = expected_version if expected_version is not None else _parse_if_match(if_match)
+            gone = (await repo.get(ctx.session, ctx.tenant_id, obj_id)
+                    if spec.post_write is not None else None)
             await repo.soft_delete(
                 ctx.session, ctx.tenant_id, obj_id, ctx.actor, expected_version=expected
             )
+            if spec.post_write is not None:
+                await spec.post_write(ctx, gone, "delete")
             return Response(status_code=204)
 
         @router.post("/{obj_id}/restore", response_model=spec.read_schema,
@@ -775,6 +794,8 @@ def build_crud_router(spec: ResourceSpec) -> APIRouter:
             enforce_operation(ctx.user, spec.delete_operation)
             await revalidate_sensitive(ctx, spec.delete_operation)
             obj = await repo.restore(ctx.session, ctx.tenant_id, obj_id, ctx.actor)
+            if spec.post_write is not None:
+                await spec.post_write(ctx, obj, "restore")
             return spec.read_schema.model_validate(obj)
 
     return router

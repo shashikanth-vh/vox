@@ -8,6 +8,7 @@ import SendIcon from '@mui/icons-material/Send';
 import { workflowActionsService, type WorkflowAction } from '../../services/workflowActionsService';
 import { tokens } from '../../theme';
 import { latestBy } from '../../api/latest';
+import { today } from '../../utils/format';
 
 /**
  * DISBURSE — the whole disbursement journey in ONE dialog, staged by where the line
@@ -68,12 +69,12 @@ export default function DisburseDialog({ action, onClose, onDone }: {
       setAmount(String(line.proposed_disbursement_amount
         ?? terms?.amount_cr ?? line.amount_cr ?? ''));
       setDate(String(line.proposed_disbursement_date
-        || new Date().toISOString().slice(0, 10)));
+        || today()));
       setPkg(await api.get<any>(`/lending/${lendingId}/handover-package`)
         .catch(() => null));
       const s = await api.get<any>(`/lending/${lendingId}/tranches`).catch(() => null);
       setSched(s);
-      setTrDate(new Date().toISOString().slice(0, 10));
+      setTrDate(today());
       setTrAmount(s?.remaining != null ? String(s.remaining) : '');
       const raw = await api.get<any>('/internal/cpcs-checklists',
         { lending_id: lendingId }).catch(() => []);

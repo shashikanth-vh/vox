@@ -1329,6 +1329,10 @@ export default function CommonTable<T extends Record<string, any>>(
     data: rows,
     manualPagination: true,
     manualSorting: true,
+    // The fetcher already applied the search (the register's `q`, or applyQuery in
+    // mock mode); MRT's own fuzzy pass over the returned page then dropped rows the
+    // register had matched on a column the page does not show (B16).
+    manualFiltering: true,
     // Filtering is entirely ours (own state + header funnel). Turning off MRT's
     // column filters means it renders no filter chrome at all — no subheader row,
     // no filter icons, no "filtered" indicator. The ⋮ actions menu is off too, so

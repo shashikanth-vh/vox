@@ -27,6 +27,7 @@ from sqlalchemy import (
     Numeric,
     and_,
     cast,
+    exists,
     func,
     or_,
     select,
@@ -130,10 +131,19 @@ class CRUDRepository(Generic[M]):
         searchable: list[str] | None = None,
         filterable: list[str] | None = None,
         jsonb_membership: list[str] | None = None,
+        search_related: list[tuple[Any, str, list[str]]] | None = None,
     ) -> None:
         self.model = model
         self.resource = model.__tablename__
         self.searchable = searchable or []
+        # The grids' search box also reaches the RELATED row a grid shows but the
+        # table does not hold: a deal, a tracker line or a mandate is listed under
+        # its COMPANY's name, which lives on the entity, so "Sunvik" must find the
+        # line even though no column of the line says Sunvik. Each entry is
+        # (related model, this model's FK column name, that model's searchable
+        # columns) and is matched with an EXISTS subquery — no join, so counts,
+        # cursors and the scope conditions are untouched.
+        self.search_related = search_related or []
         # Columns clients may filter by equality on; defaults to declared filterables.
         self.filterable = set(filterable or [])
         # JSONB LIST columns clients may filter by MEMBERSHIP (`?verticals=Solar`
@@ -329,9 +339,21 @@ class CRUDRepository(Generic[M]):
             else:
                 conds.append(self._col(key) == self._coerce_filter(key, value))
 
-        if q and self.searchable:
-            like = f"%{q}%"
-            conds.append(or_(*[self._col(c).ilike(like) for c in self.searchable]))
+        if q and (self.searchable or self.search_related):
+            # Every WORD must land somewhere (AND of ORs): "sunvik steels" finds a
+            # company called Sunvik Steels whichever column or related row holds
+            # which word, and "axel wind" is not defeated by the punctuation that
+            # sits between them in the stored name. One word is the old substring.
+            for token in [t for t in q.split() if t] or [q]:
+                like = f"%{token}%"
+                alts = [self._col(c).ilike(like) for c in self.searchable]
+                for related, fk, cols in self.search_related:
+                    alts.append(exists().where(
+                        related.id == getattr(self.model, fk),
+                        related.tenant_id == self.model.tenant_id,
+                        related.deleted_at.is_(None),
+                        or_(*[getattr(related, c).ilike(like) for c in cols])))
+                conds.append(or_(*alts))
 
         total: int | None = None
         if with_total:

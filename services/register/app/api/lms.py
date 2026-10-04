@@ -28,6 +28,7 @@ from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
+from app.core.clock import tenant_today
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
@@ -234,7 +235,7 @@ async def open_or_grow_account(ctx: RequestContext, line: LendingTracker,
     borrower from the entity, per-tenant account number) with its disbursement row.
     Later tranches → grow the principal with a "Loan Disbursement (Tn)" row."""
     lending_id = str(line.id)
-    when = disbursed_on or date.today()
+    when = disbursed_on or tenant_today()
     acct = (await ctx.session.execute(select(LoanAccount).where(
         LoanAccount.tenant_id == ctx.tenant_id,
         LoanAccount.lending_id == lending_id,
@@ -599,7 +600,7 @@ async def receive_condition(lending_id: str, key: str, payload: ConditionReceive
     if row.status in ("Completed", "Waived"):
         raise ConflictError(f"Condition {key!r} is already {row.status}.")
     row.status = "Completed"
-    row.completed_on = date.today()
+    row.completed_on = tenant_today()
     row.completed_by = ctx.actor
     if payload.evidence_ref is not None:
         row.evidence_ref = payload.evidence_ref

@@ -22,8 +22,7 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
   lead: Lead | null; onClose: () => void; onChanged: () => void; onPush: (l: Lead) => void;
 }) {
   const { user } = useAuth();
-  const ro = !can(user.roles, 'editLead');
-  const canInteract = can(user.roles, 'logInteraction');
+  const roRole = !can(user.roles, 'editLead');
   const ref = referenceService;
 
   // `row` is the saved lead; `edits` are the pending changes. Nothing is sent until Save,
@@ -58,6 +57,13 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
   }, [lead?.id, lead?.apiId]);
 
   if (!lead || !row) return null;
+
+  // A Converted lead is history — its working life continues in Deals. Every role
+  // sees it read-only here, Admin included: the register's row-lock lets senior
+  // roles correct it over the API, but the drawer is not the place (B02).
+  const converted = (row.status || lead.status) === 'Converted';
+  const ro = roRole || converted;
+  const canInteract = can(user.roles, 'logInteraction') && !converted;
 
   // What the fields show: the pending edit if there is one, else the saved value.
   const v = <K extends keyof Lead>(k: K): any => (k in edits ? (edits as any)[k] : (row as any)[k]);
@@ -115,6 +121,12 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
       </Box>
       <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {err && <Alert severity="warning" sx={{ mb: 1.4, py: 0, fontSize: 12 }}>{err}</Alert>}
+        {converted && (
+          <Alert severity="info" sx={{ mb: 1.4, py: 0, fontSize: 12 }}>
+            This lead was converted — it is read-only history. Its deal, lines and
+            interactions continue under <b>Deals</b>.
+          </Alert>
+        )}
         <DrawerSection title="Lead">
           <FieldGrid>
             {/* Company is locked after creation — Admin only can override (Forms spec). */}
@@ -138,7 +150,7 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
               </Alert>
             )}
             <SelectFld label="Temperature" value={v('temp')} disabled={ro} onChange={(x) => set('temp', x)} options={ref.getRefSync('Temperature')} />
-            <SelectFld label="Status" value={v('status')} disabled={ro} onChange={(x) => set('status', x)} options={['Active', 'Dropped']} />
+            <SelectFld label="Status" value={v('status')} disabled={ro} onChange={(x) => set('status', x)} options={[...new Set([v('status'), 'Active', 'Dropped'].filter(Boolean))]} />
             <TextFld label="Contact" value={v('contact')} disabled={ro} onChange={(x) => set('contact', x)} />
             <TextFld label="Designation" value={v('designation') || ''} disabled={ro} onChange={(x) => set('designation', x)} />
             <TextFld label="Phone" value={v('phone')} disabled={ro} onChange={(x) => set('phone', x)} />
@@ -196,9 +208,11 @@ export default function LeadDrawer({ lead, onClose, onChanged, onPush }: {
             already does. Save is the only thing that writes, and has nothing to do
             until something changed. */}
         <Button variant="outlined" onClick={onClose} disabled={saving}>Close</Button>
-        <Button variant="contained" onClick={save} disabled={saving || !dirty}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        {!converted && (
+          <Button variant="contained" onClick={save} disabled={saving || !dirty}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        )}
       </Box>
       <LogInteractionDialog code={row.id} refType="Lead" lead={row} open={logOpen}
         onClose={() => setLogOpen(false)} onDone={reloadInteractions} />

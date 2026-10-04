@@ -17,6 +17,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from app.core.clock import tenant_date
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,17 +105,17 @@ async def create_interaction(
         if d == "inbound":
             await session.execute(
                 update(SyndicationLender).where(SyndicationLender.id == lender.id)
-                .values(response_date=obj.occurred_at.date(), last_reply_note=said)
+                .values(response_date=tenant_date(obj.occurred_at), last_reply_note=said)
             )
         elif d == "outbound":
             await session.execute(
                 update(SyndicationLender).where(SyndicationLender.id == lender.id)
-                .values(chased_date=obj.occurred_at.date(), last_chase_note=said)
+                .values(chased_date=tenant_date(obj.occurred_at), last_chase_note=said)
             )
 
     # Roll the latest interaction onto the parent lead's summary fields.
     if stype == "Lead":
-        vals: dict = {"last_interaction_date": obj.occurred_at.date()}
+        vals: dict = {"last_interaction_date": tenant_date(obj.occurred_at)}
         if data.get("next_action"):
             vals["next_action"] = data["next_action"]
         if data.get("next_action_date"):

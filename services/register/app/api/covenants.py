@@ -35,7 +35,7 @@ The lifecycle of one observation:
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import Depends
@@ -46,6 +46,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.api.custom import _ensure_company_read
 from app.authz import engine as authz
 from app.authz.engine import service_ctx
+from app.core.clock import tenant_today
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.core.logging import request_id_ctx
 from app.core.router import api_router
@@ -361,7 +362,7 @@ async def submit_result(monitoring_id: uuid.UUID, payload: ResultIn,
             "governance event — waive or escalate, never overwrite.")
     details = dict(row.details or {})
     operator, threshold = details.get("operator"), row.target_value
-    submitted = payload.submitted_on or datetime.now(UTC).date()
+    submitted = payload.submitted_on or tenant_today()
     row.submitted_date = submitted
     if row.due_date is not None:
         row.on_time = submitted <= row.due_date
@@ -442,7 +443,7 @@ async def waive_breach(monitoring_id: uuid.UUID, payload: WaiveIn,
             "A waiver must be TIME-BOXED — the decision carries no valid_days.")
     row.waiver_status = "Granted"
     row.waiver_decision_ref = payload.decision_ref
-    row.waiver_valid_until = datetime.now(UTC).date() + timedelta(days=dec.valid_days)
+    row.waiver_valid_until = tenant_today() + timedelta(days=dec.valid_days)
     row.waiver_note = payload.note or dec.note
     row.status = "Waived"
     row.updated_by = ctx.actor
@@ -469,7 +470,7 @@ async def run_sweep(payload: SweepIn,
     if service_ctx.get() not in _SWEEP_SERVICES:
         raise ForbiddenError(
             "The covenant sweep runs under the workflow service principal only.")
-    today = datetime.now(UTC).date()
+    today = tenant_today()
     horizon = today + timedelta(days=payload.horizon_days)
 
     # 1. GENERATE the schedule's observations up to the horizon. The partial unique

@@ -15,6 +15,7 @@ import { BAND_COLOR, RiskGradeChip, RiskGradeDetails } from './RiskGrade';
 import { documentsService } from '../../services/documentsService';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
   from '../../services/newsService';
+import { today, localDay } from '../../utils/format';
 
 /**
  * Company 360 — the company brief.
@@ -384,7 +385,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
         panoramaService.riskGrade(r.anchor.entity_id, r.anchor.name)
           .then((g) => { if (alive && g) setGrade(g); })
           .catch(() => { /* nothing saved yet */ });
-        const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+        const from = localDay(new Date(Date.now() - 30 * 864e5));
         fetchTerm(r.anchor.name, from)
           .then((arts) => { if (alive) setNews(arts.slice(0, 15)); })
           .catch((e) => { if (alive) setNewsErr(String(e?.message || e)); });
@@ -425,8 +426,8 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
   const pdz = p?.post_disbursement;
   const openEws = (pdz?.ews || []).filter((e) => e.status !== 'Closed');
   const sevColor = (sev: string) => /red/i.test(sev) ? tokens.bad : /amber/i.test(sev) ? tokens.warn : '#1F6FA8';
-  const today = new Date().toISOString().slice(0, 10);
-  const nextCov = (pdz?.covenants || []).filter((c) => c.first_due_on && c.first_due_on >= today)
+  const todayISO = today();
+  const nextCov = (pdz?.covenants || []).filter((c) => c.first_due_on && c.first_due_on >= todayISO)
     .sort((a, b) => (a.first_due_on! < b.first_due_on! ? -1 : 1))[0] || null;
   const cpPending = (pdz?.cpcs || []).flatMap((c) => c.required_pending);
   const grp = p?.group && p.group.members.length ? p.group : null;
@@ -1052,7 +1053,7 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
                     {pdz.covenants.map((c, i) => (
                       <Typography key={i} sx={{ fontSize: 12, color: INK }}>
                         <b>{c.name}</b>{c.metric ? ` · ${c.metric} ${c.operator || ''} ${c.threshold ?? ''}` : ''}{c.frequency ? ` · ${c.frequency.toLowerCase()}` : ''}
-                        {c.first_due_on ? ` · ${c.first_due_on >= today ? 'next due' : 'first due'} ${fmtDate(c.first_due_on)}` : ''}
+                        {c.first_due_on ? ` · ${c.first_due_on >= todayISO ? 'next due' : 'first due'} ${fmtDate(c.first_due_on)}` : ''}
                         <span style={{ color: sevColor(c.breach_severity) }}> · breach → {c.breach_severity}</span>
                       </Typography>))}
                   </>}

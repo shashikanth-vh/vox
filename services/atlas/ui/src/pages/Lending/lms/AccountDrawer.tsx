@@ -16,6 +16,7 @@ import { useAuth } from '../../../auth/AuthContext';
 import { can, whoCan } from '../../../auth/rbac';
 import { tokens } from '../../../theme';
 import type { LendingRow } from '../lending.types';
+import { today } from '../../../utils/format';
 
 /**
  * The LOAN ACCOUNT DRAWER — one account's whole post-disbursement life, LOS-drawer
@@ -112,12 +113,12 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
   useEffect(() => {
     if (!open) return;
-    const today = new Date().toISOString().slice(0, 10);
-    setErr(''); setInfo(''); setBusy(''); setPreview(null); setAccrueTo(today);
+    const todayISO = today();
+    setErr(''); setInfo(''); setBusy(''); setPreview(null); setAccrueTo(todayISO);
     setTouched(false); setDataRegOpen(false); setCovOpen(false);
-    setEntry({ entry_date: today, kind: 'EMI', amount: '', particulars: '' });
+    setEntry({ entry_date: todayISO, kind: 'EMI', amount: '', particulars: '' });
     setCls({ status: '', overdue_position: '', provisioning_amount: '', closed_on: '', note: '' });
-    setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
+    setTr({ amount: '', disbursed_on: today(), ref: '' });
     void load();
   }, [open, row?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -153,7 +154,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
   const doAccrue = () => run('accrue', async () => {
     if (!row || !preview) throw new Error('Preview first — the figure must be checkable.');
     const e = await lmsService.accrue(row.id, accrueTo);
-    setPreview(null); setAccrueTo(new Date().toISOString().slice(0, 10));
+    setPreview(null); setAccrueTo(today());
     return `Interest row posted — balance ₹ ${rs(e.balance)}.`;
   });
 
@@ -166,7 +167,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
       amount: Number(entry.amount) / 1e7,
       ...(entry.particulars ? { particulars: entry.particulars } : {}),
     });
-    setEntry({ entry_date: new Date().toISOString().slice(0, 10), kind: 'EMI',
+    setEntry({ entry_date: today(), kind: 'EMI',
       amount: '', particulars: '' });
     return `${e.particulars} recorded — balance ₹ ${rs(e.balance)}.`;
   });
@@ -210,7 +211,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
       tranche_ref: tr.ref.trim(), amount: Number(tr.amount),
       ...(tr.disbursed_on ? { disbursed_on: tr.disbursed_on } : {}),
     });
-    setTr({ amount: '', disbursed_on: new Date().toISOString().slice(0, 10), ref: '' });
+    setTr({ amount: '', disbursed_on: today(), ref: '' });
     return `${t.tranche_ref} recorded — awaiting the LMS Management's booking approval.`;
   });
 
@@ -370,7 +371,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
 
         {/* ---- ②b The conditions register — LMS-owned since the handover ----------- */}
         {condReg && condReg.items.length > 0 && (() => {
-          const today = new Date().toISOString().slice(0, 10);
+          const todayISO = today();
           const openItems = condReg.items.filter(
             (c) => !['Completed', 'Waived'].includes(c.status));
           const doneN = condReg.items.length - openItems.length;
@@ -382,7 +383,7 @@ export default function AccountDrawer({ row, onClose, onChanged }: {
                 </Typography>
               )}
               {openItems.map((c) => {
-                const overdue = !!c.expiry_date && c.expiry_date < today;
+                const overdue = !!c.expiry_date && c.expiry_date < todayISO;
                 return (
                   <Box key={c.key} sx={{ py: 0.35, borderBottom: `1px dashed ${tokens.line}`,
                     '&:last-of-type': { borderBottom: 'none' } }}>

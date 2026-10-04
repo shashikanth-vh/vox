@@ -51,3 +51,9 @@ export function nameAlike(a: string, b: string): number {
   gb.forEach((g) => { const c = counts.get(g) || 0; if (c > 0) { hit += 1; counts.set(g, c - 1); } });
   return (2 * hit) / (ga.length + gb.length);
 }
+
+/** A Date as the viewer's calendar day, `YYYY-MM-DD` — the same rule as today(). */
+export const localDay = (d: Date) => {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+};

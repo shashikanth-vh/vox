@@ -71,7 +71,15 @@ export default function LeadsPage() {
         onRowClick={(l) => setEdit(l)}
         onEdit={(l) => setEdit(l)}
         editReason={ro ? whoCan('editLead') : ''}
-        onDelete={can(user.roles, 'deleteRow') ? (l) => setDel(l) : undefined}
+        // A Converted lead is the history its deal continues from — the register
+        // refuses the delete, so the grid says so before asking (B02).
+        onDelete={can(user.roles, 'deleteRow') ? (l) => {
+          if (l.status === 'Converted') {
+            setDelErr(`${l.id} is converted — its deal continues from it. Drop or delete the deal instead.`);
+            return;
+          }
+          setDel(l);
+        } : undefined}
         // Push to deals — convert this lead into a deal (v11 doPush flow).
         extraActions={can(user.roles, 'pushToDeals') ? (l) => {
           if (l.status === 'Converted') return null;

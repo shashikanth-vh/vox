@@ -6,7 +6,7 @@ import CommonTable from '../../../components/table/CommonTable';
 import { CodeText } from '../../../components/common/Pills';
 import { applyQuery } from '../../../api/queryEngine';
 import { tokens } from '../../../theme';
-import { fmt } from '../../../utils/format';
+import { fmt, today } from '../../../utils/format';
 import { lmsService, type TrancheItem } from '../../../services/lmsService';
 import { useAuth } from '../../../auth/AuthContext';
 import { can } from '../../../auth/rbac';
@@ -101,9 +101,9 @@ export default function AccountsTab({ rows }: { rows: LendingRow[] }) {
     queryFn: () => lmsService.pendingBookings().catch(() => [] as TrancheItem[]),
   });
   const queue = queueQuery.data ?? [];
-  const today = new Date().toISOString().slice(0, 10);
+  const todayISO = today();
   const overdueOf = (t: TrancheItem) =>
-    (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < today).length;
+    (t.conditions_open ?? []).filter((c) => c.expiry_date && c.expiry_date < todayISO).length;
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['lms-accounts-book'] });

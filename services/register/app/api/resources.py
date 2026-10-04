@@ -7,9 +7,11 @@ from fastapi import APIRouter
 from app.api.crud_router import ResourceSpec, build_crud_router
 from app.api.entity_rules import entity_pre_delete as _entity_pre_delete
 from app.api.lead_rules import lead_company_to_master as _lead_company_to_master
+from app.api.lead_rules import lead_pre_delete as _lead_pre_delete
 from app.api.documents_lifecycle import document_pre_delete as _document_pre_delete
 from app.api.people_rules import person_pre_write
 from app.api.prospect_rules import prospect_pre_write
+from app.api.deal_flags import sync_deal_flags_after_write as _sync_deal_flags
 from app.api.tracker_rules import lending_pre_write
 from app.models import (
     AssetMonetisation,
@@ -32,6 +34,12 @@ from app.models import (
 )
 from app.repositories.crud import CRUDRepository
 from app.schemas import resources as s
+
+# The grids list a deal, a tracker line or a mandate under its COMPANY, and the
+# company's name lives on the entity, not the line — so every company-keyed
+# resource's search box also reaches the entity's names and code (B16–B18/B22:
+# "Sunvik" found nothing on Deals because only the code said SUNVIK).
+_BY_COMPANY = [(Entity, "entity_id", ["legal_name", "display_name", "code"])]
 
 # (model, prefix, name, tags, searchable, filterable, create, update, read)
 _SPECS: list[ResourceSpec] = [
@@ -92,7 +100,8 @@ _SPECS: list[ResourceSpec] = [
     ),
     ResourceSpec(
         name="lead", prefix="/v1/leads", tags=["Leads"],
-        repo=CRUDRepository(Lead, searchable=["company", "contact", "rm", "notes"],
+        repo=CRUDRepository(Lead, searchable=["company", "contact", "rm", "notes", "lead_no"],
+                            search_related=_BY_COMPANY,
                             filterable=["status", "temperature", "sector", "rm", "source", "lens",
                                         "company", "lead_no", "last_interaction_date",
                                         "entity_id", "converted_deal_id"]),
@@ -101,6 +110,8 @@ _SPECS: list[ResourceSpec] = [
                     "lead_no", "last_interaction_date", "entity_id",
                     "converted_deal_id"],
         subject_type="Lead", view_name="leads",
+        # A Converted lead is history its deal continues — it cannot be deleted.
+        pre_delete=_lead_pre_delete,
         # Omitted lead_no → the next free L-0001, L-0002, … for the tenant.
         # A lead's company reaches the client master AT CREATION: canonical match →
         # link, genuinely new → a Prospect master row (see app.api.lead_rules).
@@ -109,6 +120,7 @@ _SPECS: list[ResourceSpec] = [
     ResourceSpec(
         name="deal", prefix="/v1/deals", tags=["Deals"],
         repo=CRUDRepository(Deal, searchable=["deal_no", "code", "rm", "analyst", "remarks"],
+                            search_related=_BY_COMPANY,
                             filterable=["product_type", "stage", "temperature", "is_lending",
                                         "is_syndication", "is_asset_mon", "entity_id", "rm", "code",
                                         "analyst", "lens"]),
@@ -120,21 +132,25 @@ _SPECS: list[ResourceSpec] = [
     ResourceSpec(
         name="lending record", prefix="/v1/lending", tags=["Lending Tracker"],
         repo=CRUDRepository(LendingTracker, searchable=["tracker_no", "rm", "analyst", "remarks"],
+                            search_related=_BY_COMPANY,
                             filterable=["stage", "pending_with", "entity_id", "deal_id", "rm",
                                         "analyst", "stage_updated_at"]),
         create_schema=s.LendingCreate, update_schema=s.LendingUpdate, read_schema=s.LendingRead,
         filterable=["stage", "pending_with", "entity_id", "deal_id", "rm", "analyst",
                     "stage_updated_at"],
         pre_write=lending_pre_write,
+        post_write=_sync_deal_flags,
         subject_type="Lending", view_name="lending",
     ),
     ResourceSpec(
         name="syndication record", prefix="/v1/syndication", tags=["Syndication Tracker"],
-        repo=CRUDRepository(SyndicationTracker, searchable=["tracker_no", "remarks", "toi"],
+        repo=CRUDRepository(SyndicationTracker, searchable=["tracker_no", "remarks", "toi", "rm", "analyst"],
+                            search_related=_BY_COMPANY,
                             filterable=["status", "priority", "entity_id", "deal_id", "rm", "pending_with"]),
         create_schema=s.SyndicationCreate, update_schema=s.SyndicationUpdate,
         read_schema=s.SyndicationRead,
         filterable=["status", "priority", "entity_id", "deal_id", "rm", "pending_with"],
+        post_write=_sync_deal_flags,
         subject_type="Syndication", view_name="syndication",
     ),
     ResourceSpec(
@@ -156,13 +172,15 @@ _SPECS: list[ResourceSpec] = [
     ),
     ResourceSpec(
         name="asset-monetisation record", prefix="/v1/asset-monetisation", tags=["Asset Monetisation"],
-        repo=CRUDRepository(AssetMonetisation, searchable=["investor", "notes"],
+        repo=CRUDRepository(AssetMonetisation, searchable=["investor", "notes", "rm", "analyst"],
+                            search_related=_BY_COMPANY,
                             filterable=["status", "nature", "entity_id", "deal_id", "state",
                                         "investor_type", "deal_type", "teaser_date",
                                         "rm", "analyst", "investor"]),
         create_schema=s.AssetMonCreate, update_schema=s.AssetMonUpdate, read_schema=s.AssetMonRead,
         filterable=["status", "nature", "entity_id", "deal_id", "state", "investor_type",
                     "deal_type", "teaser_date", "rm", "analyst", "investor"],
+        post_write=_sync_deal_flags,
         subject_type="AssetMonetisation", view_name="asset_monetisation",
     ),
     ResourceSpec(

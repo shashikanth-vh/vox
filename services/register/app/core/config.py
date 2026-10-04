@@ -30,6 +30,13 @@ class Settings(BaseServiceSettings):
     db_user: str = "register"
     db_password: str = "register"
 
+    # ---- The desk's calendar ---------------------------------------------
+    # Every date the register STAMPS on its own ("stage updated today", "last
+    # touch", a sweep's "today") is the desk's calendar day in this zone, never
+    # the UTC day — between 00:00 and 05:30 IST the two differ, and a stamp
+    # taken from the UTC clock lands on yesterday. See app.core.clock.
+    tenant_timezone: str = "Asia/Kolkata"
+
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers
     # 409 and the UI keeps its "market feed soon" card. Answers are cached per

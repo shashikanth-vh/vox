@@ -238,6 +238,12 @@ What the prod overlay now gives you out of the box:
   CronJob running `pg_dumpall` against `prism-postgresql` — the compose sidecar's
   command works verbatim in a CronJob).
 
+## 7b. One-off data fixes
+
+`deploy/fixes/` holds the register clean-ups from the October bug register
+(test-company purge, orphan tracker lines, deal product badges). Every script is
+a dry run until you add the word `apply`; see `deploy/fixes/README.md`.
+
 ## 8. Upgrade procedure (compose, the day-to-day ritual)
 
 ```bash
