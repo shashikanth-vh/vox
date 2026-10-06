@@ -261,7 +261,11 @@ recreate `notifier`. Who gets it when the website names
 nobody: tick **Enquiry approver** on the employee in the Employees master
 (release 347, migration 0027); otherwise `INTAKE_APPROVERS`; otherwise every BD
 Head. Release 348: a real tap on Approve in the mail decides at once
-(`INTAKE_ONE_TAP`, default true; scanners still get a confirm page). Check it is
+(`INTAKE_ONE_TAP`, default true; scanners still get a confirm page). Release
+349: the register chases a waiting enquiry — a reminder after
+`INTAKE_REMIND_DAYS` (3), an escalation to the BD Head when the links expire —
+and Leads → Enquiries shows every enquiry with a Resend link; migration 0028.
+Check it is
 flowing with `docker compose … logs notifier` (one `notifier_sweep` line per
 30 s with `delivered` counting up) and, if a mail dies after its retries, with
 the Admin redrive on the delivery. `INTAKE_SEND_EMAIL=false` returns to the

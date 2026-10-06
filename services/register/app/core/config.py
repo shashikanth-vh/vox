@@ -61,6 +61,12 @@ class Settings(BaseServiceSettings):
     # an old browser) gets the confirm page with one button instead. Off = always
     # the confirm page.
     intake_one_tap: bool = True
+    # Nobody decided: after this many days a reminder goes to the same approvers;
+    # when the links expire (intake_token_ttl_days) fresh ones go to the BD Head.
+    # The sweep runs inside the register every intake_sweep_interval_s (0 = off;
+    # POST /v1/internal/intake/sweep runs it on demand).
+    intake_remind_days: int = 3
+    intake_sweep_interval_s: int = 3600
 
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers

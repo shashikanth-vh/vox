@@ -534,3 +534,83 @@ async def test_two_approvers_pressing_at_once_make_one_lead(client: AsyncClient,
     texts = sorted([a.text, b.text], key=lambda t: "Already approved" in t)
     assert "created" in texts[0] and "Already approved" in texts[1]
     assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+
+
+# ---- the chase: nobody decided -------------------------------------------------
+async def _sweep(client: AsyncClient):
+    r = await client.post("/v1/internal/intake/sweep", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_a_reminder_goes_to_the_same_approvers_after_three_days(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483950"))).json()
+    assert await _sweep(client) == {"reminded": [], "escalated": [], "stranded": []}   # too early
+    await db_session.execute(text("UPDATE lead_enquiries SET received_at = now() - interval '4 days' WHERE enquiry_no = 'EV483950'"))
+    await db_session.commit()
+    assert (await _sweep(client))["reminded"] == ["EV483950"]
+    assert (await _sweep(client))["reminded"] == []                                   # once
+    mails = (await db_session.execute(text(
+        "SELECT n.title, n.meta->>'kind', d.target FROM notifications n JOIN notification_deliveries d ON d.notification_id = n.id "
+        "WHERE n.event = 'intake.approval' ORDER BY n.created_at"))).all()
+    assert [m[1] for m in mails] == ["approval", "reminder"] and all(m[2] == "mukesh@evamfinance.com" for m in mails)
+    assert mails[1][0].startswith("Reminder")
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483950")
+    assert row["stage"] == "reminded" and row["approvers"] == ["mukesh@evamfinance.com"] and row["reminded_at"]
+    # The first links still work: the reminder adds, it does not revoke.
+    assert (await client.post(out["approve_url"])).status_code == 200
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+
+
+async def test_an_expired_enquiry_is_escalated_to_the_bd_head_with_fresh_links(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483951"))).json()
+    await db_session.execute(text("UPDATE lead_enquiry_tokens SET expires_at = now() - interval '1 hour'"))
+    await db_session.commit()
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    assert next(r for r in rows if r["enquiry_no"] == "EV483951")["stage"] == "expired"
+    assert (await _sweep(client))["escalated"] == ["EV483951"]
+    assert (await _sweep(client))["escalated"] == []
+    mail = (await db_session.execute(text(
+        "SELECT n.title, n.meta->>'approve_url', d.target FROM notifications n JOIN notification_deliveries d ON d.notification_id = n.id "
+        "WHERE n.meta->>'kind' = 'escalation'"))).one()
+    assert mail[0].startswith("Escalated") and mail[2] == "shubh@evamfinance.com"
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483951")
+    assert row["stage"] == "escalated" and "shubh@evamfinance.com" in row["approvers"] and "did not decide" in row["note"]
+    # Mukesh's old link is dead; Shubh's new one approves and Shubh owns the lead.
+    assert (await client.post(out["approve_url"])).status_code == 410
+    path = mail[1].split("/v1/", 1)[1]
+    done = await client.post("/v1/" + path)
+    assert done.status_code == 200 and "Shubh Dave" in done.text
+    lead = _items((await client.get("/v1/leads", headers=ADMIN)).json())[0]
+    assert lead["rm"] == "Shubh" and "approved by shubh@evamfinance.com" in lead["notes"]
+
+
+async def test_the_desk_can_list_and_resend(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483952"))).json()
+    # Listing needs a signed-in user with access to leads; a bare machine key is refused.
+    assert (await client.get("/v1/enquiries")).status_code == 403
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483952")
+    assert row["stage"] == "waiting" and row["company"] == "Acme Renewables Pvt Ltd" and row["need"].startswith("Debt facility")
+    assert row["mobile"] == "+919876543210" and row["expires_at"] and row["lead_no"] is None
+    r = await client.post(f"/v1/enquiries/{row['id']}/resend", headers=ADMIN, json={})
+    assert r.status_code == 200 and r.json()["links"][0]["recipient"] == "mukesh@evamfinance.com"
+    r2 = await client.post(f"/v1/enquiries/{row['id']}/resend", headers=ADMIN, json={"approvers": ["shubh@evamfinance.com"]})
+    assert r2.status_code == 200 and r2.json()["links"][0]["recipient"] == "shubh@evamfinance.com"
+    kinds = (await db_session.execute(text(
+        "SELECT n.meta->>'kind', d.target FROM notifications n JOIN notification_deliveries d ON d.notification_id = n.id "
+        "WHERE n.event = 'intake.approval' ORDER BY n.created_at"))).all()
+    assert [k[0] for k in kinds] == ["approval", "resend", "resend"] and kinds[2][1] == "shubh@evamfinance.com"
+    a = (await db_session.execute(text("SELECT count(*) FROM audit_log WHERE action = 'intake.resend'"))).scalar()
+    assert a == 2
+    # Decided enquiries cannot be re-sent, and show their outcome in the list.
+    assert (await client.post(out["approve_url"])).status_code == 200
+    assert (await client.post(f"/v1/enquiries/{row['id']}/resend", headers=ADMIN, json={})).status_code == 422
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483952")
+    assert row["stage"] == "approved" and row["lead_no"].startswith("LD-") and row["approved_by"] == "mukesh@evamfinance.com"

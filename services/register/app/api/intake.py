@@ -483,10 +483,12 @@ async def _record(ctx: RequestContext, row: LeadEnquiry, *, actor: str, channel:
 # --------------------------------------------------------------------------- #
 
 
-def _base_url(request: Request) -> str:
+def _base_url(request: Request | None) -> str:
     s = get_settings()
     if s.intake_public_base_url.strip():
         return s.intake_public_base_url.strip().rstrip("/")
+    if request is None:
+        return ""
     host = request.headers.get("x-forwarded-host") or request.headers.get("host")
     if not host:
         return ""
@@ -499,9 +501,10 @@ def _hash(token: str) -> str:
 
 
 async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str] | None,
-                      base: str) -> list[dict[str, Any]]:
-    """One Approve / Reject pair per approver the website will e-mail — or one
-    anonymous pair when it named nobody (the BD Head then owns the lead)."""
+                      base: str, *, kind: str = "approval") -> list[dict[str, Any]]:
+    """One Approve / Reject pair per approver — the sender's list, else the
+    register's default approvers — each e-mailed their own. ``kind`` names the
+    occasion for the mail: approval (first issue), reminder, escalation, resend."""
     settings = get_settings()
     ttl = timedelta(days=max(1, int(settings.intake_token_ttl_days)))
     expires = datetime.now(timezone.utc) + ttl
@@ -519,18 +522,18 @@ async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str
     out: list[dict[str, Any]] = []
     for recipient in who:
         urls: dict[str, str] = {}
-        for kind in ("approve", "reject"):
+        for action in ("approve", "reject"):
             token = secrets.token_urlsafe(32)
             ctx.session.add(LeadEnquiryToken(
-                tenant_id=ctx.tenant_id, enquiry_id=row.id, kind=kind, recipient=recipient,
+                tenant_id=ctx.tenant_id, enquiry_id=row.id, kind=action, recipient=recipient,
                 token_hash=_hash(token), expires_at=expires))
-            urls[f"{kind}_url"] = f"{base}/v1/intake/enquiries/{token}/{kind}"
+            urls[f"{action}_url"] = f"{base}/v1/intake/enquiries/{token}/{action}"
         out.append({"recipient": recipient, **urls, "expires_at": expires.isoformat()})
     await ctx.session.flush()
     if settings.intake_send_email:
         for link in out:
             if link["recipient"]:
-                await _mail_approver(ctx, row, link, expires)
+                await _mail_approver(ctx, row, link, expires, kind=kind)
                 link["emailed"] = True
     return out
 
@@ -554,7 +557,7 @@ async def _default_approvers(ctx: RequestContext) -> list[str]:
 
 
 def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_url: str,
-               expires: datetime) -> str:
+               expires: datetime, banner: str | None = None) -> str:
     """The approval e-mail as Gmail renders it: a summary table and two buttons.
     Table layout and inline styles only — mail clients honour nothing else."""
     c = e.contact if e else None
@@ -580,7 +583,9 @@ def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_u
         "<table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='max-width:560px;background:#ffffff;border:1px solid #dfe5ea;border-radius:12px'>"
         "<tr><td style='padding:22px 22px 6px'><div style='font-size:12px;font-weight:700;letter-spacing:.08em;color:#0b5d4b'>PRISM · EVAM FINANCE</div>"
         f"<h1 style='font-size:20px;margin:10px 0 4px'>New {_h(row.channel)} enquiry: {_h(row.company_name)}</h1>"
-        "<p style='margin:0 0 14px;color:#5b6b7a'>Approve to create the lead in PRISM, or reject it. Nothing happens until you confirm on the page that opens.</p></td></tr>"
+        "<p style='margin:0 0 14px;color:#5b6b7a'>Approve to create the lead in PRISM, or reject it.</p>"
+        + (f"<div style='background:#fff7e6;border:1px solid #f3dcae;color:#6b4e00;border-radius:8px;padding:10px 12px;margin:0 0 14px;font-size:14px'>{_h(banner)}</div>" if banner else "")
+        + "</td></tr>"
         f"<tr><td style='padding:0 22px'><table role='presentation' cellpadding='0' cellspacing='0' width='100%' style='border-top:1px solid #eef1f4;border-bottom:1px solid #eef1f4'>{trs}</table></td></tr>"
         "<tr><td style='padding:18px 22px 6px'><table role='presentation' cellpadding='0' cellspacing='0'><tr>"
         f"<td style='padding-right:12px'><a href='{html.escape(approve_url, quote=True)}' style='{btn};background:#0b5d4b;color:#ffffff'>Approve</a></td>"
@@ -592,18 +597,30 @@ def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_u
         "</table></td></tr></table></body></html>")
 
 
+_MAIL_KINDS = {
+    "approval": ("Approve {channel} enquiry {no}: {company}", None),
+    "reminder": ("Reminder — approve {channel} enquiry {no}: {company}",
+                 "Reminder: this enquiry is still waiting for your decision."),
+    "escalation": ("Escalated — approve {channel} enquiry {no}: {company}",
+                   "Escalated to you: the approvers it was sent to did not decide before their links expired."),
+    "resend": ("Approve {channel} enquiry {no}: {company} (link re-sent)",
+               "Fresh links, re-sent from PRISM. Any earlier links for this enquiry still work until they expire."),
+}
+
+
 async def _mail_approver(ctx: RequestContext, row: LeadEnquiry, link: dict[str, Any],
-                         expires: datetime) -> None:
+                         expires: datetime, *, kind: str = "approval") -> None:
     """One inbox notification + one e-mail delivery for this approver, in the same
-    transaction as the links (the notifier sends it; see WORKFLOWS_SMTP_*)."""
+    transaction as the links (the notifier sends it; see ENQUIRY_SMTP_*)."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.notifications import Notification, NotificationDelivery
 
     e = _parse(row)
     need = _need(e) if e else (row.intent or "enquiry")
-    title = f"Approve {row.channel} enquiry {row.enquiry_no}: {row.company_name}"[:300]
-    body = (f"{row.company_name} — {need}\nContact: {row.contact_name or '—'}\n\n"
+    subject, banner = _MAIL_KINDS.get(kind, _MAIL_KINDS["approval"])
+    title = subject.format(channel=row.channel, no=row.enquiry_no, company=row.company_name)[:300]
+    body = ((banner + "\n\n") if banner else "") + (f"{row.company_name} — {need}\nContact: {row.contact_name or '—'}\n\n"
             f"Approve (creates the lead in PRISM): {link['approve_url']}\n"
             f"Reject: {link['reject_url']}\n\n"
             f"The links are for you only and work until {expires.strftime('%d %b %Y')}. "
@@ -616,9 +633,9 @@ async def _mail_approver(ctx: RequestContext, row: LeadEnquiry, link: dict[str, 
         id=nid, tenant_id=ctx.tenant_id, recipient=link["recipient"], event="intake.approval",
         severity="info", title=title, body=body, subject_type="LeadEnquiry", subject_id=str(row.id),
         dedupe_key=dedupe, created_by=ctx.actor,
-        meta={"html": _mail_html(row, e, link["approve_url"], link["reject_url"], expires),
+        meta={"html": _mail_html(row, e, link["approve_url"], link["reject_url"], expires, banner),
               "approve_url": link["approve_url"], "reject_url": link["reject_url"],
-              "enquiry_no": row.enquiry_no}).on_conflict_do_nothing()
+              "enquiry_no": row.enquiry_no, "kind": kind}).on_conflict_do_nothing()
         .returning(Notification.id))).scalar_one_or_none()
     if won is None:
         return
@@ -626,6 +643,172 @@ async def _mail_approver(ctx: RequestContext, row: LeadEnquiry, link: dict[str, 
         tenant_id=ctx.tenant_id, notification_id=nid, channel="email",
         target=link["recipient"], status="pending", created_by=ctx.actor)
         .on_conflict_do_nothing(constraint="notification_deliveries_unique"))
+
+
+# --------------------------------------------------------------------------- #
+# The chase: nobody decided
+# --------------------------------------------------------------------------- #
+
+
+async def _token_facts(ctx: RequestContext, enquiry_id: Any) -> tuple[list[str], datetime | None]:
+    """(the distinct named recipients of this enquiry's links, the latest expiry)."""
+    rows = (await ctx.session.execute(
+        select(LeadEnquiryToken.recipient, LeadEnquiryToken.expires_at).where(
+            LeadEnquiryToken.tenant_id == ctx.tenant_id, LeadEnquiryToken.enquiry_id == enquiry_id))).all()
+    who: list[str] = []
+    for r in rows:
+        if r.recipient and r.recipient not in who:
+            who.append(r.recipient)
+    latest = max((r.expires_at for r in rows), default=None)
+    return who, latest
+
+
+async def _bd_heads(ctx: RequestContext) -> list[str]:
+    rows = (await ctx.session.execute(
+        select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
+                                   Person.inactive.is_(False), Person.role.ilike("%BD Head%"),
+                                   Person.email.isnot(None)).order_by(Person.full_name))).scalars().all()
+    return [r for r in rows if r]
+
+
+def _stage(row: LeadEnquiry, latest: datetime | None, now: datetime) -> str:
+    if row.status in ("approved", "rejected"):
+        return row.status
+    if latest is None or latest < now:
+        return "expired"
+    if row.escalated_at:
+        return "escalated"
+    if row.reminded_at:
+        return "reminded"
+    return "waiting"
+
+
+async def sweep_intake(ctx: RequestContext, now: datetime | None = None) -> dict[str, Any]:
+    """The hourly chase over every waiting enquiry of this tenant:
+
+    * waiting longer than ``intake_remind_days`` and not yet reminded → the same
+      approvers get fresh links and a "Reminder" mail;
+    * every link expired and not yet escalated → the BD Heads get fresh links
+      and an "Escalated" mail (else the configured / default approvers), so an
+      enquiry never dies in silence. An escalation that expires in turn stays
+      "expired" on the Enquiries screen for the desk to re-send by hand.
+    """
+    settings = get_settings()
+    now = now or datetime.now(timezone.utc)
+    base = _base_url(None)
+    out = {"reminded": [], "escalated": [], "stranded": []}
+    rows = (await ctx.session.execute(
+        select(LeadEnquiry).where(LeadEnquiry.tenant_id == ctx.tenant_id, LeadEnquiry.status == "submitted")
+        .order_by(LeadEnquiry.received_at))).scalars().all()
+    for row in rows:
+        who, latest = await _token_facts(ctx, row.id)
+        if latest is not None and latest < now and row.escalated_at is None:
+            heads = await _bd_heads(ctx) or await _default_approvers(ctx)
+            heads = [h for h in heads if h]
+            row.escalated_at = now
+            if not heads:
+                row.note = (row.note or "") + f" Links expired {now.date().isoformat()}; nobody to escalate to."
+                out["stranded"].append(row.enquiry_no)
+                continue
+            await _mint_links(ctx, row, heads, base, kind="escalation")
+            row.note = (f"Escalated to {', '.join(heads)} on {now.date().isoformat()}: "
+                        f"{', '.join(who) or 'the original link holder'} did not decide before the links expired.")
+            out["escalated"].append(row.enquiry_no)
+            continue
+        if (row.reminded_at is None and row.escalated_at is None and who
+                and row.received_at is not None
+                and row.received_at <= now - timedelta(days=max(1, int(settings.intake_remind_days)))
+                and latest is not None and latest >= now):
+            await _mint_links(ctx, row, who, base, kind="reminder")
+            row.reminded_at = now
+            out["reminded"].append(row.enquiry_no)
+    await ctx.session.flush()
+    return out
+
+
+def _desk(ctx: RequestContext, *, write: bool = False) -> None:
+    """The Enquiries screen is the desk's: a signed-in user with access to leads."""
+    from app.authz.engine import view_access
+    from app.authz.matrix import Access
+
+    if ctx.user is None:
+        raise ForbiddenError("Sign in to see the enquiries.")
+    acc = view_access(ctx.user, "leads")
+    if acc is Access.NONE or (write and acc is Access.READ):
+        raise ForbiddenError("No access to leads.")
+
+
+@router.post("/v1/internal/intake/sweep", tags=["Internal"],
+             summary="Run the enquiry chase now (reminders, escalations) for this tenant")
+async def run_intake_sweep(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    from app.authz.engine import service_ctx
+
+    is_admin = ctx.user is not None and "Admin" in set(getattr(ctx.user, "roles", set()) or set())
+    if service_ctx.get() is None and not is_admin:
+        raise ForbiddenError("The sweep runs for a service principal or an Admin.")
+    return await sweep_intake(ctx)
+
+
+@router.get("/v1/enquiries", tags=["Intake"], summary="Every website / WhatsApp enquiry and where it stands")
+async def list_enquiries(ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    _desk(ctx)
+    now = datetime.now(timezone.utc)
+    rows = (await ctx.session.execute(
+        select(LeadEnquiry).where(LeadEnquiry.tenant_id == ctx.tenant_id)
+        .order_by(LeadEnquiry.received_at.desc()).limit(1000))).scalars().all()
+    lead_ids = [r.lead_id for r in rows if r.lead_id]
+    lead_no = {}
+    if lead_ids:
+        lead_no = dict((await ctx.session.execute(
+            select(Lead.id, Lead.lead_no).where(Lead.id.in_(lead_ids)))).all())
+    items = []
+    for r in rows:
+        who, latest = await _token_facts(ctx, r.id)
+        e = _parse(r)
+        items.append({
+            "id": str(r.id), "enquiry_no": r.enquiry_no, "channel": r.channel,
+            "status": r.status, "outcome": r.outcome, "stage": _stage(r, latest, now),
+            "company": r.company_name, "contact": r.contact_name,
+            "mobile": _mobile(e.contact.mobile) if e else None, "email": (e.contact.email if e else None),
+            "intent": r.intent, "need": _need(e) if e else None,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "received_at": r.received_at.isoformat() if r.received_at else None,
+            "approvers": who, "approved_by": r.approved_by,
+            "approved_at": r.approved_at.isoformat() if r.approved_at else None,
+            "expires_at": latest.isoformat() if latest else None,
+            "reminded_at": r.reminded_at.isoformat() if r.reminded_at else None,
+            "escalated_at": r.escalated_at.isoformat() if r.escalated_at else None,
+            "lead_id": str(r.lead_id) if r.lead_id else None, "lead_no": lead_no.get(r.lead_id),
+            "deal_id": str(r.deal_id) if r.deal_id else None, "rm": r.rm, "note": r.note,
+        })
+    return {"items": items, "total": len(items)}
+
+
+class ResendIn(BaseModel):
+    approvers: list[str] | None = None
+
+
+@router.post("/v1/enquiries/{enquiry_id}/resend", tags=["Intake"],
+             summary="Re-send the Approve / Reject links for a waiting enquiry")
+async def resend_enquiry(enquiry_id: uuid.UUID, payload: ResendIn | None = None,
+                         ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    _desk(ctx, write=True)
+    row = (await ctx.session.execute(select(LeadEnquiry).where(
+        LeadEnquiry.tenant_id == ctx.tenant_id, LeadEnquiry.id == enquiry_id))).scalar_one_or_none()
+    if row is None:
+        from app.core.errors import NotFoundError
+        raise NotFoundError("No such enquiry.")
+    if row.status != "submitted":
+        raise ValidationAppError(f"Enquiry {row.enquiry_no} is already {row.status}.")
+    who = [a for a in ((payload.approvers if payload else None) or [])] or (await _token_facts(ctx, row.id))[0]
+    links = await _mint_links(ctx, row, who, _base_url(None) or "", kind="resend")
+    actor = (ctx.user.email if ctx.user is not None and getattr(ctx.user, "email", None) else ctx.actor)
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=actor, action="intake.resend",
+        resource_type="lead_enquiries", resource_id=str(row.id),
+        changes={"enquiry_no": row.enquiry_no, "approvers": [l["recipient"] for l in links if l["recipient"]],
+                 "label": row.enquiry_no}))
+    return {"enquiry_no": row.enquiry_no, "links": links}
 
 
 @router.post("/v1/intake/enquiries", status_code=201, tags=["Intake"],

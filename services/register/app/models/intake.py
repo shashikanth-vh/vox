@@ -53,6 +53,10 @@ class LeadEnquiry(IntakeBase):
     note: Mapped[str | None] = mapped_column(Text)                         # why this outcome
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    # The chase: when the reminder went to the approvers, and when the expired
+    # enquiry was handed to the BD Head with fresh links.
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LeadEnquiryToken(IntakeBase):

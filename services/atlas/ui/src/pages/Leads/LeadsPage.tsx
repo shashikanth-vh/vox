@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Box, Button, FormControlLabel, IconButton, Switch, Tooltip, Snackbar, Alert } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
+import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
@@ -19,6 +21,7 @@ import type { Lead } from './lead.types';
 
 export default function LeadsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const ro = !can(user.roles, 'editLead');
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
@@ -63,6 +66,7 @@ export default function LeadsPage() {
         csvName="atlas_leads"
         toolbarLeft={<>
           {can(user.roles, 'addLead') && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddOpen(true)}>Add lead</Button>}
+          <Button startIcon={<MarkEmailUnreadIcon />} variant="outlined" onClick={() => navigate('/enquiries')}>Enquiries</Button>
           {mgmt && (
             <FormControlLabel sx={{ '& .MuiTypography-root': { fontSize: 12.5 } }}
               control={<Switch size="small" checked={showConverted}

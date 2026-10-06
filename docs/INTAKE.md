@@ -102,6 +102,23 @@ Only the SHA-256 of each token is stored (`lead_enquiry_tokens`); a copy of the
 table cannot be turned into a link. The links carry the public origin from
 `INTAKE_PUBLIC_BASE_URL` in `.env` (default: the request's host).
 
+## If nobody decides
+
+Release 349. The register chases a waiting enquiry on its own, hourly:
+
+| when | what |
+|---|---|
+| no decision after `INTAKE_REMIND_DAYS` (3) | the same approvers get a **Reminder** mail with fresh links; the first links still work |
+| every link expired (7 days) | fresh links go to every **BD Head** on the roster (else the configured / default approvers) with an **Escalated** mail saying who did not act; the enquiry's note records it |
+| the escalation expires too | the enquiry shows **Expired** on the Enquiries screen for the desk to re-send by hand |
+
+The desk sees all of it in PRISM under Leads → **Enquiries**: every enquiry
+with its stage (Waiting, Reminded, Escalated, Expired, Approved, Rejected),
+approvers, link expiry, who decided, and the lead or deal it became. **Resend
+link** mails fresh links to the current approvers, or to the people you name.
+`POST /v1/internal/intake/sweep` (Admin or a service principal) runs the chase
+on demand; `INTAKE_PUBLIC_BASE_URL` must be set so the mails carry working links.
+
 ## What the register does with an approved enquiry
 
 In this order, so one company never gets two stories:

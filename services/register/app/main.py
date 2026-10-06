@@ -49,6 +49,39 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+
+async def _intake_chase_loop(interval_s: int) -> None:
+    """Every ``interval_s`` seconds, run the enquiry chase (reminders, escalations)
+    for every active tenant — inside the register, so no extra container."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from sqlalchemy import select, text
+
+    from app.api.intake import sweep_intake
+    from app.db.session import get_sessionmaker
+    from app.models.system import Tenant
+
+    await asyncio.sleep(60)   # let the service settle first
+    while True:
+        try:
+            sm = get_sessionmaker()
+            async with sm() as session:
+                tenants = (await session.execute(
+                    select(Tenant.id, Tenant.code).where(Tenant.is_active.is_(True)))).all()
+            for tid, code in tenants:
+                async with sm() as session:
+                    await session.execute(text("SELECT set_config('app.current_tenant', :tid, true)"),
+                                          {"tid": str(tid)})
+                    ctx = SimpleNamespace(session=session, tenant_id=tid, actor="intake:sweep", user=None)
+                    out = await sweep_intake(ctx)   # type: ignore[arg-type]
+                    await session.commit()
+                    if out["reminded"] or out["escalated"] or out["stranded"]:
+                        log.info("intake_chase", extra={"tenant": code, **{k: len(v) for k, v in out.items()}})
+        except Exception as exc:  # noqa: BLE001 - one bad sweep never kills the service
+            log.warning("intake_chase_failed", extra={"error": str(exc)})
+        await asyncio.sleep(max(60, interval_s))
+
 DESCRIPTION = """
 The **Register** is PRISM's single source of truth — every entity, deal, financial,
 contract, touchpoint, signal and behavioural record. It is entity-centric, tenant-aware,
@@ -124,6 +157,25 @@ def create_app() -> FastAPI:
     async def root() -> dict:
         return {"service": settings.app_name, "docs": "/docs", "health": "/healthz"}
 
+    # The enquiry chase (reminders, escalations) runs inside the register, hourly,
+    # on top of the core lifespan; 0 switches it off (the sweep endpoint remains).
+    if int(settings.intake_sweep_interval_s) > 0:
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        core_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(a):  # noqa: ANN001, ANN202
+            async with core_lifespan(a):
+                task = asyncio.create_task(_intake_chase_loop(int(settings.intake_sweep_interval_s)))
+                try:
+                    yield
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        app.router.lifespan_context = lifespan
     return app
 
 

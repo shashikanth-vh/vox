@@ -21,12 +21,15 @@ import Activity from './pages/Activity/ActivityPage';
 import Masters from './pages/Masters/MastersPage';
 import ActivityHub from './pages/Masters/ActivityHubPage';
 import Tools from './pages/Tools/ToolsPage';
+import Enquiries from './pages/Enquiries/EnquiriesPage';
 import { employeesService } from './services/employeesService';
 import { referenceService } from './services/referenceService';
 
 const routes: [string, string, React.ReactNode][] = [
   ['today', '/today', <Today />],
   ['leads', '/leads', <Leads />],
+  // Website / WhatsApp enquiries waiting for an RM's decision — the leads desk's view.
+  ['leads', '/enquiries', <Enquiries />],
   ['deals', '/deals', <Deals />],
   ['lend', '/lending', <Lending />],
   ['syn', '/syndication', <Syndication />],
