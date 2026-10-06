@@ -89,7 +89,7 @@ Unknown fields are stored with the enquiry and ignored.
    `INTAKE_ONE_TAP=false` makes every click land on that confirm page.
 4. Reject opens the same page with an optional reason box; the reason is kept
    with the enquiry. Nothing is created.
-5. A link is good for seven days (`REGISTER_INTAKE_TOKEN_TTL_DAYS`), bound to
+5. A link is good for seven days (`INTAKE_LINK_DAYS`), bound to
    that enquiry, that action and that recipient, and spent by the first
    decision: every later click — same link, the other link, another approver's
    link — shows "Already approved by … on …" / "Already rejected" and creates

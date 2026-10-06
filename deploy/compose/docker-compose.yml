@@ -186,6 +186,7 @@ services:
       # Nobody decided: reminder after N days to the same approvers; at link
       # expiry fresh links go to the BD Head. The sweep runs hourly in the register.
       REGISTER_INTAKE_REMIND_DAYS: "${INTAKE_REMIND_DAYS:-3}"
+      REGISTER_INTAKE_TOKEN_TTL_DAYS: "${INTAKE_LINK_DAYS:-7}"
       # Verify an assignee's identity + role against the Access service before assigning.
       REGISTER_ACCESS_URL: "http://access:8000"
       REGISTER_ACCESS_API_KEY: "dev-local-key"
