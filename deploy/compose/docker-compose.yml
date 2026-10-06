@@ -180,6 +180,9 @@ services:
       # e-mails, or blank for every BD Head on the roster.
       REGISTER_INTAKE_SEND_EMAIL: "${INTAKE_SEND_EMAIL:-true}"
       REGISTER_INTAKE_APPROVERS: "${INTAKE_APPROVERS:-}"
+      # One tap: a real click on Approve in the e-mail decides at once; scanners
+      # and old browsers still land on a confirm page. "false" = always confirm.
+      REGISTER_INTAKE_ONE_TAP: "${INTAKE_ONE_TAP:-true}"
       # Verify an assignee's identity + role against the Access service before assigning.
       REGISTER_ACCESS_URL: "http://access:8000"
       REGISTER_ACCESS_API_KEY: "dev-local-key"

@@ -415,6 +415,50 @@ async def test_employees_ticked_enquiry_approver_get_the_links_first(client: Asy
     assert [l["recipient"] for l in out2["links"]] == ["shubh@evamfinance.com"]
 
 
+# ---- one tap: a real click on the e-mail button decides at once ---------------
+_CLICK = {"Sec-Fetch-User": "?1", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "cross-site"}
+
+
+async def test_a_real_tap_on_approve_in_the_mail_decides_at_once(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483945"))).json()
+    done = await client.get(out["approve_url"], headers=_CLICK)
+    assert done.status_code == 200 and "Lead LD-" in done.text and "created" in done.text
+    leads = _items((await client.get("/v1/leads", headers=ADMIN)).json())
+    assert len(leads) == 1 and leads[0]["rm"] == "Mukesh"
+    enq = (await db_session.execute(text("SELECT status, approved_by FROM lead_enquiries WHERE enquiry_no = 'EV483945'"))).one()
+    assert enq[0] == "approved" and enq[1] == "mukesh@evamfinance.com"
+    # Tapping again, or a scanner opening it later: already approved, still one lead.
+    assert "Already approved" in (await client.get(out["approve_url"], headers=_CLICK)).text
+    assert "Already approved" in (await client.get(out["approve_url"])).text
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+
+
+async def test_a_scanner_opening_the_link_gets_the_confirm_page_and_nothing_happens(client: AsyncClient, intake_on):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483946"))).json()
+    for headers in ({}, {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"},
+                    {"Sec-Fetch-User": "?1", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "empty"}):
+        page = await client.get(out["approve_url"], headers=headers)
+        assert page.status_code == 200 and "<form method='post'>" in page.text and "Lead LD-" not in page.text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+    # Reject always asks for the reason, even on a real tap.
+    page = await client.get(out["reject_url"], headers=_CLICK)
+    assert "<textarea name='reason'" in page.text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+
+
+async def test_one_tap_can_be_switched_off(client: AsyncClient, intake_on, monkeypatch):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483947"))).json()
+    monkeypatch.setattr(get_settings(), "intake_one_tap", False)
+    try:
+        page = await client.get(out["approve_url"], headers=_CLICK)
+    finally:
+        monkeypatch.setattr(get_settings(), "intake_one_tap", True)
+    assert "<form method='post'>" in page.text and _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+
+
 async def test_configured_approvers_and_the_no_mail_switch(client: AsyncClient, intake_on, monkeypatch, db_session):
     await _roster(client)
     monkeypatch.setattr(get_settings(), "intake_approvers", "ops@evamfinance.com, Shubh@evamfinance.com")

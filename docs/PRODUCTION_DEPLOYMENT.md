@@ -260,7 +260,8 @@ port 587 or 465, the mailbox as USER and FROM, an app password as PASS). Then
 recreate `notifier`. Who gets it when the website names
 nobody: tick **Enquiry approver** on the employee in the Employees master
 (release 347, migration 0027); otherwise `INTAKE_APPROVERS`; otherwise every BD
-Head. Check it is
+Head. Release 348: a real tap on Approve in the mail decides at once
+(`INTAKE_ONE_TAP`, default true; scanners still get a confirm page). Check it is
 flowing with `docker compose … logs notifier` (one `notifier_sweep` line per
 30 s with `delivered` counting up) and, if a mail dies after its retries, with
 the Admin redrive on the delivery. `INTAKE_SEND_EMAIL=false` returns to the

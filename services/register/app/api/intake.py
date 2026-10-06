@@ -809,11 +809,26 @@ def _already(row: LeadEnquiry) -> HTMLResponse:
                  f"<div class='no'>{_h(row.note)}</div>")
 
 
+def _real_click(request: Request) -> bool:
+    """A navigation the person started — what a tap on the e-mail button looks
+    like from Chrome, the Gmail app or a recent Safari — as opposed to a link
+    scanner, a preview fetch or a script. Browsers set these fetch-metadata
+    headers themselves; nothing in the mail can forge them."""
+    h = request.headers
+    return (h.get("sec-fetch-user") == "?1" and h.get("sec-fetch-mode") == "navigate"
+            and h.get("sec-fetch-dest", "document") == "document")
+
+
 @router.get("/v1/intake/enquiries/{token}/{kind}", tags=["Intake"], include_in_schema=False,
             response_class=HTMLResponse)
-async def decision_page(token: str, kind: str, ctx: RequestContext = Depends(get_context)) -> HTMLResponse:
-    """The page behind the Approve / Reject link: the enquiry and one button.
-    Opening it changes nothing — mail scanners open links."""
+async def decision_page(token: str, kind: str, request: Request,
+                        ctx: RequestContext = Depends(get_context)) -> HTMLResponse:
+    """The page behind the Approve / Reject link. A real tap on Approve decides
+    at once (one tap for the RM); anything else that opens the link — a mail
+    scanner, a preview — gets the enquiry and one button, and changes nothing.
+    Reject always asks for the reason first."""
+    if kind == "approve" and get_settings().intake_one_tap and _real_click(request):
+        return await decide(token, kind, request, ctx)
     tok, row, err = await _load(ctx, token, kind)
     if err is not None:
         return err

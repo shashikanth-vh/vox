@@ -79,11 +79,14 @@ Unknown fields are stored with the enquiry and ignored.
    587 or 465, the mailbox and an app password) and retried with backoff if
    the mail server is down;
    every mail is also an inbox notification in PRISM for that RM.
-3. The RM taps Approve. The link opens a PRISM page showing the enquiry
-   (company, contact, ask, address) and one button. **Opening the link changes
-   nothing** — Gmail and mail scanners open links to preview them — so the
-   decision is the button press, a POST. Pressing it runs the rule below and
-   shows the result ("Lead LD-404 created … assigned to Mukesh Rao").
+3. The RM taps Approve. **One tap**: a real click from Chrome, the Gmail app
+   or a recent Safari decides at once and shows the result ("Lead LD-404
+   created … assigned to Mukesh Rao"). PRISM tells a real click from a robot
+   by the fetch-metadata headers browsers send on a navigation the person
+   started (`Sec-Fetch-User: ?1`); a mail scanner, a link preview or an old
+   browser lacks them and lands on a page showing the enquiry with one
+   Approve button instead — **opening the link that way changes nothing**.
+   `INTAKE_ONE_TAP=false` makes every click land on that confirm page.
 4. Reject opens the same page with an optional reason box; the reason is kept
    with the enquiry. Nothing is created.
 5. A link is good for seven days (`REGISTER_INTAKE_TOKEN_TTL_DAYS`), bound to

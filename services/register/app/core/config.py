@@ -55,6 +55,12 @@ class Settings(BaseServiceSettings):
     # Who approves when the sender names nobody: comma-separated e-mails; empty =
     # every active BD Head on the Employees roster.
     intake_approvers: str = ""
+    # One tap: a REAL click on the Approve button in the e-mail (a browser
+    # navigation the user started — Sec-Fetch-User: ?1) decides at once and shows
+    # the result. Anything else opening the link (a mail scanner, a link preview,
+    # an old browser) gets the confirm page with one button instead. Off = always
+    # the confirm page.
+    intake_one_tap: bool = True
 
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers
