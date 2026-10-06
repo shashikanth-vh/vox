@@ -173,6 +173,8 @@ services:
       # Intake: the website form / WhatsApp bot post approved enquiries to
       # POST /v1/intake/enquiries, each signed with this shared secret. Empty = off.
       REGISTER_INTAKE_WEBHOOK_SECRET: "${INTAKE_WEBHOOK_SECRET:-}"
+      # The public origin the Approve / Reject links in the RM's e-mail point at.
+      REGISTER_INTAKE_PUBLIC_BASE_URL: "${INTAKE_PUBLIC_BASE_URL:-}"
       # Verify an assignee's identity + role against the Access service before assigning.
       REGISTER_ACCESS_URL: "http://access:8000"
       REGISTER_ACCESS_API_KEY: "dev-local-key"

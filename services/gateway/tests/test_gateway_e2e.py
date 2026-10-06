@@ -191,6 +191,16 @@ def test_the_intake_door_is_reachable_without_a_bearer():
     the HMAC); the gateway must not demand a user bearer for it."""
     from app.config import get_settings as _gs
 
-    exempt = {p.strip() for p in _gs().auth_exempt_paths.split(",") if p.strip()}
-    assert "/v1/intake/enquiries" in exempt
-    assert "/vocx/v1/auth/callback" in exempt     # the earlier exemptions stand
+    from app.main import _is_exempt
+
+    s = _gs()
+    assert _is_exempt(s, "/v1/intake/enquiries")
+    assert _is_exempt(s, "/vocx/v1/auth/callback")     # the earlier exemptions stand
+    # The Approve / Reject links the RM opens from the e-mail live under the door;
+    # the token in the path is the credential and the Register checks it.
+    assert _is_exempt(s, "/v1/intake/enquiries/abc123/approve")
+    assert _is_exempt(s, "/v1/intake/enquiries/abc123/reject")
+    # …and nothing else is: the prefix is the door, not the whole register.
+    assert not _is_exempt(s, "/v1/intake")
+    assert not _is_exempt(s, "/v1/leads")
+    assert not _is_exempt(s, "/v1/intake/enquiries-other")

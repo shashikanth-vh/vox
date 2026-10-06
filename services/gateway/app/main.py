@@ -129,6 +129,21 @@ def _route(settings, full_path: str) -> tuple[str, str, str]:  # noqa: ANN001
     return settings.register_url, settings.register_api_key, full_path
 
 
+def _is_exempt(settings, full_path: str) -> bool:  # noqa: ANN001
+    """Is this path on the bearer-less list? Exact entries match exactly; an
+    entry ending in ``/*`` matches everything under that prefix."""
+    for raw in settings.auth_exempt_paths.split(","):
+        p = raw.strip()
+        if not p:
+            continue
+        if p.endswith("/*"):
+            if full_path.startswith(p[:-1]) and len(full_path) > len(p) - 1:
+                return True
+        elif full_path == p:
+            return True
+    return False
+
+
 def _problem(status: int, detail: str) -> ORJSONResponse:
     # Title/type by status — a 401 must read as an auth refusal, not a broken upstream.
     kind, title = {
@@ -364,8 +379,7 @@ def create_app() -> FastAPI:
         # OIDC on (or require_auth) → no verified identity means 401, NOT a silent
         # machine-caller passthrough that would let an anonymous request reach the data.
         # Exception: the explicit exempt list (OAuth redirects arrive bearer-less).
-        exempt = full_path in {p.strip() for p in settings.auth_exempt_paths.split(",")
-                               if p.strip()}
+        exempt = _is_exempt(settings, full_path)
         if not email and (is_chitti or ((verifier is not None or settings.require_auth) and not exempt)):
             return _problem(401, "Authentication required (Bearer token).")
 

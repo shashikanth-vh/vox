@@ -240,10 +240,17 @@ What the prod overlay now gives you out of the box:
 
 ## 7a. The intake door (website / WhatsApp)
 
-Release 343 adds `POST /v1/intake/enquiries`, the signed delivery the website's
-approve handler and the WhatsApp bot send. Set `INTAKE_WEBHOOK_SECRET` in
+Release 343 adds `POST /v1/intake/enquiries`, the signed delivery the website
+form and the WhatsApp bot send. Set `INTAKE_WEBHOOK_SECRET` in
 `deploy/compose/.env` and hand the same value to the website team; the
 contract and the rule are in `docs/INTAKE.md`. Blank = the door stays closed.
+
+Release 344 hosts the RM's Approve / Reject click in PRISM: the website posts
+the enquiry at submission, PRISM answers with the two links for the e-mail, and
+the click lands on `GET/POST /v1/intake/enquiries/<token>/approve|reject`
+(bearer-less; the single-use token is the credential). Also set
+`INTAKE_PUBLIC_BASE_URL=https://prism-evamfinance.com` so the links carry the
+public origin. Migration 0026 adds `lead_enquiry_tokens`.
 
 ## 7b. One-off data fixes
 

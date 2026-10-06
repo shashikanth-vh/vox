@@ -227,3 +227,166 @@ async def test_a_whatsapp_delivery_is_the_same_contract(client: AsyncClient, int
     r = await _post(client, _capital(channel="whatsapp"))
     lead = (await client.get(f"/v1/leads/{r.json()['lead_id']}", headers=ADMIN)).json()
     assert lead["source_name"].startswith("Whatsapp EV") and "Whatsapp enquiry" in lead["notes"]
+
+
+# ---- PRISM-hosted approval: parked at submission, decided from the e-mail link ----
+def _submitted(no: str | None = None, approvers=("mukesh@evamfinance.com",), **over) -> dict:
+    d = _capital(no, status="submitted")
+    d.pop("approved_by"), d.pop("approved_at")
+    if approvers is not None:
+        d["approvers"] = list(approvers)
+    d.update(over)
+    return d
+
+
+async def test_a_submitted_enquiry_is_parked_and_answers_with_the_links(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    r = await _post(client, _submitted("EV483930"))
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["status"] == "submitted" and out["outcome"] == "pending" and out["lead_id"] is None
+    assert len(out["links"]) == 1 and out["links"][0]["recipient"] == "mukesh@evamfinance.com"
+    assert out["approve_url"].startswith("http://test/v1/intake/enquiries/") and out["approve_url"].endswith("/approve")
+    assert out["reject_url"].endswith("/reject") and out["approve_url"] != out["reject_url"]
+    # Nothing was created: the desk sees no lead, the RM got no notification yet.
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+    assert (await db_session.execute(text("SELECT count(*) FROM notifications"))).scalar() == 0
+    # Only the hash is stored — the table cannot be turned into a link.
+    hashes = (await db_session.execute(text("SELECT token_hash, kind, recipient FROM lead_enquiry_tokens"))).all()
+    assert len(hashes) == 2 and {h.kind for h in hashes} == {"approve", "reject"}
+    assert all(len(h.token_hash) == 64 and h.token_hash not in out["approve_url"] for h in hashes)
+    # OPENING the link changes nothing (mail scanners open links): the page shows
+    # the enquiry and a button, and the lead is still not there.
+    page = await client.get(out["approve_url"])
+    assert page.status_code == 200 and "text/html" in page.headers["content-type"]
+    assert "Acme Renewables Pvt Ltd" in page.text and "Rajesh Kumar" in page.text and "<form method='post'>" in page.text
+    assert "mukesh@evamfinance.com" in page.text and "Debt facility" in page.text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+    # A redelivery of the same (still parked) enquiry gets its links again.
+    again = await _post(client, _submitted("EV483930"))
+    assert again.status_code == 201 and again.json()["replayed"] is True and again.json()["links"]
+    assert again.json()["approve_url"] != out["approve_url"]
+    assert (await db_session.execute(text("SELECT count(*) FROM lead_enquiries"))).scalar() == 1
+
+
+async def test_pressing_approve_creates_the_lead_once_and_names_the_approver(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483931"))).json()
+    done = await client.post(out["approve_url"])
+    assert done.status_code == 200 and "text/html" in done.headers["content-type"], done.text
+    assert "Lead LD-" in done.text and "created" in done.text and "Mukesh Rao" in done.text
+    leads = _items((await client.get("/v1/leads", params={"company": "Acme Renewables Pvt Ltd"}, headers=ADMIN)).json())
+    assert len(leads) == 1 and leads[0]["rm"] == "Mukesh" and leads[0]["source_name"] == "Website EV483931"
+    assert "approved by mukesh@evamfinance.com" in leads[0]["notes"]
+    enq = (await db_session.execute(text(
+        "SELECT status, outcome, approved_by, approved_at, lead_id FROM lead_enquiries WHERE enquiry_no = 'EV483931'"))).one()
+    assert enq.status == "approved" and enq.outcome == "lead_created" and enq.approved_by == "mukesh@evamfinance.com"
+    assert enq.approved_at is not None and str(enq.lead_id) == leads[0]["id"]
+    a = (await db_session.execute(text(
+        "SELECT actor, changes->>'approved_by' FROM audit_log WHERE action = 'intake.enquiry' "
+        "AND changes->>'enquiry_no' = 'EV483931' AND changes->>'status' = 'approved'"))).one()
+    assert a[0] == "mukesh@evamfinance.com" and a[1] == "mukesh@evamfinance.com"
+    # The same link again: "already approved", and still one lead. The reject
+    # link is spent too — the decision is the enquiry's, not the token's.
+    twice = await client.post(out["approve_url"])
+    assert twice.status_code == 200 and "Already approved" in twice.text and "LD-" not in twice.text.split("<h1>")[1].split("</h1>")[0]
+    assert "Already approved" in (await client.get(out["reject_url"])).text
+    assert "Already approved" in (await client.post(out["reject_url"])).text
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+    # The webhook replay answers with the decision now.
+    again = (await _post(client, _submitted("EV483931"))).json()
+    assert again["replayed"] is True and again["status"] == "approved" and again["lead_no"] == leads[0]["lead_no"]
+    assert "links" not in again
+
+
+async def test_pressing_reject_keeps_the_reason_and_creates_nothing(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483932"))).json()
+    page = await client.get(out["reject_url"])
+    assert page.status_code == 200 and "<textarea name='reason'" in page.text
+    done = await client.post(out["reject_url"], data={"reason": "Not a climate business"})
+    assert done.status_code == 200 and "Rejected" in done.text and "Not a climate business" in done.text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+    enq = (await db_session.execute(text(
+        "SELECT status, outcome, approved_by, note, payload->'decision'->>'reason' FROM lead_enquiries "
+        "WHERE enquiry_no = 'EV483932'"))).one()
+    assert enq[0] == "rejected" and enq[1] == "rejected" and enq[2] == "mukesh@evamfinance.com"
+    assert "Not a climate business" in enq[3] and enq[4] == "Not a climate business"
+    assert "Already rejected" in (await client.post(out["approve_url"])).text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+
+
+async def test_an_unknown_or_expired_link_decides_nothing(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    r = await client.get("/v1/intake/enquiries/" + "x" * 43 + "/approve")
+    assert r.status_code == 404 and "not recognised" in r.text
+    assert (await client.post("/v1/intake/enquiries/" + "x" * 43 + "/approve")).status_code == 404
+    assert (await client.get("/v1/intake/enquiries/short/approve")).status_code == 404
+    out = (await _post(client, _submitted("EV483933"))).json()
+    # The approve token on the reject route is not a reject token.
+    swapped = out["approve_url"].rsplit("/", 1)[0] + "/reject"
+    assert (await client.post(swapped)).status_code == 404
+    await db_session.execute(text("UPDATE lead_enquiry_tokens SET expires_at = now() - interval '1 minute'"))
+    await db_session.commit()
+    assert (await client.get(out["approve_url"])).status_code == 410
+    gone = await client.post(out["approve_url"])
+    assert gone.status_code == 410 and "expired" in gone.text
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+    enq = (await db_session.execute(text("SELECT status FROM lead_enquiries WHERE enquiry_no = 'EV483933'"))).scalar()
+    assert enq == "submitted"
+
+
+async def test_a_link_issued_to_nobody_hands_the_lead_to_the_bd_head(client: AsyncClient, intake_on):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483934", approvers=None))).json()
+    assert len(out["links"]) == 1 and out["links"][0]["recipient"] is None
+    page = await client.get(out["approve_url"])
+    assert "BD Head" in page.text
+    done = await client.post(out["approve_url"])
+    assert done.status_code == 200 and "Shubh Dave" in done.text
+    lead = _items((await client.get("/v1/leads", headers=ADMIN)).json())[0]
+    assert lead["rm"] == "Shubh" and "not on the RM roster" in lead["notes"]
+
+
+async def test_each_approver_gets_their_own_pair_and_the_first_click_wins(client: AsyncClient, intake_on):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483935", approvers=["mukesh@evamfinance.com", "Shubh@evamfinance.com",
+                                                                  "mukesh@evamfinance.com"]))).json()
+    assert [l["recipient"] for l in out["links"]] == ["mukesh@evamfinance.com", "shubh@evamfinance.com"]
+    shubh = out["links"][1]
+    done = await client.post(shubh["approve_url"])
+    assert done.status_code == 200 and "Shubh Dave" in done.text
+    lead = _items((await client.get("/v1/leads", headers=ADMIN)).json())[0]
+    assert lead["rm"] == "Shubh" and "approved by shubh@evamfinance.com" in lead["notes"]
+    late = await client.post(out["links"][0]["approve_url"])
+    assert "Already approved" in late.text and "shubh@evamfinance.com" in late.text
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+
+
+async def test_the_links_point_at_the_configured_public_origin(client: AsyncClient, intake_on, monkeypatch):
+    await _roster(client)
+    monkeypatch.setattr(get_settings(), "intake_public_base_url", "https://prism-evamfinance.com/")
+    try:
+        out = (await _post(client, _submitted("EV483936"))).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "intake_public_base_url", "")
+    assert out["approve_url"].startswith("https://prism-evamfinance.com/v1/intake/enquiries/")
+    # …and the approval through the existing rule still runs behind that origin's path.
+    path = out["approve_url"].split("prism-evamfinance.com", 1)[1]
+    assert (await client.post(path)).status_code == 200
+
+
+async def test_a_submitted_enquiry_for_a_company_with_a_live_deal_lands_on_the_deal_when_approved(client: AsyncClient, intake_on):
+    await _roster(client)
+    ent = await client.post("/v1/entities", headers=ADMIN,
+                            json={"code": "ACMEREN", "legal_name": "Acme Renewables Private Limited"})
+    eid = ent.json()["id"]
+    did = (await client.post("/v1/deals", headers=ADMIN, json={"entity_id": eid, "stage": "In Pipeline", "rm": "Shubh"})).json()["id"]
+    assert (await client.post("/v1/lending", headers=ADMIN,
+                              json={"entity_id": eid, "deal_id": did, "stage": "Data Awaited"})).status_code == 201
+    out = (await _post(client, _submitted("EV483937"))).json()
+    done = await client.post(out["approve_url"])
+    assert done.status_code == 200 and "live deal" in done.text
+    inters = _items((await client.get("/v1/interactions", params={"deal_id": did}, headers=ADMIN)).json())
+    assert len(inters) == 1 and inters[0]["direction"] == "inbound"
+    assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []

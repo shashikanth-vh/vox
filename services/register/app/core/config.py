@@ -42,6 +42,12 @@ class Settings(BaseServiceSettings):
     # timestamp + '.' + body). Empty = intake switched off (503).
     intake_webhook_secret: str = ""
     intake_max_skew_s: int = 300
+    # Where the Approve / Reject links in the RM's e-mail point: the public origin
+    # of this PRISM (https://prism-evamfinance.com). Empty = taken from the
+    # request's X-Forwarded-Host / Host, else the links are returned as paths.
+    intake_public_base_url: str = ""
+    # How long an unused Approve / Reject link stays valid.
+    intake_token_ttl_days: int = 7
 
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers
