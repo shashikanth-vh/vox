@@ -17,3 +17,19 @@ Run order on production: `purge_test_companies` → `attach_orphan_lines` →
 `recompute_deal_flags`. Take a backup first (`deploy/backup/`). Afterwards
 `deploy/reconcile.sh` should show section 5c (deal flags) and 6b (orphan lines)
 empty, and no test company in section 1.
+
+## Playing the website: `enquiry.sh`
+
+Until the website is wired up, `enquiry.sh` posts a signed sample enquiry to this
+box exactly as the website will, and drives the rest of the flow:
+
+    sudo ./prism/deploy/fixes/enquiry.sh send capital --to you@evamfinance.com   # a sample enquiry, mailed to you
+    sudo ./prism/deploy/fixes/enquiry.sh send assets                            # PRISM picks the approvers
+    sudo ./prism/deploy/fixes/enquiry.sh list                                   # every enquiry and its stage
+    sudo ./prism/deploy/fixes/enquiry.sh mail                                   # the mails and whether they went out
+    sudo ./prism/deploy/fixes/enquiry.sh age EV123456 4 && sudo ./prism/deploy/fixes/enquiry.sh chase   # reminder now
+    sudo ./prism/deploy/fixes/enquiry.sh expire EV123456 && sudo ./prism/deploy/fixes/enquiry.sh chase  # escalation now
+
+It reads `INTAKE_WEBHOOK_SECRET`, `INTAKE_PUBLIC_BASE_URL` and `SVC_WORKFLOWS_KEY`
+from `deploy/compose/.env`. `PRISM_URL=https://host` overrides the target and
+`PRISM_INSECURE=1` skips certificate checks on a self-signed staging box.
