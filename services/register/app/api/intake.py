@@ -660,8 +660,12 @@ def _parse(row: LeadEnquiry) -> EnquiryIn | None:
         return None
 
 
-async def _load(ctx: RequestContext, token: str, kind: str) -> tuple[LeadEnquiryToken | None, LeadEnquiry | None, HTMLResponse | None]:
-    """The token's enquiry — or the page that says why there is none."""
+async def _load(ctx: RequestContext, token: str, kind: str, *, lock: bool = False,
+                ) -> tuple[LeadEnquiryToken | None, LeadEnquiry | None, HTMLResponse | None]:
+    """The token's enquiry — or the page that says why there is none. ``lock``
+    takes the enquiry row FOR UPDATE: two RMs pressing their buttons in the same
+    second must serialise, so the second sees the first's decision and never
+    creates a twin lead."""
     if kind not in ("approve", "reject") or not (20 <= len(token) <= 128):
         return None, None, _page("Link not recognised",
                                  "<h1>This link is not recognised</h1><p class='sub'>It may have been "
@@ -673,8 +677,10 @@ async def _load(ctx: RequestContext, token: str, kind: str) -> tuple[LeadEnquiry
         return None, None, _page("Link not recognised",
                                  "<h1>This link is not recognised</h1><p class='sub'>It may have been "
                                  "copied incompletely. Open it again from the e-mail.</p>", 404)
-    row = (await ctx.session.execute(select(LeadEnquiry).where(
-        LeadEnquiry.id == tok.enquiry_id, LeadEnquiry.tenant_id == ctx.tenant_id))).scalar_one_or_none()
+    q = select(LeadEnquiry).where(LeadEnquiry.id == tok.enquiry_id, LeadEnquiry.tenant_id == ctx.tenant_id)
+    if lock:
+        q = q.with_for_update()
+    row = (await ctx.session.execute(q)).scalar_one_or_none()
     if row is None:
         return None, None, _page("Link not recognised", "<h1>This link is not recognised</h1>", 404)
     if row.status == "submitted" and tok.expires_at < datetime.now(timezone.utc):
@@ -730,7 +736,7 @@ async def decision_page(token: str, kind: str, ctx: RequestContext = Depends(get
 async def decide(token: str, kind: str, request: Request,
                  ctx: RequestContext = Depends(get_context)) -> HTMLResponse:
     """The button: run the rule (approve) or park the rejection, once."""
-    tok, row, err = await _load(ctx, token, kind)
+    tok, row, err = await _load(ctx, token, kind, lock=True)
     if err is not None:
         return err
     assert tok is not None and row is not None

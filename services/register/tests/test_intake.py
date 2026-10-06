@@ -390,3 +390,17 @@ async def test_a_submitted_enquiry_for_a_company_with_a_live_deal_lands_on_the_d
     inters = _items((await client.get("/v1/interactions", params={"deal_id": did}, headers=ADMIN)).json())
     assert len(inters) == 1 and inters[0]["direction"] == "inbound"
     assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
+
+
+async def test_two_approvers_pressing_at_once_make_one_lead(client: AsyncClient, intake_on):
+    """The decision takes the enquiry row FOR UPDATE, so simultaneous presses
+    serialise: one creates the lead, the other sees 'Already approved'."""
+    import asyncio
+
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483938", approvers=["mukesh@evamfinance.com", "shubh@evamfinance.com"]))).json()
+    a, b = await asyncio.gather(client.post(out["links"][0]["approve_url"]),
+                                client.post(out["links"][1]["approve_url"]))
+    texts = sorted([a.text, b.text], key=lambda t: "Already approved" in t)
+    assert "created" in texts[0] and "Already approved" in texts[1]
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
