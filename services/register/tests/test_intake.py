@@ -248,9 +248,11 @@ async def test_a_submitted_enquiry_is_parked_and_answers_with_the_links(client: 
     assert len(out["links"]) == 1 and out["links"][0]["recipient"] == "mukesh@evamfinance.com"
     assert out["approve_url"].startswith("http://test/v1/intake/enquiries/") and out["approve_url"].endswith("/approve")
     assert out["reject_url"].endswith("/reject") and out["approve_url"] != out["reject_url"]
-    # Nothing was created: the desk sees no lead, the RM got no notification yet.
+    # Nothing was created: the desk sees no lead; the RM has only the approval
+    # mail, not a "lead created" notification.
     assert _items((await client.get("/v1/leads", headers=ADMIN)).json()) == []
-    assert (await db_session.execute(text("SELECT count(*) FROM notifications"))).scalar() == 0
+    events = (await db_session.execute(text("SELECT event FROM notifications"))).scalars().all()
+    assert events == ["intake.approval"]
     # Only the hash is stored — the table cannot be turned into a link.
     hashes = (await db_session.execute(text("SELECT token_hash, kind, recipient FROM lead_enquiry_tokens"))).all()
     assert len(hashes) == 2 and {h.kind for h in hashes} == {"approve", "reject"}
@@ -336,16 +338,79 @@ async def test_an_unknown_or_expired_link_decides_nothing(client: AsyncClient, i
     assert enq == "submitted"
 
 
-async def test_a_link_issued_to_nobody_hands_the_lead_to_the_bd_head(client: AsyncClient, intake_on):
+async def test_when_the_website_names_nobody_the_bd_head_gets_the_links(client: AsyncClient, intake_on, db_session):
+    """No approvers in the post and none configured → every BD Head on the roster
+    is the approver: their own links, their own e-mail."""
     await _roster(client)
     out = (await _post(client, _submitted("EV483934", approvers=None))).json()
-    assert len(out["links"]) == 1 and out["links"][0]["recipient"] is None
-    page = await client.get(out["approve_url"])
-    assert "BD Head" in page.text
+    assert [l["recipient"] for l in out["links"]] == ["shubh@evamfinance.com"]
     done = await client.post(out["approve_url"])
     assert done.status_code == 200 and "Shubh Dave" in done.text
     lead = _items((await client.get("/v1/leads", headers=ADMIN)).json())[0]
-    assert lead["rm"] == "Shubh" and "not on the RM roster" in lead["notes"]
+    assert lead["rm"] == "Shubh" and "not on the RM roster" not in lead["notes"]
+    assert "approved by shubh@evamfinance.com" in lead["notes"]
+
+
+async def test_a_link_issued_to_nobody_at_all_still_works_and_flags_the_lead(client: AsyncClient, intake_on):
+    """A roster without a BD Head and no configured approvers: one unnamed pair
+    (the website must mail it), and the lead is flagged for the desk."""
+    r = await client.post("/v1/people", headers=ADMIN,
+                          json={"name": "Mukesh", "full_name": "Mukesh Rao", "role": "BDRM", "email": "mukesh@evamfinance.com"})
+    assert r.status_code == 201
+    out = (await _post(client, _submitted("EV483939", approvers=None))).json()
+    assert len(out["links"]) == 1 and out["links"][0]["recipient"] is None and "emailed" not in out["links"][0]
+    page = await client.get(out["approve_url"])
+    assert "BD Head" in page.text
+    done = await client.post(out["approve_url"])
+    assert done.status_code == 200
+    lead = _items((await client.get("/v1/leads", headers=ADMIN)).json())[0]
+    assert "not on the RM roster" in lead["notes"]
+
+
+async def test_prism_mails_each_approver_the_buttons(client: AsyncClient, intake_on, db_session):
+    """PRISM sends the Approve / Reject mail itself: one inbox notification and one
+    pending e-mail delivery per approver, the HTML carrying that approver's links."""
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483940", approvers=["mukesh@evamfinance.com", "shubh@evamfinance.com"]))).json()
+    assert all(l["emailed"] is True for l in out["links"])
+    rows = (await db_session.execute(text(
+        "SELECT n.recipient, n.title, n.body, n.meta, d.channel, d.target, d.status "
+        "FROM notifications n JOIN notification_deliveries d ON d.notification_id = n.id "
+        "WHERE n.event = 'intake.approval' ORDER BY n.recipient"))).mappings().all()
+    assert [r["recipient"] for r in rows] == ["mukesh@evamfinance.com", "shubh@evamfinance.com"]
+    for r, link in zip(rows, out["links"]):
+        assert r["channel"] == "email" and r["target"] == r["recipient"] and r["status"] == "pending"
+        assert "Acme Renewables" in r["title"] and link["approve_url"] in r["body"] and link["reject_url"] in r["body"]
+        html_ = r["meta"]["html"]
+        assert f"href='{link['approve_url']}'" in html_ and f"href='{link['reject_url']}'" in html_
+        assert ">Approve<" in html_ and ">Reject<" in html_ and "Rajesh Kumar" in html_ and "Debt facility" in html_
+        # Mukesh's mail never carries Shubh's links.
+        other = out["links"][1 - out["links"].index(link)]
+        assert other["approve_url"] not in html_
+    # A re-post of the still-waiting enquiry re-issues the links and mails again.
+    again = (await _post(client, _submitted("EV483940", approvers=["mukesh@evamfinance.com"]))).json()
+    assert again["replayed"] is True and again["links"][0]["emailed"] is True
+    n = (await db_session.execute(text("SELECT count(*) FROM notification_deliveries WHERE target = 'mukesh@evamfinance.com'"))).scalar()
+    assert n == 2
+
+
+async def test_configured_approvers_and_the_no_mail_switch(client: AsyncClient, intake_on, monkeypatch, db_session):
+    await _roster(client)
+    monkeypatch.setattr(get_settings(), "intake_approvers", "ops@evamfinance.com, Shubh@evamfinance.com")
+    try:
+        out = (await _post(client, _submitted("EV483941", approvers=None))).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "intake_approvers", "")
+    assert [l["recipient"] for l in out["links"]] == ["ops@evamfinance.com", "shubh@evamfinance.com"]
+    monkeypatch.setattr(get_settings(), "intake_send_email", False)
+    try:
+        out2 = (await _post(client, _submitted("EV483942"))).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "intake_send_email", True)
+    assert out2["links"][0]["recipient"] == "mukesh@evamfinance.com" and "emailed" not in out2["links"][0]
+    n = (await db_session.execute(text(
+        "SELECT count(*) FROM notifications WHERE event = 'intake.approval' AND meta->>'enquiry_no' = 'EV483942'"))).scalar()
+    assert n == 0
 
 
 async def test_each_approver_gets_their_own_pair_and_the_first_click_wins(client: AsyncClient, intake_on):

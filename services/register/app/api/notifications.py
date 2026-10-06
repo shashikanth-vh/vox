@@ -302,7 +302,7 @@ async def claim_deliveries(payload: ClaimIn,
           AND n.id = d.notification_id
         RETURNING d.id, d.channel, d.target, d.attempts, d.claim_token,
                   n.event, n.severity, n.title, n.body, n.recipient,
-                  n.subject_type, n.subject_id, n.workflow_id
+                  n.subject_type, n.subject_id, n.workflow_id, n.meta
     """), {"lease": payload.lease_seconds, "tid": str(ctx.tenant_id),
            "lim": payload.limit})).mappings().all()
     return {"claimed": [
@@ -311,7 +311,11 @@ async def claim_deliveries(payload: ClaimIn,
          "event": r["event"], "severity": r["severity"], "title": r["title"],
          "body": r["body"], "recipient": r["recipient"],
          "subject_type": r["subject_type"], "subject_id": r["subject_id"],
-         "workflow_id": r["workflow_id"]}
+         "workflow_id": r["workflow_id"],
+         # Channel-specific rendering the producer attached (e.g. meta.html — the
+         # HTML body of an e-mail with buttons). The notifier sends it as the
+         # alternative part; the plain body stays the text part.
+         "meta": r["meta"]}
         for r in rows]}
 
 

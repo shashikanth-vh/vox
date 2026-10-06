@@ -48,6 +48,13 @@ class Settings(BaseServiceSettings):
     intake_public_base_url: str = ""
     # How long an unused Approve / Reject link stays valid.
     intake_token_ttl_days: int = 7
+    # PRISM sends the Approve / Reject e-mail itself: one notification + one e-mail
+    # delivery per approver, driven out by the notifier (WORKFLOWS_SMTP_*). Off =
+    # the links are only returned to the sender, which then mails them.
+    intake_send_email: bool = True
+    # Who approves when the sender names nobody: comma-separated e-mails; empty =
+    # every active BD Head on the Employees roster.
+    intake_approvers: str = ""
 
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers

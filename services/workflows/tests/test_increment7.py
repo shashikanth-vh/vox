@@ -281,3 +281,21 @@ async def test_document_expiry_monitor_notifies_and_dedupes(mock_register, monke
         assert all(r["subject_type"] == "Lending" for r in rows)
     finally:
         get_settings.cache_clear()
+
+
+def test_build_email_carries_the_producers_html_as_the_alternative_part():
+    """An e-mail delivery whose notification attached meta.html (the intake
+    approval mail with its buttons) goes out as text + HTML; without it, text only."""
+    from app import notifier
+
+    claim = {"target": "rm@evamfinance.com", "title": "Approve website enquiry EV1",
+             "body": "Approve: https://prism/v1/intake/enquiries/t/approve",
+             "meta": {"html": "<html><body><a href='https://prism/v1/intake/enquiries/t/approve'>Approve</a></body></html>"}}
+    msg = notifier.build_email(claim)
+    assert msg["To"] == "rm@evamfinance.com" and msg["Subject"] == "[PRISM] Approve website enquiry EV1"
+    assert msg.get_content_type() == "multipart/alternative"
+    parts = {p.get_content_type(): p.get_content() for p in msg.iter_parts()}
+    assert "https://prism/v1/intake/enquiries/t/approve" in parts["text/plain"]
+    assert ">Approve</a>" in parts["text/html"]
+    plain = notifier.build_email({"target": "rm@evamfinance.com", "title": "x", "body": "y"})
+    assert plain.get_content_type() == "text/plain" and "y" in plain.get_content()

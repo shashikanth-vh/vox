@@ -46,10 +46,11 @@ log = get_logger("notifier")
 Sender = Callable[[dict[str, Any]], Any]   # async callable: claim → None (raises on failure)
 
 
-def _smtp_send(claim: dict[str, Any]) -> None:
-    """Blocking SMTP send (runs in a worker thread). Raises on any failure."""
-    import smtplib
-
+def build_email(claim: dict[str, Any]) -> EmailMessage:
+    """The message for one e-mail delivery: the notification's title and body as
+    text, plus — when the producer attached ``meta.html`` (the intake approval
+    mail with its Approve / Reject buttons) — that HTML as the alternative part,
+    so Gmail shows the buttons and a text-only client still gets the links."""
     s = get_settings()
     msg = EmailMessage()
     msg["From"] = s.smtp_from
@@ -60,7 +61,20 @@ def _smtp_send(claim: dict[str, Any]) -> None:
     if claim.get("subject_type"):
         subject_line = f"\n\nSubject: {claim['subject_type']} {claim.get('subject_id') or ''}"
     run_line = f"\nRun: {claim['workflow_id']}" if claim.get("workflow_id") else ""
-    msg.set_content(f"{body}{subject_line}{run_line}\n\n— PRISM workflows")
+    msg.set_content(f"{body}{subject_line}{run_line}\n\n— PRISM")
+    meta = claim.get("meta") or {}
+    html = meta.get("html") if isinstance(meta, dict) else None
+    if html:
+        msg.add_alternative(str(html), subtype="html")
+    return msg
+
+
+def _smtp_send(claim: dict[str, Any]) -> None:
+    """Blocking SMTP send (runs in a worker thread). Raises on any failure."""
+    import smtplib
+
+    s = get_settings()
+    msg = build_email(claim)
     with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=s.smtp_timeout_s) as smtp:
         if s.smtp_starttls:
             smtp.starttls()

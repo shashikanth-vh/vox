@@ -51,6 +51,7 @@ import json
 import re
 import secrets
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -501,11 +502,14 @@ async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str
                       base: str) -> list[dict[str, Any]]:
     """One Approve / Reject pair per approver the website will e-mail — or one
     anonymous pair when it named nobody (the BD Head then owns the lead)."""
-    ttl = timedelta(days=max(1, int(get_settings().intake_token_ttl_days)))
+    settings = get_settings()
+    ttl = timedelta(days=max(1, int(settings.intake_token_ttl_days)))
     expires = datetime.now(timezone.utc) + ttl
     seen: set[str] = set()
     who: list[str | None] = []
-    for a in approvers or []:
+    # Who decides: the sender's list, else the register's configured approvers,
+    # else every active BD Head on the roster. Nobody at all → one unnamed pair.
+    for a in list(approvers or []) or await _default_approvers(ctx):
         em = (a or "").strip().lower()[:200]
         if em and em not in seen:
             seen.add(em)
@@ -523,7 +527,98 @@ async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str
             urls[f"{kind}_url"] = f"{base}/v1/intake/enquiries/{token}/{kind}"
         out.append({"recipient": recipient, **urls, "expires_at": expires.isoformat()})
     await ctx.session.flush()
+    if settings.intake_send_email:
+        for link in out:
+            if link["recipient"]:
+                await _mail_approver(ctx, row, link, expires)
+                link["emailed"] = True
     return out
+
+
+async def _default_approvers(ctx: RequestContext) -> list[str]:
+    configured = [x.strip() for x in get_settings().intake_approvers.split(",") if x.strip()]
+    if configured:
+        return configured
+    rows = (await ctx.session.execute(
+        select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
+                                   Person.inactive.is_(False), Person.role.ilike("%BD Head%"),
+                                   Person.email.isnot(None)).order_by(Person.full_name))).scalars().all()
+    return [r for r in rows if r]
+
+
+def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_url: str,
+               expires: datetime) -> str:
+    """The approval e-mail as Gmail renders it: a summary table and two buttons.
+    Table layout and inline styles only — mail clients honour nothing else."""
+    c = e.contact if e else None
+    when = row.submitted_at or row.received_at
+    rows = [("Enquiry", f"{row.enquiry_no} · {row.channel}"), ("Company", row.company_name),
+            ("Contact", ", ".join(x for x in ((c.name if c else row.contact_name),
+                                               _mobile(c.mobile) if c else None,
+                                               (c.email if c else None)) if x) or None),
+            ("Ask", (("Capital" if e.intent == "capital" else "Asset monetisation" if e.intent == "assets" else "Enquiry")
+                     + " — " + _need(e)) if e else row.intent),
+            ("Submitted", when.strftime("%d %b %Y, %H:%M") if when else None)]
+    if e and e.company and e.company.address:
+        rows.insert(2, ("Address", e.company.address))
+    trs = "".join(
+        f"<tr><td style='padding:6px 10px 6px 0;color:#5b6b7a;vertical-align:top;white-space:nowrap'>{_h(k)}</td>"
+        f"<td style='padding:6px 0;color:#1d2733'>{_h(v)}</td></tr>" for k, v in rows)
+    btn = ("display:inline-block;padding:12px 22px;border-radius:8px;font-weight:600;"
+           "text-decoration:none;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif")
+    return (
+        "<!doctype html><html><body style='margin:0;background:#f4f6f8;font-family:-apple-system,Segoe UI,Roboto,"
+        "Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1d2733'>"
+        "<table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='background:#f4f6f8'><tr><td align='center' style='padding:24px 12px'>"
+        "<table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='max-width:560px;background:#ffffff;border:1px solid #dfe5ea;border-radius:12px'>"
+        "<tr><td style='padding:22px 22px 6px'><div style='font-size:12px;font-weight:700;letter-spacing:.08em;color:#0b5d4b'>PRISM · EVAM FINANCE</div>"
+        f"<h1 style='font-size:20px;margin:10px 0 4px'>New {_h(row.channel)} enquiry: {_h(row.company_name)}</h1>"
+        "<p style='margin:0 0 14px;color:#5b6b7a'>Approve to create the lead in PRISM, or reject it. Nothing happens until you confirm on the page that opens.</p></td></tr>"
+        f"<tr><td style='padding:0 22px'><table role='presentation' cellpadding='0' cellspacing='0' width='100%' style='border-top:1px solid #eef1f4;border-bottom:1px solid #eef1f4'>{trs}</table></td></tr>"
+        "<tr><td style='padding:18px 22px 6px'><table role='presentation' cellpadding='0' cellspacing='0'><tr>"
+        f"<td style='padding-right:12px'><a href='{html.escape(approve_url, quote=True)}' style='{btn};background:#0b5d4b;color:#ffffff'>Approve</a></td>"
+        f"<td><a href='{html.escape(reject_url, quote=True)}' style='{btn};background:#b42318;color:#ffffff'>Reject</a></td>"
+        "</tr></table></td></tr>"
+        f"<tr><td style='padding:8px 22px 22px;color:#7a8794;font-size:12px'>These links are for you only and work until {expires.strftime('%d %b %Y')}. "
+        "If the buttons do not show, copy the link below into your browser.<br>"
+        f"Approve: {_h(approve_url)}<br>Reject: {_h(reject_url)}</td></tr>"
+        "</table></td></tr></table></body></html>")
+
+
+async def _mail_approver(ctx: RequestContext, row: LeadEnquiry, link: dict[str, Any],
+                         expires: datetime) -> None:
+    """One inbox notification + one e-mail delivery for this approver, in the same
+    transaction as the links (the notifier sends it; see WORKFLOWS_SMTP_*)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.notifications import Notification, NotificationDelivery
+
+    e = _parse(row)
+    need = _need(e) if e else (row.intent or "enquiry")
+    title = f"Approve {row.channel} enquiry {row.enquiry_no}: {row.company_name}"[:300]
+    body = (f"{row.company_name} — {need}\nContact: {row.contact_name or '—'}\n\n"
+            f"Approve (creates the lead in PRISM): {link['approve_url']}\n"
+            f"Reject: {link['reject_url']}\n\n"
+            f"The links are for you only and work until {expires.strftime('%d %b %Y')}. "
+            "Opening a link shows the enquiry; the decision is the button on that page.")
+    nid = uuid.uuid4()
+    # One mail per issue: a re-issue (the website re-posting a waiting enquiry) is a
+    # new dedupe key, so the RM gets the fresh links.
+    dedupe = f"intake:{row.enquiry_no}:approval:{link['recipient']}:{_hash(link['approve_url'])[:12]}"[:240]
+    won = (await ctx.session.execute(pg_insert(Notification).values(
+        id=nid, tenant_id=ctx.tenant_id, recipient=link["recipient"], event="intake.approval",
+        severity="info", title=title, body=body, subject_type="LeadEnquiry", subject_id=str(row.id),
+        dedupe_key=dedupe, created_by=ctx.actor,
+        meta={"html": _mail_html(row, e, link["approve_url"], link["reject_url"], expires),
+              "approve_url": link["approve_url"], "reject_url": link["reject_url"],
+              "enquiry_no": row.enquiry_no}).on_conflict_do_nothing()
+        .returning(Notification.id))).scalar_one_or_none()
+    if won is None:
+        return
+    await ctx.session.execute(pg_insert(NotificationDelivery).values(
+        tenant_id=ctx.tenant_id, notification_id=nid, channel="email",
+        target=link["recipient"], status="pending", created_by=ctx.actor)
+        .on_conflict_do_nothing(constraint="notification_deliveries_unique"))
 
 
 @router.post("/v1/intake/enquiries", status_code=201, tags=["Intake"],

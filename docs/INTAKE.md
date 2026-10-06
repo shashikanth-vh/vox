@@ -1,10 +1,10 @@
 # Intake — enquiries from the website and WhatsApp
 
 Release 343 opened one door for every enquiry that does not start at the desk;
-release 344 moves the RM's Approve / Reject click into PRISM. The website posts
-each enquiry to PRISM the moment it is submitted, PRISM answers with an Approve
-link and a Reject link, the website puts them in the e-mail it sends the RM, and
-the RM's click lands on PRISM directly — no website server in between.
+releases 344–346 move the whole approval into PRISM. The website posts each
+enquiry to PRISM the moment it is submitted and is done. PRISM e-mails the RM
+the Approve / Reject buttons, the RM's click lands on PRISM directly, and the
+lead is created there. The website never sends mail and never handles a click.
 
 ## The endpoint
 
@@ -43,7 +43,7 @@ The website's enquiry JSON as agreed, with `status` saying which way in:
 | `enquiry_no` | yes | the idempotency key; a redelivery answers with the stored outcome and writes nothing (a redelivery of a still-waiting enquiry re-issues its links) |
 | `channel` | no | `website` (default) or `whatsapp` |
 | `status` | yes | `submitted` — PRISM hosts the approval (below); `approved` / `rejected` — the sender already decided, the rule runs at once |
-| `approvers` | for submitted | the e-mail addresses the website will send the Approve / Reject mail to; one pair of links per address, so the click says who approved. Empty = one unnamed pair; the BD Head then owns the lead |
+| `approvers` | no | who should decide: e-mail addresses, one Approve / Reject pair and one e-mail each. Empty = PRISM's `INTAKE_APPROVERS` list, else every BD Head on the Employees roster |
 | `intent` | yes | `capital` or `assets` |
 | `approved_by`, `approved_at` | for approved | the RM's e-mail; resolved against the Employees roster |
 | `contact.name`, `contact.mobile`, `contact.email` | name yes | mobile is normalised to +91 |
@@ -55,23 +55,29 @@ Unknown fields are stored with the enquiry and ignored.
 
 ## PRISM-hosted approval (`status: submitted`)
 
-1. The website posts the enquiry at submission with `approvers`. PRISM parks it
-   (status `submitted`, outcome `pending`) and answers `201`:
+1. The website posts the enquiry at submission. PRISM parks it (status
+   `submitted`, outcome `pending`), works out the approvers, **sends each one
+   the e-mail with the two buttons**, and answers `201`:
 
    ```json
    {"enquiry_no": "EV483920", "status": "submitted", "outcome": "pending",
     "links": [{"recipient": "mukesh@evamfinance.com",
                "approve_url": "https://prism-evamfinance.com/v1/intake/enquiries/<token>/approve",
                "reject_url":  "https://prism-evamfinance.com/v1/intake/enquiries/<token>/reject",
-               "expires_at": "2026-10-13T09:36:00+00:00"}],
+               "expires_at": "2026-10-13T09:36:00+00:00", "emailed": true}],
     "approve_url": "…", "reject_url": "…", "replayed": false}
    ```
 
-   `approve_url` / `reject_url` at the top level are the first pair, for the
-   one-approver case. Each recipient must get **their own** pair in their own
-   e-mail; the token is what tells PRISM who approved.
-2. The website sends the RM the e-mail with the two links as buttons. Nothing
-   else is needed from the website: no approve handler, no second post.
+   The links are returned for the record (and for a deployment that keeps
+   `INTAKE_SEND_EMAIL=false`, where the website mails them itself). Each
+   recipient gets **their own** pair; the token is what tells PRISM who approved.
+2. The e-mail. Subject "[PRISM] Approve website enquiry EV483920: Acme
+   Renewables Pvt Ltd"; a summary of the enquiry (company, address, contact,
+   ask, submitted) and two buttons, Approve and Reject, with the plain links
+   below them for clients that strip buttons. It is sent by the notifier
+   container over `WORKFLOWS_SMTP_*` (Gmail: smtp.gmail.com, 587, the mailbox
+   and an app password) and retried with backoff if the mail server is down;
+   every mail is also an inbox notification in PRISM for that RM.
 3. The RM taps Approve. The link opens a PRISM page showing the enquiry
    (company, contact, ask, address) and one button. **Opening the link changes
    nothing** — Gmail and mail scanners open links to preview them — so the

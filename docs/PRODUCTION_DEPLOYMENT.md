@@ -252,6 +252,17 @@ the click lands on `GET/POST /v1/intake/enquiries/<token>/approve|reject`
 `INTAKE_PUBLIC_BASE_URL=https://prism-evamfinance.com` so the links carry the
 public origin. Migration 0026 adds `lead_enquiry_tokens`.
 
+Release 346: PRISM sends the Approve / Reject e-mail itself. The `notifier`
+container (already in the stack) sends it over `WORKFLOWS_SMTP_HOST / PORT /
+FROM / USERNAME / PASSWORD` in `.env` — for Gmail: `smtp.gmail.com`, `587`, the
+mailbox address as FROM and USERNAME, an app password as PASSWORD. Set
+`INTAKE_APPROVERS` to the addresses that should get the mail when the website
+names nobody (blank = every BD Head on the Employees roster). Check it is
+flowing with `docker compose … logs notifier` (one `notifier_sweep` line per
+30 s with `delivered` counting up) and, if a mail dies after its retries, with
+the Admin redrive on the delivery. `INTAKE_SEND_EMAIL=false` returns to the
+website sending the mail from the links PRISM answers with.
+
 ## 7b. One-off data fixes
 
 `deploy/fixes/` holds the register clean-ups from the October bug register
