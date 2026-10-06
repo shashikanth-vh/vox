@@ -120,7 +120,9 @@ class Settings(BaseSettings):
     # bearer-less top-level navigation: the vocx side refuses it unless it
     # carries the single-use ticket a preceding AUTHENTICATED call minted, so
     # the cannot-land-a-token-in-someone-else's-slot property holds.
-    auth_exempt_paths: str = "/vocx/v1/auth/callback,/vocx/v1/auth/start"
+    # /v1/intake/enquiries is the website / WhatsApp door: a signed machine delivery
+    # with no user; the Register verifies its HMAC itself (REGISTER_INTAKE_WEBHOOK_SECRET).
+    auth_exempt_paths: str = "/vocx/v1/auth/callback,/vocx/v1/auth/start,/v1/intake/enquiries"
 
     # Proxy behaviour.
     upstream_timeout_s: float = 60.0

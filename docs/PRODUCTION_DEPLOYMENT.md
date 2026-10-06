@@ -238,6 +238,13 @@ What the prod overlay now gives you out of the box:
   CronJob running `pg_dumpall` against `prism-postgresql` — the compose sidecar's
   command works verbatim in a CronJob).
 
+## 7a. The intake door (website / WhatsApp)
+
+Release 343 adds `POST /v1/intake/enquiries`, the signed delivery the website's
+approve handler and the WhatsApp bot send. Set `INTAKE_WEBHOOK_SECRET` in
+`deploy/compose/.env` and hand the same value to the website team; the
+contract and the rule are in `docs/INTAKE.md`. Blank = the door stays closed.
+
 ## 7b. One-off data fixes
 
 `deploy/fixes/` holds the register clean-ups from the October bug register

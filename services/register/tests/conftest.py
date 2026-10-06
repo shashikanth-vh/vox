@@ -95,7 +95,7 @@ async def client() -> AsyncIterator[AsyncClient]:
                 "people, documents, document_checklist, line_assignments, "
                 "change_requests, audit_log, idempotency_keys, "
                 "calendar_events, notifications, notification_deliveries, "
-                "vox_conversations, vox_consent_records, vox_conversation_edits "
+                "vox_conversations, vox_consent_records, vox_conversation_edits, lead_enquiries "
                 "RESTART IDENTITY CASCADE"
             ))
             await session.commit()

@@ -37,6 +37,12 @@ class Settings(BaseServiceSettings):
     # taken from the UTC clock lands on yesterday. See app.core.clock.
     tenant_timezone: str = "Asia/Kolkata"
 
+    # ---- Intake: enquiries from the website form / WhatsApp bot ------------
+    # The shared secret the sender signs each delivery with (HMAC-SHA256 over
+    # timestamp + '.' + body). Empty = intake switched off (503).
+    intake_webhook_secret: str = ""
+    intake_max_skew_s: int = 300
+
     # ---- Tracxn (the Company-360 market feed) ----------------------------
     # Empty token = not configured: the panorama financials endpoint answers
     # 409 and the UI keeps its "market feed soon" card. Answers are cached per

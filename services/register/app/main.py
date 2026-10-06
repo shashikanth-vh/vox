@@ -23,6 +23,7 @@ from app.api.covenants import router as covenants_router
 from app.api.cpcs import router as cpcs_router
 from app.api.custom import router as custom_router
 from app.api.lead_lookup import router as lead_lookup_router
+from app.api.intake import router as intake_router
 from app.api.decisions import router as decisions_router
 from app.api.documents_lifecycle import router as documents_lifecycle_router
 from app.api.evidence import router as evidence_router
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
         import_router,
         custom_router,
         lead_lookup_router,
+        intake_router,
         activity_router,
         decisions_router,
         cpcs_router,

@@ -184,3 +184,13 @@ async def test_cf8_injected_internal_headers_are_stripped(gw: AsyncClient, acces
     # And the delete guardrail cannot be reached by claiming Admin either.
     r = await gw.delete(f"/v1/syndication/{syn['id']}", headers=forged)
     assert r.status_code == 403, r.text
+
+
+def test_the_intake_door_is_reachable_without_a_bearer():
+    """The website / WhatsApp door is a signed machine delivery (the Register checks
+    the HMAC); the gateway must not demand a user bearer for it."""
+    from app.config import get_settings as _gs
+
+    exempt = {p.strip() for p in _gs().auth_exempt_paths.split(",") if p.strip()}
+    assert "/v1/intake/enquiries" in exempt
+    assert "/vocx/v1/auth/callback" in exempt     # the earlier exemptions stand

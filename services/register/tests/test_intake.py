@@ -1,0 +1,229 @@
+"""The intake door: an approved website / WhatsApp enquiry becomes a lead, or an
+interaction on the work the company already has, by one rule; a rejected one is
+kept for the funnel; every delivery is signed and idempotent."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import time
+import uuid
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select, text
+
+from app.core.config import get_settings
+
+pytestmark = pytest.mark.asyncio
+
+ADMIN = {"X-User-Email": "admin@evamfinance.com", "X-User-Roles": "Admin"}
+SECRET = "s3cret-for-tests"
+
+
+def _items(body):
+    return body.get("items") if isinstance(body, dict) else body
+
+
+def _signed(body: dict, *, secret: str = SECRET, ts: str | None = None) -> tuple[bytes, dict]:
+    raw = json.dumps(body).encode("utf-8")
+    ts = ts or str(int(time.time()))
+    sig = hmac.new(secret.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+    return raw, {"X-Intake-Timestamp": ts, "X-Intake-Signature": f"sha256={sig}",
+                 "Content-Type": "application/json"}
+
+
+def _capital(no: str | None = None, **over) -> dict:
+    d = {
+        "enquiry_no": no or f"EV{uuid.uuid4().hex[:6].upper()}",
+        "submitted_at": "2026-10-04T14:36:00+05:30", "status": "approved",
+        "approved_by": "mukesh@evamfinance.com", "approved_at": "2026-10-04T15:02:11+05:30",
+        "verification": {"mobile_verified": True, "email_verified": True}, "intent": "capital",
+        "contact": {"name": "Rajesh Kumar", "mobile": "9876543210", "email": "rajesh@example.com", "consent": True},
+        "company": {"name": "Acme Renewables Pvt Ltd", "address": "Plot 14, Hitec City, Hyderabad, Telangana 500081"},
+        "capital": {"persona": "advisor", "client_role": "developer", "sector": "electric-mobility",
+                    "sub_sectors": ["EV fleets", "Charging"], "ticket_size": "15-100"},
+        "assets": None,
+        "business": {"years_in_operation": "3–10 years", "annual_revenue": "₹25–50 Cr",
+                     "need": "Debt facility for a 10 MW solar portfolio"},
+        "otp_verified": True,
+    }
+    d.update(over)
+    return d
+
+
+def _assets(no: str | None = None, **over) -> dict:
+    d = {
+        "enquiry_no": no or f"EV{uuid.uuid4().hex[:6].upper()}",
+        "submitted_at": "2026-10-06T11:45:00+05:30", "status": "approved",
+        "approved_by": "mukesh@evamfinance.com", "approved_at": "2026-10-06T12:10:00+05:30",
+        "verification": {"mobile_verified": True, "email_verified": True}, "intent": "assets",
+        "contact": {"name": "Rajesh Kumar", "mobile": "9876543210", "email": "rajesh@example.com", "consent": True},
+        "company": {"name": "Green Power Infra LLP", "address": "3rd Floor, Anna Salai, Chennai, Tamil Nadu 600002"},
+        "assets": {"role": "both", "on_behalf_of_client": False, "offerings": ["Entire project", "PPA"],
+                   "status": "Operational", "status_other": None, "location": "Tamil Nadu / Coimbatore",
+                   "buyer_size": "₹25–100 Cr", "buyer_value_basis": "DCF, per-MW", "buyer_location": "South India",
+                   "buyer_criteria": ["operating solar, 10–30 MW, South India"]},
+        "capital": None, "business": None, "otp_verified": True,
+    }
+    d.update(over)
+    return d
+
+
+@pytest.fixture
+def intake_on(monkeypatch):
+    monkeypatch.setattr(get_settings(), "intake_webhook_secret", SECRET)
+    yield
+    monkeypatch.setattr(get_settings(), "intake_webhook_secret", "")
+
+
+async def _roster(client: AsyncClient) -> None:
+    for name, full, role, email in (("Mukesh", "Mukesh Rao", "BDRM", "mukesh@evamfinance.com"),
+                                    ("Shubh", "Shubh Dave", "BD Head", "shubh@evamfinance.com")):
+        r = await client.post("/v1/people", headers=ADMIN,
+                              json={"name": name, "full_name": full, "role": role, "email": email})
+        assert r.status_code == 201, r.text
+
+
+async def _post(client: AsyncClient, body: dict, **kw):
+    raw, headers = _signed(body, **kw)
+    return await client.post("/v1/intake/enquiries", content=raw, headers=headers)
+
+
+# ---- the door itself -------------------------------------------------------
+async def test_unsigned_stale_or_wrongly_signed_deliveries_are_refused(client: AsyncClient, intake_on, monkeypatch):
+    body = _capital()
+    raw = json.dumps(body).encode()
+    r = await client.post("/v1/intake/enquiries", content=raw, headers={"Content-Type": "application/json"})
+    assert r.status_code == 403
+    r = await _post(client, body, secret="wrong")
+    assert r.status_code == 403 and "signature" in r.text.lower()
+    r = await _post(client, body, ts=str(int(time.time()) - 3600))
+    assert r.status_code == 403 and "old" in r.text.lower()
+    monkeypatch.setattr(get_settings(), "intake_webhook_secret", "")
+    assert (await _post(client, body)).status_code == 503
+
+
+# ---- 4. a new company → a new lead and its master row ----------------------
+async def test_an_approved_capital_enquiry_becomes_a_lead(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    body = _capital("EV483920")
+    r = await _post(client, body)
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["outcome"] == "lead_created" and out["replayed"] is False and out["rm"] == "Mukesh"
+    lead = (await client.get(f"/v1/leads/{out['lead_id']}", headers=ADMIN)).json()
+    assert lead["lead_no"] == out["lead_no"]
+    assert lead["company"] == "Acme Renewables Pvt Ltd" and lead["contact"] == "Rajesh Kumar"
+    assert lead["phone"] == "+919876543210" and lead["state"] == "Telangana" and lead["city"] == "Hyderabad"
+    assert lead["sector"] == "EV Mobility" and lead["lens"] == "Mitigation"
+    assert lead["source"] == "Inbound" and lead["source_name"] == "Website EV483920"
+    assert lead["rm"] == "Mukesh" and lead["status"] == "Active" and lead["temperature"] == "Warm"
+    assert "rajesh@example.com" in lead["notes"] and "Capital ask" in lead["notes"] and "ticket size: 15-100" in lead["notes"]
+    assert lead["next_action"].startswith("Call back on website enquiry EV483920")
+    assert lead["last_interaction_date"] == "2026-10-04"
+    # The client master gained the company, born a Prospect.
+    assert lead["entity_id"]
+    ent = (await client.get(f"/v1/entities/{lead['entity_id']}", headers=ADMIN)).json()
+    assert ent["legal_name"] == "Acme Renewables Pvt Ltd" and ent["lifecycle"] == "Prospect"
+    # The RM was told, and the trail says what happened.
+    n = (await db_session.execute(text(
+        "SELECT title FROM notifications WHERE recipient = 'mukesh@evamfinance.com' "
+        "AND event = 'intake.enquiry'"))).scalars().all()
+    assert n and "Acme Renewables" in n[0]
+    a = (await db_session.execute(text(
+        "SELECT changes->>'outcome' FROM audit_log WHERE action = 'intake.enquiry' "
+        "AND changes->>'enquiry_no' = 'EV483920'"))).scalar()
+    assert a == "lead_created"
+    # Redelivery of the same enquiry number writes nothing and answers the same.
+    again = await _post(client, body)
+    assert again.status_code == 201 and again.json()["replayed"] is True
+    assert again.json()["lead_id"] == out["lead_id"]
+    leads = _items((await client.get("/v1/leads", params={"company": "Acme Renewables Pvt Ltd"}, headers=ADMIN)).json())
+    assert len(leads) == 1
+
+
+# ---- 1. a client with a live deal → logged on the deal, no lead -----------
+async def test_an_enquiry_from_a_client_with_a_live_deal_is_logged_on_the_deal(client: AsyncClient, intake_on):
+    await _roster(client)
+    ent = await client.post("/v1/entities", headers=ADMIN,
+                            json={"code": "ACMEREN", "legal_name": "Acme Renewables Private Limited"})
+    eid = ent.json()["id"]
+    deal = await client.post("/v1/deals", headers=ADMIN, json={"entity_id": eid, "stage": "In Pipeline", "rm": "Shubh"})
+    did = deal.json()["id"]
+    assert (await client.post("/v1/lending", headers=ADMIN,
+                              json={"entity_id": eid, "deal_id": did, "stage": "Data Awaited"})).status_code == 201
+    r = await _post(client, _capital())
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["outcome"] == "interaction_on_deal" and out["deal_id"] == did and out["lead_id"] is None
+    assert "live deal" in out["note"]
+    inters = _items((await client.get("/v1/interactions", params={"deal_id": did}, headers=ADMIN)).json())
+    assert len(inters) == 1 and "Debt facility" in inters[0]["summary"] and inters[0]["direction"] == "inbound"
+    assert _items((await client.get("/v1/leads", params={"company": "Acme Renewables Pvt Ltd"}, headers=ADMIN)).json()) == []
+
+
+# ---- 2. an active lead → one more touch on it ------------------------------
+async def test_an_enquiry_for_a_company_with_an_open_lead_lands_on_that_lead(client: AsyncClient, intake_on):
+    await _roster(client)
+    first = await client.post("/v1/leads", headers=ADMIN,
+                              json={"company": "Acme Renewables Pvt. Ltd.", "rm": "Shubh", "status": "Active"})
+    assert first.status_code == 201, first.text
+    r = await _post(client, _capital())
+    out = r.json()
+    assert r.status_code == 201 and out["outcome"] == "interaction_on_lead"
+    assert out["lead_id"] == first.json()["id"] and out["lead_no"] == first.json()["lead_no"]
+    lead = (await client.get(f"/v1/leads/{first.json()['id']}", headers=ADMIN)).json()
+    assert lead["next_action"].startswith("Call back on website enquiry") and lead["next_action_date"]
+    assert lead["last_interaction_date"] == "2026-10-04"
+    inters = _items((await client.get(f"/v1/leads/{first.json()['id']}/interactions", headers=ADMIN)).json())
+    assert len(inters) == 1 and "EV" in inters[0]["summary"]
+
+
+# ---- assets intent, and the address → state / city parse --------------------
+async def test_an_assets_enquiry_becomes_a_lead_with_the_monetisation_ask_in_notes(client: AsyncClient, intake_on):
+    await _roster(client)
+    r = await _post(client, _assets("EV483921"))
+    assert r.status_code == 201, r.text
+    lead = (await client.get(f"/v1/leads/{r.json()['lead_id']}", headers=ADMIN)).json()
+    assert lead["company"] == "Green Power Infra LLP" and lead["state"] == "Tamil Nadu" and lead["city"] == "Chennai"
+    assert lead["sector"] == "Solar - General"           # from the buyer criteria
+    assert "Asset monetisation — role: both" in lead["notes"] and "Entire project, PPA" in lead["notes"]
+    assert lead["source_name"] == "Website EV483921"
+
+
+# ---- rejected, unknown approver, duplicate contact --------------------------
+async def test_a_rejected_enquiry_is_kept_but_creates_nothing(client: AsyncClient, intake_on):
+    await _roster(client)
+    before = len(_items((await client.get("/v1/leads", headers=ADMIN)).json()))
+    r = await _post(client, _capital(status="rejected"))
+    assert r.status_code == 201 and r.json()["outcome"] == "rejected" and r.json()["lead_id"] is None
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == before
+
+
+async def test_an_approver_off_the_roster_hands_the_lead_to_the_bd_head(client: AsyncClient, intake_on):
+    await _roster(client)
+    r = await _post(client, _capital(approved_by="nobody@evamfinance.com"))
+    out = r.json()
+    assert r.status_code == 201 and out["rm"] == "Shubh"
+    lead = (await client.get(f"/v1/leads/{out['lead_id']}", headers=ADMIN)).json()
+    assert "not on the RM roster" in lead["notes"] and lead["rm"] == "Shubh"
+
+
+async def test_the_same_contact_under_another_company_is_flagged_not_blocked(client: AsyncClient, intake_on):
+    await _roster(client)
+    assert (await _post(client, _capital())).status_code == 201
+    other = _capital(company={"name": "Rajesh Logistics Pvt Ltd", "address": "MG Road, Bengaluru, Karnataka 560001"})
+    r = await _post(client, other)
+    assert r.status_code == 201 and r.json()["outcome"] == "lead_created"
+    lead = (await client.get(f"/v1/leads/{r.json()['lead_id']}", headers=ADMIN)).json()
+    assert "FLAG: same contact as lead" in lead["notes"] and "Acme Renewables" in lead["notes"]
+    assert lead["state"] == "Karnataka" and lead["city"] == "Bengaluru"
+
+
+async def test_a_whatsapp_delivery_is_the_same_contract(client: AsyncClient, intake_on):
+    await _roster(client)
+    r = await _post(client, _capital(channel="whatsapp"))
+    lead = (await client.get(f"/v1/leads/{r.json()['lead_id']}", headers=ADMIN)).json()
+    assert lead["source_name"].startswith("Whatsapp EV") and "Whatsapp enquiry" in lead["notes"]

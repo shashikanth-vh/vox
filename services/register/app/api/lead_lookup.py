@@ -21,7 +21,7 @@ import re
 from typing import Any
 
 from fastapi import Depends, Query
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 
 from app.core.router import api_router
 from app.core.security import RequestContext, get_context
@@ -76,6 +76,27 @@ def alike(typed: str, candidate: str | None) -> bool:
     return bool(qd and ad) and name_alike(qd, ad) >= 0.62
 
 
+async def live_deal_for(session: Any, tenant_id: Any, entity_id: Any) -> dict[str, Any] | None:
+    """The company's most recent deal that still has a LIVE line (not closed, not
+    dead), as {id, deal_no, rm} — or None. Shared by the Add-lead warning (B07)
+    and the intake rule."""
+    deals = (await session.execute(
+        select(Deal.id, Deal.deal_no, Deal.rm).where(
+            Deal.tenant_id == tenant_id, Deal.entity_id == entity_id,
+            Deal.deleted_at.is_(None)).order_by(Deal.created_at.desc()))).all()
+    for d in deals:
+        live = bool((await session.execute(select(
+            exists().where(LendingTracker.deal_id == d.id, LendingTracker.deleted_at.is_(None),
+                           LendingTracker.stage.notin_(("Rejected", "Dropped", "Disbursed")))
+            | exists().where(SyndicationTracker.deal_id == d.id, SyndicationTracker.deleted_at.is_(None),
+                             SyndicationTracker.status.notin_(("Dropped", "Withdrawn", "Rejected", "Disbursed")))
+            | exists().where(AssetMonetisation.deal_id == d.id, AssetMonetisation.deleted_at.is_(None),
+                             AssetMonetisation.status.notin_(("Dropped", "Closed")))))).scalar())
+        if live:
+            return {"id": d.id, "deal_no": d.deal_no, "rm": d.rm}
+    return None
+
+
 @router.get("/v1/lead-lookup", tags=["Leads"],
             summary="Companies and open leads that look like this name (tenant-wide)")
 async def lead_lookup(
@@ -103,24 +124,14 @@ async def lead_lookup(
     # dialog warns and offers Add product on the existing deal instead.
     for c in clients:
         eid = c["entity_id"]
-        deals = (await ctx.session.execute(
-            select(Deal.id, Deal.deal_no, Deal.rm).where(
+        live = await live_deal_for(ctx.session, ctx.tenant_id, eid)
+        if live is not None:
+            c["deal_no"], c["deal_rm"] = live["deal_no"], live["rm"]
+        c["live_deal"] = live is not None
+        c["deals"] = int((await ctx.session.execute(
+            select(func.count()).select_from(Deal).where(
                 Deal.tenant_id == ctx.tenant_id, Deal.entity_id == eid,
-                Deal.deleted_at.is_(None)).order_by(Deal.created_at.desc()))).all()
-        live = False
-        for d in deals:
-            live = bool((await ctx.session.execute(select(
-                exists().where(LendingTracker.deal_id == d.id, LendingTracker.deleted_at.is_(None),
-                               LendingTracker.stage.notin_(("Rejected", "Dropped", "Disbursed")))
-                | exists().where(SyndicationTracker.deal_id == d.id, SyndicationTracker.deleted_at.is_(None),
-                                 SyndicationTracker.status.notin_(("Dropped", "Withdrawn", "Rejected", "Disbursed")))
-                | exists().where(AssetMonetisation.deal_id == d.id, AssetMonetisation.deleted_at.is_(None),
-                                 AssetMonetisation.status.notin_(("Dropped", "Closed")))))).scalar())
-            if live:
-                c["deal_no"], c["deal_rm"] = d.deal_no, d.rm
-                break
-        c["live_deal"] = live
-        c["deals"] = len(deals)
+                Deal.deleted_at.is_(None)))).scalar_one())
 
     rows = (await ctx.session.execute(
         select(Lead.lead_no, Lead.company, Lead.rm, Lead.status)
