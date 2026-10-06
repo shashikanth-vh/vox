@@ -51,9 +51,11 @@ def build_email(claim: dict[str, Any]) -> EmailMessage:
     text, plus — when the producer attached ``meta.html`` (the intake approval
     mail with its Approve / Reject buttons) — that HTML as the alternative part,
     so Gmail shows the buttons and a text-only client still gets the links."""
+    from email.utils import formataddr
+
     s = get_settings()
     msg = EmailMessage()
-    msg["From"] = s.smtp_from
+    msg["From"] = formataddr((s.smtp_from_name, s.smtp_from)) if s.smtp_from_name else s.smtp_from
     msg["To"] = claim["target"]
     msg["Subject"] = f"[PRISM] {claim.get('title') or claim.get('event')}"
     body = claim.get("body") or claim.get("title") or claim.get("event") or ""
@@ -75,8 +77,14 @@ def _smtp_send(claim: dict[str, Any]) -> None:
 
     s = get_settings()
     msg = build_email(claim)
-    with smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=s.smtp_timeout_s) as smtp:
-        if s.smtp_starttls:
+    # 465 is implicit TLS (Gmail's SSL port); anything else connects plain and
+    # upgrades with STARTTLS when configured (587).
+    if int(s.smtp_port) == 465:
+        conn = smtplib.SMTP_SSL(s.smtp_host, s.smtp_port, timeout=s.smtp_timeout_s)
+    else:
+        conn = smtplib.SMTP(s.smtp_host, s.smtp_port, timeout=s.smtp_timeout_s)
+    with conn as smtp:
+        if s.smtp_starttls and int(s.smtp_port) != 465:
             smtp.starttls()
         if s.smtp_username:
             smtp.login(s.smtp_username, s.smtp_password)

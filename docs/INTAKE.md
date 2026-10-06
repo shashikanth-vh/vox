@@ -43,7 +43,7 @@ The website's enquiry JSON as agreed, with `status` saying which way in:
 | `enquiry_no` | yes | the idempotency key; a redelivery answers with the stored outcome and writes nothing (a redelivery of a still-waiting enquiry re-issues its links) |
 | `channel` | no | `website` (default) or `whatsapp` |
 | `status` | yes | `submitted` — PRISM hosts the approval (below); `approved` / `rejected` — the sender already decided, the rule runs at once |
-| `approvers` | no | who should decide: e-mail addresses, one Approve / Reject pair and one e-mail each. Empty = PRISM's `INTAKE_APPROVERS` list, else every BD Head on the Employees roster |
+| `approvers` | no | who should decide: e-mail addresses, one Approve / Reject pair and one e-mail each. Empty = the employees ticked **Enquiry approver** in the Employees master, else PRISM's `INTAKE_APPROVERS` list, else every BD Head on the roster |
 | `intent` | yes | `capital` or `assets` |
 | `approved_by`, `approved_at` | for approved | the RM's e-mail; resolved against the Employees roster |
 | `contact.name`, `contact.mobile`, `contact.email` | name yes | mobile is normalised to +91 |
@@ -75,8 +75,9 @@ Unknown fields are stored with the enquiry and ignored.
    Renewables Pvt Ltd"; a summary of the enquiry (company, address, contact,
    ask, submitted) and two buttons, Approve and Reject, with the plain links
    below them for clients that strip buttons. It is sent by the notifier
-   container over `WORKFLOWS_SMTP_*` (Gmail: smtp.gmail.com, 587, the mailbox
-   and an app password) and retried with backoff if the mail server is down;
+   container from the `ENQUIRY_SMTP_*` mailbox in `.env` (Gmail: smtp.gmail.com,
+   587 or 465, the mailbox and an app password) and retried with backoff if
+   the mail server is down;
    every mail is also an inbox notification in PRISM for that RM.
 3. The RM taps Approve. The link opens a PRISM page showing the enquiry
    (company, contact, ask, address) and one button. **Opening the link changes

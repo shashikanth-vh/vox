@@ -82,6 +82,10 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
     { accessorKey: 'reportsTo', header: 'Reports to', size: 130, meta: { localFilter: true } },
     // The STRING is the value ('Active'/'Inactive'), so the facet reads as words rather
     // than true/false — and applyQuery matches the row by the same words.
+    { id: 'enquiryApprover', header: 'Enquiry approver', size: 130, meta: { localFilter: true },
+      accessorFn: (r: any) => (r.enquiryApprover ? 'Yes' : 'No'),
+      Cell: ({ cell }) => cell.getValue<string>() === 'Yes'
+        ? <Chip size="small" label="Approver" color="primary" variant="outlined" /> : <span style={{ color: 'var(--mui-palette-text-disabled)' }}>—</span> },
     { id: 'inactive', header: 'Status', size: 100, meta: { localFilter: true },
       accessorFn: (r: any) => (r.inactive ? 'Inactive' : 'Active'),
       Cell: ({ cell }) => <Chip size="small" label={cell.getValue<string>()} color={cell.getValue() === 'Inactive' ? 'default' : 'success'} variant="outlined" /> },

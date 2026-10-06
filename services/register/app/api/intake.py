@@ -536,13 +536,20 @@ async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str
 
 
 async def _default_approvers(ctx: RequestContext) -> list[str]:
+    """Who decides when the sender names nobody: the employees ticked "Enquiry
+    approver" in the Employees master; else REGISTER_INTAKE_APPROVERS; else every
+    active BD Head on the roster."""
+    base = select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
+                                      Person.inactive.is_(False), Person.email.isnot(None))
+    ticked = (await ctx.session.execute(
+        base.where(Person.enquiry_approver.is_(True)).order_by(Person.full_name))).scalars().all()
+    if ticked:
+        return [r for r in ticked if r]
     configured = [x.strip() for x in get_settings().intake_approvers.split(",") if x.strip()]
     if configured:
         return configured
     rows = (await ctx.session.execute(
-        select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
-                                   Person.inactive.is_(False), Person.role.ilike("%BD Head%"),
-                                   Person.email.isnot(None)).order_by(Person.full_name))).scalars().all()
+        base.where(Person.role.ilike("%BD Head%")).order_by(Person.full_name))).scalars().all()
     return [r for r in rows if r]
 
 

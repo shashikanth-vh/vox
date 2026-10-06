@@ -59,7 +59,7 @@ async function hydrateRoster(): Promise<void> {
     name: p.name || p.full_name, full: p.full_name || p.name, role: p.role || '',
     username: '', email: p.email || '', phone: p.phone || '', geography: p.geography || '',
     sectors: p.sectors || '', startedOn: p.started_on || '', reportsTo: p.reports_to || '',
-    inactive: false, notes: p.notes || '', registerId: p.id,
+    inactive: false, notes: p.notes || '', registerId: p.id, enquiryApprover: !!p.enquiry_approver,
   } as Employee));
 
   const named = (test: RegExp) => db().people
@@ -89,6 +89,7 @@ function toPersonBody(e: Partial<Employee>): Record<string, any> {
   if (e.startedOn !== undefined) out.started_on = e.startedOn || null;
   if (e.reportsTo !== undefined) out.reports_to = e.reportsTo || null;
   if (e.inactive !== undefined) out.inactive = !!e.inactive;
+  if (e.enquiryApprover !== undefined) out.enquiry_approver = !!e.enquiryApprover;
   if (e.notes !== undefined) out.notes = e.notes || null;
   return out;
 }
@@ -230,6 +231,7 @@ export const employeesService = {
               phone: per.phone || '', geography: per.geography || '',
               sectors: per.sectors || '', startedOn: per.started_on || '',
               reportsTo: per.reports_to || '', inactive: !!per.inactive,
+              enquiryApprover: !!per.enquiry_approver,
               notes: per.notes || '', registerId: per.id, noSignIn: true,
             } as any as Employee);
           });

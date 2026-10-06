@@ -99,6 +99,9 @@ class Person(RegisterBase):
     started_on: Mapped[date | None] = mapped_column(Date)
     reports_to: Mapped[str | None] = mapped_column(String(200))
     inactive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # Gets the website / WhatsApp enquiry Approve / Reject e-mail when the sender
+    # names nobody (ticked in the Employees master).
+    enquiry_approver: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     notes: Mapped[str | None] = mapped_column(Text)
 
 

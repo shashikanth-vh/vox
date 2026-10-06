@@ -34,7 +34,7 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
   // Access then wins if it answers. A miss (unprovisioned user, mock mode) keeps the row.
   useEffect(() => {
     if (!emp) {
-      setF({ name: '', full: '', role: 'BDRM', username: '', email: '', phone: '', geography: '', sectors: '', reportsTo: '', inactive: false, notes: '' });
+      setF({ name: '', full: '', role: 'BDRM', username: '', email: '', phone: '', geography: '', sectors: '', reportsTo: '', inactive: false, enquiryApprover: false, notes: '' });
       setErr('');
       return;
     }
@@ -132,6 +132,9 @@ export default function EmployeeDialog({ emp, mode, onClose, onDone }: {
         </FieldGrid>
         <Box sx={{ mt: 1.4 }}><TextFld label="Notes" value={f.notes} onChange={(v) => set('notes', v)} placeholder="strengths, quirks, patch history" multiline /></Box>
         <FormControlLabel control={<Switch checked={!f.inactive} onChange={(e) => set('inactive', !e.target.checked)} />} label="Active" />
+        <FormControlLabel
+          control={<Switch checked={!!f.enquiryApprover} onChange={(e) => set('enquiryApprover', e.target.checked)} />}
+          label="Enquiry approver — gets the website enquiry Approve / Reject e-mail" />
         {err && <Alert severity="warning" sx={{ mt: 1, py: 0, fontSize: 12 }}>{err}</Alert>}
       </DialogContent>
       <DialogActions>

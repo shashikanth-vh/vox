@@ -394,6 +394,27 @@ async def test_prism_mails_each_approver_the_buttons(client: AsyncClient, intake
     assert n == 2
 
 
+async def test_employees_ticked_enquiry_approver_get_the_links_first(client: AsyncClient, intake_on, monkeypatch):
+    """The Employees master tick beats the env list and the BD Head default."""
+    await _roster(client)
+    r = await client.post("/v1/people", headers=ADMIN,
+                          json={"name": "Priya", "full_name": "Priya Nair", "role": "BDRM",
+                                "email": "priya@evamfinance.com", "enquiry_approver": True})
+    assert r.status_code == 201 and r.json()["enquiry_approver"] is True
+    monkeypatch.setattr(get_settings(), "intake_approvers", "ops@evamfinance.com")
+    try:
+        out = (await _post(client, _submitted("EV483943", approvers=None))).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "intake_approvers", "")
+    assert [l["recipient"] for l in out["links"]] == ["priya@evamfinance.com"]
+    # Unticking returns the roster to the BD Head default.
+    pid = r.json()["id"]
+    r2 = await client.patch(f"/v1/people/{pid}", headers=ADMIN, json={"enquiry_approver": False})
+    assert r2.status_code == 200 and r2.json()["enquiry_approver"] is False, r2.text
+    out2 = (await _post(client, _submitted("EV483944", approvers=None))).json()
+    assert [l["recipient"] for l in out2["links"]] == ["shubh@evamfinance.com"]
+
+
 async def test_configured_approvers_and_the_no_mail_switch(client: AsyncClient, intake_on, monkeypatch, db_session):
     await _roster(client)
     monkeypatch.setattr(get_settings(), "intake_approvers", "ops@evamfinance.com, Shubh@evamfinance.com")

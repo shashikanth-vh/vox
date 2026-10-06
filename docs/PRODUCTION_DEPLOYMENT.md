@@ -252,12 +252,15 @@ the click lands on `GET/POST /v1/intake/enquiries/<token>/approve|reject`
 `INTAKE_PUBLIC_BASE_URL=https://prism-evamfinance.com` so the links carry the
 public origin. Migration 0026 adds `lead_enquiry_tokens`.
 
-Release 346: PRISM sends the Approve / Reject e-mail itself. The `notifier`
-container (already in the stack) sends it over `WORKFLOWS_SMTP_HOST / PORT /
-FROM / USERNAME / PASSWORD` in `.env` — for Gmail: `smtp.gmail.com`, `587`, the
-mailbox address as FROM and USERNAME, an app password as PASSWORD. Set
-`INTAKE_APPROVERS` to the addresses that should get the mail when the website
-names nobody (blank = every BD Head on the Employees roster). Check it is
+Release 346/347: PRISM sends the Approve / Reject e-mail itself. The `notifier`
+container (already in the stack) sends it from the `ENQUIRY_SMTP_HOST / PORT /
+USER / PASS / FROM / FROM_NAME` mailbox in `.env` — its own account, separate
+from the `PULSE_SMTP_*` one the news digest uses (Gmail: `smtp.gmail.com`,
+port 587 or 465, the mailbox as USER and FROM, an app password as PASS). Then
+recreate `notifier`. Who gets it when the website names
+nobody: tick **Enquiry approver** on the employee in the Employees master
+(release 347, migration 0027); otherwise `INTAKE_APPROVERS`; otherwise every BD
+Head. Check it is
 flowing with `docker compose … logs notifier` (one `notifier_sweep` line per
 30 s with `delivered` counting up) and, if a mail dies after its retries, with
 the Admin redrive on the delivery. `INTAKE_SEND_EMAIL=false` returns to the

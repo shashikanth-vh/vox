@@ -192,6 +192,7 @@ class Settings(BaseServiceSettings):
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_from: str = "prism@localhost"
+    smtp_from_name: str = "PRISM"
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_starttls: bool = True

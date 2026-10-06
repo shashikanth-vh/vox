@@ -32,6 +32,7 @@ class PersonCreate(CreateModel):
     started_on: date | None = None
     reports_to: str | None = Field(default=None, max_length=200)
     inactive: bool = False
+    enquiry_approver: bool = False
     notes: str | None = None
 
 
@@ -46,6 +47,7 @@ class PersonUpdate(UpdateModel):
     started_on: date | None = None
     reports_to: str | None = Field(default=None, max_length=200)
     inactive: bool | None = None
+    enquiry_approver: bool | None = None
     notes: str | None = None
 
 
@@ -60,6 +62,7 @@ class PersonRead(ReadModel):
     started_on: date | None
     reports_to: str | None
     inactive: bool
+    enquiry_approver: bool = False
     notes: str | None
 
 
